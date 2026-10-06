@@ -21,12 +21,33 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
     private var frame: InlineFrame?
     private var suspended = false
     private weak var player: AVPlayer?
+    public var onRotatedToLandscape: (() -> Void)?
+    private var rotationObserver: NSObjectProtocol?
     /// What the web view looked like before it was made see-through.
     private var restore: (opaque: Bool, background: UIColor?, scrollBackground: UIColor?)?
 
     /// `webView` is asked for the Capacitor bridge's web view each time.
     public init(webView: @escaping () -> WKWebView?) {
         self.webView = webView
+        super.init()
+        // Capacitor's view controller posts this as the interface starts to turn; it has turned
+        // once the animation is over, which is what the interface orientation reports.
+        rotationObserver = NotificationCenter.default.addObserver(
+            forName: Notification.Name("CapacitorViewWillTransition"), object: nil, queue: .main
+        ) { [weak self] _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self?.rotated() }
+        }
+    }
+
+    deinit {
+        if let rotationObserver { NotificationCenter.default.removeObserver(rotationObserver) }
+    }
+
+    /// Only a video the page is showing, and that nothing else holds, turns into full-screen.
+    private func rotated() {
+        guard frame != nil, !suspended,
+              webView()?.window?.windowScene?.interfaceOrientation.isLandscape == true else { return }
+        onRotatedToLandscape?()
     }
 
     public func setFrame(_ frame: InlineFrame?, player: AVPlayer) {

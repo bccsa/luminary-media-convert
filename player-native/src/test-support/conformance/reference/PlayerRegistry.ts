@@ -245,7 +245,7 @@ export class PlayerRegistry {
                 player.engine.setAudioTrack(args.id as string);
                 break;
             case 'setInlineFrame':
-                player.engine.setInlineFrame((args.frame as InlineFrame | undefined) ?? null);
+                player.setInlineFrame((args.frame as InlineFrame | undefined) ?? null);
                 break;
             case 'enterFullscreen':
                 player.engine.enterFullscreen();

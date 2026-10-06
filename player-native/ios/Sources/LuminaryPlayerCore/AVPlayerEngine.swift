@@ -89,6 +89,12 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
             skip: { [weak self] seconds in self?.skip(by: seconds) }
         ))
         observeInterruptions()
+        // Turning the phone sideways while a landscape video plays in the page opens full-screen,
+        // as a video app does; a portrait video, a paused one and audio stay where they are.
+        inline?.onRotatedToLandscape = { [weak self] in
+            guard let self, self.hasVideo, self.intendedPlaying, self.videoIsLandscape else { return }
+            self.enterFullscreen()
+        }
         ladder = RecoveryLadder(policy: .default, clock: clock, hooks: .init(
             // AVPlayer offers no in-place repair: the rung is skipped rather than pretended.
             recoverInPlace: { _ in false },
@@ -101,6 +107,12 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
                 self?.events?.error(category: failure.category, fatal: true, code: failure.code, message: failure.message)
             }
         ))
+    }
+
+    /// The picture is wider than tall: what turning the phone sideways is for. False until known.
+    public var videoIsLandscape: Bool {
+        guard let size = item?.presentationSize, size.width > 0, size.height > 0 else { return false }
+        return size.width > size.height
     }
 
     /// True until the tracks say otherwise. A track that has not reported its type yet may be
@@ -304,10 +316,11 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         if presenter?.dismiss() == true { presentationDidChange(.inline) }
     }
 
-    /// The viewer leaving full-screen does what `exitFullscreen` does, pause included.
+    /// The viewer leaving full-screen does what `exitFullscreen` does, pause included, unless the
+    /// video is shown in the page: it plays on there.
     private func leaveFullscreenByViewer() {
         exitFullscreen()
-        if hasVideo { pause() }
+        if hasVideo, inlineFrame == nil { pause() }
     }
 
     public func destroy() {

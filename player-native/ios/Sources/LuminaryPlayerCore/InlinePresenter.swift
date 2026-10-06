@@ -22,6 +22,10 @@ public protocol InlinePresenter: AnyObject {
     /// Shows `player` in `frame`, or hides it when `frame` is nil.
     func setFrame(_ frame: InlineFrame?, player: AVPlayer)
 
+    /// The phone was turned to landscape while the video shows in the page: the engine decides
+    /// whether that opens full-screen (it plays, and its picture is wider than tall).
+    var onRotatedToLandscape: (() -> Void)? { get set }
+
     /// Full-screen or picture in picture holds the picture: the inline view lets go of the player
     /// (true) and takes it back (false). The frame it was given stays.
     func setSuspended(_ suspended: Bool)

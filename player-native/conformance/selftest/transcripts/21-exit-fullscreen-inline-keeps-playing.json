@@ -1,0 +1,140 @@
+{
+ "scenario": "21-exit-fullscreen-inline-keeps-playing.json",
+ "ops": [
+  {
+   "op": "start",
+   "capabilities": {
+    "variantSwitching": false,
+    "pictureInPicture": false,
+    "renderText": false,
+    "live": false,
+    "chunkWarming": false,
+    "backgroundAudio": false,
+    "inlineVideo": true,
+    "maxPlayers": 1
+   }
+  },
+  {
+   "op": "call",
+   "method": "getInfo",
+   "args": {},
+   "result": {
+    "resolved": {
+     "protocolVersion": 1,
+     "platform": "android",
+     "capabilities": {
+      "variantSwitching": false,
+      "pictureInPicture": false,
+      "renderText": false,
+      "live": false,
+      "chunkWarming": false,
+      "backgroundAudio": false,
+      "inlineVideo": true,
+      "maxPlayers": 1
+     }
+    }
+   }
+  },
+  {
+   "op": "call",
+   "method": "reset",
+   "args": {},
+   "result": {
+    "resolved": {}
+   }
+  },
+  {
+   "op": "call",
+   "method": "create",
+   "args": {
+    "protocolVersion": 1,
+    "skipBackSeconds": 10,
+    "skipForwardSeconds": 10
+   },
+   "result": {
+    "resolved": {
+     "playerId": "player-1"
+    }
+   }
+  },
+  {
+   "op": "call",
+   "method": "setInlineFrame",
+   "args": {
+    "playerId": "player-1",
+    "frame": {
+     "x": 0,
+     "y": 72,
+     "width": 390,
+     "height": 219
+    }
+   },
+   "result": {
+    "resolved": {}
+   }
+  },
+  {
+   "op": "call",
+   "method": "exitFullscreen",
+   "args": {
+    "playerId": "player-1"
+   },
+   "result": {
+    "resolved": {}
+   }
+  },
+  {
+   "op": "drainEngineCalls",
+   "calls": [
+    {
+     "method": "setInlineFrame",
+     "x": 0,
+     "y": 72,
+     "width": 390,
+     "height": 219
+    },
+    {
+     "method": "exitFullscreen"
+    }
+   ]
+  },
+  {
+   "op": "call",
+   "method": "setInlineFrame",
+   "args": {
+    "playerId": "player-1"
+   },
+   "result": {
+    "resolved": {}
+   }
+  },
+  {
+   "op": "call",
+   "method": "exitFullscreen",
+   "args": {
+    "playerId": "player-1"
+   },
+   "result": {
+    "resolved": {}
+   }
+  },
+  {
+   "op": "drainEngineCalls",
+   "calls": [
+    {
+     "method": "setInlineFrame"
+    },
+    {
+     "method": "exitFullscreen"
+    },
+    {
+     "method": "pause"
+    }
+   ]
+  },
+  {
+   "op": "drainEvents",
+   "events": []
+  }
+ ]
+}

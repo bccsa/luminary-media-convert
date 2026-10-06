@@ -15,6 +15,8 @@ public final class PlayerHost {
     private var loadId: String?
     /// Warms the current load's chunks; a new load gets a new one, a reattach keeps it.
     private var warmer: ChunkWarmer?
+    /// Where the video is shown inside the page, while it is.
+    private var inlineFrame: InlineFrame?
 
     init(
         playerId: String,
@@ -102,10 +104,16 @@ public final class PlayerHost {
         assets.release(generation)
     }
 
-    /// Pauses, unless the item has no video: audio keeps playing when full-screen goes away.
+    func setInlineFrame(_ frame: InlineFrame?) {
+        inlineFrame = frame
+        engine.setInlineFrame(frame)
+    }
+
+    /// Pauses, unless the item has no video (audio keeps playing when full-screen goes away) or
+    /// its video is shown in the page, where it plays on.
     func exitFullscreen() {
         engine.exitFullscreen()
-        if engine.hasVideo { engine.pause() }
+        if engine.hasVideo, inlineFrame == nil { engine.pause() }
     }
 
     func resumed() -> ResumeResult {

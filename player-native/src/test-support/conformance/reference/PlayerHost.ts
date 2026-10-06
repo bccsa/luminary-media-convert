@@ -3,7 +3,7 @@
  * `UriRouter`, `FakeEngine` and `EventSink`, and the order it applies a load in.
  */
 
-import type { BridgeAsset } from '../../../bridge.js';
+import type { BridgeAsset, InlineFrame } from '../../../bridge.js';
 import type { Json, JsonObject } from '../scenario.js';
 import type { VirtualClock } from './clock.js';
 import { EventSink } from './EventSink.js';
@@ -21,6 +21,8 @@ export class PlayerHost implements EngineListener {
     private duration: number | null = 0;
     /** A new player plays at 1; a load keeps whatever rate the last one had. */
     private rate = 1;
+    /** Where the video is shown inside the page, while it is. */
+    private inlineFrame: InlineFrame | null = null;
 
     constructor(
         readonly playerId: string,
@@ -77,9 +79,15 @@ export class PlayerHost implements EngineListener {
         this.assets.release(generation);
     }
 
+    setInlineFrame(frame: InlineFrame | null): void {
+        this.inlineFrame = frame;
+        this.engine.setInlineFrame(frame);
+    }
+
+    /** Pauses, unless the item has no video, or the video is shown in the page: it plays on there. */
     exitFullscreen(): void {
         this.engine.exitFullscreen();
-        if (this.engine.hasVideo) this.engine.pause();
+        if (this.engine.hasVideo && !this.inlineFrame) this.engine.pause();
     }
 
     resumed(): JsonObject {

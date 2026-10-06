@@ -92,7 +92,7 @@ public final class PlayerRegistry {
         case .setRate(_, let rate): engine.setRate(rate)
         case .setVariant(_, let id): engine.setVariant(id)
         case .setAudioTrack(_, let id): engine.setAudioTrack(id)
-        case .setInlineFrame(_, let frame): engine.setInlineFrame(frame)
+        case .setInlineFrame(_, let frame): player.setInlineFrame(frame)
         case .enterFullscreen: engine.enterFullscreen()
         case .exitFullscreen: player.exitFullscreen()
         case .resumed: return player.resumed().json

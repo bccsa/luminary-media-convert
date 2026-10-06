@@ -265,7 +265,10 @@ export interface LuminaryPlayerPlugin {
      */
     setInlineFrame(args: { playerId: string; frame?: InlineFrame }): Promise<void>;
     enterFullscreen(args: { playerId: string }): Promise<void>;
-    /** Pauses, unless the current item has no video track (audio-only). */
+    /**
+     * Pauses, unless the current item has no video track (audio-only), or its video is shown in
+     * the page (`setInlineFrame` set a frame): leaving full-screen goes back to a picture that plays.
+     */
     exitFullscreen(args: { playerId: string }): Promise<void>;
     /** Called on every return to the foreground; see {@link ResumeResult}. */
     resumed(args: { playerId: string }): Promise<ResumeResult>;

@@ -76,10 +76,61 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     override var prefersStatusBarHidden: Bool { true }
     override var prefersHomeIndicatorAutoHidden: Bool { true }
 
-    /// Whatever the app allows: full-screen opens the way the phone is held and follows it, as on
-    /// Android. Unlike `player-web`, which locks to landscape on entering full-screen.
+    /// Whatever the app allows: full-screen follows how the phone is held, as on Android. A
+    /// landscape video opened from a phone held upright turns it sideways (`turnToLandscape`),
+    /// and turning it upright again leaves.
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
-        UIApplication.shared.supportedInterfaceOrientations(for: view.window)
+        turning ? .landscape : UIApplication.shared.supportedInterfaceOrientations(for: view.window)
+    }
+
+    /// The picture is wider than tall, so full-screen is landscape. Known once the item has a size.
+    private var videoIsLandscape: Bool {
+        guard let size = player.currentItem?.presentationSize, size.width > 0, size.height > 0 else { return false }
+        return size.width > size.height
+    }
+
+    /// Asked of the system and not yet arrived: the turn is ours, not the viewer's.
+    private var turning = false
+    private var turned = false
+    private weak var scene: UIWindowScene?
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        scene = view.window?.windowScene
+        turnToLandscape()
+    }
+
+    /// A landscape video opened from a phone held upright: full-screen turns sideways, as the
+    /// viewer asked for the picture to fill the screen.
+    private func turnToLandscape() {
+        guard videoIsLandscape, let scene, scene.interfaceOrientation.isPortrait else { return }
+        if #available(iOS 16.0, *) {
+            turning = true
+            turned = true
+            setNeedsUpdateOfSupportedInterfaceOrientations()
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscape)) { [weak self] _ in
+                DispatchQueue.main.async { self?.turning = false }
+            }
+        }
+    }
+
+    /// Back upright after a turn this view asked for.
+    private func restorePortrait() {
+        guard turned, let scene else { return }
+        turned = false
+        if #available(iOS 16.0, *) {
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait)) { _ in }
+        }
+    }
+
+    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+        super.viewWillTransition(to: size, with: coordinator)
+        // The phone turned upright while a landscape video fills the screen: back to the page.
+        guard !turning, videoIsLandscape, size.height > size.width else { return }
+        coordinator.animate(alongsideTransition: nil) { [weak self] _ in
+            self?.turned = false
+            self?.onLeave?()
+        }
     }
 
     override func viewDidLoad() {
@@ -143,6 +194,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
 
     /// Stops watching the player and hands it back; called as the presentation ends.
     func detach() {
+        restorePortrait()
         stopObserving()
         visibility.stop()
         closeMenu()
