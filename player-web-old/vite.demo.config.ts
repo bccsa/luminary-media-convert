@@ -27,7 +27,7 @@ export default defineConfig({
         dedupe: ['vue'],
     },
     server: {
-        port: 5182,
+        port: 5181,
         strictPort: true,
     },
 });
