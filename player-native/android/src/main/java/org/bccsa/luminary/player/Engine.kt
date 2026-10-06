@@ -9,7 +9,14 @@ interface Engine {
      * [nowPlaying] is what the lock screen and the notification show for this item; [recovery] is
      * the policy the recovery ladder climbs by.
      */
-    fun load(masterUri: String, startPosition: Double?, nowPlaying: NowPlaying?, recovery: RecoveryPolicy)
+    fun load(
+        masterUri: String,
+        startPosition: Double?,
+        nowPlaying: NowPlaying?,
+        recovery: RecoveryPolicy,
+        /** The host's connection measure in bits per second, to start the adaptive logic from; null for none. */
+        bandwidthEstimate: Double?,
+    )
 
     /** Same assets; restore position, rate and tracks. */
     fun reattach()
@@ -46,6 +53,9 @@ interface Engine {
 
     /** Selects the subtitle listed under [label] (its name, else its language); null turns them off. */
     fun setSubtitleTrack(label: String?)
+
+    /** Opens the system's AirPlay device list. Android has none, and does not report the capability. */
+    fun showAirPlayPicker()
 
     /** Starts picture in picture from the picture that is showing; nothing when none is. */
     fun startPictureInPicture()

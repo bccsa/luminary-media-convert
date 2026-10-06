@@ -84,6 +84,26 @@ class BridgeTypesTest {
         assertEquals(null, holder.copy())
     }
 
+    private fun loadWith(bandwidth: kotlinx.serialization.json.JsonElement?) = JsonObject(
+        load(JsonPrimitive(3)) + (if (bandwidth != null) mapOf("bandwidthEstimate" to bandwidth) else emptyMap()),
+    )
+
+    @Test
+    fun `a bandwidth estimate is a hint, a usable number is kept and anything else is no hint`() {
+        fun estimate(value: kotlinx.serialization.json.JsonElement?) =
+            (BridgeCall.decode("load", loadWith(value)) as BridgeCall.Load).args.bandwidthEstimate
+
+        assertEquals(null, estimate(null))
+        assertEquals(5_000_000.0, estimate(JsonPrimitive(5_000_000))!!, 0.0)
+        assertEquals(null, estimate(JsonPrimitive(0)))
+        assertEquals(null, estimate(JsonPrimitive(-5)))
+    }
+
+    @Test
+    fun `a bandwidth estimate that is not a number is refused`() {
+        assertInvalid("load", loadWith(JsonPrimitive("fast")))
+    }
+
     @Test
     fun `counts that fit decode as they are`() {
         val load = BridgeCall.decode("load", load(JsonPrimitive(3))) as BridgeCall.Load

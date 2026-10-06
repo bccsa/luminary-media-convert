@@ -40,7 +40,7 @@ class PlayerHost(
         assets.put(args.generation, args.assets)
         key.set(args.keyHex)
         beginLoad(args.loadId)
-        engine.load(args.masterUri, args.startPosition, args.nowPlaying, args.recovery)
+        engine.load(args.masterUri, args.startPosition, args.nowPlaying, args.recovery, args.bandwidthEstimate)
         assets.purgeReleasedBefore(args.generation)
     }
 

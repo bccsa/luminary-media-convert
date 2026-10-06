@@ -45,6 +45,7 @@ data class BridgeCapabilities(
     val inlineVideo: Boolean = false,
     val muting: Boolean = false,
     val subtitleSelection: Boolean = false,
+    val airPlay: Boolean = false,
     val maxPlayers: Int = 1,
 ) {
     fun toJson(): JsonObject = buildJsonObject {
@@ -57,6 +58,7 @@ data class BridgeCapabilities(
         put("inlineVideo", inlineVideo)
         put("muting", muting)
         put("subtitleSelection", subtitleSelection)
+        put("airPlay", airPlay)
         put("maxPlayers", maxPlayers)
     }
 
@@ -73,6 +75,7 @@ data class BridgeCapabilities(
                 inlineVideo = flag("inlineVideo"),
                 muting = flag("muting"),
                 subtitleSelection = flag("subtitleSelection"),
+                airPlay = flag("airPlay"),
                 maxPlayers = (json["maxPlayers"] as? JsonPrimitive)?.doubleOrNull?.toInt() ?: 1,
             )
         }
@@ -112,6 +115,8 @@ data class LoadArgs(
     val masterUri: String,
     val assets: List<BridgeAsset>,
     val keyHex: String?,
+    /** The host's connection measure in bits per second, a hint to start the adaptive logic from; null for none. */
+    val bandwidthEstimate: Double?,
     val startPosition: Double?,
     val recovery: RecoveryPolicy,
     val nowPlaying: NowPlaying?,
@@ -206,6 +211,7 @@ sealed interface BridgeCall {
     data class SetMuted(override val playerId: String, val muted: Boolean) : BridgeCall
     data class SetSubtitleTrack(override val playerId: String, val label: String?) : BridgeCall
     data class StartPictureInPicture(override val playerId: String) : BridgeCall
+    data class ShowAirPlayPicker(override val playerId: String) : BridgeCall
 
     /** [texts] are what the controls say in the host's language; null keeps the last, or English. */
     data class EnterFullscreen(override val playerId: String, val texts: Map<String, String>?) : BridgeCall
@@ -223,6 +229,7 @@ sealed interface BridgeCall {
             "setMuted" -> BridgeCapabilities::muting
             "setSubtitleTrack" -> BridgeCapabilities::subtitleSelection
             "startPictureInPicture" -> BridgeCapabilities::pictureInPicture
+            "showAirPlayPicker" -> BridgeCapabilities::airPlay
             else -> null
         }
 
@@ -307,6 +314,7 @@ sealed interface BridgeCall {
                 "setMuted" -> SetMuted(args.string("playerId"), args.optBoolean("muted") ?: args.invalid("muted is required"))
                 "setSubtitleTrack" -> SetSubtitleTrack(args.string("playerId"), args.optString("label"))
                 "startPictureInPicture" -> StartPictureInPicture(args.string("playerId"))
+                "showAirPlayPicker" -> ShowAirPlayPicker(args.string("playerId"))
                 "enterFullscreen" -> EnterFullscreen(args.string("playerId"), args.optObj("texts")?.strings())
                 "exitFullscreen" -> ExitFullscreen(args.string("playerId"))
                 "resumed" -> Resumed(args.string("playerId"))
@@ -328,6 +336,8 @@ sealed interface BridgeCall {
                 masterUri = masterUri,
                 assets = args.assets(generation),
                 keyHex = args.optKeyHex("keyHex"),
+                // A hint that is not a usable number is no hint.
+                bandwidthEstimate = args.optNumber("bandwidthEstimate")?.takeIf { it > 0 },
                 startPosition = args.optNumber("startPosition")?.also {
                     if (it < 0) args.invalid("startPosition is not negative")
                 },

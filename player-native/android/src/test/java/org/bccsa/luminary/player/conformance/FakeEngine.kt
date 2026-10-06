@@ -42,7 +42,13 @@ class FakeEngine(
 
     // Commands: recorded, never acted on.
 
-    override fun load(masterUri: String, startPosition: Double?, nowPlaying: NowPlaying?, recovery: RecoveryPolicy) {
+    override fun load(
+        masterUri: String,
+        startPosition: Double?,
+        nowPlaying: NowPlaying?,
+        recovery: RecoveryPolicy,
+        bandwidthEstimate: Double?,
+    ) {
         record("load") {
             put("masterUri", masterUri)
             if (startPosition != null) put("startPosition", startPosition)
@@ -70,6 +76,7 @@ class FakeEngine(
     override fun setMuted(muted: Boolean) = record("setMuted") { put("muted", muted) }
     override fun setSubtitleTrack(label: String?) = record("setSubtitleTrack") { if (label != null) put("label", label) }
     override fun startPictureInPicture() = record("startPictureInPicture")
+    override fun showAirPlayPicker() = record("showAirPlayPicker")
     override fun setInlineFrame(frame: InlineFrame?) = record("setInlineFrame") {
         if (frame != null) {
             put("x", frame.x)
@@ -144,6 +151,10 @@ class FakeEngine(
                 events.bufferedTo(bufferedEnd)
             }
             "position" -> setPosition(args.getValue("position").number())
+            "airplay" -> events.airPlayChanged(
+                (args["available"] as? JsonPrimitive)?.content == "true",
+                (args["active"] as? JsonPrimitive)?.content == "true",
+            )
             "muted" -> (args["muted"] as? JsonPrimitive)?.content?.let { events.mutedChanged(it == "true") }
             "rate" -> {
                 setPosition(position())

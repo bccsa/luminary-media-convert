@@ -21,6 +21,7 @@ import androidx.media3.common.util.Util
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.exoplayer.hls.HlsMediaSource
+import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import androidx.media3.session.CommandButton
@@ -68,7 +69,12 @@ class ExoEngine(
     /** What the full-screen controls and the notification skip by; snapped onto what the skin can draw. */
     private val skin = SkinOptions(options.skipBackSeconds, options.skipForwardSeconds)
 
+    /** Seeds the adaptive logic from the host's connection measure; only the player this engine builds takes it. */
+    private val bandwidth: SeedableBandwidthMeter? =
+        if (player == null) SeedableBandwidthMeter(DefaultBandwidthMeter.getSingletonInstance(context.applicationContext)) else null
+
     private val player: ExoPlayer = player ?: ExoPlayer.Builder(context.applicationContext)
+        .setBandwidthMeter(bandwidth!!)
         .setAudioAttributes(
             AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
             /* handleAudioFocus= */ true,
@@ -178,7 +184,14 @@ class ExoEngine(
     override val hasVideo: Boolean
         get() = player.currentTracks.isEmpty || player.currentTracks.containsType(C.TRACK_TYPE_VIDEO)
 
-    override fun load(masterUri: String, startPosition: Double?, nowPlaying: NowPlaying?, recovery: RecoveryPolicy) {
+    override fun load(
+        masterUri: String,
+        startPosition: Double?,
+        nowPlaying: NowPlaying?,
+        recovery: RecoveryPolicy,
+        bandwidthEstimate: Double?,
+    ) {
+        bandwidth?.hint = bandwidthEstimate?.toLong()
         this.recovery = recovery
         ladder.setPolicy(recovery)
         ladder.noteSourceLoaded()
@@ -295,6 +308,9 @@ class ExoEngine(
     override fun setSubtitleTrack(label: String?) = selectSubtitle(player, label)
 
     /** Needs the system's picture in picture and an activity that allows it; the registry refuses the call otherwise. */
+    /** AirPlay is Apple's: the capability is off, and the registry refuses the call before it gets here. */
+    override fun showAirPlayPicker() {}
+
     override fun startPictureInPicture() {
         if (!hasVideo) return
         // The small window shows the full-screen view's picture: take the picture there first.

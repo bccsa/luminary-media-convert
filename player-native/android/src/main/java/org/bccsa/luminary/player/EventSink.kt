@@ -132,6 +132,21 @@ class EventSink(
         }
     }
 
+    private var airPlay = false to false
+
+    /** Only on a change: another device appeared or went (`available`), or playback went to one or came back (`active`). */
+    fun airPlayChanged(available: Boolean, active: Boolean) {
+        if (airPlay == available to active) return
+        airPlay = available to active
+        send(
+            "airplaychange",
+            buildJsonObject {
+                put("available", available)
+                put("active", active)
+            },
+        )
+    }
+
     private var muted = false
 
     /** Only on a change, whoever made it: a `setMuted`, or the viewer in native UI. */
