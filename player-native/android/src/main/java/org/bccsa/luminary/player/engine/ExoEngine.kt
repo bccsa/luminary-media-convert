@@ -34,7 +34,10 @@ import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.roundToLong
+import android.util.Log
+import java.net.InetAddress
 import org.bccsa.luminary.player.AudioTrack
+import org.bccsa.luminary.player.CastServer
 import org.bccsa.luminary.player.Cancellable
 import org.bccsa.luminary.player.Clock
 import org.bccsa.luminary.player.CreateOptions
@@ -47,13 +50,14 @@ import org.bccsa.luminary.player.RecoveryLadder
 import org.bccsa.luminary.player.RecoveryPolicy
 import org.bccsa.luminary.player.Snapshot
 import org.bccsa.luminary.player.UriRouter
+import org.bccsa.luminary.player.rewriteForCast
 import org.bccsa.luminary.player.Variant
 
 /** The [Engine] on Media3 ExoPlayer: HLS through the player's [UriRouter], reported through [events]. */
 @OptIn(UnstableApi::class)
 class ExoEngine(
     context: Context,
-    router: UriRouter,
+    private val router: UriRouter,
     private val clock: Clock,
     options: CreateOptions,
     private val presenter: FullscreenPresenter,
@@ -65,6 +69,8 @@ class ExoEngine(
     private val inline: InlinePresenter? = null,
     /** Google Cast, where the host and the device allow it; null otherwise. */
     private val cast: CastSupport? = null,
+    /** The phone's address on the Wi-Fi, which a receiver on the same network can reach; null when there is none. */
+    private val castAddress: () -> InetAddress? = { CastServer.lanAddress() },
 ) : Engine, Player.Listener {
     override lateinit var events: EventSink
 
@@ -105,7 +111,8 @@ class ExoEngine(
     /** In the background only the sound is wanted: the video track goes, and its downloads with it. */
     private val appVisibility = object : DefaultLifecycleObserver {
         override fun onStart(owner: LifecycleOwner) {
-            setVideoDisabled(false)
+            // The phone's picture stays off while the TV has it.
+            if (castPlayer == null) setVideoDisabled(false)
             setAppSuspended(false)
         }
 
@@ -161,6 +168,35 @@ class ExoEngine(
     /** The id `setVariant` pinned; re-applied to a rebuilt ladder that still offers it. */
     private var pinnedVariant: String? = null
 
+    /** The receiver's player while playback is on a TV; null while it is on the phone. */
+    private var castPlayer: Player? = null
+
+    /** A receiver session that is up, taken over as soon as there is something to play. */
+    private var availableCast: Player? = null
+    private var castServer: CastServer? = null
+
+    /** Playback commands, state and events are the receiver's while casting. */
+    private val active: Player get() = castPlayer ?: player
+
+    /** What the receiver's player says that the page needs to hear: playback, never its tracks or volume. */
+    private val castForwarder = object : Player.Listener {
+        override fun onTimelineChanged(timeline: Timeline, reason: Int) = handleTimelineChanged(timeline)
+
+        override fun onPlaybackStateChanged(playbackState: Int) = handlePlaybackStateChanged(playbackState)
+
+        override fun onIsPlayingChanged(isPlaying: Boolean) = handleIsPlayingChanged(isPlaying)
+
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) = handlePlayWhenReadyChanged(playWhenReady, reason)
+
+        override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) =
+            handlePositionDiscontinuity(reason)
+
+        override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) = handleParameters(playbackParameters)
+
+        // The receiver gave up: the TV is not a reason to lose the viewer's place, so playback comes home.
+        override fun onPlayerError(error: PlaybackException) = endCasting()
+    }
+
     init {
         this.player.addListener(this)
         appLifecycle.addObserver(appVisibility)
@@ -169,6 +205,16 @@ class ExoEngine(
             cast?.start(object : CastSupport.Listener {
                 override fun routesChanged(available: Boolean, active: Boolean) {
                     if (::events.isInitialized) events.airPlayChanged(available, active)
+                }
+
+                override fun sessionAvailable(player: Player) {
+                    availableCast = player
+                    startCasting(player)
+                }
+
+                override fun sessionLost() {
+                    availableCast = null
+                    endCasting()
                 }
             })
         }
@@ -230,6 +276,16 @@ class ExoEngine(
         }
         player.prepare()
         startPolling()
+        // A session that was up before there was anything to play takes this over; one that is up
+        // already gets the new source in place of the old.
+        val receiver = castPlayer
+        if (receiver != null) {
+            player.playWhenReady = false
+            castItem(item)?.let { receiver.setMediaItem(it, ((startPosition ?: 0.0) * 1000).roundToLong()) }
+            receiver.prepare()
+        } else {
+            availableCast?.let(::startCasting)
+        }
     }
 
     /** The same item again, prepared from scratch; rate and track parameters live on the player. */
@@ -258,17 +314,17 @@ class ExoEngine(
 
     /** As a video element does: playing at the end starts again from the beginning. */
     override fun play() {
-        Util.handlePlayButtonAction(player)
+        Util.handlePlayButtonAction(active)
     }
 
-    override fun pause() = player.pause()
+    override fun pause() = active.pause()
 
     override fun seek(position: Double, exact: Boolean) {
-        player.setSeekParameters(if (exact) SeekParameters.EXACT else SeekParameters.CLOSEST_SYNC)
-        player.seekTo((position * 1000).roundToLong())
+        if (castPlayer == null) player.setSeekParameters(if (exact) SeekParameters.EXACT else SeekParameters.CLOSEST_SYNC)
+        active.seekTo((position * 1000).roundToLong())
     }
 
-    override fun setRate(rate: Double) = player.setPlaybackSpeed(rate.toFloat())
+    override fun setRate(rate: Double) = active.setPlaybackSpeed(rate.toFloat())
 
     override fun setVariant(id: String) {
         pinnedVariant = id.takeUnless { it == "auto" }
@@ -324,7 +380,7 @@ class ExoEngine(
     }
 
     override fun startPictureInPicture() {
-        if (!hasVideo) return
+        if (!hasVideo || castPlayer != null) return
         // The small window shows the full-screen view's picture: take the picture there first.
         if (!presenter.isPresented) enterFullscreen(null)
         presenter.startPictureInPicture()
@@ -368,19 +424,19 @@ class ExoEngine(
     }
 
     override fun snapshot(): Snapshot {
-        val state = player.playbackState
+        val state = active.playbackState
         return Snapshot(
-            currentTime = player.currentPosition / 1000.0,
+            currentTime = active.currentPosition / 1000.0,
             duration = duration(),
-            bufferedEnd = player.bufferedPosition / 1000.0,
-            playing = player.playWhenReady && (state == Player.STATE_BUFFERING || state == Player.STATE_READY),
+            bufferedEnd = active.bufferedPosition / 1000.0,
+            playing = active.playWhenReady && (state == Player.STATE_BUFFERING || state == Player.STATE_READY),
         )
     }
 
     /** 0 until known; null while unbounded (live). */
     private fun duration(): Double? {
-        if (player.isCurrentMediaItemLive) return null
-        val duration = player.duration
+        if (active.isCurrentMediaItemLive) return null
+        val duration = active.duration
         return if (duration == C.TIME_UNSET) 0.0 else duration / 1000.0
     }
 
@@ -390,6 +446,8 @@ class ExoEngine(
     override fun enterFullscreen(texts: Map<String, String>?) {
         // A call with no texts keeps the last, or English.
         if (texts != null) this.texts = FullscreenTexts.from(texts)
+        // The picture is on the TV: there is nothing to show full-screen here.
+        if (castPlayer != null) return
         // Audio-only has no view. Until the tracks are known the item is presumed to have one, and
         // the view is taken down again if it turns out not to (see `onTracksChanged`).
         if (knownAudioOnly(player.currentTracks)) return
@@ -415,6 +473,10 @@ class ExoEngine(
 
     override fun destroy() {
         runCatching { cast?.stop() }
+        castPlayer?.removeListener(castForwarder)
+        castPlayer = null
+        runCatching { castServer?.close() }
+        castServer = null
         ladder.destroy()
         poll?.cancel()
         poll = null
@@ -435,7 +497,7 @@ class ExoEngine(
     }
 
     private fun sample() {
-        val end = player.bufferedPosition / 1000.0
+        val end = active.bufferedPosition / 1000.0
         if (metadataSent && end != reportedBufferedEnd) {
             reportedBufferedEnd = end
             events.bufferedTo(end)
@@ -446,6 +508,10 @@ class ExoEngine(
     // Player.Listener: what ExoPlayer reports, handed to EventSink.
 
     override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+        if (castPlayer == null) handleTimelineChanged(timeline)
+    }
+
+    private fun handleTimelineChanged(timeline: Timeline) {
         if (timeline.isEmpty) return
         if (metadataSent) events.durationChanged(duration()) else announceMetadata()
     }
@@ -459,10 +525,14 @@ class ExoEngine(
     }
 
     override fun onPlaybackStateChanged(playbackState: Int) {
+        if (castPlayer == null) handlePlaybackStateChanged(playbackState)
+    }
+
+    private fun handlePlaybackStateChanged(playbackState: Int) {
         val ready = wasReady
         wasReady = playbackState == Player.STATE_READY || (playbackState == Player.STATE_BUFFERING && ready)
         when (playbackState) {
-            Player.STATE_BUFFERING -> if (player.playWhenReady) {
+            Player.STATE_BUFFERING -> if (active.playWhenReady) {
                 events.buffering()
                 // Running dry mid-playback is the engine's own verdict; a seek or a first load is not.
                 if (wasReady && !seekPending) stall()
@@ -484,6 +554,10 @@ class ExoEngine(
     }
 
     override fun onIsPlayingChanged(isPlaying: Boolean) {
+        if (castPlayer == null) handleIsPlayingChanged(isPlaying)
+    }
+
+    private fun handleIsPlayingChanged(isPlaying: Boolean) {
         if (!isPlaying) return
         ladder.notePlaybackHealthy()
         clearStall()
@@ -503,6 +577,10 @@ class ExoEngine(
     }
 
     override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+        if (castPlayer == null) handlePlayWhenReadyChanged(playWhenReady, reason)
+    }
+
+    private fun handlePlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
         if (!playWhenReady && reason != Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) events.paused()
     }
 
@@ -511,6 +589,10 @@ class ExoEngine(
         newPosition: Player.PositionInfo,
         reason: Int,
     ) {
+        if (castPlayer == null) handlePositionDiscontinuity(reason)
+    }
+
+    private fun handlePositionDiscontinuity(reason: Int) {
         // A seek masks the state to BUFFERING; it has finished once the player is READY again.
         if (reason == Player.DISCONTINUITY_REASON_SEEK && !redrawing) seekPending = true
     }
@@ -549,10 +631,16 @@ class ExoEngine(
     }
 
     override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) {
+        if (castPlayer == null) handleParameters(playbackParameters)
+    }
+
+    private fun handleParameters(playbackParameters: PlaybackParameters) {
         events.rateChanged(rateOf(playbackParameters.speed))
     }
 
     override fun onPlayerError(error: PlaybackException) {
+        // The phone's own player is silent while the TV has playback; its trouble is for when it is back.
+        if (castPlayer != null) return
         ladder.note(
             RecoveryLadder.Failure(
                 category = categoryOf(error),
@@ -576,6 +664,75 @@ class ExoEngine(
             Futures.immediateFailedFuture(UnsupportedOperationException("Nothing to resume: the app picks what plays"))
     }
 
+    // Casting.
+
+    /** The receiver's item for [item]: the master's address on the phone's own server, which the TV can reach. */
+    private fun castItem(item: MediaItem): MediaItem? {
+        val base = castServer?.base ?: return null
+        val uri = item.localConfiguration?.uri?.toString() ?: return null
+        return MediaItem.Builder()
+            .setUri(rewriteForCast(uri, base))
+            .setMimeType(MimeTypes.APPLICATION_M3U8)
+            .setMediaMetadata(item.mediaMetadata)
+            .build()
+    }
+
+    /**
+     * Moves playback to the receiver: the phone's player goes quiet where it is (keeping its source
+     * and tracks, so the page's lists stay), the phone starts answering for the playlists and key a
+     * TV cannot reach, and the TV is given the master from there at the same position.
+     */
+    private fun startCasting(receiver: Player) {
+        val item = mediaItem ?: return
+        if (castPlayer != null) return
+        val address = castAddress()
+        if (address == null) {
+            Log.w(TAG, "No Wi-Fi address to serve a cast from")
+            return
+        }
+        val server = CastServer(router, address)
+        try {
+            server.start()
+        } catch (failed: java.io.IOException) {
+            Log.w(TAG, "Could not start the cast server: ${failed.message}")
+            return
+        }
+        castServer = server
+
+        val wanted = player.playWhenReady && player.playbackState != Player.STATE_ENDED
+        val position = player.currentPosition
+        val speed = player.playbackParameters.speed
+        // The TV has the picture now: nothing full-screen here, and from here the phone's events are ignored.
+        if (presenter.dismiss()) presentationDidChange("inline")
+        castPlayer = receiver
+        receiver.addListener(castForwarder)
+        player.pause()
+        setVideoDisabled(true)
+
+        castItem(item)?.let { receiver.setMediaItem(it, position) }
+        receiver.setPlaybackSpeed(speed)
+        receiver.prepare()
+        receiver.playWhenReady = wanted
+    }
+
+    /** Brings playback home from the receiver, at the place it had got to. */
+    private fun endCasting() {
+        val receiver = castPlayer ?: return
+        val position = receiver.currentPosition
+        val wanted = receiver.playWhenReady && receiver.playbackState != Player.STATE_ENDED
+        receiver.removeListener(castForwarder)
+        runCatching {
+            receiver.stop()
+            receiver.clearMediaItems()
+        }
+        castPlayer = null
+        runCatching { castServer?.close() }
+        castServer = null
+        if (appLifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) setVideoDisabled(false)
+        player.seekTo(position)
+        player.playWhenReady = wanted
+    }
+
     private companion object {
         /** What a re-attach cannot fix: a decoder that will not start, an asset the source no longer names. */
         fun needsRebuild(error: PlaybackException) = error.errorCode in listOf(
@@ -584,6 +741,7 @@ class ExoEngine(
             PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND,
         )
 
+        private const val TAG = "LuminaryCast"
         const val POLL_PERIOD = 0.25
         const val DEFAULT_SKIP_SECONDS = 10
 

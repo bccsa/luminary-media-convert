@@ -6,6 +6,9 @@ import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import androidx.media3.cast.CastPlayer
+import androidx.media3.cast.SessionAvailabilityListener
+import androidx.media3.common.Player
 import androidx.mediarouter.app.MediaRouteChooserDialog
 import androidx.mediarouter.app.MediaRouteControllerDialog
 import com.google.android.gms.cast.framework.CastContext
@@ -24,6 +27,12 @@ interface CastSupport {
     interface Listener {
         /** [available]: a receiver is in range. [active]: connected to one. */
         fun routesChanged(available: Boolean, active: Boolean)
+
+        /** Playback can move to the receiver: [player] is the one that drives it. */
+        fun sessionAvailable(player: Player)
+
+        /** The session ended, or the receiver went away. */
+        fun sessionLost()
     }
 
     /** Starts watching for receivers; the listener is told as soon as the SDK is ready, and on every change. */
@@ -46,6 +55,7 @@ class GoogleCastSupport(private val context: Context, private val activity: () -
     private val mainExecutor = Executor(main::post)
     private var cast: CastContext? = null
     private var stateListener: CastStateListener? = null
+    private var castPlayer: CastPlayer? = null
     private var stopped = false
 
     override fun start(listener: CastSupport.Listener) {
@@ -61,6 +71,16 @@ class GoogleCastSupport(private val context: Context, private val activity: () -
                 castContext.addCastStateListener(watcher)
                 // Listeners are told of changes; the state as it is now is told here.
                 watcher.onCastStateChanged(castContext.castState)
+
+                val receiver = CastPlayer(castContext)
+                castPlayer = receiver
+                receiver.setSessionAvailabilityListener(object : SessionAvailabilityListener {
+                    override fun onCastSessionAvailable() = listener.sessionAvailable(receiver)
+
+                    override fun onCastSessionUnavailable() = listener.sessionLost()
+                })
+                // A session already running when the app starts is one to take over.
+                if (receiver.isCastSessionAvailable) listener.sessionAvailable(receiver)
             }
     }
 
@@ -82,6 +102,9 @@ class GoogleCastSupport(private val context: Context, private val activity: () -
         stopped = true
         stateListener?.let { cast?.removeCastStateListener(it) }
         stateListener = null
+        castPlayer?.setSessionAvailabilityListener(null)
+        castPlayer?.release()
+        castPlayer = null
         cast = null
     }
 
