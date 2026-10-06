@@ -31,8 +31,48 @@ Baseline: iOS 15.0, Capacitor 8, CocoaPods.
 | `pictureInPicture` | `true` |
 | `renderText` | `false` |
 | `backgroundAudio` | `true` (phase 3b) |
-| `live` | `false` until phase 4 |
-| `chunkWarming` | `false` until phase 5 |
+| `live` | `true` (since 2026-10-06; plays on the device) |
+| `chunkWarming` | `false` until phase 5 passes behind a byte-range CDN, on both platforms |
+| `inlineVideo`, `muting`, `subtitleSelection`, `airPlay` | `true` (2026-10-06; see plan 08 and the status below) |
+
+## Status (2026-10-06)
+
+What the iOS side does now, on top of everything in the 2026-10-01 status below. All of it is on
+`feat/native-player-bridge`, with Swift tests (113 core, 14 conformance), conformance scenarios 19 to
+26 and CI green on both platforms.
+
+- **Video in the page** (`inlineVideo`, `setInlineFrame`): the picture sits behind a transparent web
+  view, follows its frame, and survives full-screen and picture in picture. Turning the phone
+  sideways opens full-screen for a landscape video that plays; the full-screen button opens it
+  otherwise. Device-verified.
+- **Controls the page draws:** `setMuted` (and `mutedchange`), `setSubtitleTrack`,
+  `startPictureInPicture`, and AirPlay. Device-verified.
+- **AirPlay** (`airPlay`, `showAirPlayPicker`, `airplaychange`): the page's button shows only while
+  a device is detected; native full-screen has Apple's own picker in its top row. **Verified on a
+  Mac as the receiver, video and sound.** An Apple TV or an AirPlay speaker has not been tried.
+- **`live` is on** and plays on the device (the SCC live stream).
+- **Native full-screen speaks the app's language** (`enterFullscreen` carries the texts).
+- **Now Playing:** title, duration and elapsed time as before; artwork is cropped to a square, and
+  `fallbackArtworkUrl` (a `data:` JPEG from the host) is used when the post's own picture is absent,
+  answers an error or is not an image.
+- **The engine recreates its `AVPlayer`** when iOS resets its media services, and carries on from where
+  it was (unit-tested; a reset cannot be triggered on demand, so not exercised on the device).
+- **The review** ([plan 07](temp_native-player-07-ios-review.md)): groups A, B and C are fixed. What
+  is left is minor, or can only be seen on a device.
+- **`bandwidthEstimate`** (a hint from the host's speed probe) reaches the load; AVPlayer has no way to
+  seed an estimate, so iOS ignores it.
+
+**Open:**
+
+- **The slow-phone pass.** Not done: no iPhone 7 or 8 (iOS 15) to hand. Playback, 10+ minutes on the
+  lock screen, full-screen, picture in picture, an angle switch, and the memory budget the edge-case
+  list names.
+- **Chunk warming** (`chunkWarming`): built and unit-tested on both platforms, still off. It turns on
+  when a run behind a byte-range CDN shows it earns its keep on both. To agree with Dirk.
+- **Conformance for the ladder and for a live answer:** the shared part of the ladder scenarios
+  (ExoPlayer's rungs differ), and a route result shape for a live answer.
+- **Packaging:** SwiftPM and the podspec from the same sources, to agree with Dirk.
+- **AirPlay on an Apple TV and a speaker.**
 
 ## Status (2026-10-01)
 
@@ -340,8 +380,9 @@ A port of `player-web/src/adapter/chunkWarming.ts` that follows all nine rules i
 
 ## iOS-specific edge cases
 
-- **AirPlay** cannot fetch `luminary://` playlists, so it is off for native
-  playback.
+- **AirPlay** was expected to be off for native playback, since a receiver cannot fetch
+  `luminary://` playlists. It is on (`airPlay`): tried on a Mac as the receiver, it plays video and
+  sound. Not tried on an Apple TV or a speaker.
 - **The audio session is shared** with `WKWebView`. Set it late and restore it on
   destroy.
 - **CORS.** `player-core` fetches playlists from `capacitor://localhost`, so the
