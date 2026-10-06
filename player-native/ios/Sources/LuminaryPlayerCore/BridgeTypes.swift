@@ -92,6 +92,8 @@ public struct NowPlaying: Sendable {
     public let title: String
     public let subtitle: String?
     public let artworkUrl: String?
+    /// Tried when `artworkUrl` is absent or does not give an image.
+    public let fallbackArtworkUrl: String?
 }
 
 /// Resolved by `player-core`: native applies it, never defaults it.
@@ -442,7 +444,8 @@ public enum BridgeCall: Sendable {
                 NowPlaying(
                     title: try $0.string("title"),
                     subtitle: try $0.optionalString("subtitle"),
-                    artworkUrl: try $0.optionalString("artworkUrl")
+                    artworkUrl: try $0.optionalString("artworkUrl"),
+                    fallbackArtworkUrl: try $0.optionalString("fallbackArtworkUrl")
                 )
             }
         )

@@ -182,6 +182,12 @@ export interface NowPlaying {
     title: string;
     subtitle?: string;
     artworkUrl?: string;
+    /**
+     * Shown when `artworkUrl` is absent, does not answer, or is not an image: the host's own
+     * stand-in for a post with no usable picture. A `data:` URL is the form for an image that
+     * lives in the page's own bundle, which native cannot fetch by address.
+     */
+    fallbackArtworkUrl?: string;
 }
 
 /** `LivePlaylistSpec` as data: the key travels as hex, like `keyHex`. */

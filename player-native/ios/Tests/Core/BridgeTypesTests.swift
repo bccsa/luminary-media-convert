@@ -49,6 +49,31 @@ struct BridgeTypesTests {
         }
     }
 
+    @Test("now playing carries the post's artwork and the host's stand-in for it")
+    func nowPlayingDecodes() throws {
+        var args = load(maxReloadAttempts: .number(3))
+        args["nowPlaying"] = .object([
+            "title": .string("Friday evening"),
+            "artworkUrl": .string("https://cdn.example.com/a.webp"),
+            "fallbackArtworkUrl": .string("data:image/jpeg;base64,AAAA"),
+        ])
+        guard case .load(let decoded) = try BridgeCall.decode("load", args) else {
+            Issue.record("not a load")
+            return
+        }
+        #expect(decoded.nowPlaying?.title == "Friday evening")
+        #expect(decoded.nowPlaying?.artworkUrl == "https://cdn.example.com/a.webp")
+        #expect(decoded.nowPlaying?.fallbackArtworkUrl == "data:image/jpeg;base64,AAAA")
+
+        args["nowPlaying"] = .object(["title": .string("No picture")])
+        guard case .load(let bare) = try BridgeCall.decode("load", args) else {
+            Issue.record("not a load")
+            return
+        }
+        #expect(bare.nowPlaying?.artworkUrl == nil)
+        #expect(bare.nowPlaying?.fallbackArtworkUrl == nil)
+    }
+
     @Test("counts that fit decode as they are")
     func countsDecode() throws {
         guard case .load(let args) = try BridgeCall.decode("load", load(maxReloadAttempts: .number(3))) else {

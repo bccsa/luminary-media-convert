@@ -58,7 +58,8 @@ final class NowPlayingController {
         if let nowPlaying {
             info[MPMediaItemPropertyTitle] = nowPlaying.title
             if let subtitle = nowPlaying.subtitle { info[MPMediaItemPropertyArtist] = subtitle }
-            if let artworkUrl = nowPlaying.artworkUrl { loadArtwork(artworkUrl, generation: metadataGeneration) }
+            let candidates = [nowPlaying.artworkUrl, nowPlaying.fallbackArtworkUrl].compactMap { $0 }.filter { !$0.isEmpty }
+            if !candidates.isEmpty { loadArtwork(candidates, generation: metadataGeneration) }
         }
         publish()
     }
@@ -131,11 +132,22 @@ final class NowPlayingController {
         }
     }
 
-    private func loadArtwork(_ url: String, generation: Int) {
+    /// The first of `urls` that gives an image: a post's own picture, else the host's stand-in.
+    /// One that does not answer, answers with an error page, or is not an image passes to the next.
+    private func loadArtwork(_ urls: [String], generation: Int) {
         #if canImport(UIKit)
-        guard let url = URL(string: url) else { return }
-        let task = URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
-            guard let data, let image = UIImage(data: data) else { return }
+        guard let first = urls.first else { return }
+        let rest = Array(urls.dropFirst())
+        guard let url = URL(string: first) else { return loadArtwork(rest, generation: generation) }
+        let task = URLSession.shared.dataTask(with: url) { [weak self] data, response, _ in
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 200
+            guard let data, (200..<300).contains(status), let image = UIImage(data: data) else {
+                DispatchQueue.main.async {
+                    guard let self, self.metadataGeneration == generation else { return }
+                    self.loadArtwork(rest, generation: generation)
+                }
+                return
+            }
             DispatchQueue.main.async {
                 guard let self, self.metadataGeneration == generation else { return }
                 self.info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) { _ in image }

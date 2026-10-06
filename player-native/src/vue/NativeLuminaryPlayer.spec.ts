@@ -132,6 +132,21 @@ describe('NativeLuminaryPlayer', () => {
         expect(fetched).toContain(MASTER_URL);
     });
 
+    it("sends the host's stand-in picture along, for native to use when the artwork does not load", async () => {
+        const { plugin } = await mountPlayer({
+            nowPlaying: {
+                title: 'Episode 12',
+                artworkUrl: 'https://cdn.example.com/art.jpg',
+                fallbackArtworkUrl: 'data:image/jpeg;base64,AAAA',
+            },
+        });
+
+        expect(plugin.argsOf<LoadArgs>('load')[0]!.nowPlaying).toMatchObject({
+            artworkUrl: 'https://cdn.example.com/art.jpg',
+            fallbackArtworkUrl: 'data:image/jpeg;base64,AAAA',
+        });
+    });
+
     it('keeps artwork the host gave', async () => {
         const { plugin } = await mountPlayer({
             poster: 'https://cdn.example.com/poster.jpg',
