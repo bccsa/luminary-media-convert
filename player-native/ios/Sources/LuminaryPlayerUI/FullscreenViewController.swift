@@ -43,6 +43,11 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     private let rateButton = GlyphButton(size: Skin.control, iconSize: Skin.icon)
     private let muteButton = GlyphButton(size: Skin.control, iconSize: Skin.icon)
     private let exitButton = GlyphButton(size: Skin.control, iconSize: Skin.icon)
+    /// Apple's own AirPlay control: it draws the glyph, shows casting in its tint, and opens the
+    /// system's device list. Hidden unless the detector finds a device to send to.
+    private let airPlayButton = AVRoutePickerView()
+    private let routeDetector = AVRouteDetector()
+    private var routeObservation: NSKeyValueObservation?
     private let progress = ProgressBar()
     private let timeLabel = UILabel()
 
@@ -144,6 +149,12 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         for button in [playPause, skipBack, skipForward, audioButton, pipButton, subtitlesButton, rateButton, muteButton, exitButton] {
             controls.addSubview(button)
         }
+        airPlayButton.tintColor = .white
+        airPlayButton.activeTintColor = .systemYellow
+        airPlayButton.prioritizesVideoDevices = true
+        airPlayButton.delegate = self
+        airPlayButton.isHidden = true
+        controls.addSubview(airPlayButton)
         controls.addSubview(spinner)
         controls.addSubview(progress)
         timeLabel.font = Skin.text
@@ -217,7 +228,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
 
         // The top row, in `player-web`'s order, closing up around what is hidden.
         var x = area.minX
-        for button in [audioButton, pipButton, subtitlesButton, rateButton, muteButton] where !button.isHidden {
+        for button in [audioButton, pipButton, airPlayButton, subtitlesButton, rateButton, muteButton] as [UIView] where !button.isHidden {
             button.frame = CGRect(x: x, y: area.minY, width: Skin.control, height: Skin.control)
             x += Skin.control
         }
@@ -247,7 +258,13 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 4), queue: .main) { [weak self] _ in
             self?.refresh()
         }
+        // Looking for devices costs battery, so only while this view is up.
+        routeDetector.isRouteDetectionEnabled = true
+        routeObservation = routeDetector.observe(\.multipleRoutesDetected) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.refresh() }
+        }
         observations = [
+            player.observe(\.isExternalPlaybackActive) { [weak self] _, _ in DispatchQueue.main.async { self?.refresh() } },
             player.observe(\.timeControlStatus) { [weak self] _, _ in DispatchQueue.main.async { self?.refresh() } },
             player.observe(\.rate) { [weak self] player, _ in
                 DispatchQueue.main.async {
@@ -275,6 +292,9 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         timeObserver = nil
         observations.forEach { $0.invalidate() }
         observations = []
+        routeObservation?.invalidate()
+        routeObservation = nil
+        routeDetector.isRouteDetectionEnabled = false
     }
 
     /// Reads the player and the engine, and draws what the layout says.
@@ -314,6 +334,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         audioButton.isHidden = !layout.showsAudioMenu
         subtitlesButton.isHidden = !layout.showsSubtitlesMenu
         pipButton.isHidden = !pictureInPictureAvailable
+        airPlayButton.isHidden = !routeDetector.multipleRoutesDetected && !player.isExternalPlaybackActive
         rateButton.isHidden = !layout.showsRate
         rateButton.text = rateLabel(next.rate)
         rateButton.accessibilityValue = rateLabel(next.rate)
@@ -574,3 +595,15 @@ final class ProgressBar: UIView {
     }
 }
 #endif
+
+/// The system's device list is a sheet over this view: the controls stay while it is up, and run
+/// their timer again once it is gone.
+extension FullscreenViewController: AVRoutePickerViewDelegate {
+    func routePickerViewWillBeginPresentingRoutes(_ routePickerView: AVRoutePickerView) {
+        visibility.hold()
+    }
+
+    func routePickerViewDidEndPresentingRoutes(_ routePickerView: AVRoutePickerView) {
+        visibility.touched()
+    }
+}
