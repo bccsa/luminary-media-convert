@@ -957,6 +957,32 @@ describe('PlayerController — an adapter that has exhausted its recovery', () =
     });
 });
 
+describe('PlayerController — an error the engine recovers from', () => {
+    it('clears the error panel when playback starts again by itself', async () => {
+        const { adapter, controller } = setup(simpleRoutes, { recoverResult: false });
+        await controller.load({ masterUrl: MASTER_URL, recovery: { maxReloadAttempts: 0 } });
+        adapter.emit('error', { category: 'network', fatal: true });
+        expect(controller.getState().lifecycle).toBe('error');
+
+        adapter.emit('playing', undefined);
+
+        const state = controller.getState();
+        expect(state.lifecycle).toBe('ready');
+        expect(state.error).toBeNull();
+        expect(state.playing).toBe(true);
+    });
+
+    it('leaves a destroyed player destroyed when a late playing event arrives', async () => {
+        const { adapter, controller } = setup(simpleRoutes);
+        await controller.load({ masterUrl: MASTER_URL });
+        controller.destroy();
+
+        adapter.emit('playing', undefined);
+
+        expect(controller.getState().lifecycle).toBe('destroyed');
+    });
+});
+
 describe('PlayerController — destroy', () => {
     it('tears the engine down and goes inert', async () => {
         const { adapter, controller } = setup(simpleRoutes);

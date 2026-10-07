@@ -813,10 +813,14 @@ export class PlayerController implements PlayerControllerApi {
                 this.store.setState({ bufferedEnd });
             }),
             this.adapter.on('playing', () => {
+                // Playing is proof the engine is working: after an error, it got there by itself (its
+                // own recovery, a retry), and an error panel left over it would misstate that.
+                const recovered = this.state.lifecycle === 'error';
                 this.store.setState({
                     playing: true,
                     ended: false,
                     stalled: false,
+                    ...(recovered ? { lifecycle: 'ready' as const, error: null } : {}),
                 });
             }),
             this.adapter.on('pause', () => {
