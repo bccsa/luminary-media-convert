@@ -125,12 +125,21 @@ public final class ChunkWarmer {
         return urls
     }
 
-    /// The bytes are discarded ciphertext, read to completion and dropped; every failure is
-    /// swallowed. Nothing is cached, so the request reaches the edge.
-    public static let urlSessionFetch: Fetch = { url, bytes in
+    /// The request that warms a chunk: `Range: bytes=0-<bytes - 1>`, never from the cache, and not
+    /// on a constrained network. Low Data Mode is the viewer's own data saver, and a warm is an
+    /// extra request nobody asked for: it is skipped there, and the engine's own request is the
+    /// fallback, as it is for every warm that does not happen.
+    static func warmRequest(_ url: URL, bytes: Int) -> URLRequest {
         var request = URLRequest(url: url)
         request.setValue("bytes=0-\(bytes - 1)", forHTTPHeaderField: "Range")
         request.cachePolicy = .reloadIgnoringLocalCacheData
-        URLSession.shared.dataTask(with: request) { _, _, _ in }.resume()
+        request.allowsConstrainedNetworkAccess = false
+        return request
+    }
+
+    /// The bytes are discarded ciphertext, read to completion and dropped; every failure is
+    /// swallowed. Nothing is cached, so the request reaches the edge.
+    public static let urlSessionFetch: Fetch = { url, bytes in
+        URLSession.shared.dataTask(with: warmRequest(url, bytes: bytes)) { _, _, _ in }.resume()
     }
 }

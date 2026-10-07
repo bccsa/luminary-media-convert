@@ -129,6 +129,9 @@ a half-filled bag whose defaults it would have to know.
   object; small enough that a wasted warm costs nothing worth counting.
 - **`enabled`, default on.** For hosts that want no warming at all: a proxy that
   already warms, a metered connection, a test counting requests.
+  A native adapter also honours the platform's own data saver without being asked: iOS skips
+  the warm on a constrained network (Low Data Mode), and the engine's own request is the fallback,
+  as for any warm that does not happen. A host's data saver turns warming off through `enabled`.
 - **`debug`, default off.** Warming is invisible by design — one small ranged
   request per chunk among hundreds of media requests — so this narrates it
   instead: the schedule shape when armed, every warm with its trigger context

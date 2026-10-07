@@ -50,6 +50,21 @@ struct ChunkWarmerTests {
         #expect(run.warmed == ["\(base)/media/v0_1.m4s", "\(base)/media/v0_2.m4s"])
     }
 
+    @Test("the warming request is a ranged read that skips the cache and a constrained network")
+    func warmRequestShape() throws {
+        let url = try #require(URL(string: "\(base)/media/v0_1.m4s"))
+        let request = ChunkWarmer.warmRequest(url, bytes: 65_536)
+
+        #expect(request.url == url)
+        #expect(request.value(forHTTPHeaderField: "Range") == "bytes=0-65535")
+        #expect(request.cachePolicy == .reloadIgnoringLocalCacheData)
+        // Low Data Mode is the viewer's own data saver: no warm goes out under it.
+        #expect(request.allowsConstrainedNetworkAccess == false)
+        // Cellular and a hotspot are allowed: the data saver is the viewer's to switch on.
+        #expect(request.allowsCellularAccess)
+        #expect(request.allowsExpensiveNetworkAccess)
+    }
+
     @Test("asks for the first warmBytes, as a range")
     func asksForBytes() {
         let run = Harness([chain])
