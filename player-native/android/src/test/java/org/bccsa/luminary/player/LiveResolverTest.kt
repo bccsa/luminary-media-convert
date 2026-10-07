@@ -349,4 +349,13 @@ class MediaPlaylistRewriteTest {
         val out = rewriteMediaPlaylist("#EXTM3U\r\n#EXTINF:4.000000,\r\nsegment_0.m4s\r\n", BASE, null)
         assertEquals("#EXTM3U\r\n#EXTINF:4.000000,\r\nhttps://cdn.example.com/out/session/stream_720/segment_0.m4s\r\n", out)
     }
+
+    @Test
+    fun `a key line naming no method, or an empty one, is no key either - the read goes through and the line is left as written`() {
+        for (keyLine in listOf("#EXT-X-KEY:URI=\"k\"", "#EXT-X-KEY:METHOD=,URI=\"k\"", "#EXT-X-KEY:METHOD=NONE")) {
+            val playlist = liveWindow(100).replace("#EXTINF:4,\nl_100", "$keyLine\n#EXTINF:4,\nl_100")
+            val text = resolve(spec(), FakeLiveUpstream(mutableMapOf(LIVE_URL to body(playlist))))
+            assertTrue("$keyLine was rewritten", text.contains("$keyLine\n"))
+        }
+    }
 }

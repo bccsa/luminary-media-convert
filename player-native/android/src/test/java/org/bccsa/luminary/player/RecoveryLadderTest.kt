@@ -244,4 +244,56 @@ class RecoveryLadderTest {
         clock.advance(1.0)
         assertEquals(listOf("in-place", "reattach@1.0", "reload(fatal,2)@2.0", "reload(fatal,3)@3.0"), steps)
     }
+
+    @Test
+    fun `a policy handed over mid-climb keeps the rung already scheduled and governs the next`() {
+        val ladder = ladder()
+        ladder.note(failure)
+        // One attempt is allowed from here on, and the rung scheduled under the old delays stays.
+        ladder.setPolicy(RecoveryPolicy(10_000.0, 1, listOf(10_000.0)))
+        clock.advance(2.0)
+        ladder.note(failure)
+        assertEquals(listOf("in-place", "reattach@2.0", "exhausted:network-error"), steps)
+    }
+
+    @Test
+    fun `fewer delays than attempts - the last delay repeats`() {
+        val ladder = ladder(RecoveryPolicy(10_000.0, 3, listOf(1_000.0)))
+        ladder.note(failure)
+        clock.advance(1.0)
+        ladder.note(failure)
+        clock.advance(1.0)
+        ladder.note(failure)
+        clock.advance(1.0)
+        ladder.note(failure)
+        assertEquals(
+            listOf("in-place", "reattach@1.0", "reload(fatal,2)@2.0", "reload(fatal,3)@3.0", "exhausted:network-error"),
+            steps,
+        )
+    }
+
+    @Test
+    fun `no delays at all - every rung is taken as soon as the clock moves`() {
+        val ladder = ladder(RecoveryPolicy(10_000.0, 2, emptyList()))
+        ladder.note(failure)
+        clock.advance(0.0)
+        ladder.note(failure)
+        clock.advance(0.0)
+        assertEquals(listOf("in-place", "reattach@0.0", "reload(fatal,2)@0.0"), steps)
+    }
+
+    @Test
+    fun `no attempts allowed - the failure is reported at once, after the in-place repair had its turn`() {
+        val ladder = ladder(RecoveryPolicy(10_000.0, 0, listOf(1_000.0)))
+        ladder.note(failure)
+        clock.advance(30.0)
+        assertEquals(listOf("in-place", "exhausted:network-error"), steps)
+        assertFalse(ladder.pendingReload)
+
+        // And a repair that took still ends it there.
+        steps.clear()
+        inPlaceAnswer = true
+        ladder(RecoveryPolicy(10_000.0, 0, emptyList())).note(failure)
+        assertEquals(listOf("in-place"), steps)
+    }
 }

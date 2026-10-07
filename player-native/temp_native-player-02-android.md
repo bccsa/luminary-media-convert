@@ -13,6 +13,26 @@
 ships on both platforms together; see the parity rules in
 [the overview](temp_native-player-00-overview.md).
 
+## Status (2026-10-07)
+
+Parity with Johan's iOS commits of 2026-10-06:
+
+- **`fallbackArtworkUrl`:** done. `ArtworkBitmapLoader` gives the media session the post's picture,
+  else the host's stand-in (a `data:` URL loads like any other); unit-tested, not yet seen on a
+  device (the Lab sends no stand-in).
+- **Square artwork:** deliberately not on Android. Since Android 13 the media player in quick
+  settings and on the lock screen is wide and fills itself with the picture; a landscape post picture
+  suits it, and a square crop would throw most of it away.
+- **Recreating the player after a media-services reset:** iOS only. Android has no such system-wide
+  event; a dead media server reaches ExoPlayer as a renderer error, which the ladder's re-prepare
+  answers with new codecs.
+- **Johan's new ladder and live-resolver edge cases** (a policy changed mid-climb, short and empty
+  delay lists, no attempts, keyless `METHOD` forms): ported to `RecoveryLadderTest` and
+  `LiveResolverTest`; Android already behaved the same.
+
+Casting (plans 08 and 09): Android casts to Google's Default Media Receiver until our own receiver
+is registered; `castMenu` / `setCastMenu` / `castselect` are Android only.
+
 ## Status (2026-10-01)
 
 - **Phase 1a: done.** The overview's native structure is in

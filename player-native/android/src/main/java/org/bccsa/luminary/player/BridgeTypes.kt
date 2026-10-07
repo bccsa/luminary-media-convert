@@ -88,7 +88,13 @@ data class BridgeCapabilities(
 /** One served asset. Text travels as text, never base64. */
 data class BridgeAsset(val uri: String, val contentType: String, val text: String)
 
-data class NowPlaying(val title: String, val subtitle: String?, val artworkUrl: String?)
+data class NowPlaying(
+    val title: String,
+    val subtitle: String?,
+    val artworkUrl: String?,
+    /** The host's stand-in, for when [artworkUrl] is absent or gives no image. */
+    val fallbackArtworkUrl: String? = null,
+)
 
 /** Resolved by `player-core`: native applies it, never defaults it. */
 data class RecoveryPolicy(val escalationWindowMs: Double, val maxReloadAttempts: Int, val reloadDelaysMs: List<Double>) {
@@ -368,7 +374,7 @@ sealed interface BridgeCall {
                     },
                 ),
                 nowPlaying = nowPlaying?.let {
-                    NowPlaying(it.string("title"), it.optString("subtitle"), it.optString("artworkUrl"))
+                    NowPlaying(it.string("title"), it.optString("subtitle"), it.optString("artworkUrl"), it.optString("fallbackArtworkUrl"))
                 },
             )
             if (!masterUri.startsWith(ASSET_URI_PREFIX)) args.invalid("masterUri is a luminary://asset/ address")

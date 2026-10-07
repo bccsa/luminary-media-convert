@@ -27,6 +27,7 @@ import org.bccsa.luminary.player.PlayerRegistry
 import org.bccsa.luminary.player.conformance.VirtualClock
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -188,6 +189,27 @@ class ExoEngineFullscreenTest {
         assertEquals("Episode 12", metadata.title.toString())
         assertEquals("Sunday service", metadata.artist.toString())
         assertEquals("https://cdn.example.com/poster.jpg", metadata.artworkUri.toString())
+    }
+
+    @Test
+    fun `the host's stand-in picture rides along for the loader, and stands in outright when there is no artwork`() {
+        create()
+        load(audioOnly = false, nowPlaying = buildJsonObject {
+            put("title", "Episode 12")
+            put("artworkUrl", "https://cdn.example.com/poster.jpg")
+            put("fallbackArtworkUrl", "data:image/png;base64,AAAA")
+        })
+        val metadata = engine!!.mediaSession.player.mediaMetadata
+        assertEquals("https://cdn.example.com/poster.jpg", metadata.artworkUri.toString())
+        assertEquals("data:image/png;base64,AAAA", metadata.extras!!.getString("org.bccsa.luminary.player.FALLBACK_ARTWORK"))
+
+        load(audioOnly = false, nowPlaying = buildJsonObject {
+            put("title", "Episode 12")
+            put("fallbackArtworkUrl", "data:image/png;base64,AAAA")
+        })
+        val alone = engine!!.mediaSession.player.mediaMetadata
+        assertEquals("data:image/png;base64,AAAA", alone.artworkUri.toString())
+        assertNull(alone.extras)
     }
 
     @Test

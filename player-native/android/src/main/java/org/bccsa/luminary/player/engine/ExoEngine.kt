@@ -18,12 +18,14 @@ import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.util.Util
+import androidx.media3.datasource.DataSourceBitmapLoader
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
+import androidx.media3.session.CacheBitmapLoader
 import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaSession
 import androidx.lifecycle.DefaultLifecycleObserver
@@ -111,6 +113,7 @@ class ExoEngine(
         .setId("luminary-player-${SESSIONS.incrementAndGet()}")
         .setMediaButtonPreferences(skipButtons(skin))
         .setCallback(SessionCallback)
+        .setBitmapLoader(ArtworkBitmapLoader(CacheBitmapLoader(DataSourceBitmapLoader.Builder(context.applicationContext).build())))
         .apply { openAppIntent(context.applicationContext)?.let(::setSessionActivity) }
         .build()
 
@@ -855,15 +858,21 @@ class ExoEngine(
             return Variant("${height ?: 0}_$bandwidth", height, bandwidth)
         }
 
-        /** The session reads the item's metadata for the lock screen; it fetches the artwork itself. */
+        /**
+         * The session reads the item's metadata for the lock screen and fetches the artwork itself;
+         * the stand-in rides along for [ArtworkBitmapLoader] to fall back on.
+         */
         fun metadataOf(nowPlaying: NowPlaying?): MediaMetadata {
             if (nowPlaying == null) return MediaMetadata.EMPTY
+            val artwork = nowPlaying.artworkUrl?.takeIf { it.isNotEmpty() }
+            val fallback = nowPlaying.fallbackArtworkUrl?.takeIf { it.isNotEmpty() }
             return MediaMetadata.Builder()
                 .setTitle(nowPlaying.title)
                 .setDisplayTitle(nowPlaying.title)
                 .setArtist(nowPlaying.subtitle)
                 .setSubtitle(nowPlaying.subtitle)
-                .setArtworkUri(nowPlaying.artworkUrl?.let(Uri::parse))
+                .setArtworkUri((artwork ?: fallback)?.let(Uri::parse))
+                .apply { if (artwork != null && fallback != null) setExtras(ArtworkBitmapLoader.extrasWith(fallback)) }
                 .build()
         }
 
