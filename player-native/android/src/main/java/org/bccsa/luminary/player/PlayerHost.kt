@@ -40,9 +40,16 @@ class PlayerHost(
         assets.put(args.generation, args.assets)
         key.set(args.keyHex)
         beginLoad(args.loadId)
+        engine.setSourceCastable(isCastable(args.assets))
         engine.load(args.masterUri, args.startPosition, args.nowPlaying, args.recovery, args.bandwidthEstimate)
         assets.purgeReleasedBefore(args.generation)
     }
+
+    /**
+     * Google's receiver plays fragmented-MP4 HLS well and transport-stream HLS badly (long stalls,
+     * or an error), so only a source whose playlists carry an init segment offers casting.
+     */
+    private fun isCastable(assets: List<BridgeAsset>) = assets.any { it.text.contains("#EXT-X-MAP") }
 
     fun reattach(loadId: String) {
         beginLoad(loadId)

@@ -78,7 +78,7 @@ class ExoEngineCastTest {
 
     private fun changes() = events.filter { it.first == "airplaychange" }.map { it.second }
 
-    private fun load(loadId: String) {
+    private fun load(loadId: String, playlist: String = FMP4_PLAYLIST) {
         registry.call("load", buildJsonObject {
             put("playerId", playerId)
             put("loadId", loadId)
@@ -88,7 +88,7 @@ class ExoEngineCastTest {
                 add(buildJsonObject {
                     put("uri", "luminary://asset/1/1.m3u8")
                     put("contentType", "application/vnd.apple.mpegurl")
-                    put("text", "#EXTM3U\n")
+                    put("text", playlist)
                 })
             })
             put("recovery", buildJsonObject {
@@ -100,26 +100,25 @@ class ExoEngineCastTest {
     }
 
     @Test
-    fun `devices coming and going are told to the page as they happen, even before a source is loaded`() {
-        cast.listener!!.routesChanged(available = true, active = false)
+    fun `a source with an init segment offers casting, a transport-stream one does not`() {
+        load("fmp4")
+        assertEquals(JsonPrimitive(true), changes().last()["available"])
 
-        val first = changes().single()
-        assertEquals(JsonPrimitive(true), first["available"])
-        assertEquals(JsonPrimitive(false), first["active"])
-        assertEquals(JsonPrimitive(playerId), first["playerId"])
-        assertNull("no load to stamp it with yet", first["loadId"])
+        load("ts", TS_PLAYLIST)
+        assertEquals(JsonPrimitive(false), changes().last()["available"])
     }
 
     @Test
-    fun `a change after a load is stamped with that load, and a repeat is not told twice`() {
+    fun `a change after a load is stamped with that load, devices do not decide the button, and a repeat is not told twice`() {
         load("load1")
-        cast.listener!!.routesChanged(true, false)
-        cast.listener!!.routesChanged(true, false)
+        cast.listener!!.routesChanged(false, false)
+        cast.listener!!.routesChanged(false, false)
         cast.listener!!.routesChanged(true, true)
 
         val told = changes()
         assertEquals(2, told.size)
         assertEquals(JsonPrimitive("load1"), told[0]["loadId"])
+        assertEquals(JsonPrimitive(true), told[0]["available"])
         assertEquals(JsonPrimitive(true), told[1]["active"])
     }
 
@@ -188,5 +187,10 @@ class ExoEngineCastTest {
     @Test
     fun `a host that has not opted in has no cast support, here or on a device without Play services`() {
         assertFalse(GoogleCastSupport.supported(activity))
+    }
+
+    private companion object {
+        const val FMP4_PLAYLIST = "#EXTM3U\n#EXT-X-MAP:URI=\"init.mp4\"\n"
+        const val TS_PLAYLIST = "#EXTM3U\n#EXTINF:6,\nsegment.ts\n"
     }
 }

@@ -60,6 +60,9 @@ interface Engine {
     /** The angles and qualities the TV's menu offers while casting, with the page's current choice. */
     fun setCastMenu(menu: CastMenu) {}
 
+    /** Whether the source just loaded can be cast; the page's cast button follows it. */
+    fun setSourceCastable(castable: Boolean) {}
+
     /** Starts picture in picture from the picture that is showing; nothing when none is. */
     fun startPictureInPicture()
 

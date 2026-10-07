@@ -126,7 +126,8 @@ export interface BridgeCapabilities {
     /**
      * Sends the picture and sound to an AirPlay device: `showAirPlayPicker` opens the system's
      * device list, and `airplaychange` reports whether there is a device to send to and whether
-     * playback is going to one. Parity-gated.
+     * playback is going to one. Parity-gated. On Android this is Google Cast, where `available` means
+     * the loaded source can be cast (the system's chooser searches for devices), not that one is near.
      */
     airPlay: boolean;
     /**

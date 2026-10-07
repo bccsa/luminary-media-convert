@@ -221,7 +221,9 @@ class ExoEngine(
         runCatching {
             cast?.start(object : CastSupport.Listener {
                 override fun routesChanged(available: Boolean, active: Boolean) {
-                    if (::events.isInitialized) events.airPlayChanged(available, active)
+                    // The chooser is what searches for TVs, so the button is offered whenever the source can be cast.
+                    castActive = active
+                    announceCast()
                 }
 
                 override fun sessionAvailable(player: Player) {
@@ -687,6 +689,18 @@ class ExoEngine(
     }
 
     // Casting.
+
+    private var sourceCastable = false
+    private var castActive = false
+
+    override fun setSourceCastable(castable: Boolean) {
+        sourceCastable = castable
+        announceCast()
+    }
+
+    private fun announceCast() {
+        if (cast != null && ::events.isInitialized) events.airPlayChanged(sourceCastable, castActive)
+    }
 
     /** The receiver's item for [item]: the master's address on the phone's own server, which the TV can reach. */
     private fun castItem(item: MediaItem): MediaItem? {
