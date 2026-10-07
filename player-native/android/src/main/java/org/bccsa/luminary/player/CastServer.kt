@@ -1,5 +1,6 @@
 package org.bccsa.luminary.player
 
+import android.util.Log
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
@@ -119,14 +120,26 @@ class CastServer(
         // Constant time on the token, so a LAN neighbour cannot learn it a character at a time.
         val given = path.removePrefix("/").substringBefore('/')
         if (!path.startsWith("/") || !MessageDigest.isEqual(given.toByteArray(), token.toByteArray())) {
+            Log.w(TAG, "$method request with a wrong token from the receiver or a neighbour")
             return respond(output, 404, "Not Found", cors = true)
         }
         val uri = bridgeUriOf(path.removePrefix(prefix)) ?: return respond(output, 404, "Not Found", cors = true)
 
+        // Only the part after the token is logged; the token itself never is.
+        val shown = path.removePrefix(prefix)
         when (val answer = answer(uri)) {
-            is Answer.Body -> send(output, method == "HEAD", answer.bytes, answer.type, headers["range"])
-            Answer.Missing -> respond(output, 404, "Not Found", cors = true)
-            Answer.Upstream -> respond(output, 502, "Bad Gateway", cors = true)
+            is Answer.Body -> {
+                Log.d(TAG, "$method $shown range=${headers["range"]} -> ${answer.bytes.size} bytes")
+                send(output, method == "HEAD", answer.bytes, answer.type, headers["range"])
+            }
+            Answer.Missing -> {
+                Log.w(TAG, "$method $shown -> 404 (not held)")
+                respond(output, 404, "Not Found", cors = true)
+            }
+            Answer.Upstream -> {
+                Log.w(TAG, "$method $shown -> 502 (origin refused the live playlist)")
+                respond(output, 502, "Bad Gateway", cors = true)
+            }
         }
     }
 
@@ -218,6 +231,8 @@ class CastServer(
     private fun isText(contentType: String) = "mpegurl" in contentType || contentType.startsWith("text/")
 
     companion object {
+        private const val TAG = "LuminaryCast"
+
         private const val WORKERS = 4
         private const val MAX_CONNECTIONS = 8
         private const val BACKLOG = 8

@@ -182,7 +182,10 @@ class ExoEngine(
     private val castForwarder = object : Player.Listener {
         override fun onTimelineChanged(timeline: Timeline, reason: Int) = handleTimelineChanged(timeline)
 
-        override fun onPlaybackStateChanged(playbackState: Int) = handlePlaybackStateChanged(playbackState)
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            Log.d("LuminaryCast", "receiver state=$playbackState")
+            handlePlaybackStateChanged(playbackState)
+        }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) = handleIsPlayingChanged(isPlaying)
 
@@ -194,7 +197,10 @@ class ExoEngine(
         override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) = handleParameters(playbackParameters)
 
         // The receiver gave up: the TV is not a reason to lose the viewer's place, so playback comes home.
-        override fun onPlayerError(error: PlaybackException) = endCasting()
+        override fun onPlayerError(error: PlaybackException) {
+            Log.w("LuminaryCast", "receiver error ${error.errorCodeName} (${error.errorCode}): ${error.message}", error)
+            endCasting()
+        }
     }
 
     init {
@@ -213,6 +219,7 @@ class ExoEngine(
                 }
 
                 override fun sessionLost() {
+                    Log.d("LuminaryCast", "session lost")
                     availableCast = null
                     endCasting()
                 }
