@@ -18,8 +18,12 @@ ships on both platforms together; see the parity rules in
 Parity with Johan's iOS commits of 2026-10-06:
 
 - **`fallbackArtworkUrl`:** done. `ArtworkBitmapLoader` gives the media session the post's picture,
-  else the host's stand-in (a `data:` URL loads like any other); unit-tested, not yet seen on a
-  device (the Lab sends no stand-in).
+  else the host's stand-in (a `data:` URL loads like any other). The stand-in stays out of the
+  item's metadata: Media3 copies `artworkUri` into the platform metadata three times and extras
+  once, so a `data:` URL there failed `setMetadata` with `TransactionTooLargeException` (no
+  artwork, no seek bar on the lock screen). The loader holds it now, and a stand-in with no
+  artwork goes in as `artworkData`. Seen on the LuminaryLab emulator (Android 15) for all three
+  cases: artwork, artwork that 404s, stand-in only.
 - **Square artwork:** deliberately not on Android. Since Android 13 the media player in quick
   settings and on the lock screen is wide and fills itself with the picture; a landscape post picture
   suits it, and a square crop would throw most of it away.

@@ -109,11 +109,13 @@ class ExoEngine(
      * buttons that jump by the same seconds the full-screen controls do. [PlaybackService] hosts
      * it, which is what keeps it playing with the screen locked.
      */
+    private val artworkLoader = ArtworkBitmapLoader(CacheBitmapLoader(DataSourceBitmapLoader.Builder(context.applicationContext).build()))
+
     private val session: MediaSession = MediaSession.Builder(context.applicationContext, this.player)
         .setId("luminary-player-${SESSIONS.incrementAndGet()}")
         .setMediaButtonPreferences(skipButtons(skin))
         .setCallback(SessionCallback)
-        .setBitmapLoader(ArtworkBitmapLoader(CacheBitmapLoader(DataSourceBitmapLoader.Builder(context.applicationContext).build())))
+        .setBitmapLoader(artworkLoader)
         .apply { openAppIntent(context.applicationContext)?.let(::setSessionActivity) }
         .build()
 
@@ -276,6 +278,7 @@ class ExoEngine(
         this.recovery = recovery
         ladder.setPolicy(recovery)
         ladder.noteSourceLoaded()
+        artworkLoader.fallback = fallbackOf(nowPlaying)
         val item = MediaItem.Builder()
             .setUri(masterUri)
             .setMimeType(MimeTypes.APPLICATION_M3U8)
@@ -858,21 +861,32 @@ class ExoEngine(
             return Variant("${height ?: 0}_$bandwidth", height, bandwidth)
         }
 
+        /** The stand-in [ArtworkBitmapLoader] falls back on: only when there is artwork to fall back from. */
+        fun fallbackOf(nowPlaying: NowPlaying?): String? =
+            nowPlaying?.fallbackArtworkUrl?.takeIf { it.isNotEmpty() && !nowPlaying.artworkUrl.isNullOrEmpty() }
+
         /**
-         * The session reads the item's metadata for the lock screen and fetches the artwork itself;
-         * the stand-in rides along for [ArtworkBitmapLoader] to fall back on.
+         * The session reads the item's metadata for the lock screen and fetches the artwork itself.
+         * A `data:` stand-in goes in as bytes, never as the URI, which the session sends to the
+         * system three times over in every update.
          */
         fun metadataOf(nowPlaying: NowPlaying?): MediaMetadata {
             if (nowPlaying == null) return MediaMetadata.EMPTY
             val artwork = nowPlaying.artworkUrl?.takeIf { it.isNotEmpty() }
-            val fallback = nowPlaying.fallbackArtworkUrl?.takeIf { it.isNotEmpty() }
+            val standIn = nowPlaying.fallbackArtworkUrl?.takeIf { it.isNotEmpty() && artwork == null }
+            val standInBytes = standIn?.let(ArtworkBitmapLoader::dataUrlBytes)
             return MediaMetadata.Builder()
                 .setTitle(nowPlaying.title)
                 .setDisplayTitle(nowPlaying.title)
                 .setArtist(nowPlaying.subtitle)
                 .setSubtitle(nowPlaying.subtitle)
-                .setArtworkUri((artwork ?: fallback)?.let(Uri::parse))
-                .apply { if (artwork != null && fallback != null) setExtras(ArtworkBitmapLoader.extrasWith(fallback)) }
+                .apply {
+                    when {
+                        artwork != null -> setArtworkUri(Uri.parse(artwork))
+                        standInBytes != null -> setArtworkData(standInBytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
+                        standIn != null && !standIn.startsWith("data:", ignoreCase = true) -> setArtworkUri(Uri.parse(standIn))
+                    }
+                }
                 .build()
         }
 

@@ -26,6 +26,7 @@ import org.bccsa.luminary.player.HttpUpstream
 import org.bccsa.luminary.player.PlayerRegistry
 import org.bccsa.luminary.player.conformance.VirtualClock
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertFalse
@@ -192,23 +193,24 @@ class ExoEngineFullscreenTest {
     }
 
     @Test
-    fun `the host's stand-in picture rides along for the loader, and stands in outright when there is no artwork`() {
+    fun `the host's stand-in picture stays out of the metadata the system is sent, and stands in as bytes when there is no artwork`() {
         create()
         load(audioOnly = false, nowPlaying = buildJsonObject {
             put("title", "Episode 12")
             put("artworkUrl", "https://cdn.example.com/poster.jpg")
-            put("fallbackArtworkUrl", "data:image/png;base64,AAAA")
+            put("fallbackArtworkUrl", "data:image/png;base64,AQID")
         })
         val metadata = engine!!.mediaSession.player.mediaMetadata
         assertEquals("https://cdn.example.com/poster.jpg", metadata.artworkUri.toString())
-        assertEquals("data:image/png;base64,AAAA", metadata.extras!!.getString("org.bccsa.luminary.player.FALLBACK_ARTWORK"))
+        assertNull(metadata.extras)
 
         load(audioOnly = false, nowPlaying = buildJsonObject {
             put("title", "Episode 12")
-            put("fallbackArtworkUrl", "data:image/png;base64,AAAA")
+            put("fallbackArtworkUrl", "data:image/png;base64,AQID")
         })
         val alone = engine!!.mediaSession.player.mediaMetadata
-        assertEquals("data:image/png;base64,AAAA", alone.artworkUri.toString())
+        assertNull(alone.artworkUri)
+        assertArrayEquals(byteArrayOf(1, 2, 3), alone.artworkData)
         assertNull(alone.extras)
     }
 
