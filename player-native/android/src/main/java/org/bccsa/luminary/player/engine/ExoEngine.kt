@@ -36,7 +36,15 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.roundToLong
 import android.util.Log
 import java.net.InetAddress
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
 import org.bccsa.luminary.player.AudioTrack
+import org.bccsa.luminary.player.CastMenu
 import org.bccsa.luminary.player.CastServer
 import org.bccsa.luminary.player.Cancellable
 import org.bccsa.luminary.player.Clock
@@ -175,6 +183,9 @@ class ExoEngine(
     private var availableCast: Player? = null
     private var castServer: CastServer? = null
 
+    /** The page's angles and qualities, for our own receiver's menu. */
+    private var castMenu: CastMenu? = null
+
     /** Playback commands, state and events are the receiver's while casting. */
     private val active: Player get() = castPlayer ?: player
 
@@ -223,6 +234,8 @@ class ExoEngine(
                     availableCast = null
                     endCasting()
                 }
+
+                override fun message(text: String) = castMessage(text)
             })
         }
         // A new surface in the page has nothing drawn in it, and a finished item draws nothing by itself.
@@ -334,7 +347,9 @@ class ExoEngine(
     override fun setRate(rate: Double) = active.setPlaybackSpeed(rate.toFloat())
 
     override fun setVariant(id: String) {
+        val before = pinnedVariant
         pinnedVariant = id.takeUnless { it == "auto" }
+        if (castPlayer != null && pinnedVariant != before) recast()
         if (!applyVariantPin(player.currentTracks)) {
             // A rendition this device cannot play (or no longer offers) falls back to auto.
             events.variants(reportedVariants ?: emptyList())
@@ -678,7 +693,7 @@ class ExoEngine(
         val base = castServer?.base ?: return null
         val uri = item.localConfiguration?.uri?.toString() ?: return null
         return MediaItem.Builder()
-            .setUri(rewriteForCast(uri, base))
+            .setUri(rewriteForCast(uri, base) + (pinnedVariant?.let { "?v=$it" } ?: ""))
             .setMimeType(MimeTypes.APPLICATION_M3U8)
             .setMediaMetadata(item.mediaMetadata)
             .build()
@@ -718,6 +733,42 @@ class ExoEngine(
 
         castItem(item)?.let { receiver.setMediaItem(it, position) }
         receiver.setPlaybackSpeed(speed)
+        receiver.prepare()
+        receiver.playWhenReady = wanted
+        sendCastMenu()
+    }
+
+    override fun setCastMenu(menu: CastMenu) {
+        castMenu = menu
+        sendCastMenu()
+    }
+
+    private fun sendCastMenu() {
+        val menu = castMenu ?: return
+        if (castPlayer == null) return
+        cast?.send(castMenuJson(menu))
+    }
+
+    /** What our own receiver says: it is ready for the menu, or the viewer picked an angle or a quality. */
+    private fun castMessage(text: String) {
+        val message = runCatching { Json.parseToJsonElement(text).jsonObject }.getOrNull() ?: return
+        when ((message["type"] as? JsonPrimitive)?.contentOrNull) {
+            "ready" -> sendCastMenu()
+            "select" -> {
+                val kind = (message["kind"] as? JsonPrimitive)?.contentOrNull
+                val id = (message["id"] as? JsonPrimitive)?.contentOrNull ?: return
+                if ((kind == "angle" || kind == "quality") && ::events.isInitialized) events.castSelect(kind, id)
+            }
+        }
+    }
+
+    /** The cast item again at the receiver's position, for a pin the TV can only get as a new master. */
+    private fun recast() {
+        val receiver = castPlayer ?: return
+        val item = mediaItem?.let(::castItem) ?: return
+        val position = receiver.currentPosition
+        val wanted = receiver.playWhenReady
+        receiver.setMediaItem(item, position)
         receiver.prepare()
         receiver.playWhenReady = wanted
     }
@@ -830,3 +881,12 @@ private class TransientRetryPolicy(private val policy: () -> RecoveryPolicy) : D
         const val MAX_LOADER_RETRIES = 2
     }
 }
+
+/** The menu as our own receiver reads it (`player-native/cast-receiver`). */
+internal fun castMenuJson(menu: CastMenu): String = buildJsonObject {
+    put("type", "menu")
+    put("angles", JsonArray(menu.angles.map { buildJsonObject { put("id", it.id); put("label", it.label) } }))
+    menu.activeAngleId?.let { put("activeAngleId", it) }
+    put("qualities", JsonArray(menu.qualities.map { buildJsonObject { put("id", it.id); put("label", it.label) } }))
+    put("activeQualityId", menu.activeQualityId)
+}.toString()

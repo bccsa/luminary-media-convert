@@ -46,6 +46,7 @@ data class BridgeCapabilities(
     val muting: Boolean = false,
     val subtitleSelection: Boolean = false,
     val airPlay: Boolean = false,
+    val castMenu: Boolean = false,
     val maxPlayers: Int = 1,
 ) {
     fun toJson(): JsonObject = buildJsonObject {
@@ -59,6 +60,7 @@ data class BridgeCapabilities(
         put("muting", muting)
         put("subtitleSelection", subtitleSelection)
         put("airPlay", airPlay)
+        put("castMenu", castMenu)
         put("maxPlayers", maxPlayers)
     }
 
@@ -76,6 +78,7 @@ data class BridgeCapabilities(
                 muting = flag("muting"),
                 subtitleSelection = flag("subtitleSelection"),
                 airPlay = flag("airPlay"),
+                castMenu = flag("castMenu"),
                 maxPlayers = (json["maxPlayers"] as? JsonPrimitive)?.doubleOrNull?.toInt() ?: 1,
             )
         }
@@ -213,6 +216,8 @@ sealed interface BridgeCall {
     data class StartPictureInPicture(override val playerId: String) : BridgeCall
     data class ShowAirPlayPicker(override val playerId: String) : BridgeCall
 
+    data class SetCastMenu(override val playerId: String, val menu: CastMenu) : BridgeCall
+
     /** [texts] are what the controls say in the host's language; null keeps the last, or English. */
     data class EnterFullscreen(override val playerId: String, val texts: Map<String, String>?) : BridgeCall
     data class ExitFullscreen(override val playerId: String) : BridgeCall
@@ -230,6 +235,7 @@ sealed interface BridgeCall {
             "setSubtitleTrack" -> BridgeCapabilities::subtitleSelection
             "startPictureInPicture" -> BridgeCapabilities::pictureInPicture
             "showAirPlayPicker" -> BridgeCapabilities::airPlay
+            "setCastMenu" -> BridgeCapabilities::castMenu
             else -> null
         }
 
@@ -315,6 +321,19 @@ sealed interface BridgeCall {
                 "setSubtitleTrack" -> SetSubtitleTrack(args.string("playerId"), args.optString("label"))
                 "startPictureInPicture" -> StartPictureInPicture(args.string("playerId"))
                 "showAirPlayPicker" -> ShowAirPlayPicker(args.string("playerId"))
+                "setCastMenu" -> {
+                    val playerId = args.string("playerId")
+                    val menu = args.obj("menu")
+                    SetCastMenu(
+                        playerId,
+                        CastMenu(
+                            angles = menu.choices("angles"),
+                            activeAngleId = menu.optString("activeAngleId"),
+                            qualities = menu.choices("qualities"),
+                            activeQualityId = menu.string("activeQualityId"),
+                        ),
+                    )
+                }
                 "enterFullscreen" -> EnterFullscreen(args.string("playerId"), args.optObj("texts")?.strings())
                 "exitFullscreen" -> ExitFullscreen(args.string("playerId"))
                 "resumed" -> Resumed(args.string("playerId"))
@@ -404,6 +423,15 @@ private class Args(private val json: JsonObject, private val path: String) {
 
     fun obj(key: String): Args = optObj(key) ?: invalid("$key is required")
 
+    /** An array of `{ id, label }`, each a string; refused whole when one is not. */
+    fun choices(key: String): List<CastChoice> = array(key).mapIndexed { i, element ->
+        val choice = element as? JsonObject ?: invalid("$key[$i] is not an object")
+        val id = (choice["id"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+        val label = (choice["label"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+        if (id == null || label == null) invalid("$key[$i] has no id and label")
+        CastChoice(id, label)
+    }
+
     fun optObj(key: String): Args? {
         val value = present(key) ?: return null
         return Args(value as? JsonObject ?: invalid("$key is not an object"), "$path.$key")
@@ -440,3 +468,14 @@ private class Args(private val json: JsonObject, private val path: String) {
         }
     }
 }
+
+/** One entry of the TV's menu: what the page calls it, and what the viewer reads. */
+data class CastChoice(val id: String, val label: String)
+
+/** The page's angles and qualities, with its current choice, for the TV's menu. */
+data class CastMenu(
+    val angles: List<CastChoice>,
+    val activeAngleId: String?,
+    val qualities: List<CastChoice>,
+    val activeQualityId: String,
+)

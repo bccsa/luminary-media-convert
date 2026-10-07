@@ -11,12 +11,14 @@
 import {
     PlayerController,
     type PlayerControllerOptions,
+    type PlayerState,
     type Unsubscribe,
 } from '@luminary-media-converter/player-core';
 import {
     PROTOCOL_VERSION,
     type BridgeErrorCode,
     type BridgeInfo,
+    type CastMenu,
     type LuminaryPlayerPlugin,
 } from './bridge.js';
 import { AssetBatch } from './assetBatch.js';
@@ -97,8 +99,22 @@ export async function createNativePlayer(
     // choice too, so its state agrees and the next attach keeps it.
     adapter.onViewerChoice((choice) => {
         if (choice.kind === 'audio') controller.setAudioTrack(choice.id);
-        else controller.setPlaybackRate(choice.rate);
+        else if (choice.kind === 'rate') controller.setPlaybackRate(choice.rate);
+        else if (choice.kind === 'angle') void controller.setAngle(choice.id);
+        else controller.setQuality(choice.id);
     });
+    // The TV's menu follows the controller: native keeps it for whenever a session comes up.
+    if (adapter.castMenu) {
+        let sent = '';
+        const unsubscribe = controller.subscribe((state) => {
+            const menu = castMenuOf(state);
+            const key = JSON.stringify(menu);
+            if (key === sent) return;
+            sent = key;
+            adapter.setCastMenu(menu);
+        });
+        adapter.onDestroy(unsubscribe);
+    }
     watchForeground(adapter, options.onAppResume);
     return { controller, adapter, playerId };
 }
@@ -145,4 +161,14 @@ function watchForeground(
 
 function defaultReport(method: string, error: unknown): void {
     console.warn(`[luminary-native] ${method} failed`, error);
+}
+
+/** The angles and qualities the TV's menu offers, in the controller's own words. */
+export function castMenuOf(state: Readonly<PlayerState>): CastMenu {
+    return {
+        angles: state.angles.map((angle) => ({ id: angle.id, label: angle.name })),
+        ...(state.activeAngleId !== null ? { activeAngleId: state.activeAngleId } : {}),
+        qualities: state.qualities.map((quality) => ({ id: quality.id, label: quality.label })),
+        activeQualityId: state.activeQualityId,
+    };
 }

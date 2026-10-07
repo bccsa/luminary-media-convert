@@ -597,3 +597,51 @@ describe('NativeBridgeAdapter — destroy', () => {
         expect(reports).toEqual(['destroy']);
     });
 });
+
+describe('NativeBridgeAdapter — the TV menu', () => {
+    type MenuArgs = { playerId: string; menu: { angles: { id: string; label: string }[]; activeAngleId?: string; qualities: { id: string; label: string }[]; activeQualityId: string } };
+
+    it('sends nothing where native has no menu', async () => {
+        const { controller, plugin } = await setup(multiAngleRoutes);
+        await controller.load({ masterUrl: MASTER_URL });
+        expect(plugin.argsOf('setCastMenu')).toEqual([]);
+    });
+
+    it('gives native the angles and qualities in the controller\'s words, once per change', async () => {
+        const { controller, plugin, emitNow } = await setup(multiAngleRoutes, { castMenu: true });
+        await controller.load({ masterUrl: MASTER_URL });
+
+        const menus = plugin.argsOf<MenuArgs>('setCastMenu');
+        const { menu } = menus.at(-1)!;
+        expect(menu.angles.map((angle) => angle.label)).toEqual(expect.arrayContaining(['Wide', 'Close']));
+        expect(menu.activeAngleId).toBe('angle_0');
+        expect(menu.qualities.length).toBeGreaterThan(0);
+        expect(menu.activeQualityId).toBe('auto');
+
+        const sent = menus.length;
+        emitNow('timeupdate', { currentTime: 3 });
+        expect(plugin.argsOf('setCastMenu')).toHaveLength(sent);
+    });
+
+    it('applies an angle picked on the TV as the page\'s own pick, and tells the TV', async () => {
+        const { controller, plugin, emitNow } = await setup(multiAngleRoutes, { castMenu: true });
+        await controller.load({ masterUrl: MASTER_URL });
+
+        emitNow('castselect', { kind: 'angle', id: 'angle_1' });
+        await flush();
+        expect(controller.getState().activeAngleId).toBe('angle_1');
+        expect(plugin.argsOf<MenuArgs>('setCastMenu').at(-1)!.menu.activeAngleId).toBe('angle_1');
+    });
+
+    it('applies a quality picked on the TV through the rendition pin', async () => {
+        const { controller, plugin, emitNow } = await setup(multiAngleRoutes, { castMenu: true, variantSwitching: true });
+        await controller.load({ masterUrl: MASTER_URL });
+        const quality = controller.getState().qualities[0]!.id;
+
+        emitNow('castselect', { kind: 'quality', id: quality });
+        await flush();
+        expect(controller.getState().activeQualityId).toBe(quality);
+        expect(plugin.argsOf('setVariant')).toHaveLength(1);
+        expect(plugin.argsOf<MenuArgs>('setCastMenu').at(-1)!.menu.activeQualityId).toBe(quality);
+    });
+});

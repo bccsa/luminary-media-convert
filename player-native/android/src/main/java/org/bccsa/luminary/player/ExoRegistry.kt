@@ -38,6 +38,8 @@ fun exoPlayerRegistry(
     // Google Cast needs the host to have opted in and the device to have Play services. `airPlay` is
     // the bridge's name for "send playback to a device near you": on Android that is Cast.
     val casting = GoogleCastSupport.supported(context)
+    // The TV's menu is our own receiver's; Google's default receiver has none.
+    val castMenu = casting && GoogleCastSupport.receiverAppId(context) != null
     val engines = EngineFactory { router, clock, options ->
         ExoEngine(
             context, router, clock, options, FullscreenPresenter(activity),
@@ -48,7 +50,7 @@ fun exoPlayerRegistry(
     // Picture in picture needs the system's support and an activity that has opted in.
     val pictureInPicture = activity()?.let(FullscreenPresenter::pictureInPictureAvailable) ?: false
     return PlayerRegistry(
-        ANDROID_CAPABILITIES.copy(pictureInPicture = pictureInPicture, airPlay = casting), MainLooperClock(), HttpUpstream(sharedHttpClient), engines, OkHttpLiveFetch(sharedHttpClient),
+        ANDROID_CAPABILITIES.copy(pictureInPicture = pictureInPicture, airPlay = casting, castMenu = castMenu), MainLooperClock(), HttpUpstream(sharedHttpClient), engines, OkHttpLiveFetch(sharedHttpClient),
         OkHttpWarmFetch(sharedHttpClient), emit,
     )
 }

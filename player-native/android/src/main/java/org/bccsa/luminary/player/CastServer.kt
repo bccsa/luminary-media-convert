@@ -24,7 +24,7 @@ import java.util.concurrent.Semaphore
  *
  * Everything is behind a per-session [token], and only what [router] already holds for the current
  * load can be asked for: a request is mapped to a bridge address, and the router either has it or
- * does not. Never log the token, a path, or a response: they carry the key's address and the key.
+ * does not. Never log the token or a response: the token is the key's address, a response may be the key.
  *
  * `GET`, `HEAD` and `OPTIONS`, with the CORS headers a web receiver's `XMLHttpRequest` needs.
  */
@@ -116,6 +116,9 @@ class CastServer(
 
         // A query or a fragment names nothing here.
         val path = target.substringBefore('?').substringBefore('#')
+        // `v`: the variant a quality pin keeps, on the master only.
+        val pin = target.substringAfter('?', "").substringBefore('#').split('&')
+            .firstOrNull { it.startsWith("v=") }?.removePrefix("v=")?.takeIf { it.matches(VARIANT_ID) }
         val prefix = "/$token"
         // Constant time on the token, so a LAN neighbour cannot learn it a character at a time.
         val given = path.removePrefix("/").substringBefore('/')
@@ -127,7 +130,7 @@ class CastServer(
 
         // Only the part after the token is logged; the token itself never is.
         val shown = path.removePrefix(prefix)
-        when (val answer = answer(uri)) {
+        when (val answer = answer(uri, pin)) {
             is Answer.Body -> {
                 Log.d(TAG, "$method $shown range=${headers["range"]} -> ${answer.bytes.size} bytes")
                 send(output, method == "HEAD", answer.bytes, answer.type, headers["range"])
@@ -153,10 +156,11 @@ class CastServer(
         data object Upstream : Answer
     }
 
-    private fun answer(uri: String): Answer = when (val route = router.route(uri)) {
+    private fun answer(uri: String, pin: String?): Answer = when (val route = router.route(uri)) {
         is UriRouter.Route.Served ->
             if (isText(route.contentType)) {
-                Answer.Body(rewriteForCast(String(route.bytes, Charsets.UTF_8), base).toByteArray(Charsets.UTF_8), route.contentType)
+                val text = String(route.bytes, Charsets.UTF_8).let { if (pin != null) pinVariant(it, pin) else it }
+                Answer.Body(rewriteForCast(text, base).toByteArray(Charsets.UTF_8), route.contentType)
             } else {
                 Answer.Body(route.bytes, route.contentType)
             }
@@ -232,6 +236,7 @@ class CastServer(
 
     companion object {
         private const val TAG = "LuminaryCast"
+        private val VARIANT_ID = Regex("\\d+_\\d+")
 
         private const val WORKERS = 4
         private const val MAX_CONNECTIONS = 8

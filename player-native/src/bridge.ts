@@ -129,8 +129,28 @@ export interface BridgeCapabilities {
      * playback is going to one. Parity-gated.
      */
     airPlay: boolean;
+    /**
+     * While casting, the TV shows a menu of the source's angles and qualities (`setCastMenu`), and
+     * a pick there comes back as `castselect` for the page to apply as its own. Android only.
+     */
+    castMenu: boolean;
     /** 1 in v1: a second `create` destroys the first player. */
     maxPlayers: number;
+}
+
+/** One entry of the TV's menu: the page's id for it, and what the viewer reads. */
+export interface CastChoice {
+    id: string;
+    label: string;
+}
+
+/** The page's angles and qualities, with its current choice, for the TV's menu. */
+export interface CastMenu {
+    angles: CastChoice[];
+    activeAngleId?: string;
+    qualities: CastChoice[];
+    /** A quality's id, or `'auto'`. */
+    activeQualityId: string;
 }
 
 /** The strings of native full-screen. Each is optional: native has an English default. */
@@ -328,6 +348,11 @@ export interface LuminaryPlayerPlugin {
      */
     showAirPlayPicker(args: { playerId: string }): Promise<void>;
     /**
+     * `unsupported` unless `castMenu`. What the TV's menu offers while casting; sent whenever it
+     * changes, and kept by native for the next session.
+     */
+    setCastMenu(args: { playerId: string; menu: CastMenu }): Promise<void>;
+    /**
      * `texts` are what the full-screen controls say (VoiceOver labels, menu entries), in the
      * language the host speaks: native keeps its English default for any it is not given, and
      * for all of them when there are none. `{seconds}` in the skip texts is the interval.
@@ -410,6 +435,8 @@ export interface BridgeEventMap {
      * came back (`active`). Not on `load`: the devices around outlive the item.
      */
     airplaychange: { available: boolean; active: boolean };
+    /** The viewer picked an angle or a quality in the TV's menu; the page applies it as its own pick. */
+    castselect: { kind: 'angle' | 'quality'; id: string };
     /** Once per load, when the duration and seekable range are known. Whole milliseconds, as `durationchange`. */
     loadedmetadata: { duration: number | null };
     /** On a presentation change. `inline` means not presented. */
@@ -441,6 +468,7 @@ export const BRIDGE_EVENT_NAMES: readonly BridgeEventName[] = [
     'ratechange',
     'mutedchange',
     'airplaychange',
+    'castselect',
     'loadedmetadata',
     'presentationchange',
 ];

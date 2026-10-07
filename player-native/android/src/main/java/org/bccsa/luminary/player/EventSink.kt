@@ -156,6 +156,17 @@ class EventSink(
         )
     }
 
+    /** The viewer picked an angle or a quality in the TV's menu; the page applies it as its own pick. */
+    fun castSelect(kind: String, id: String) {
+        send(
+            "castselect",
+            buildJsonObject {
+                put("kind", kind)
+                put("id", id)
+            },
+        )
+    }
+
     private var muted = false
 
     /** Only on a change, whoever made it: a `setMuted`, or the viewer in native UI. */

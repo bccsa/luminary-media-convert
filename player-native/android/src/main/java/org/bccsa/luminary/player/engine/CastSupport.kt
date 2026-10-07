@@ -33,6 +33,9 @@ interface CastSupport {
 
         /** The session ended, or the receiver went away. */
         fun sessionLost()
+
+        /** A message from our own receiver, on [CAST_NAMESPACE]. */
+        fun message(text: String) {}
     }
 
     /** Starts watching for receivers; the listener is told as soon as the SDK is ready, and on every change. */
@@ -41,9 +44,15 @@ interface CastSupport {
     /** The chooser when idle, the controller (with the way to disconnect) when connected. Nothing until the SDK is ready. */
     fun showPicker()
 
+    /** Sends [text] to our own receiver on [CAST_NAMESPACE]; nothing when no session is up. */
+    fun send(text: String) {}
+
     /** Stops watching. */
     fun stop()
 }
+
+/** The channel the phone and our own receiver (`player-native/cast-receiver`) talk on. */
+const val CAST_NAMESPACE = "urn:x-cast:org.bccsa.luminary.player"
 
 /**
  * Google Cast through the Cast framework and MediaRouter. The Cast SDK needs Google Play services, so
@@ -75,13 +84,32 @@ class GoogleCastSupport(private val context: Context, private val activity: () -
                 val receiver = CastPlayer(castContext)
                 castPlayer = receiver
                 receiver.setSessionAvailabilityListener(object : SessionAvailabilityListener {
-                    override fun onCastSessionAvailable() = listener.sessionAvailable(receiver)
+                    override fun onCastSessionAvailable() {
+                        listenForMessages(castContext, listener)
+                        listener.sessionAvailable(receiver)
+                    }
 
                     override fun onCastSessionUnavailable() = listener.sessionLost()
                 })
                 // A session already running when the app starts is one to take over.
-                if (receiver.isCastSessionAvailable) listener.sessionAvailable(receiver)
+                if (receiver.isCastSessionAvailable) {
+                    listenForMessages(castContext, listener)
+                    listener.sessionAvailable(receiver)
+                }
             }
+    }
+
+    private fun listenForMessages(castContext: CastContext, listener: CastSupport.Listener) {
+        runCatching {
+            castContext.sessionManager.currentCastSession?.setMessageReceivedCallbacks(CAST_NAMESPACE) { _, _, text ->
+                main.post { listener.message(text) }
+            }
+        }.onFailure { Log.w(TAG, "No message channel to the receiver: ${it.message}") }
+    }
+
+    override fun send(text: String) {
+        runCatching { cast?.sessionManager?.currentCastSession?.sendMessage(CAST_NAMESPACE, text) }
+            .onFailure { Log.w(TAG, "Could not message the receiver: ${it.message}") }
     }
 
     private fun available(state: Int) = state != CastState.NO_DEVICES_AVAILABLE
@@ -113,6 +141,17 @@ class GoogleCastSupport(private val context: Context, private val activity: () -
 
         /** The manifest key a host sets to `true` to opt in. */
         const val OPT_IN = "org.bccsa.luminary.player.CAST"
+
+        /** The manifest key naming the host's registered app id for our own receiver. */
+        const val RECEIVER_APP_ID = "org.bccsa.luminary.player.CAST_RECEIVER_APP_ID"
+
+        /** The host's app id for our own receiver, or null to use Google's Default Media Receiver. */
+        fun receiverAppId(context: Context): String? = try {
+            context.packageManager.getApplicationInfo(context.packageName, PackageManager.GET_META_DATA)
+                .metaData?.getString(RECEIVER_APP_ID)?.trim()?.takeIf { it.isNotEmpty() }
+        } catch (missing: PackageManager.NameNotFoundException) {
+            null
+        }
 
         /** The host opted in, and this device has Google Play services to run the Cast SDK on. */
         fun supported(context: Context): Boolean {

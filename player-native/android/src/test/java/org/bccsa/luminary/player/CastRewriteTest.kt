@@ -50,4 +50,25 @@ class CastRewriteTest {
         val paths = rewritten.lines().filter { it.isNotEmpty() }.map { it.removePrefix(base) }
         assertEquals(listOf("luminary://asset/1/2.m3u8", "luminary://key", "luminary://live/9"), paths.map { bridgeUriOf(it) })
     }
+
+    @Test
+    fun `a pinned variant leaves the master with that rendition alone, its audio groups and every other tag kept`() {
+        val master = "#EXTM3U\r\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"a\",URI=\"a.m3u8\"\r\n" +
+            "#EXT-X-STREAM-INF:BANDWIDTH=900000,AVERAGE-BANDWIDTH=800000,RESOLUTION=1280x720,AUDIO=\"a\"\r\nv720.m3u8\r\n" +
+            "#EXT-X-STREAM-INF:BANDWIDTH=300000,RESOLUTION=640x360,AUDIO=\"a\"\r\nv360.m3u8\r\n"
+        assertEquals(
+            "#EXTM3U\r\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"a\",URI=\"a.m3u8\"\r\n" +
+                "#EXT-X-STREAM-INF:BANDWIDTH=300000,RESOLUTION=640x360,AUDIO=\"a\"\r\nv360.m3u8\r\n",
+            pinVariant(master, "360_300000"),
+        )
+        // The engine names a variant by its BANDWIDTH, never its AVERAGE-BANDWIDTH.
+        assertEquals(master, pinVariant(master, "720_800000"))
+    }
+
+    @Test
+    fun `a variant the master does not offer leaves it as it is, and so does a resolution-less one by its own id`() {
+        val master = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=64000\naudio.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=128000\nhigh.m3u8\n"
+        assertEquals(master, pinVariant(master, "720_900000"))
+        assertEquals("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=64000\naudio.m3u8\n", pinVariant(master, "0_64000"))
+    }
 }

@@ -57,6 +57,9 @@ interface Engine {
     /** Opens the system's AirPlay device list. Android has none, and does not report the capability. */
     fun showAirPlayPicker()
 
+    /** The angles and qualities the TV's menu offers while casting, with the page's current choice. */
+    fun setCastMenu(menu: CastMenu) {}
+
     /** Starts picture in picture from the picture that is showing; nothing when none is. */
     fun startPictureInPicture()
 

@@ -5,6 +5,6 @@ export default defineConfig({
         // The TypeScript half runs against a fake plugin; nothing here needs a DOM.
         environment: 'node',
         globals: false,
-        include: ['src/**/*.spec.ts'],
+        include: ['src/**/*.spec.ts', 'cast-receiver/**/*.spec.ts'],
     },
 });

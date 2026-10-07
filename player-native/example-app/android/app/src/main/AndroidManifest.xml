@@ -12,6 +12,11 @@
 
         <!-- Google Cast: the player plugin offers casting only where the host says so. -->
         <meta-data android:name="org.bccsa.luminary.player.CAST" android:value="true" />
+        <!--
+            Our own receiver (player-native/cast-receiver), with the TV menu: its app id from the Cast
+            SDK Developer Console goes here. Without it, casting uses Google's Default Media Receiver.
+            <meta-data android:name="org.bccsa.luminary.player.CAST_RECEIVER_APP_ID" android:value="ABCD1234" />
+        -->
 
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"

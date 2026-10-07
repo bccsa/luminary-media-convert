@@ -47,6 +47,7 @@ import {
     fromWireDuration,
     type BridgeEvent,
     type BridgeEventName,
+    type CastMenu,
     type BridgeInfo,
     type LuminaryPlayerPlugin,
     type NowPlaying,
@@ -55,7 +56,11 @@ import {
 import type { AssetBatch } from './assetBatch.js';
 
 /** A choice the viewer made in native UI, which the controller has not heard of. */
-export type ViewerChoice = { kind: 'audio'; id: string } | { kind: 'rate'; rate: number };
+export type ViewerChoice =
+    | { kind: 'audio'; id: string }
+    | { kind: 'rate'; rate: number }
+    | { kind: 'angle'; id: string }
+    | { kind: 'quality'; id: string };
 
 export interface NativeBridgeAdapterOptions {
     plugin: LuminaryPlayerPlugin;
@@ -82,6 +87,8 @@ export class NativeBridgeAdapter implements PlayerAdapter {
     readonly pictureInPicture: boolean;
     /** Native can send playback to an AirPlay device. */
     readonly airPlay: boolean;
+    /** Native shows our own receiver's menu on the TV while casting. */
+    readonly castMenu: boolean;
     /**
      * Present only when native runs the warming loop: the controller calls it
      * through `?.`, so leaving it undefined is how the capability is declined.
@@ -135,6 +142,7 @@ export class NativeBridgeAdapter implements PlayerAdapter {
         this.subtitleSelection = capabilities.subtitleSelection === true;
         this.pictureInPicture = capabilities.pictureInPicture === true;
         this.airPlay = capabilities.airPlay === true;
+        this.castMenu = capabilities.castMenu === true;
         this.capabilities = {
             nativeHls: false,
             keyDelivery: 'memory',
@@ -366,6 +374,12 @@ export class NativeBridgeAdapter implements PlayerAdapter {
         this.send('showAirPlayPicker', this.plugin.showAirPlayPicker({ playerId: this.playerId }));
     }
 
+    /** What the TV's menu offers while casting. A no-op where native has no menu. */
+    setCastMenu(menu: CastMenu): void {
+        if (!this.castMenu || this.destroyed) return;
+        this.send('setCastMenu', this.plugin.setCastMenu({ playerId: this.playerId, menu }));
+    }
+
     // -----------------------------------------------------------------------
     // Chunk warming
     // -----------------------------------------------------------------------
@@ -544,6 +558,11 @@ export class NativeBridgeAdapter implements PlayerAdapter {
                 ) {
                     this.choose({ kind: 'audio', id: activeId });
                 }
+                return;
+            }
+            case 'castselect': {
+                const { kind, id } = event as BridgeEvent<'castselect'>;
+                if (kind === 'angle' || kind === 'quality') this.choose({ kind, id });
                 return;
             }
             // For the host component, which listens on the plugin itself.

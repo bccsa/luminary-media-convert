@@ -34,3 +34,38 @@ fun bridgeUriOf(path: String): String? {
 
 private val ASSET_PATH = Regex("/a/(\\d+)/([A-Za-z0-9._-]+)")
 private val LIVE_PATH = Regex("/l/(\\d+)\\.m3u8")
+
+private val STREAM_INF = "#EXT-X-STREAM-INF:"
+private val BANDWIDTH = Regex("(?:^|,)BANDWIDTH=(\\d+)")
+private val RESOLUTION = Regex("(?:^|,)RESOLUTION=\\d+x(\\d+)")
+
+/**
+ * [master] with only the variant whose id is [variantId] (`<height>_<bandwidth>`, as the engine names
+ * them), or unchanged when none is: a TV has no rendition pin of its own, so a quality the viewer
+ * chose is a master that offers nothing else.
+ */
+fun pinVariant(master: String, variantId: String): String {
+    val lines = master.split("\n")
+    fun idOf(tag: String): String {
+        val attributes = tag.removePrefix(STREAM_INF)
+        val height = RESOLUTION.find(attributes)?.groupValues?.get(1) ?: "0"
+        val bandwidth = BANDWIDTH.find(attributes)?.groupValues?.get(1) ?: "0"
+        return "${height}_$bandwidth"
+    }
+    if (lines.none { it.trimEnd('\r').startsWith(STREAM_INF) && idOf(it.trimEnd('\r')) == variantId }) return master
+    val kept = ArrayList<String>(lines.size)
+    var dropUri = false
+    for (line in lines) {
+        val bare = line.trimEnd('\r')
+        when {
+            bare.startsWith(STREAM_INF) -> {
+                dropUri = idOf(bare) != variantId
+                if (!dropUri) kept += line
+            }
+            dropUri && bare.isNotEmpty() && !bare.startsWith("#") -> dropUri = false
+            dropUri && bare.startsWith("#") -> {}
+            else -> kept += line
+        }
+    }
+    return kept.joinToString("\n")
+}

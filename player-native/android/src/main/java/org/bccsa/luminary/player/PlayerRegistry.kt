@@ -86,6 +86,7 @@ class PlayerRegistry(
             is BridgeCall.SetSubtitleTrack -> engine.setSubtitleTrack(call.label)
             is BridgeCall.StartPictureInPicture -> engine.startPictureInPicture()
             is BridgeCall.ShowAirPlayPicker -> engine.showAirPlayPicker()
+            is BridgeCall.SetCastMenu -> engine.setCastMenu(call.menu)
             is BridgeCall.EnterFullscreen -> engine.enterFullscreen(call.texts)
             is BridgeCall.ExitFullscreen -> player.exitFullscreen()
             is BridgeCall.Resumed -> return player.resumed().toJson()
