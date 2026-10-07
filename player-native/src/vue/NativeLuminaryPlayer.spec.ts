@@ -343,6 +343,36 @@ describe('NativeLuminaryPlayer', () => {
             ]);
         });
 
+        it('follows the picture area frame by frame while a transition moves it', async () => {
+            const { plugin } = await mountPlayer({ inline: true, plugin: new FakePlugin({ inlineVideo: true }) });
+            await ready(plugin);
+            let calls = 0;
+            vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => {
+                calls++;
+                const top = Math.max(72, 400 - calls * 100);
+                return { ...RECT, top, y: top } as DOMRect;
+            });
+
+            // A slide in: the area is below the screen and comes up, one step per frame.
+            window.dispatchEvent(new Event('transitionrun'));
+
+            expect(frames(plugin).map((frame) => (frame as { y: number }).y)).toEqual([72, 300, 200, 100, 72]);
+        });
+
+        it('stops following once the transition is over', async () => {
+            const { plugin } = await mountPlayer({ inline: true, plugin: new FakePlugin({ inlineVideo: true }) });
+            await ready(plugin);
+            const measure = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect');
+
+            window.dispatchEvent(new Event('transitionrun'));
+            window.dispatchEvent(new Event('transitionend'));
+            const after = measure.mock.calls.length;
+            window.dispatchEvent(new Event('resize'));
+
+            // One more measurement for the resize, not a loop left running.
+            expect(measure.mock.calls.length - after).toBeLessThanOrEqual(2);
+        });
+
         it('takes the video away in audio only, and when the component goes', async () => {
             const { plugin, wrapper } = await mountPlayer({ inline: true, plugin: new FakePlugin({ inlineVideo: true }) }, AUDIO_ONLY_MASTER);
             await ready(plugin);

@@ -267,6 +267,37 @@ export const NativeLuminaryPlayer = defineComponent({
             requestAnimationFrame(sendFrame);
         }
 
+        /**
+         * A transition moves the picture area without a resize or a scroll, and only its end said so:
+         * a player that slides in or out left the video where it was for the length of the slide,
+         * a black hole and a picture hanging in the air. So while a transition runs the frame is
+         * followed, once per animation frame. Bounded, so a transition that never ends cannot keep
+         * the loop going, and an unrelated one (a hover colour) costs a few cheap measurements.
+         */
+        const MAX_FOLLOWED_FRAMES = 90;
+        let transitions = 0;
+        let following = false;
+        let followed = 0;
+        function followStep(): void {
+            requestAnimationFrame(() => {
+                sendFrame();
+                followed++;
+                if (transitions > 0 && followed < MAX_FOLLOWED_FRAMES) followStep();
+                else following = false;
+            });
+        }
+        function transitionStarted(): void {
+            transitions++;
+            followed = 0;
+            if (following) return;
+            following = true;
+            followStep();
+        }
+        function transitionEnded(): void {
+            transitions = Math.max(0, transitions - 1);
+            queueFrame();
+        }
+
         const frameWatchers: (() => void)[] = [];
         watch(
             [inlineActive, rootEl],
@@ -278,12 +309,17 @@ export const NativeLuminaryPlayer = defineComponent({
                 window.addEventListener('resize', queueFrame);
                 // Capture: the page scrolls inside containers, which do not bubble `scroll`.
                 window.addEventListener('scroll', queueFrame, true);
-                window.addEventListener('transitionend', queueFrame, true);
+                window.addEventListener('transitionrun', transitionStarted, true);
+                window.addEventListener('transitionend', transitionEnded, true);
+                window.addEventListener('transitioncancel', transitionEnded, true);
                 frameWatchers.push(() => {
                     observer?.disconnect();
                     window.removeEventListener('resize', queueFrame);
                     window.removeEventListener('scroll', queueFrame, true);
-                    window.removeEventListener('transitionend', queueFrame, true);
+                    window.removeEventListener('transitionrun', transitionStarted, true);
+                    window.removeEventListener('transitionend', transitionEnded, true);
+                    window.removeEventListener('transitioncancel', transitionEnded, true);
+                    transitions = 0;
                 });
                 queueFrame();
             },
