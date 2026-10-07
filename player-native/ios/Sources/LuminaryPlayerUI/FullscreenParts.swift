@@ -142,8 +142,8 @@ final class FullscreenMenu: UIView {
         let pick: () -> Void
     }
 
-    static let width: CGFloat = 140
-    static let itemHeight: CGFloat = 44
+    static let width: CGFloat = 152
+    static let itemHeight: CGFloat = 48
 
     init(items: [Item]) {
         super.init(frame: CGRect(x: 0, y: 0, width: Self.width, height: Self.itemHeight * CGFloat(items.count)))
@@ -157,12 +157,25 @@ final class FullscreenMenu: UIView {
             let button = UIButton(type: .custom)
             button.frame = CGRect(x: 0, y: CGFloat(index) * Self.itemHeight, width: Self.width, height: Self.itemHeight)
             button.contentHorizontalAlignment = .left
-            button.contentEdgeInsets = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+            button.contentEdgeInsets = UIEdgeInsets(top: 12, left: 14, bottom: 12, right: 40)
             button.setTitle(item.title, for: .normal)
-            button.titleLabel?.font = item.selected ? .boldSystemFont(ofSize: 14) : Skin.text
+            button.titleLabel?.font = item.selected ? .boldSystemFont(ofSize: 16) : .systemFont(ofSize: 16)
+            button.titleLabel?.lineBreakMode = .byTruncatingTail
             button.setTitleColor(UIColor { $0.userInterfaceStyle == .dark ? Self.rgb(0xF1F5F9) : Self.rgb(0x18181B) }, for: .normal)
             if item.selected {
-                button.backgroundColor = UIColor { $0.userInterfaceStyle == .dark ? Self.rgb(0x71717A) : Self.rgb(0xD4D4D8) }
+                // Three cues, so the choice in force reads at a glance and not by weight alone: a
+                // yellow row, yellow text, and a check at the end of the row.
+                let ink = UIColor { $0.userInterfaceStyle == .dark ? Self.rgb(0xFACC15) : Self.rgb(0x854D0E) }
+                button.backgroundColor = UIColor { $0.userInterfaceStyle == .dark
+                    ? UIColor(red: 250 / 255, green: 204 / 255, blue: 21 / 255, alpha: 0.24)
+                    : UIColor(red: 234 / 255, green: 179 / 255, blue: 8 / 255, alpha: 0.30) }
+                button.setTitleColor(ink, for: .normal)
+                let check = UIImageView(image: UIImage(systemName: "checkmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .bold)))
+                check.tintColor = ink
+                check.contentMode = .center
+                check.frame = CGRect(x: Self.width - 36, y: 0, width: 24, height: Self.itemHeight)
+                check.isUserInteractionEnabled = false
+                button.addSubview(check)
                 button.accessibilityTraits.insert(.selected)
             }
             if index == 0 { button.layer.cornerRadius = 6; button.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner] }

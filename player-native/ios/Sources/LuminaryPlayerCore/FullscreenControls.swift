@@ -11,6 +11,9 @@ public struct FullscreenControlsState: Equatable {
     /// Waiting for data while playing.
     public var waiting = false
     public var live = false
+    /// The item has not said yet whether it is live or how long it is: a live stream reports an
+    /// indefinite duration only once it is known, so until then nothing about seeking is shown.
+    public var awaitingDuration = false
     /// Seconds; 0 until known.
     public var duration: Double = 0
     public var position: Double = 0
@@ -40,14 +43,16 @@ public struct FullscreenControlsLayout: Equatable {
     public let showsPause: Bool
 
     public init(_ state: FullscreenControlsState, skin: SkinOptions) {
-        // Live has nothing to skip to and no rate to change.
-        skipBack = state.live ? nil : skin.back
-        skipForward = state.live ? nil : skin.forward
-        showsRate = !state.live
+        // Live has nothing to skip to and no rate to change, and until it is known which this is,
+        // neither is shown: a live stream would otherwise show them for a moment and take them away.
+        let seekable = !state.live && !state.awaitingDuration
+        skipBack = seekable ? skin.back : nil
+        skipForward = seekable ? skin.forward : nil
+        showsRate = seekable
         // video.js shows its audio button only with more than one track.
         showsAudioMenu = state.audioTrackCount > 1
         showsSubtitlesMenu = state.hasSubtitles
-        showsProgress = !state.live
+        showsProgress = seekable
         showsSpinner = state.playing && state.waiting
         showsPause = state.playing
     }

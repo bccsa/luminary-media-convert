@@ -30,6 +30,24 @@ struct FullscreenControlsLayoutTests {
         #expect(layout().showsProgress)
     }
 
+    @Test("until the item says what it is, no skip, speed or progress is shown")
+    func awaitingDuration() {
+        let waiting = layout { $0.awaitingDuration = true }
+        #expect(waiting.skipBack == nil)
+        #expect(waiting.skipForward == nil)
+        #expect(!waiting.showsRate)
+        #expect(!waiting.showsProgress)
+        // Play and pause are not about seeking: they show from the start.
+        #expect(waiting.showsPause == false)
+        let playing = layout { $0.awaitingDuration = true; $0.playing = true }
+        #expect(playing.showsPause)
+        // Once it is known, a recorded video has them all.
+        let known = layout { $0.duration = 120 }
+        #expect(known.skipBack == 10)
+        #expect(known.showsRate)
+        #expect(known.showsProgress)
+    }
+
     @Test("shows the audio menu only with more than one track, as video.js does")
     func audioMenu() {
         #expect(!layout { $0.audioTrackCount = 1 }.showsAudioMenu)

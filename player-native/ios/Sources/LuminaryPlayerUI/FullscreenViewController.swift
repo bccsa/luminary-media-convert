@@ -306,6 +306,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         next.playing = commands.playbackWanted()
         next.waiting = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
         next.live = duration.isIndefinite
+        next.awaitingDuration = !duration.isIndefinite && !(duration.isNumeric && duration.seconds > 0)
         next.duration = duration.isNumeric ? duration.seconds : 0
         let position = player.currentTime().seconds
         next.position = scrubbing ?? (position.isFinite ? position : 0)
