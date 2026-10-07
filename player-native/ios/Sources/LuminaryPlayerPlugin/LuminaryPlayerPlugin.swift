@@ -35,6 +35,9 @@ public class LuminaryPlayerPlugin: CAPPlugin, CAPBridgedPlugin {
         capabilities.muting = true
         capabilities.subtitleSelection = true
         capabilities.airPlay = true
+        // The warming loop runs beside the engine, as on Android; it skips a constrained network
+        // (Low Data Mode), and the host's Data Saver turns it off through the prefetch policy.
+        capabilities.chunkWarming = true
         return capabilities
     }()
 

@@ -32,7 +32,7 @@ Baseline: iOS 15.0, Capacitor 8, CocoaPods.
 | `renderText` | `false` |
 | `backgroundAudio` | `true` (phase 3b) |
 | `live` | `true` (since 2026-10-06; plays on the device) |
-| `chunkWarming` | `false` on iOS until a run behind a byte-range CDN shows it earns its keep. **Android reports `true`** since its phase 5 (Dirk, 2026-10-06), so the two differ: parity is to be settled |
+| `chunkWarming` | `true` (2026-10-07), as on Android since its phase 5. Not yet seen to help on a real byte-range CDN, on either platform |
 | `inlineVideo`, `muting`, `subtitleSelection`, `airPlay` | `true` (2026-10-06; see plan 08 and the status below) |
 
 ## Status (2026-10-06)
@@ -67,10 +67,9 @@ What the iOS side does now, on top of everything in the 2026-10-01 status below.
 - **The slow-phone pass.** Not done: no iPhone 7 or 8 (iOS 15) to hand. Playback, 10+ minutes on the
   lock screen, full-screen, picture in picture, an angle switch, and the memory budget the edge-case
   list names.
-- **Chunk warming** (`chunkWarming`): built and unit-tested on both platforms. **Android has it on**
-  (`ExoRegistry.kt` reports `chunkWarming = true`); iOS keeps it off. Either iOS turns it on, after a
-  run behind a byte-range CDN, or Android goes back to off until both have been seen working. To agree
-  with Dirk.
+- **Chunk warming** (`chunkWarming`): on for both platforms (iOS since 2026-10-07, to match Android).
+  Still open: a run behind a real byte-range CDN, on both, to show it earns its keep. iOS skips it on
+  Low Data Mode, and the app's Data Saver turns it off through `prefetch.enabled`.
 - **Conformance for the ladder and for a live answer:** the shared part of the ladder scenarios
   (ExoPlayer's rungs differ), and a route result shape for a live answer.
 - **Packaging:** SwiftPM and the podspec from the same sources, to agree with Dirk.
