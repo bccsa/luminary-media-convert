@@ -1,104 +1,94 @@
 import { vi } from 'vitest';
+import { DEFAULT_RECOVERY_POLICY, type AdapterSource } from '@luminary-media-converter/player-core';
+import type { HlsJsVideoElement } from '../src/adapter/hlsTypes';
 
-/**
- * A stand-in for a video.js player: the surface the adapter touches, and a way to
- * fire an event at it. Testing against a real player would test video.js, which
- * is not what the adapter is — it is a translation layer, and what is worth
- * pinning is the translation.
- */
-export function fakePlayer(overrides: Record<string, unknown> = {}) {
-    const handlers = new Map<string, ((e?: unknown) => void)[]>();
-    /** What `one` actually subscribed for each listener, so `off` can remove it by the original. */
-    const onceOf = new Map<(e?: unknown) => void, (e?: unknown) => void>();
-    // videojs-contrib-quality-levels: `enabled` is a getter/setter function on
-    // each level, and the adapter identifies a level by height (or bitrate).
-    const levels = Object.assign(
-        [
-            // `enabled` is assigned, not called: VHS pins a quality by leaving
-            // exactly one level enabled.
-            { height: 360, bitrate: 800_000, enabled: true },
-            { height: 720, bitrate: 2_400_000, enabled: true },
-        ],
-        { length: 2, on: vi.fn(), off: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn() },
-    );
-    const audioTracks = Object.assign(
-        [
-            { id: 'en', language: 'en', label: 'English', enabled: true },
-            { id: 'fr', language: 'fr', label: 'French', enabled: false },
-        ],
-        { length: 2, on: vi.fn(), off: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn() },
-    );
-    const textTracks = Object.assign([] as unknown[], {
-        length: 0,
-        on: vi.fn(),
-        off: vi.fn(),
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-    });
+/** A list the element's rendition and track lists stand in for: iterable, indexable, an event target. */
+export class FakeList<T> extends EventTarget {
+    constructor(public items: T[] = []) {
+        super();
+    }
+    get length(): number {
+        return this.items.length;
+    }
+    [Symbol.iterator](): Iterator<T> {
+        return this.items[Symbol.iterator]();
+    }
+    set(items: T[], event?: string): void {
+        this.items = items;
+        if (event) this.dispatchEvent(new Event(event));
+    }
+}
 
-    const player: Record<string, unknown> = {
-        // What video.js keeps its construction options in, starting from the
-        // order `buildVideoJsOptions` gives it; `preferYouTubeTech` edits it.
-        options_: { techOrder: ['html5'] },
-        _levels: levels,
-        _time: 0,
-        _error: undefined as unknown,
-        src: vi.fn(),
-        play: vi.fn(() => Promise.resolve()),
-        pause: vi.fn(),
-        paused: vi.fn(() => true),
-        currentTime: vi.fn((v?: number) =>
-            v === undefined ? (player._time as number) : ((player._time = v) as unknown as void),
-        ),
-        duration: vi.fn(() => 120),
-        playbackRate: vi.fn(),
-        buffered: () => ({ length: 1, start: () => 0, end: () => 42 }),
-        error: vi.fn(() => player._error),
-        readyState: () => 4,
-        textTracks: () => textTracks,
-        audioTracks: () => audioTracks,
-        addRemoteTextTrack: vi.fn(() => ({ track: { id: 'added' } })),
-        removeRemoteTextTrack: vi.fn(),
-        qualityLevels: vi.fn(() => levels),
-        tech: vi.fn(() => ({ vhs: {} })),
-        // video.js takes a name or a list of them, and the component uses both
-        // forms; a fake that only understood one silently dropped half the
-        // subscriptions.
-        on: (name: string | string[], fn: (e?: unknown) => void) =>
-            (Array.isArray(name) ? name : [name]).forEach((n) =>
-                handlers.set(n, [...(handlers.get(n) ?? []), fn]),
-            ),
-        // Like video.js: `one` runs once and removes itself, and `off` removes. A fake that
-        // kept every listener hid the adapter spending a one-shot arming on the wrong source.
-        one: (name: string | string[], fn: (e?: unknown) => void) =>
-            (Array.isArray(name) ? name : [name]).forEach((n) => {
-                const once = (e?: unknown) => {
-                    handlers.set(n, (handlers.get(n) ?? []).filter((f) => f !== once));
-                    fn(e);
-                };
-                onceOf.set(fn, once);
-                handlers.set(n, [...(handlers.get(n) ?? []), once]);
-            }),
-        off: vi.fn((name: string | string[], fn: (e?: unknown) => void) =>
-            (Array.isArray(name) ? name : [name]).forEach((n) =>
-                handlers.set(n, (handlers.get(n) ?? []).filter((f) => f !== fn && f !== onceOf.get(fn))),
-            ),
-        ),
-        // The surface the component drives that the adapter does not.
-        el: vi.fn(() => document.createElement('div')),
-        poster: vi.fn(),
-        // Audio-only: video.js hides the tech and swaps in the poster. Both
-        // return promises on the real player.
-        audioOnlyMode: vi.fn(() => Promise.resolve()),
-        audioPosterMode: vi.fn(() => Promise.resolve()),
-        dispose: vi.fn(),
-        requestFullscreen: vi.fn(() => Promise.resolve()),
-        exitFullscreen: vi.fn(),
-        isFullscreen: vi.fn(() => false),
-        fire: (name: string, payload?: unknown) =>
-            (handlers.get(name) ?? []).forEach((f) => f(payload)),
+export interface FakeEngine {
+    handlers: Map<string, Set<(event: string, data: unknown) => void>>;
+    nextLevel: number;
+    recoverMediaError: ReturnType<typeof vi.fn>;
+    startLoad: ReturnType<typeof vi.fn>;
+    bandwidthEstimate: number;
+    on(event: string, fn: (event: string, data: unknown) => void): void;
+    off(event: string, fn: (event: string, data: unknown) => void): void;
+    emit(event: string, data: unknown): void;
+}
+
+export function fakeEngine(): FakeEngine {
+    const handlers = new Map<string, Set<(event: string, data: unknown) => void>>();
+    return {
         handlers,
+        nextLevel: -1,
+        recoverMediaError: vi.fn(),
+        startLoad: vi.fn(),
+        bandwidthEstimate: 0,
+        on(event, fn) {
+            const set = handlers.get(event) ?? new Set();
+            set.add(fn);
+            handlers.set(event, set);
+        },
+        off(event, fn) {
+            handlers.get(event)?.delete(fn);
+        },
+        emit(event, data) {
+            for (const fn of [...(handlers.get(event) ?? [])]) fn(event, data);
+        },
+    };
+}
+
+/** What `<hlsjs-video>` exposes that the adapter reads and writes. */
+export class FakeElement extends EventTarget {
+    source: unknown = null;
+    src = '';
+    currentTime = 0;
+    duration = NaN;
+    paused = true;
+    readyState = 0;
+    playbackRate = 1;
+    buffered: { length: number; start(i: number): number; end(i: number): number } = {
+        length: 0,
+        start: () => 0,
+        end: () => 0,
+    };
+    engine: FakeEngine | null = fakeEngine();
+    videoRenditions = new FakeList<{ id: string; height?: number; bitrate?: number }>();
+    audioTracks = new FakeList<{ id: string; label: string; language: string; enabled: boolean }>();
+    textTracks = new FakeList<unknown>();
+    play = vi.fn(async () => {
+        this.paused = false;
+    });
+    pause = vi.fn(() => {
+        this.paused = true;
+    });
+    addTextTrack = vi.fn();
+    shadowRoot = null;
+}
+
+export function fakeElement(): FakeElement & HlsJsVideoElement {
+    return new FakeElement() as unknown as FakeElement & HlsJsVideoElement;
+}
+
+export function adapterSource(overrides: Partial<AdapterSource> = {}): AdapterSource {
+    return {
+        url: 'blob:master',
+        isBlob: true,
+        recovery: DEFAULT_RECOVERY_POLICY,
         ...overrides,
     };
-    return player as any;
 }

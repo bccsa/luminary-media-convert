@@ -1,8 +1,13 @@
 import { defineConfig, devices } from '@playwright/test';
 
-/** `ENGINE=v8|v10` picks which demo build the specs drive; the specs themselves are engine-neutral. */
-const engine = process.env.ENGINE ?? 'v8';
-const demoPort = engine === 'v10' ? 5183 : 5182;
+/**
+ * `ENGINE=v10|v8` picks which player the specs drive: v10 is `player-web`, the main one and the default; v8 is the
+ * frozen `player-web-v8`, kept as a baseline to compare against. The specs themselves are engine-neutral.
+ */
+// The specs read `process.env.ENGINE` too, and skip themselves when it is not `v10`.
+process.env.ENGINE ??= 'v10';
+const engine = process.env.ENGINE;
+const demoPort = engine === 'v8' ? 5183 : 5182;
 /**
  * The tests get a fixture server of their own. They arm faults, reset the simulated live stream and clear the
  * request log, which would reach into anyone looking at the same server in a browser (the compare page uses
@@ -32,8 +37,8 @@ export default defineConfig({
             reuseExistingServer: true,
         },
         {
-            // Built first for v10: `built.spec.ts` drives the library as an app gets it, not the source.
-            command: engine === 'v10' ? 'npm --prefix ../player-web-v10 run build:lib && npm --prefix ../player-web-v10 run demo' : 'npm run demo',
+            // Built first for the main player: `built.spec.ts` drives the library as an app gets it, not the source.
+            command: engine === 'v8' ? 'npm --prefix ../player-web-v8 run demo' : 'npm run build:lib && npm run demo',
             url: `http://127.0.0.1:${demoPort}`,
             reuseExistingServer: true,
         },

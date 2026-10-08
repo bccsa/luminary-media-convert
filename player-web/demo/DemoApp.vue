@@ -4,7 +4,7 @@
  *
  * Paste any master playlist URL — plain or LMCENC-encrypted, byte-range or not
  * — plus an optional 32-hex-char session key, and it plays through the real
- * `LuminaryPlayer` → `PlayerController` → `VideoJsAdapter` path, in the Luminary
+ * `LuminaryPlayer` → `PlayerController` → `HlsJsVideoAdapter` path, in the Luminary
  * app's chrome. A YouTube URL in the same field switches the component into
  * YouTube mode, where the LMC pipeline is bypassed entirely.
  *
@@ -34,6 +34,7 @@ const saved = (() => {
             preferredLanguage?: string;
             prefetchDebug?: boolean;
             bare?: boolean;
+            thumbs?: boolean;
         };
     } catch {
         return {};
@@ -51,6 +52,8 @@ const form = reactive({
     prefetchDebug: saved.prefetchDebug ?? true,
     // How the encoder embeds the player: nothing on the frame until fullscreen.
     bare: saved.bare ?? false,
+    // Whether to hand the player a `thumbnails.vtt` beside the master, as a host that knows one exists would.
+    thumbs: saved.thumbs ?? false,
 });
 
 const source = shallowRef<PlayerSource | null>(null);
@@ -60,6 +63,7 @@ const source = shallowRef<PlayerSource | null>(null);
 const query = new URLSearchParams(location.search);
 if (query.has('master')) form.url = query.get('master') ?? '';
 if (query.has('key')) form.keyHex = query.get('key') ?? '';
+if (query.has('thumbs')) form.thumbs = query.get('thumbs') !== '0';
 // `?embed` drops the form and the notes, for a side-by-side page that only wants the player.
 const embed = query.has('embed');
 onMounted(() => {
@@ -113,6 +117,7 @@ function load() {
             preferredLanguage: form.preferredLanguage.trim(),
             prefetchDebug: form.prefetchDebug,
             bare: form.bare,
+            thumbs: form.thumbs,
         }),
     );
     // Controller options and `controls` are read once at construction, so a
@@ -133,7 +138,11 @@ function load() {
     }
     poster.value = toImage(form.poster, form.posterFallback);
     preferredLanguage.value = form.preferredLanguage.trim();
-    source.value = { masterUrl: url, ...(keyHex ? { keyHex } : {}) };
+    source.value = {
+        masterUrl: url,
+        ...(keyHex ? { keyHex } : {}),
+        ...(form.thumbs ? { sidecars: { thumbnails: { url: new URL('thumbnails.vtt', url).href } } } : {}),
+    };
 }
 
 const state = computed(() => player.value?.state ?? null);
@@ -223,6 +232,10 @@ const fmt = (n: number | undefined) => (n ?? 0).toFixed(1);
                 <input v-model="form.bare" type="checkbox" />
                 Bare when windowed — no controls outside fullscreen; double-click
                 for fullscreen, as the encoder embeds it (applies on Load)
+            </label>
+            <label class="demo-check">
+                <input v-model="form.thumbs" type="checkbox" />
+                Scrub thumbnails — a <code>thumbnails.vtt</code> beside the master (applies on Load)
             </label>
             <button type="submit">Load</button>
             <p v-if="formError" class="demo-error">{{ formError }}</p>

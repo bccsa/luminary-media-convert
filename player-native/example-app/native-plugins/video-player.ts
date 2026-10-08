@@ -3,6 +3,7 @@ import { Capacitor } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
 import type { PlayerSource } from '@luminary-media-converter/player-core';
 import { LuminaryPlayer, isYouTubeUrl } from '@luminary-media-converter/player-web';
+import { LuminaryPlayer as YouTubePlayer } from '@luminary-media-converter/player-web-v8';
 import { LuminaryPlayer as NativePlugin } from '@luminary-media-converter/player-native';
 import type { ModeInfo, PlaybackMode, VideoPlayerService } from '../src/build-time/contracts/video-player/contract';
 import { VideoPlayerKey } from '../src/build-time/contracts/video-player/token';
@@ -40,7 +41,9 @@ class NativeVideoPlayerService implements VideoPlayerService {
     }
 
     component(mode: PlaybackMode): Component {
-        return mode === 'native' ? NativeVideoPlayer : (LuminaryPlayer as Component);
+        if (mode === 'native') return NativeVideoPlayer;
+        // The Video.js 10 player has no YouTube mode yet; the frozen Video.js 8 one does.
+        return (mode === 'youtube' ? YouTubePlayer : LuminaryPlayer) as Component;
     }
 }
 

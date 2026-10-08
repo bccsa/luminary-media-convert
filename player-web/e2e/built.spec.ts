@@ -11,12 +11,12 @@ const FIXTURES = `http://127.0.0.1:${process.env.FIXTURE_PORT ?? 5191}`;
 const KEY_HEX = '00112233445566778899aabbccddeeff';
 
 test.beforeAll(() => {
-    const dist = resolve(process.cwd(), '../player-web-v10/dist/index.js');
-    if (!existsSync(dist)) throw new Error(`no built library at ${dist}: run \`npm -w player-web-v10 run build:lib\` first`);
+    const dist = resolve(process.cwd(), 'dist/index.js');
+    if (!existsSync(dist)) throw new Error(`no built library at ${dist}: run \`npm -w player-web run build:lib\` first`);
 });
 
 const open = (page: import('@playwright/test').Page, fixture = 'encrypted', extra = '') =>
-    page.goto(`http://127.0.0.1:5183/built.html?master=${encodeURIComponent(`${FIXTURES}/${fixture}/master.m3u8`)}${extra}`);
+    page.goto(`http://127.0.0.1:5182/built.html?master=${encodeURIComponent(`${FIXTURES}/${fixture}/master.m3u8`)}${extra}`);
 
 test('every control tag of the built player is a registered element', async ({ page }) => {
     await open(page, 'clear');

@@ -108,11 +108,11 @@
 
         <div class="grid">
             <section class="pane">
-                <h2>Video.js 8 <small>current · VHS · :5182</small></h2>
+                <h2>Video.js 8 <small>retired · VHS · :5183</small></h2>
                 <iframe id="v8" allow="fullscreen; autoplay; picture-in-picture" title="Video.js 8"></iframe>
             </section>
             <section class="pane">
-                <h2>Video.js 10 <small>new · hls.js · stock skin · :5183</small></h2>
+                <h2>Video.js 10 <small>main · hls.js · :5182</small></h2>
                 <iframe id="v10" allow="fullscreen; autoplay; picture-in-picture" title="Video.js 10"></iframe>
             </section>
         </div>
@@ -136,8 +136,8 @@
                 const query = `?master=${encodeURIComponent(master)}${key ? `&key=${encodeURIComponent(key)}` : ''}`;
                 const embedded = `${query}&embed=1`;
                 const embeddedV10 = `${embedded}&thumbs=1`;
-                $('v8').src = `http://127.0.0.1:5182/${embedded}`;
-                $('v10').src = `http://127.0.0.1:5183/${embeddedV10}`;
+                $('v8').src = `http://127.0.0.1:5183/${embedded}`;
+                $('v10').src = `http://127.0.0.1:5182/${embeddedV10}`;
                 history.replaceState(null, '', `?${query.slice(1)}`);
             }
 

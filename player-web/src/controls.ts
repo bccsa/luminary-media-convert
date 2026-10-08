@@ -22,17 +22,10 @@ export interface PlayerControlsOptions {
      */
     audioMenu: boolean;
     /**
-     * Show the audio/video toggle in the top-right corner. Only ever visible
-     * when there is somewhere for it to go, whatever this says: the stream must
-     * carry the synthesized audio-only rendering, and — when audio-only is what
-     * is playing — a real video angle to come back to.
-     */
-    audioVideoToggle: boolean;
-    /**
      * Show the subtitles / captions menu.
      *
      * Only ever visible when the source carries text tracks, whatever this says
-     * — video.js hides the button itself while there are none. It is an option
+     * — the button hides itself while there are none. It is an option
      * regardless, because "invisible in today's content" is not the same promise
      * as "absent": an app that has never had this control does not want one
      * appearing the first time a stream ships a caption track.
@@ -43,16 +36,10 @@ export interface PlayerControlsOptions {
      * honest way to say "this player does not skip" — a button that moves
      * nowhere is worse than no button.
      *
-     * video.js ships skip-button icons for 5, 10 and 30 seconds only, and hides
-     * a button configured for anything else outright. Rather than lose the
-     * control, an off-set value is snapped to the nearest of {5, 10, 30} — for
-     * the icon *and* for the seek, which are the same number: the snapped value
-     * is what is handed to video.js. So `15` is a 10-second button that seeks
-     * 10 seconds, not a 15-second jump behind a "10" label. Stay on {5, 10, 30}
-     * to get exactly what is asked for.
+     * Any interval is drawn: the interval is written into the button's icon.
      */
     skipBackSeconds: number;
-    /** Seconds the skip-forward button moves. `0` removes the button; the same snapping to {5, 10, 30} applies. */
+    /** Seconds the skip-forward button moves. `0` removes the button. */
     skipForwardSeconds: number;
     /**
      * Show the controls while the player is windowed.
@@ -61,8 +48,8 @@ export interface PlayerControlsOptions {
      * from its own interface — the encoder, whose trim timeline and its
      * shortcuts are the whole transport:
      *
-     * - no control bar, big play button, audio/video toggle or video.js dialog,
-     *   so nothing on the frame can take focus or a key — a focused video.js
+     * - no control bar, play button or dialog,
+     *   so nothing on the frame can take focus or a key — a focused player
      *   control swallows every key but Tab, which would be the host's shortcuts;
      * - a click on the picture does nothing, and a double-click toggles
      *   fullscreen.
@@ -78,7 +65,6 @@ export interface PlayerControlsOptions {
 /** The behaviour the library had before any of this was configurable. */
 export const DEFAULT_CONTROLS: PlayerControlsOptions = {
     audioMenu: true,
-    audioVideoToggle: true,
     subtitlesMenu: true,
     skipBackSeconds: 10,
     skipForwardSeconds: 10,
@@ -102,7 +88,7 @@ export function mergeControls(
     const merged = { ...DEFAULT_CONTROLS };
     if (!partial) return merged;
 
-    for (const key of ['audioMenu', 'audioVideoToggle', 'subtitlesMenu', 'windowedControls'] as const) {
+    for (const key of ['audioMenu', 'subtitlesMenu', 'windowedControls'] as const) {
         const value = partial[key];
         if (typeof value === 'boolean') {
             merged[key] = value;

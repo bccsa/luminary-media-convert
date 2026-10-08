@@ -38,7 +38,8 @@ The API binds to `127.0.0.1` only. The renderer authenticates with a token minte
 | `encode-config/`  | Shared encode-config form + types                              | [encode-config/README.md](encode-config/README.md)                         |
 | `hls-core/`       | Shared HLS parsing, key utilities, angle extraction            | —                                                                          |
 | `player-core/`    | Player pipeline: fetch, decrypt, extract angles, state         | —                                                                          |
-| `player-web/`     | Web player: Video.js 8 / VHS over the `PlayerAdapter` contract | [player-web/README.md](player-web/README.md)                               |
+| `player-web/`     | Web player: Video.js 10 / hls.js over the `PlayerAdapter` contract | [player-web/README.md](player-web/README.md)                               |
+| `player-web-v8/`  | Retired Video.js 8 / VHS player, kept for YouTube — frozen     | —                                                                          |
 | `player-web-old/` | Retired hls.js test implementation — frozen, not built         | —                                                                          |
 | `ffmpeg-build/`   | Builds the bundled LGPL FFmpeg                                 | [ffmpeg-build/README.md](ffmpeg-build/README.md)                           |
 
@@ -193,7 +194,7 @@ by other applications, while the build scripts are a separate concern.
 
 |                                                                                                                                                    | Licence          |                                                                                                                        |
 | -------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| every workspace — `api/`, `app/`, `app-electron/`, `encode-config/`, `hls-core/`, `player-core/`, `player-web/`, `player-web-old/`, `cms-mock/`    | Apache-2.0       | each carries its own `LICENSE`                                                                                         |
+| every workspace — `api/`, `app/`, `app-electron/`, `encode-config/`, `hls-core/`, `player-core/`, `player-web/`, `player-web-v8/`, `player-web-old/`, `cms-mock/`    | Apache-2.0       | each carries its own `LICENSE`                                                                                         |
 | `ffmpeg-build/`                                                                                                                                    | GPL-3.0-or-later | carries its own `LICENSE`; the build scripts also carry an SPDX header                                                 |
 | everything else — `docs/`, `test-media/`, the root files                                                                                           | Apache-2.0       | the root `LICENSE`                                                                                                     |
 | the bundled FFmpeg and FFprobe                                                                                                                     | LGPL-2.1         | built without `--enable-gpl` and without libx264; `COPYING.LGPLv2.1` and `LICENSE-ffmpeg.txt` ship beside the binaries |

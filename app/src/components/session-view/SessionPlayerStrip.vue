@@ -374,6 +374,7 @@ defineExpose({
                         ref="luminaryPlayerRef"
                         :source="source"
                         :controls="playerControls"
+                        windowed-fit="cover"
                     />
                 </div>
                 <!--
@@ -578,26 +579,16 @@ defineExpose({
     max-height: 100%;
 }
 /*
- * The player sizes itself 16:9 off its width, and so does its video.js box. The
- * shell is 16:9 too, until a short window or a wide split caps its height — then
- * the player would overflow it and the shell would clip its bottom edge. Fill
- * the shell instead.
+ * The player sizes itself 16:9 off its width. The shell is 16:9 too, until a short
+ * window or a wide split caps its height — then the player would overflow it and
+ * the shell would clip its bottom edge. Fill the shell instead.
+ *
+ * How the picture fills it (`cover`, for a source that is not 16:9, while windowed;
+ * letterboxed in fullscreen) is the player's `windowed-fit`: the `<video>` sits in
+ * its element's shadow DOM, out of reach of any rule written here.
  */
 .session-trim-player-shell :deep(.lmpl-root) {
     height: 100%;
-}
-.session-trim-player-shell :deep(.lmpl-video-player) {
-    aspect-ratio: auto;
-}
-/*
- * `cover` fills the 16/9 strip with a source that is not 16:9, which is what
- * this shell wants — but entering fullscreen does not move the element out of
- * the shell, so the rule would keep matching and fill a screen-shaped box,
- * cropping everything outside the overlap. Fullscreen has to letterbox; that is
- * the point of it. video.js marks its fullscreen element `.vjs-fullscreen`.
- */
-.session-trim-player-shell :deep(.video-js:not(.vjs-fullscreen) .vjs-tech) {
-    object-fit: cover;
 }
 
 /* Force split-list SegmentEditor to fill the full aside height. */
