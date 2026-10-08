@@ -41,4 +41,8 @@ public protocol InlinePresenter: AnyObject {
     /// Full-screen or picture in picture holds the picture: the inline view lets go of the player
     /// (true) and takes it back (false). The frame it was given stays.
     func setSuspended(_ suspended: Bool)
+
+    /// The picture is about to be rebuilt (a recovery swaps the player's item): a still of what is
+    /// showing stays up until the new picture has its first frame, instead of black.
+    func holdPicture()
 }

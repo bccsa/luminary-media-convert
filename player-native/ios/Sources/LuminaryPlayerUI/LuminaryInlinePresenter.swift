@@ -31,6 +31,8 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
     private var frameObservation: NSKeyValueObservation?
     private var wasOnScreen = false
     private var settleCheck: DispatchWorkItem?
+    private var heldPicture: UIView?
+    private var readyObservation: NSKeyValueObservation?
     /// What the web view looked like before it was made see-through.
     private var restore: (opaque: Bool, background: UIColor?, scrollBackground: UIColor?)?
 
@@ -111,6 +113,7 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
             x: webView.frame.minX + frame.x, y: webView.frame.minY + frame.y,
             width: frame.width, height: frame.height
         )
+        heldPicture?.frame = view.frame
     }
 
     /// From the inline layer: the picture continues in its own window, and the page goes on.
@@ -138,6 +141,25 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
         routePicker = picker
         for case let button as UIButton in picker.subviews { button.sendActions(for: .touchUpInside) }
         return true
+    }
+
+    public func holdPicture() {
+        guard let videoView, let container = videoView.superview, !suspended, heldPicture == nil,
+              let still = videoView.snapshotView(afterScreenUpdates: false) else { return }
+        still.frame = videoView.frame
+        container.insertSubview(still, aboveSubview: videoView)
+        heldPicture = still
+        // Down again when the new picture shows its first frame, and in any case after a while.
+        readyObservation = videoView.playerLayer.observe(\.isReadyForDisplay, options: [.new]) { [weak self] layer, _ in
+            if layer.isReadyForDisplay { DispatchQueue.main.async { self?.releasePicture() } }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in self?.releasePicture() }
+    }
+
+    private func releasePicture() {
+        readyObservation = nil
+        heldPicture?.removeFromSuperview()
+        heldPicture = nil
     }
 
     public func setSuspended(_ suspended: Bool) {
@@ -186,6 +208,7 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
         routePicker = nil
         frameObservation = nil
         settleCheck?.cancel()
+        releasePicture()
         wasOnScreen = false
         videoView?.playerLayer.player = nil
         videoView?.removeFromSuperview()

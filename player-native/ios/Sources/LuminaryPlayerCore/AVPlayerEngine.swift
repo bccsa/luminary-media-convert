@@ -248,6 +248,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         restoreAudioId = reportedAudio?.activeId
         let position = player.currentTime().seconds
         let resume = intendedPlaying
+        inline?.holdPicture()
         attach(startAt: position.isFinite ? position : nil)
         if resume { play() }
     }
