@@ -126,6 +126,8 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
             // The skin draws its own controls, and none of Media3's, spinner included.
             useController = false
             setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
+            // A recovery that rebuilds the source keeps the last frame up, not a black shutter, until the new picture shows.
+            setKeepContentOnPlayerReset(true)
             this.player = player
         }
         val controls = SkinControls(

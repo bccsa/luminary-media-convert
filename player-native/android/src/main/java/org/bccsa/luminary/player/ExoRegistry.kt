@@ -51,6 +51,13 @@ fun exoPlayerRegistry(
     val pictureInPicture = activity()?.let(FullscreenPresenter::pictureInPictureAvailable) ?: false
     return PlayerRegistry(
         ANDROID_CAPABILITIES.copy(pictureInPicture = pictureInPicture, airPlay = casting, castMenu = castMenu), MainLooperClock(), HttpUpstream(sharedHttpClient), engines, OkHttpLiveFetch(sharedHttpClient),
-        OkHttpWarmFetch(sharedHttpClient), emit,
+        OkHttpWarmFetch(sharedHttpClient) { systemDataSaverOn(context) }, emit,
     )
+}
+
+/** The system's Data Saver is on for the network in use, which only restricts a metered one. */
+internal fun systemDataSaverOn(context: Context): Boolean {
+    val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager ?: return false
+    return connectivity.isActiveNetworkMetered &&
+        connectivity.restrictBackgroundStatus == android.net.ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENABLED
 }

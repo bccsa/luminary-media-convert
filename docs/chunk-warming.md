@@ -130,7 +130,8 @@ a half-filled bag whose defaults it would have to know.
 - **`enabled`, default on.** For hosts that want no warming at all: a proxy that
   already warms, a metered connection, a test counting requests.
   A native adapter also honours the platform's own data saver without being asked: iOS skips
-  the warm on a constrained network (Low Data Mode), and the engine's own request is the fallback,
+  the warm on a constrained network (Low Data Mode), Android when the system's Data Saver is on
+  for a metered network, and the engine's own request is the fallback,
   as for any warm that does not happen. A host's data saver turns warming off through `enabled`.
 - **`debug`, default off.** Warming is invisible by design — one small ranged
   request per chunk among hundreds of media requests — so this narrates it

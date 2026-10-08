@@ -40,8 +40,13 @@ fun interface WarmFetch {
  * The bytes are discarded ciphertext, read to completion and dropped; every failure is swallowed.
  * Nothing is cached, so the request reaches the edge.
  */
-class OkHttpWarmFetch(private val client: OkHttpClient) : WarmFetch {
+class OkHttpWarmFetch(
+    private val client: OkHttpClient,
+    /** True when the viewer asked the system to save data: a warm that fetches bytes nobody plays then costs them. */
+    private val dataSaverOn: () -> Boolean = { false },
+) : WarmFetch {
     override fun warm(url: String, bytes: Int) {
+        if (dataSaverOn()) return
         val request = try {
             Request.Builder().url(url).header("Range", "bytes=0-${bytes - 1}").cacheControl(CacheControl.FORCE_NETWORK).build()
         } catch (invalid: IllegalArgumentException) {

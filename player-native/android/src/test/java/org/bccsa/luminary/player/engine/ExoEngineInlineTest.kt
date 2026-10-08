@@ -179,13 +179,24 @@ class ExoEngineInlineTest {
     }
 
     @Test
-    fun `turning to landscape while the page shows the picture opens it full-screen`() {
+    fun `turning to landscape while the page shows a playing picture opens it full-screen`() {
+        load()
+        call("setInlineFrame", "frame" to frame())
+        call("play")
+
+        inline.onRotatedToLandscape!!.invoke()
+
+        assertEquals(listOf("fullscreen"), states())
+    }
+
+    @Test
+    fun `turning to landscape leaves a paused picture where the viewer put it`() {
         load()
         call("setInlineFrame", "frame" to frame())
 
         inline.onRotatedToLandscape!!.invoke()
 
-        assertEquals(listOf("fullscreen"), states())
+        assertEquals(emptyList<String>(), states())
     }
 
     @Test

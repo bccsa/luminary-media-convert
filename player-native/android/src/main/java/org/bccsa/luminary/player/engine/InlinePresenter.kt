@@ -122,6 +122,8 @@ class InlinePresenter(
         val view = PlayerView(web.context).apply {
             useController = false
             setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
+            // A recovery that rebuilds the source keeps the last frame up, not a black shutter, until the new picture shows.
+            setKeepContentOnPlayerReset(true)
             setBackgroundColor(Color.BLACK)
             isClickable = false
             isFocusable = false
