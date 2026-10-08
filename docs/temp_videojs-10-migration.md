@@ -240,3 +240,51 @@ Port `<youtube-video>` and the frame-protocol media element (row 30), and delete
 - v10 defaults that change behaviour and are overridden to match v8: `capLevelToPlayerSize` (true → false), `capLevelOnFPSDrop` (true → false), `startLevel: 0` for VHS's `enableLowInitialPlaylist`.
 - hls.js's gap controller nudges 3 times and then raises a fatal `BUFFER_STALLED_ERROR`, which goes straight into the ladder, so the strike counting in `vhsStallSignals` is not needed.
 - Open for Phase 1: iPhone ManagedMediaSource (device), Capacitor YouTube (item f), skin restyle feasibility (item g), the playback-rate decision.
+
+### Component and chrome (done)
+
+- **Skin decision, reversed twice.** The plan said "default skin, restyled". The packaged skin cannot do it: no skip buttons, no way to leave a menu out, no bare windowed frame, 18 built-in hotkeys. First decision: own the skin source. Then: keep the stock skin. Then, once the controls were wanted laid out a specific way: own it after all. **Current: the controls are composed in `src/ui/controlsHtml.ts` from v10's `media-*` elements**, with the default skin's stylesheet still drawing the buttons, icons, menus and sliders and `src/styles.css` placing and restyling them.
+- **Layout as asked for:** pause/play centred with skip back/forward flanking it; thick rounded timeline with no thumb, on its own row with wide side insets (these controls are mostly met in fullscreen, where a stray edge touch must not seek); under it volume (a card: plus, thick vertical slider, minus) then quality, language, speed, captions, each its own button opening its own card; casting, AirPlay, picture-in-picture and fullscreen together on the right. No cogwheel, no top-left cluster. No blur anywhere (custom properties set to none). The audio/video toggle is gone from the player.
+- **Sizes follow the player's width, not "mobile vs desktop":** every size is a multiple of `--lmpl-s`, stepped by container query at 900 px and 1400 px. The first attempt put the side-inset on `.lmpl-root`, which is the *parent* of the size container, so the query never applied and a 2000 px screen kept a phone's margin. Caught from a screenshot; the spec now asserts it.
+- **3 s auto-hide** (v10 hard-codes 2 s): holds a controls lock while the pointer is active, releases it and hides at once at 3 s.
+- **Scrub thumbnails** from `player-core` (`source.sidecars.thumbnails`, `thumbnailsReady`, `thumbnailAt`): the frame under the pointer with its timecode, following the pointer and kept inside the frame, staying up through a drag, nudged off the very end so the last position does not blank, holding the last frame across a gap in the cues. Same look as `player-web-old`'s `ScrubThumbnail`, which is the reference for a native player. Works for an encrypted session (LMCENC `thumbnails.vtt`, plain sprite).
+- **Language selector:** shown only when the stream has more than one language (v10 hides the trigger itself otherwise). Switching works, but needed a fix: `<hlsjs-video>` builds new track lists with each engine and has none before one exists, so listeners bound once at mount never attached, and a language picked in the card reached the engine but not the controller.
+- **Bugs found by looking, not by tests:** the skip buttons were inert (`media-seek-button` is not registered by the default skin, which seeks by gesture); the vertical volume fill covered half the track (the skin sets `left: 0` for a horizontal fill's pseudo-element only); a 22 px gap between volume and the settings.
+- **A test-infrastructure finding:** the tests and a browser tab on the same fixture server disturb each other (armed faults, the live clock reset). The tests now have their own on port 5191 (`FIXTURE_PORT`).
+- **Real multi-language media:** `player-native/spike/.../stream` (two angles, English/Español/Français/Deutsch, AES-128, byte-range chains) is served at `/native/` by the fixture server, key `6c756d696e6172792d737069a4e2c0de`.
+
+### Open, and cross-player
+
+- **Native plan 05 specifies the native fullscreen controls as a copy of the Video.js 8 look** (icons exported from video.js's font, a screenshot of each web state). The v10 layout departs from that. Needs a decision: native follows the new web look, or the web look follows native. Not decided here.
+- **Native has no scrub thumbnails.** The data path is player-core's (`thumbnailsReady`, `thumbnailAt`), so native only has to draw it; the geometry rules (nudge off the end, clamp inside the frame, hold the last frame) are written down in `src/ui/scrubPreview.ts` and tested.
+- Live: v8 hid the skip buttons and the speed control on a live stream. Not done in v10.
+- Audio-only artwork layer, YouTube mode, `windowedControls: false` on a real device, iOS ManagedMediaSource, Firefox, performance numbers: still unverified or undone.
+
+### Size (done)
+
+| | Before | After |
+|---|---|---|
+| The library file (`dist/index.js`) | 153 kB, 30.2 kB gzipped | 83.7 kB, 21.3 kB gzipped |
+| An app using the player (Vue left out) | about 1.3 MB, about 320 kB gzipped | 848 kB, 251 kB gzipped, of which hls.js is 500 kB |
+
+Where it came from, in the order it mattered:
+
+- **Importing the packaged skin (`@videojs/html/video/skin`) cost an app 553 kB (120 kB gzipped)**: every UI element Video.js has, every icon, and the skin's own template and 97 kB stylesheet, none of it drawn here. `src/ui/register.ts` now imports the 33 elements and 19 icons the controls use, one module each.
+- **The skin's stylesheet** is trimmed at build time (`scripts/build-skin-css.mjs`, PurgeCSS): rules for other themes and presets dropped, the `[data-theme]` / `[data-preset]` attributes stripped from the selectors (inside `:where()`, so specificity is unchanged), unused rules removed, then minified. 96.8 kB to 32.2 kB, written to `src/generated/skin.css` (not committed; the `build`, `build:lib`, `demo` and `dev` scripts regenerate it).
+- **The library output is minified** (esbuild, in `generateBundle`, after Vite's own pass, which otherwise reprints it with its whitespace). Cost: ten `/* @__PURE__ */` annotations, which no esbuild minify keeps.
+- **Not done:** hls.js is 59% of an app's bundle and cannot shrink while the player is built on it; `hls.js/light` lacks alternate audio, which this player needs. Loading it on demand would move it out of an app's first load, but it is the app's route-level splitting that decides that, and the adapter imports `Hls` statically.
+
+**A near-miss worth knowing:** the first version of the minimal registration was dropped entirely from the built library. `register.ts` has no exports, this package declares only `.css` and `.vue` files as having side effects, so the bundler removed the import: the built player registered not one control. Every test passed, because they all drive the demo, which loads source. Fixed by declaring `**/ui/register.ts` in `sideEffects`, and caught for good by `e2e/built.spec.ts`, which mounts the player from `dist/` (`demo/built.html`) and checks that every tag is registered, every icon draws, the stylesheet applies, an encrypted stream plays and the controls work. With the fix removed, four of its five specs fail. `npm -w player-web-v10 run build:lib` before running it; the Playwright config does.
+
+**Pixel guard:** `e2e/visual-guard.spec.ts` (a local tool, `SNAPSHOT_DIR=…`) compares 13 states of the controls with the picture masked. The trimmed stylesheet and the minimal registration are pixel-identical to the full ones on all 13.
+
+Localisation: the setting buttons' hidden labels were `<media-text token=…>`, which needs an element this package does not expose by a public path; they are plain spans with English text now, like the card titles.
+
+### hls.js size: the light build does not work, a custom build does (not adopted)
+
+hls.js is 500 kB of the 848 kB an app ships (59%). Measured, on hls.js 1.6.7, which `@videojs/hlsjs-video` pins:
+
+- **`hls.js/light` plays every picture and no sound.** It stubs out alternate audio, and every audio group this encoder writes is an alternate-audio `#EXT-X-MEDIA` playlist, even with one language. On all three test streams: 0 audio tracks, 0 bytes of audio decoded, no error, lifecycle "ready". The full build decodes audio on all three. It saves 178 kB (51 kB gzipped) by dropping features this player needs. Do not use it.
+- **A custom compile is possible.** hls.js has nine compile-time switches (`__USE_ALT_AUDIO__`, `_SUBTITLES__`, `_EME_DRM__`, `_CMCD__`, `_INTERSTITIALS__`, `_CONTENT_STEERING__`, `_VARIABLE_SUBSTITUTION__`, `_M2TS_ADVANCED_CODECS__`, `_MEDIA_CAPABILITIES__`). Compiled from `hls.js/src/hls.ts` with esbuild, alternate audio on and the rest off: **345 kB (109 kB gzipped) against 489 kB (153 kB gzipped) for the same compile with everything on**, 144 kB (43 kB gzipped) less, about 17% of an app's bundle. The whole suite (88 browser checks, Chromium and WebKit) passes against it, including the four-language stream, live, byte-range and encrypted playback.
+- **Why it was not adopted:** it means owning a build of a dependency pinned inside Video.js (it needs `@svta/common-media-library` 0.15.1, `eventemitter3` 5.0.1 and `url-toolkit` 2.2.5, which hls.js bundles rather than lists, and must be redone on every Video.js bump), and an app has to alias `hls.js` to it, which a library cannot do for its host. It would also drop DRM, in-stream WebVTT subtitles and CMCD, none of which are used here today. To redo it: the switches above, `define` them in an esbuild of that entry, alias `hls.js` in the app's bundler.
+- **A test gap this exposed:** nearly every check read the playhead, which advances for a silent video. `playback.spec.ts` now reads the browser's decoded audio and video byte counts for three streams (Chromium; WebKit does not report them). It fails on all three under the light build and passes on the full one, on both players.
