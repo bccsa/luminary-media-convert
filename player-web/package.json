@@ -26,7 +26,9 @@
         "dev": "concurrently -k -n js,dts -c blue,gray \"vite build --watch\" \"vue-tsc --declaration --emitDeclarationOnly --outDir dist --watch --preserveWatchOutput\"",
         "test": "vitest run",
         "test:watch": "vitest",
-        "demo": "vite --config vite.demo.config.ts"
+        "demo": "vite --config vite.demo.config.ts",
+        "test:e2e": "playwright test",
+        "fixtures": "node e2e/fixtures/build.mjs"
     },
     "dependencies": {
         "@luminary-media-converter/player-core": "file:../player-core",
@@ -38,6 +40,7 @@
         "vue": "^3.5.0"
     },
     "devDependencies": {
+        "@playwright/test": "^1.63.0",
         "@vitejs/plugin-vue": "^5.2.0",
         "@vue/test-utils": "^2.4.0",
         "jsdom": "^26.0.0",
