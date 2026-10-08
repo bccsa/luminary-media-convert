@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Hls } from '@videojs/hlsjs-video';
 import { HlsJsVideoAdapter, UnsupportedBrowserError } from '../src/adapter/HlsJsVideoAdapter';
 import type { LoaderCallbacks, LoaderContext } from '../src/adapter/hlsTypes';
-import { adapterSource, fakeElement, fakeEngine, type FakeEngine } from './helpers';
+import { FakeList, adapterSource, fakeElement, fakeEngine, type FakeEngine } from './helpers';
 
 const KEY_HEX = '00112233445566778899aabbccddeeff';
 const KEY = Uint8Array.from(KEY_HEX.match(/../g)!.map((b) => parseInt(b, 16)));
@@ -290,6 +290,48 @@ describe('audio tracks', () => {
     it('falls back to an index id when a track has none', () => {
         el.audioTracks.set([{ id: '', label: '', language: '', enabled: true }]);
         expect(adapter.getAudioTracks()).toEqual([{ id: 'a0', lang: undefined, label: 'a0' }]);
+    });
+});
+
+describe('track lists are per engine', () => {
+    // `<hlsjs-video>` builds a fresh pair of lists with each engine and has none before one exists.
+    it('hears of a change in the lists an engine brings, though there were none when it was built', () => {
+        const bare = fakeElement();
+        (bare as unknown as { audioTracks: unknown }).audioTracks = undefined;
+        (bare as unknown as { videoRenditions: unknown }).videoRenditions = undefined;
+        const late = new HlsJsVideoAdapter(bare);
+        const seen = events(late, 'audiotracks-updated', 'variants-updated');
+        // The engine arrives, with its lists.
+        const audio = new FakeList<{ id: string; label: string; language: string; enabled: boolean }>();
+        const renditions = new FakeList<{ id: string }>();
+        (bare as unknown as { audioTracks: unknown }).audioTracks = audio;
+        (bare as unknown as { videoRenditions: unknown }).videoRenditions = renditions;
+        bare.engine = fakeEngine();
+        bare.dispatchEvent(new Event('loadstart'));
+        audio.dispatchEvent(new Event('change'));
+        renditions.dispatchEvent(new Event('addrendition'));
+        expect(seen.map(([name]) => name)).toEqual(['audiotracks-updated', 'variants-updated']);
+        late.destroy();
+    });
+
+    it('stops listening to the lists of an engine that has been replaced', () => {
+        const seen = events(adapter, 'audiotracks-updated');
+        const old = el.audioTracks;
+        el.audioTracks = new FakeList();
+        el.engine = fakeEngine();
+        el.dispatchEvent(new Event('loadstart'));
+        old.dispatchEvent(new Event('change'));
+        expect(seen).toHaveLength(0);
+        el.audioTracks.dispatchEvent(new Event('change'));
+        expect(seen).toHaveLength(1);
+    });
+
+    it('does not bind the same list twice across loads of the same engine', () => {
+        const seen = events(adapter, 'audiotracks-updated');
+        el.dispatchEvent(new Event('loadstart'));
+        el.dispatchEvent(new Event('loadstart'));
+        el.audioTracks.dispatchEvent(new Event('change'));
+        expect(seen).toHaveLength(1);
     });
 });
 

@@ -124,6 +124,8 @@
                 ['Encrypted (key + LMCENC)', `${FIXTURES}/encrypted/master.m3u8`, KEY],
                 ['Clear', `${FIXTURES}/clear/master.m3u8`, ''],
                 ['Byte-range', `${FIXTURES}/byterange/master.m3u8`, ''],
+                ['4 languages + 2 angles (native sample)', `${FIXTURES}/native/master.m3u8`, '6c756d696e6172792d737069a4e2c0de'],
+                ['Two languages (synthetic)', `${FIXTURES}/multiaudio/master.m3u8`, ''],
                 ['Live (simulated)', `${FIXTURES}/live/master.m3u8`, ''],
             ];
 
@@ -133,8 +135,9 @@
                 if (!master) return;
                 const query = `?master=${encodeURIComponent(master)}${key ? `&key=${encodeURIComponent(key)}` : ''}`;
                 const embedded = `${query}&embed=1`;
+                const embeddedV10 = `${embedded}&thumbs=1`;
                 $('v8').src = `http://127.0.0.1:5182/${embedded}`;
-                $('v10').src = `http://127.0.0.1:5183/${embedded}`;
+                $('v10').src = `http://127.0.0.1:5183/${embeddedV10}`;
                 history.replaceState(null, '', `?${query.slice(1)}`);
             }
 

@@ -5,7 +5,6 @@
 export * from '@luminary-media-converter/player-core';
 
 export { default as LuminaryPlayer } from './components/LuminaryPlayer.vue';
-export { default as AudioVideoToggle } from './components/AudioVideoToggle.vue';
 
 // What `poster` takes: an image described in plain terms, so the shape outlives the engine.
 export type { PlayerImage, PlayerImageInput } from './image';
@@ -44,5 +43,17 @@ export { DEFAULT_MESSAGES, formatSeconds, mergeMessages, type PlayerMessages } f
 export { DEFAULT_CONTROLS, mergeControls, type PlayerControlsOptions } from './controls';
 export { usePlayerState } from './composables/usePlayerState';
 export { createKeepAlive, SILENT_AUDIO_DATA_URI, type KeepAlive } from './ui/keepAlive';
+export {
+    SCRUB_EDGE_PX,
+    SCRUB_SLOP_PX,
+    clampPreviewCentre,
+    formatClock,
+    isOnBar,
+    pointerRatio,
+    previewTimes,
+} from './ui/scrubPreview';
+export { default as ScrubThumbnail } from './components/ScrubThumbnail.vue';
+export { installAutoHide, AUTO_HIDE_MS, type ControlsStore } from './ui/autoHide';
+export { buildControlsHtml, type ControlsHtmlOptions } from './ui/controlsHtml';
 export { isYouTubeUrl, extractYouTubeId, toVideoJsYouTubeUrl } from './youtube';
 export { singleFlight } from './singleFlight';

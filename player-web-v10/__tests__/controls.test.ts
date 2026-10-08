@@ -29,4 +29,9 @@ describe('mergeControls', () => {
         ).toBe(10);
         expect(mergeControls({ audioMenu: 1 as unknown as boolean }).audioMenu).toBe(true);
     });
+
+    it('no longer offers an audio/video toggle: another experience owns it', () => {
+        expect(DEFAULT_CONTROLS).not.toHaveProperty('audioVideoToggle');
+        expect(mergeControls({ audioVideoToggle: false } as never)).not.toHaveProperty('audioVideoToggle');
+    });
 });

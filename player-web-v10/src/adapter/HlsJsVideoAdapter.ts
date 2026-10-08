@@ -534,6 +534,7 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         this.stopPersistingBandwidth = null;
         this.engine = engine;
         this.stallSignals.attach(engine);
+        this.attachListListeners();
         if (!engine) return;
         engine.on(Hls.Events.ERROR, this.onEngineError);
         this.stopPersistingBandwidth = persistBandwidth(engine);
@@ -579,10 +580,16 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
     }
 
     /**
-     * The rendition and audio-track lists outlive individual sources and engines, so their change
-     * events are forwarded from one subscription each rather than re-attached per load.
+     * Forwards the rendition and audio-track lists' change events.
+     *
+     * `<hlsjs-video>` builds a fresh pair of lists with each engine and has none while there is no
+     * engine, so these are bound when an engine appears (see {@link bindEngine}), not once at
+     * construction, when there is nothing to bind to yet. Bound once, no track change after the first load
+     * would ever reach the controller: the element's own list says Deutsch and the player's state says English.
      */
     private attachListListeners(): void {
+        // Re-entrant: each engine builds its own lists, so this runs again for every one.
+        this.detachListListeners();
         const renditions = this.el.videoRenditions;
         if (renditions) {
             const onVariants = (): void => this.emit('variants-updated', undefined);
@@ -603,6 +610,11 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
                 this.listListeners.push(() => tracks.removeEventListener(type, onAudioTracks));
             }
         }
+    }
+
+    private detachListListeners(): void {
+        for (const detach of this.listListeners) detach();
+        this.listListeners = [];
     }
 
     /**
@@ -651,8 +663,7 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         this.onVisibilityChange = null;
         for (const [type, handler] of this.elementListeners) this.el.removeEventListener(type, handler);
         this.elementListeners = [];
-        for (const detach of this.listListeners) detach();
-        this.listListeners = [];
+        this.detachListListeners();
         this.activeTextTrackId = null;
         this.listeners.clear();
         // The element is not disposed: it belongs to the component that made it.

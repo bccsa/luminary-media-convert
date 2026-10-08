@@ -1,16 +1,16 @@
 <script setup lang="ts">
 /**
- * The Luminary web player on Video.js 10: `player-core` playback inside v10's packaged video skin.
+ * The Luminary web player on Video.js 10: `player-core` playback inside controls laid out for it.
  *
  * A `PlayerController` over an `HlsJsVideoAdapter` munges the master (LMCENC decrypt, angle
- * extraction, quality capping) and hands hls.js a blob playlist plus an in-memory key. The skin is
- * v10's own, unmodified; the props that shaped the Video.js 8 chrome (`controls`) are accepted so a
- * host compiles unchanged, but the packaged skin cannot honour them — see the migration notes.
+ * extraction, quality capping) and hands hls.js a blob playlist plus an in-memory key. The chrome is
+ * composed here from v10's `media-*` elements rather than taken from its packaged skin, because the
+ * packaged skin's control set is fixed: it has no skip buttons, no way to leave a menu out and no
+ * bare windowed frame. The default skin's stylesheet still draws the buttons, icons and menus.
  */
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
-import '@videojs/html/video/player';
-import '@videojs/html/video/skin';
-import '@videojs/html/media/hlsjs-video';
+// The elements and icons the controls use, and no others; see the module for why not the packaged skin.
+import '../ui/register';
 import {
     AUDIO_ONLY_ANGLE_ID,
     PlayerController,
@@ -21,6 +21,7 @@ import type {
     PlayerControllerOptions,
     PlayerError,
     PlayerSource,
+    ThumbnailSpriteCue,
 } from '@luminary-media-converter/player-core';
 import { HlsJsVideoAdapter } from '../adapter/HlsJsVideoAdapter';
 import type { HlsJsVideoElement } from '../adapter/hlsTypes';
@@ -29,19 +30,27 @@ import { usePlayerState } from '../composables/usePlayerState';
 import { mergeMessages, type PlayerMessages } from '../messages';
 import { mergeControls, type PlayerControlsOptions } from '../controls';
 import { createKeepAlive, SILENT_AUDIO_DATA_URI, type KeepAlive } from '../ui/keepAlive';
+import { buildControlsHtml } from '../ui/controlsHtml';
+import { installAutoHide, type ControlsStore } from '../ui/autoHide';
+import { stepVolume } from '../ui/volume';
+import {
+    SCRUB_EDGE_PX,
+    clampPreviewCentre,
+    formatClock,
+    isOnBar,
+    pointerRatio,
+    previewTimes,
+} from '../ui/scrubPreview';
+import ScrubThumbnail from './ScrubThumbnail.vue';
 import { imageAttempts, toPlayerImage, type PlayerImageInput } from '../image';
 import { isYouTubeUrl } from '../youtube';
-import AudioVideoToggle from './AudioVideoToggle.vue';
 
 interface Props {
     /** What to play. Assigning a new object reloads the player. */
     source: PlayerSource;
     /** UI strings merged over the English defaults. */
     messages?: Partial<PlayerMessages>;
-    /**
-     * Accepted for compatibility with the Video.js 8 player. The packaged v10 skin has a fixed
-     * control set, so only `audioVideoToggle` still has an effect.
-     */
+    /** Which controls to offer, and how far the skip buttons move. Anything omitted keeps the default. */
     controls?: Partial<PlayerControlsOptions>;
     /** Artwork under the picture, until the first frame and while audio-only. */
     poster?: PlayerImageInput;
@@ -67,16 +76,29 @@ const emit = defineEmits<{
 const mediaEl = shallowRef<HlsJsVideoElement | null>(null);
 const keepAliveEl = ref<HTMLAudioElement | null>(null);
 const playerEl = ref<HTMLElement | null>(null);
+const containerEl = ref<HTMLElement | null>(null);
 const controller = shallowRef<PlayerControllerApi | null>(null);
 const isFullscreen = ref(false);
 const frameWidth = ref(0);
 let frameObserver: ResizeObserver | null = null;
 let keepAlive: KeepAlive | null = null;
+let removeAutoHide: (() => void) | null = null;
 
 const state = usePlayerState(controller);
 const msg = computed(() => mergeMessages(props.messages));
 const mergedControls = computed(() => mergeControls(props.controls));
 const isYouTube = computed(() => isYouTubeUrl(props.source.masterUrl));
+
+/** Element ids in the controls (menu triggers point at their menus by id) must not collide between players. */
+const instanceId = `lmpl-${Math.random().toString(36).slice(2, 9)}`;
+const controlsHtml = computed(() => buildControlsHtml(mergedControls.value, instanceId));
+
+/**
+ * Clicking the picture plays and pauses, and a touch brings the controls up. A bare windowed frame
+ * answers neither: the host's own interface is the transport, and a frame that also answered clicks
+ * would be a second one. Fullscreen has no other transport, so it answers both.
+ */
+const gesturesOn = computed(() => mergedControls.value.windowedControls || isFullscreen.value);
 
 const UNSUPPORTED_YOUTUBE: PlayerError = {
     code: 'media',
@@ -210,6 +232,22 @@ const mediaListeners: [string, EventListener][] = [];
 let audioTrackList: EventTarget | undefined;
 let textTrackList: EventTarget | undefined;
 
+/**
+ * Listens to the element's audio and text track lists, for a choice made in the player's own menus.
+ * `<hlsjs-video>` builds new lists with each engine and has none before one exists, so this runs on every
+ * load, not once at mount: bound once, a language picked in the card would reach the engine but never the
+ * controller, and the player's state would go on saying English.
+ */
+function bindTrackLists(): void {
+    audioTrackList?.removeEventListener('change', onEngineAudioTrackChange);
+    textTrackList?.removeEventListener('change', onEngineTextTrackChange);
+    const media = mediaEl.value;
+    audioTrackList = media?.audioTracks as unknown as EventTarget | undefined;
+    textTrackList = media?.textTracks as unknown as EventTarget | undefined;
+    audioTrackList?.addEventListener('change', onEngineAudioTrackChange);
+    textTrackList?.addEventListener('change', onEngineTextTrackChange);
+}
+
 onMounted(() => {
     const media = mediaEl.value;
     if (!media) return;
@@ -231,10 +269,8 @@ onMounted(() => {
 
     keepAlive = createKeepAlive(keepAliveEl.value);
 
-    audioTrackList = media.audioTracks as unknown as EventTarget | undefined;
-    audioTrackList?.addEventListener('change', onEngineAudioTrackChange);
-    textTrackList = media.textTracks as unknown as EventTarget | undefined;
-    textTrackList?.addEventListener('change', onEngineTextTrackChange);
+    on('loadstart', bindTrackLists);
+    bindTrackLists();
 
     const frame = playerEl.value;
     if (frame && typeof ResizeObserver !== 'undefined') {
@@ -244,6 +280,8 @@ onMounted(() => {
         frameObserver.observe(frame);
     }
     document.addEventListener('fullscreenchange', onFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+    if (containerEl.value) removeAutoHide = installAutoHide(containerEl.value, store);
     void loadSource(props.source);
 });
 
@@ -267,6 +305,9 @@ onBeforeUnmount(() => {
     audioTrackList?.removeEventListener('change', onEngineAudioTrackChange);
     textTrackList?.removeEventListener('change', onEngineTextTrackChange);
     document.removeEventListener('fullscreenchange', onFullscreenChange);
+    document.removeEventListener('webkitfullscreenchange', onFullscreenChange);
+    removeAutoHide?.();
+    removeAutoHide = null;
     frameObserver?.disconnect();
     frameObserver = null;
     keepAlive?.dispose();
@@ -298,15 +339,57 @@ function retry(): void {
 
 // --- fullscreen and the media surface ---------------------------------------
 
-interface PlayerStore {
+interface PlayerStore extends ControlsStore {
     requestFullscreen(): Promise<void>;
     exitFullscreen(): Promise<void>;
+    volume: number;
+    muted: boolean;
+    setVolume(volume: number): number;
+    setMuted(muted: boolean): boolean;
 }
 
 const store = (): PlayerStore | undefined => (playerEl.value as unknown as { store?: PlayerStore } | null)?.store;
 
 function onFullscreenChange(): void {
-    isFullscreen.value = document.fullscreenElement !== null;
+    const doc = document as Document & { webkitFullscreenElement?: Element | null };
+    isFullscreen.value = (doc.fullscreenElement ?? doc.webkitFullscreenElement ?? null) !== null;
+    // A control clicked in fullscreen keeps focus once the bare frame hides it again, and a focused
+    // control swallows every key but Tab: the host's shortcuts would stay dead until something else
+    // took focus.
+    if (isFullscreen.value || mergedControls.value.windowedControls) return;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && containerEl.value?.contains(active)) active.blur();
+}
+
+/**
+ * The volume card's plus and minus buttons, caught on the container rather than bound one by one:
+ * the controls are markup, not Vue elements, and a card in the top layer is still inside it for events.
+ * Raising the volume of a muted player unmutes it, which is what pressing plus means.
+ */
+function onControlsClick(event: MouseEvent): void {
+    const target = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-volume-step]') : null;
+    const player = store();
+    if (!target || !player) return;
+    const media = mediaEl.value;
+    if (!media) return;
+    const direction = target.dataset.volumeStep === '-1' ? -1 : 1;
+    // Read and written on the element, which is the truth: the store follows it a moment later, and a
+    // press in that moment would step from a volume that is already out of date, or ask the store to unmute
+    // a player it believes is not muted.
+    if (direction === 1 && media.muted) media.muted = false;
+    player.setVolume(stepVolume(media.volume, direction));
+}
+
+/**
+ * A double-click toggles fullscreen anywhere on the picture, in both directions. What is refused is a
+ * double-click on an actual control, where it is two presses of that control rather than a gesture on
+ * the picture. Not v10's own double-tap, which seeks when it lands on the left or right third.
+ */
+function onFrameDoubleClick(event: MouseEvent): void {
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('.lmpl-cluster, .lmpl-bottom, .media-popup')) return;
+    if (isFullscreen.value) exitFullscreen();
+    else void enterFullscreen();
 }
 
 async function enterFullscreen(): Promise<void> {
@@ -342,23 +425,110 @@ function pause(): void {
     mediaEl.value?.pause();
 }
 
-// --- audio / video toggle -------------------------------------------------
+// --- audio-only -------------------------------------------------------------
 
-/** Offered only when pressing it would go somewhere; see the Video.js 8 component for the reasoning. */
-const showAudioVideoToggle = computed(() => {
-    if (!mergedControls.value.audioVideoToggle) return false;
-    if (isYouTube.value || controller.value === null) return false;
-    const snapshot = state.value;
-    if (snapshot.lifecycle !== 'ready') return false;
-    if (!snapshot.angles.some((angle) => angle.id === AUDIO_ONLY_ANGLE_ID)) return false;
-    const inAudioOnly = snapshot.isAudioOnly || snapshot.activeAngleId === AUDIO_ONLY_ANGLE_ID;
-    return !inAudioOnly || snapshot.angles.some((angle) => angle.id !== AUDIO_ONLY_ANGLE_ID);
-});
-
+/** Whether the picture is off — the audio-only rendering is what is playing. Read from the controller, so it survives a reload. */
 const isAudioOnly = computed(
     () =>
         controller.value !== null &&
         (state.value.isAudioOnly || state.value.activeAngleId === AUDIO_ONLY_ANGLE_ID)
+);
+
+// --- scrub preview ----------------------------------------------------------
+
+interface ScrubState {
+    cue: ThumbnailSpriteCue | null;
+    label: string;
+    /** Centre of the preview, in px from the container's left edge. */
+    left: number;
+    /** Gap, in px, between the container's bottom edge and the preview's. */
+    bottom: number;
+}
+
+const scrub = shallowRef<ScrubState | null>(null);
+
+/**
+ * Scales with the player, like the controls: a thumbnail sized for a phone is a stamp on a 2000px screen.
+ * A sixth of the width, between the 168px the Video.js 8 player used and a size past which the sprite's own
+ * 160px frames only blur.
+ */
+const scrubWidth = computed(() => Math.round(Math.min(340, Math.max(168, frameWidth.value / 6))));
+
+/** Room the preview keeps above the bar. */
+const SCRUB_GAP_PX = 14;
+
+function hideScrub(): void {
+    if (scrub.value) scrub.value = null;
+}
+
+/**
+ * Whether a press that began on the bar is still held. Tracked here rather than read from Video.js's
+ * `data-dragging`, and not inferred from pointer capture: engines differ in both, and a drag that wanders
+ * off the bar must keep its preview for as long as the button is down, wherever the pointer goes.
+ */
+let scrubbing = false;
+
+/** The press ended, or was taken from us: nothing is being scrubbed any more. */
+function endScrub(): void {
+    scrubbing = false;
+    hideScrub();
+}
+
+/**
+ * Follows the pointer over, or dragging, the timeline: where the viewer is about to land, which is not
+ * where the video is. Driven from the container's pointer events rather than the slider's own, because
+ * they cover a mouse hovering and a finger dragging alike, and a dragged slider holds the pointer
+ * captured, so its events keep arriving after the pointer has left it.
+ *
+ * Offered only once there are frames to show: without them the timeline's own time readout stays.
+ */
+function updateScrub(event: PointerEvent): void {
+    const container = containerEl.value;
+    const slider = container?.querySelector<HTMLElement>('.lmpl-time-slider');
+    const media = mediaEl.value;
+    const instance = controller.value;
+    if (!container || !slider || !media || !instance || !state.value.thumbnailsReady) return hideScrub();
+
+    // Live has no length to scrub across.
+    const duration = media.duration;
+    if (!Number.isFinite(duration) || duration <= 0) return hideScrub();
+
+    const bar = slider.getBoundingClientRect();
+    const onBar = isOnBar(event.clientX, event.clientY, bar);
+    if (event.type === 'pointerdown' && onBar) scrubbing = true;
+    if (!scrubbing && !slider.hasAttribute('data-dragging') && !onBar) return hideScrub();
+
+    const ratio = pointerRatio(event.clientX, bar);
+    if (ratio === null) return hideScrub();
+    const { time, lookup } = previewTimes(ratio, duration);
+
+    const frame = container.getBoundingClientRect();
+    scrub.value = {
+        // A lookup that lands in a gap in the cues keeps the frame already on show: a preview that blanks
+        // for a moment between two frames reads as a fault, and a stale frame a hair away is not.
+        cue: instance.thumbnailAt(lookup) ?? scrub.value?.cue ?? null,
+        label: formatClock(time, duration >= 3600),
+        left: clampPreviewCentre(event.clientX - frame.left, scrubWidth.value, SCRUB_EDGE_PX, frame.width - SCRUB_EDGE_PX),
+        bottom: frame.bottom - bar.top + SCRUB_GAP_PX,
+    };
+}
+
+/**
+ * Fetches the first sprite sheet the moment there is one, so the first hover is not a blank frame
+ * waiting on an image. Later sheets load as the pointer reaches them.
+ */
+watch(
+    () => state.value.thumbnailsReady,
+    (ready) => {
+        if (!ready) return;
+        const first = controller.value?.thumbnailAt(0);
+        if (first) new Image().src = first.spriteUrl;
+    }
+);
+
+watch(
+    () => props.source,
+    () => hideScrub()
 );
 
 // --- artwork ----------------------------------------------------------------
@@ -394,10 +564,32 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
 </script>
 
 <template>
-    <div class="lmpl-root">
+    <div
+        class="lmpl-root"
+        :class="{
+            'lmpl-windowed-bare': !mergedControls.windowedControls,
+            'lmpl-is-fullscreen': isFullscreen,
+            'lmpl-has-quality-choice': state.qualities.length > 1,
+            'lmpl-has-audio-choice': state.audioTracks.length > 1,
+            'lmpl-has-subtitles': state.subtitleTracks.length > 0,
+            'lmpl-has-thumbs': state.thumbnailsReady,
+        }"
+    >
         <video-player ref="playerEl" class="lmpl-video-player">
-            <video-skin class="lmpl-skin">
-                <!-- Slotted into the skin's container, so the artwork goes fullscreen with the picture. -->
+            <media-container
+                ref="containerEl"
+                class="media-skin media-container lmpl-container"
+                data-theme="default"
+                data-preset="video"
+                @dblclick="onFrameDoubleClick"
+                @click="onControlsClick"
+                @pointermove="updateScrub"
+                @pointerdown.capture="updateScrub"
+                @pointerleave="hideScrub"
+                @pointerup.capture="endScrub"
+                @pointercancel.capture="endScrub"
+            >
+                <!-- Inside the container, so the artwork goes fullscreen with the picture. -->
                 <div
                     v-if="showArtworkLayer"
                     class="lmpl-artwork"
@@ -431,8 +623,17 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
                         />
                     </svg>
                 </div>
-                <hlsjs-video ref="mediaEl" playsinline preload="auto"></hlsjs-video>
-            </video-skin>
+                <hlsjs-video ref="mediaEl" class="lmpl-media" playsinline preload="auto"></hlsjs-video>
+
+                <media-gesture v-if="gesturesOn" type="tap" action="togglePaused" pointer="mouse" region="center"></media-gesture>
+                <media-gesture v-if="gesturesOn" type="tap" action="toggleControls" pointer="touch"></media-gesture>
+
+                <media-controls class="lmpl-controls" v-html="controlsHtml"></media-controls>
+
+                <div v-if="scrub" class="lmpl-scrub-preview" :style="{ left: `${scrub.left}px`, bottom: `${scrub.bottom}px` }">
+                    <ScrubThumbnail :cue="scrub.cue" :label="scrub.label" :width="scrubWidth" />
+                </div>
+            </media-container>
         </video-player>
 
         <!-- Keeps the iOS audio session open across a re-source; see ui/keepAlive.ts. -->
@@ -467,18 +668,16 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
                 </div>
             </slot>
         </template>
-
-        <transition name="lmpl-fade">
-            <AudioVideoToggle
-                v-if="showAudioVideoToggle"
-                :state="state"
-                :controller="controller"
-                :messages="msg"
-            />
-        </transition>
     </div>
 </template>
 
 <style>
+/*
+ * Stylesheet order is load-bearing: the default skin's rules come first and `styles.css` overrides
+ * them. They are `@import`ed from a style block rather than `import`ed from a script, because
+ * TypeScript preserves a side-effect `import` in the emitted `.d.ts`, where a consumer type-checking
+ * with `skipLibCheck: false` then fails to resolve `.css`.
+ */
+@import '../generated/skin.css';
 @import '../styles.css';
 </style>
