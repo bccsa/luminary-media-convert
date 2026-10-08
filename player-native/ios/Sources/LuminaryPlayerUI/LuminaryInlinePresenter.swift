@@ -28,6 +28,8 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
     private var routePicker: AVRoutePickerView?
     private var rotationObserver: NSObjectProtocol?
     private var frameObservation: NSKeyValueObservation?
+    private var wasOnScreen = false
+    private var settleCheck: DispatchWorkItem?
     /// What the web view looked like before it was made see-through.
     private var restore: (opaque: Bool, background: UIColor?, scrollBackground: UIColor?)?
 
@@ -71,7 +73,28 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
         }
         layout()
         makeTransparent(webView)
+        let onScreen = view.frame.intersects(webView.frame)
+        if onScreen && !wasOnScreen && videoView != nil && !suspended {
+            // A paused picture that was moved out of sight (the player slid away) comes back with
+            // no frame until something redraws it: attach the layer afresh.
+            view.playerLayer.player = nil
+        }
+        wasOnScreen = onScreen
         view.playerLayer.player = suspended ? nil : player
+        scheduleSettleCheck()
+    }
+
+    /// Once the page stops moving the picture, a layer with nothing to show is attached afresh.
+    private func scheduleSettleCheck() {
+        settleCheck?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, !self.suspended, let layer = self.videoView?.playerLayer,
+                  self.wasOnScreen, !layer.isReadyForDisplay else { return }
+            layer.player = nil
+            layer.player = self.player
+        }
+        settleCheck = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
     }
 
     /// The page's coordinates are the web view's: its own origin, then the frame.
@@ -155,6 +178,8 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
         routePicker?.removeFromSuperview()
         routePicker = nil
         frameObservation = nil
+        settleCheck?.cancel()
+        wasOnScreen = false
         videoView?.playerLayer.player = nil
         videoView?.removeFromSuperview()
         videoView = nil
