@@ -19,14 +19,14 @@ const SEGMENT = 2;
 const run = (args) => execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args], { stdio: 'inherit' });
 
 /** Encodes one clear fMP4 HLS ladder (two video renditions, one audio group). */
-function encodeLadder(dir, { singleFile = false } = {}) {
+function encodeLadder(dir, { singleFile = false, audios = [{ freq: 440, lang: 'eng', name: 'English' }] } = {}) {
     mkdirSync(dir, { recursive: true });
     const args = [
         '-f', 'lavfi', '-i', `testsrc2=size=640x360:rate=25:duration=${DURATION}`,
-        '-f', 'lavfi', '-i', `sine=frequency=440:sample_rate=48000:duration=${DURATION}`,
+        ...audios.flatMap((a) => ['-f', 'lavfi', '-i', `sine=frequency=${a.freq}:sample_rate=48000:duration=${DURATION}`]),
         '-filter_complex',
         '[0:v]split=2[a][b];[a]scale=640:360,setsar=1[v0];[b]scale=320:180,setsar=1[v1]',
-        '-map', '[v0]', '-map', '[v1]', '-map', '1:a',
+        '-map', '[v0]', '-map', '[v1]', ...audios.flatMap((_, i) => ['-map', `${i + 1}:a`]),
         '-c:v', 'libx264', '-preset', 'veryfast', '-g', '50', '-keyint_min', '50', '-sc_threshold', '0',
         '-b:v:0', '800k', '-b:v:1', '250k',
         '-c:a', 'aac', '-b:a', '64k',
@@ -34,7 +34,10 @@ function encodeLadder(dir, { singleFile = false } = {}) {
         '-hls_segment_type', 'fmp4', '-hls_flags', singleFile ? 'independent_segments+single_file' : 'independent_segments',
         ...(singleFile ? [] : ['-hls_segment_filename', join(dir, 'v%v_%03d.m4s')]),
         '-master_pl_name', 'master.m3u8',
-        '-var_stream_map', 'v:0,agroup:aud v:1,agroup:aud a:0,agroup:aud,name:audio,default:yes',
+        '-var_stream_map', [
+            'v:0,agroup:aud', 'v:1,agroup:aud',
+            ...audios.map((a, i) => `a:${i},agroup:aud,language:${a.lang},name:${i === 0 ? 'audio' : `audio${i}`}${i === 0 ? ',default:yes' : ''}`),
+        ].join(' '),
         join(dir, 'v%v.m3u8'),
     ];
     run(args);
@@ -113,8 +116,59 @@ function buildByteRange() {
     }
 }
 
+/**
+ * A scrub-preview sprite sheet and the `thumbnails.vtt` that indexes it, in the shape the encoder
+ * writes: one frame a second, laid out five to a row, each cue `sheet#xywh=x,y,w,h` relative to the VTT.
+ * An encrypted session wraps the VTT (LMCENC) and leaves the sprite image plain.
+ */
+const THUMB_W = 160;
+const THUMB_H = 90;
+const THUMB_COLUMNS = 5;
+
+function vttTime(seconds) {
+    const ms = Math.round(seconds * 1000);
+    const pad = (n, w = 2) => String(n).padStart(w, '0');
+    return `${pad(Math.floor(ms / 3600000))}:${pad(Math.floor(ms / 60000) % 60)}:${pad(Math.floor(ms / 1000) % 60)}.${pad(ms % 1000, 3)}`;
+}
+
+function addThumbnails(dir, { encrypt = false } = {}) {
+    mkdirSync(dir, { recursive: true });
+    const rows = Math.ceil(DURATION / THUMB_COLUMNS);
+    run([
+        '-f', 'lavfi', '-i', `testsrc2=size=640x360:rate=25:duration=${DURATION}`,
+        '-vf', `fps=1,scale=${THUMB_W}:${THUMB_H},tile=${THUMB_COLUMNS}x${rows}`,
+        '-frames:v', '1', '-q:v', '4',
+        join(dir, 'thumbnails_0.jpg'),
+    ]);
+    const lines = ['WEBVTT', ''];
+    for (let i = 0; i < DURATION; i++) {
+        const x = (i % THUMB_COLUMNS) * THUMB_W;
+        const y = Math.floor(i / THUMB_COLUMNS) * THUMB_H;
+        // The last cue runs to the end of the media, which is a hair longer than a whole number of seconds.
+        const end = i === DURATION - 1 ? DURATION + 0.5 : i + 1;
+        lines.push(`${vttTime(i)} --> ${vttTime(end)}`, `thumbnails_0.jpg#xywh=${x},${y},${THUMB_W},${THUMB_H}`, '');
+    }
+    const text = Buffer.from(lines.join('\n'));
+    writeFileSync(join(dir, 'thumbnails.vtt'), encrypt ? lmcenc(text) : text);
+}
+
+/** Two audio languages in one group, so the player has a language to choose. */
+function buildMultiAudio() {
+    encodeLadder(join(OUT, 'multiaudio'), {
+        audios: [
+            { freq: 440, lang: 'eng', name: 'English' },
+            { freq: 880, lang: 'afr', name: 'Afrikaans' },
+        ],
+    });
+}
+
 rmSync(OUT, { recursive: true, force: true });
 buildClear();
 buildEncrypted();
 buildByteRange();
+buildMultiAudio();
+addThumbnails(join(OUT, 'clear'));
+addThumbnails(join(OUT, 'encrypted'), { encrypt: true });
+addThumbnails(join(OUT, 'byterange'));
+addThumbnails(join(OUT, 'multiaudio'));
 console.log(`fixtures written to ${OUT}`);

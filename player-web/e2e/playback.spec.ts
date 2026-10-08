@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-const FIXTURES = 'http://127.0.0.1:5190';
+const FIXTURES = `http://127.0.0.1:${process.env.FIXTURE_PORT ?? 5191}`;
 const KEY_HEX = '00112233445566778899aabbccddeeff';
 const STORAGE_KEY = 'luminary-legacy-player-demo';
 
@@ -88,3 +88,29 @@ test('opens straight into playback from a link', async ({ page }) => {
     await expect.poll(() => page.locator('video').evaluate((v: HTMLVideoElement) => v.currentTime), { timeout: 20_000 }).toBeGreaterThan(2);
     await expect(stat(page, 'lifecycle')).not.toHaveText('error');
 });
+
+// Playing is not the same as sounding. A build of hls.js without alternate audio plays every picture here
+// without a sound, reports no error and a lifecycle of "ready", and every check above that reads the playhead
+// still passes. This reads what the browser has decoded.
+const NATIVE_KEY = '6c756d696e6172792d737069a4e2c0de';
+for (const [name, fixture, key] of [
+    ['one audio group', 'clear', ''],
+    ['an encrypted one', 'encrypted', KEY_HEX],
+    ['four languages, encrypted, two angles', 'native', NATIVE_KEY],
+] as const) {
+    test(`decodes audio, not only picture: ${name}`, async ({ page }) => {
+        await load(page, fixture, key);
+        const video = page.locator('video');
+        const decoded = () =>
+            video.evaluate((v: HTMLVideoElement) => ({
+                audio: (v as unknown as { webkitAudioDecodedByteCount?: number }).webkitAudioDecodedByteCount,
+                video: (v as unknown as { webkitVideoDecodedByteCount?: number }).webkitVideoDecodedByteCount,
+            }));
+        await video.evaluate((v: HTMLVideoElement) => { v.muted = false; v.volume = 1; return v.play().catch(() => undefined); });
+        await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.currentTime), { timeout: 30_000 }).toBeGreaterThan(3);
+        const bytes = await decoded();
+        test.skip(bytes.audio === undefined, 'this browser does not report decoded bytes');
+        expect(bytes.video, 'the picture is decoding').toBeGreaterThan(0);
+        expect(bytes.audio, 'and so is the sound').toBeGreaterThan(0);
+    });
+}

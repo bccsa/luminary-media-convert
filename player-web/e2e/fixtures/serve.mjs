@@ -4,7 +4,14 @@ import { createServer } from 'node:http';
 import { dirname, extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), 'out');
+const HERE = dirname(fileURLToPath(import.meta.url));
+const ROOT = join(HERE, 'out');
+/**
+ * The native player's sample stream, read where it lives rather than copied (54 MB): two angles, four languages,
+ * AES-128 under `luminary://key`, byte-range chunk chains. Served at `/native/`; its key is
+ * 6c756d696e6172792d737069a4e2c0de.
+ */
+const NATIVE = join(HERE, '../../../player-native/spike/android/app/src/main/assets/stream');
 const PORT = Number(process.env.FIXTURE_PORT ?? 5190);
 const TYPES = { '.m3u8': 'application/vnd.apple.mpegurl', '.m4s': 'video/iso.segment', '.mp4': 'video/mp4' };
 /** Every request seen, so a test can assert on what the player asked for. */
@@ -66,8 +73,10 @@ createServer((req, res) => {
         }
         return serveFile(req, res, live.file);
     }
-    const file = normalize(join(ROOT, url.pathname));
-    if (!file.startsWith(ROOT) || !existsSync(file) || !statSync(file).isFile()) {
+    const native = url.pathname.startsWith('/native/');
+    const base = native ? NATIVE : ROOT;
+    const file = normalize(join(base, native ? url.pathname.slice('/native'.length) : url.pathname));
+    if (!file.startsWith(base) || !existsSync(file) || !statSync(file).isFile()) {
         return void res.writeHead(404).end();
     }
     log.push({ path: url.pathname, range: req.headers.range ?? null, at: Date.now() });
