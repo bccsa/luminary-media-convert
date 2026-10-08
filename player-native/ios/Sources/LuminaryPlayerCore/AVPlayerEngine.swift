@@ -96,13 +96,22 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         observeInterruptions()
         // Turning the phone sideways while a landscape video plays in the page opens full-screen,
         // as a video app does; a portrait video, a paused one and audio stay where they are.
+        inline?.onRotatedToPortrait = { [weak self] in self?.turnedWhileLoading = false }
         inline?.onPictureInPicture = { [weak self] active in
             // Started from the inline picture, which stays the picture's source: nothing lets go
             // of the player, and `inline` is what the page goes back to.
             self?.events?.presentationChanged((active ? Presentation.pip : Presentation.inline).rawValue)
         }
         inline?.onRotatedToLandscape = { [weak self] in
-            guard let self, self.hasVideo, self.intendedPlaying, self.videoIsLandscape else { return }
+            // Before the picture's size is known the turn counts: a viewer who turns the phone while
+            // the video loads wants the big picture, and full-screen has its own spinner. A video
+            // that turns out upright is let go of once its size is known (`leaveIfUpright`).
+            guard let self, self.hasVideo else { return }
+            // Turned before anything plays and before the size is known: the page starts playback
+            // a moment later (`play`), and the turn is remembered until then.
+            if !self.intendedPlaying && !self.pictureSizeKnown { self.turnedWhileLoading = true; return }
+            guard self.intendedPlaying, self.videoIsLandscape || !self.pictureSizeKnown else { return }
+            self.fullscreenBeforeSizeKnown = !self.pictureSizeKnown
             self.enterFullscreen(texts: nil)
         }
         ladder = RecoveryLadder(policy: .default, clock: clock, hooks: .init(
@@ -120,6 +129,22 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     }
 
     /// The picture is wider than tall: what turning the phone sideways is for. False until known.
+    private var fullscreenBeforeSizeKnown = false
+    private var turnedWhileLoading = false
+
+    private var pictureSizeKnown: Bool {
+        guard let size = item?.presentationSize else { return false }
+        return size.width > 0 && size.height > 0
+    }
+
+    /// Full-screen opened by a turn of the phone before the size was known, on a video that is
+    /// upright: the viewer is taken back to the page, where an upright video belongs.
+    private func leaveIfUpright() {
+        guard fullscreenBeforeSizeKnown, pictureSizeKnown else { return }
+        fullscreenBeforeSizeKnown = false
+        if !videoIsLandscape { exitFullscreen() }
+    }
+
     public var videoIsLandscape: Bool {
         guard let size = item?.presentationSize, size.width > 0, size.height > 0 else { return false }
         return size.width > size.height
@@ -266,6 +291,13 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     public func play() {
         intendedPlaying = true
         activateAudioSession()
+        if turnedWhileLoading {
+            turnedWhileLoading = false
+            if hasVideo {
+                fullscreenBeforeSizeKnown = !pictureSizeKnown
+                enterFullscreen(texts: nil)
+            }
+        }
         if ended {
             ended = false
             player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
@@ -448,6 +480,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     /// The viewer leaving full-screen does what `exitFullscreen` does, pause included, unless the
     /// video is shown in the page: it plays on there.
     private func leaveFullscreenByViewer() {
+        fullscreenBeforeSizeKnown = false
         exitFullscreen()
         if hasVideo, inlineFrame == nil { pause() }
     }
@@ -524,6 +557,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         case .readyToPlay:
             announceMetadata()
             loadAudioGroup(of: item)
+            leaveIfUpright()
         case .failed:
             fail(item.error)
         default:
@@ -536,6 +570,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     private func tracksChanged() {
         nowPlaying?.setHasVideo(hasVideo)
         if !hasVideo { exitFullscreen() }
+        leaveIfUpright()
     }
 
     private func durationChanged() {

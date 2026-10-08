@@ -23,6 +23,7 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
     private var suspended = false
     private weak var player: AVPlayer?
     public var onRotatedToLandscape: (() -> Void)?
+    public var onRotatedToPortrait: (() -> Void)?
     public var onPictureInPicture: ((Bool) -> Void)?
     private var pictureInPicture: AVPictureInPictureController?
     private var routePicker: AVRoutePickerView?
@@ -53,11 +54,12 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
     /// Only a video the page is showing, and that nothing else holds, turns into full-screen.
     private func rotated() {
         guard frame != nil, !suspended,
-              webView()?.window?.windowScene?.interfaceOrientation.isLandscape == true else { return }
-        onRotatedToLandscape?()
+              let landscape = webView()?.window?.windowScene?.interfaceOrientation.isLandscape else { return }
+        if landscape { onRotatedToLandscape?() } else { onRotatedToPortrait?() }
     }
 
     public func setFrame(_ frame: InlineFrame?, player: AVPlayer) {
+        let appeared = frame != nil && self.frame == nil
         self.frame = frame
         self.player = player
         guard let frame, let webView = webView(), let container = webView.superview else {
@@ -82,6 +84,11 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
         wasOnScreen = onScreen
         view.playerLayer.player = suspended ? nil : player
         scheduleSettleCheck()
+        // A turn that came before the picture had a place in the page was not heard (nothing to
+        // show yet); a phone already on its side when the picture appears counts as turned.
+        if appeared {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.rotated() }
+        }
     }
 
     /// Once the page stops moving the picture, a layer with nothing to show is attached afresh.

@@ -26,6 +26,9 @@ public protocol InlinePresenter: AnyObject {
     /// whether that opens full-screen (it plays, and its picture is wider than tall).
     var onRotatedToLandscape: (() -> Void)? { get set }
 
+    /// The phone was turned back upright while the video shows in the page.
+    var onRotatedToPortrait: (() -> Void)? { get set }
+
     /// Starts picture in picture from the inline picture. False when there is none to start from.
     func startPictureInPicture() -> Bool
 
