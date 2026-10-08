@@ -1,0 +1,192 @@
+/*
+ * What this package draws itself: the frame, the artwork layer, the host slot, the status panels and
+ * the audio/video toggle. The player chrome is Video.js 10's packaged skin, unmodified.
+ *
+ * Dark mode follows the app's convention: a `.dark` class on an ancestor, not `prefers-color-scheme`,
+ * because the host owns that decision.
+ */
+
+.lmpl-root {
+    /* Only the surfaces this package draws itself are themable; the video.js
+       chrome below is the app's, deliberately hard-coded to match it. */
+    --lmpl-text: #ffffff;
+    --lmpl-surface: rgba(9, 9, 11, 0.72);
+    --lmpl-surface-strong: rgba(9, 9, 11, 0.88);
+    --lmpl-border: rgba(255, 255, 255, 0.16);
+    --lmpl-radius-sm: 6px;
+    --lmpl-transition: 180ms ease;
+
+    position: relative;
+    display: block;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    background: transparent;
+    color: var(--lmpl-text);
+    box-sizing: border-box;
+}
+
+@media (min-width: 768px) {
+    .lmpl-root {
+        border-radius: 0.5rem;
+    }
+}
+
+.lmpl-artwork {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    overflow: hidden;
+    border-radius: inherit;
+    pointer-events: none;
+}
+
+/* Audio-only with no artwork is black, not whatever is behind the player. */
+.lmpl-artwork-audio {
+    background-color: #000;
+}
+
+.lmpl-artwork-img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/* Beneath the controls like the rest of the layer, so the centre play button
+   covers it rather than the other way round. */
+.lmpl-audio-glyph {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 4rem;
+    height: 4rem;
+    transform: translate(-50%, -50%);
+    color: rgba(255, 255, 255, 0.85);
+    filter: drop-shadow(0 1px 6px rgba(0, 0, 0, 0.55));
+}
+
+/* The keep-alive element is machinery, never a control. */
+.lmpl-keep-alive {
+    display: none;
+}
+
+/* The v10 player fills the frame; `isolation` keeps the artwork's z-index -1 inside it. */
+.lmpl-root .lmpl-video-player {
+    position: absolute;
+    inset: 0;
+    display: block;
+    isolation: isolate;
+}
+
+.lmpl-root .lmpl-skin {
+    width: 100%;
+    height: 100%;
+}
+
+/* --- Host overlay slot --------------------------------------------------- */
+
+.lmpl-slot {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+
+.lmpl-slot > * {
+    pointer-events: auto;
+}
+
+/* --- Status / error panels ----------------------------------------------- */
+
+.lmpl-panel {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.875rem;
+    padding: 1.5rem;
+    text-align: center;
+    background: var(--lmpl-surface);
+    box-sizing: border-box;
+    z-index: 3;
+}
+
+.lmpl-panel-text {
+    margin: 0;
+    font-size: 1rem;
+    line-height: 1.4;
+    color: var(--lmpl-text);
+}
+
+.lmpl-btn {
+    appearance: none;
+    border: 1px solid var(--lmpl-border);
+    border-radius: var(--lmpl-radius-sm);
+    background: transparent;
+    color: var(--lmpl-text);
+    font: inherit;
+    padding: 0.45rem 0.9rem;
+    cursor: pointer;
+    transition: background var(--lmpl-transition);
+}
+
+.lmpl-btn:hover,
+.lmpl-btn:focus-visible {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+/* --- Audio / video toggle ------------------------------------------------ */
+
+.lmpl-av-toggle {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    z-index: 4;
+    display: flex;
+    padding: 0;
+    border: none;
+    border-radius: 0.5rem;
+    background-color: rgba(113, 113, 122, 0.7);
+    cursor: pointer;
+}
+
+.lmpl-av-half {
+    display: flex;
+    padding: 0.25rem;
+    border-radius: 0.5rem;
+    background-color: transparent;
+}
+
+.lmpl-av-half-active {
+    background-color: rgba(24, 24, 27, 0.6);
+}
+
+.lmpl-av-icon {
+    display: block;
+    height: 1.5rem;
+    width: 1.5rem;
+    /* Inactive is legible against the pill, not invisible — the half that is
+       off is still the affordance telling a viewer the other mode exists. */
+    color: #27272a;
+}
+
+.lmpl-av-half-active .lmpl-av-icon {
+    color: #ffffff;
+}
+
+/* Quick to arrive, unhurried to leave: the toggle appears with the controls and
+   lingers past them, the app's asymmetry. */
+.lmpl-fade-enter-active {
+    transition: opacity 100ms ease-out;
+}
+
+.lmpl-fade-leave-active {
+    transition: opacity 500ms ease-in;
+}
+
+.lmpl-fade-enter-from,
+.lmpl-fade-leave-to {
+    opacity: 0;
+}
