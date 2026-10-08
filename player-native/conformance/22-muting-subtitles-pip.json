@@ -1,0 +1,203 @@
+{
+    "name": "setMuted, setSubtitleTrack and startPictureInPicture reach the engine, and a mute change is reported once",
+    "capabilities": {
+        "muting": true,
+        "subtitleSelection": true,
+        "pictureInPicture": true
+    },
+    "steps": [
+        {
+            "drive": {
+                "start": {}
+            }
+        },
+        {
+            "call": {
+                "method": "getInfo",
+                "result": {
+                    "protocolVersion": 1
+                }
+            }
+        },
+        {
+            "call": {
+                "method": "reset"
+            }
+        },
+        {
+            "call": {
+                "method": "create",
+                "args": {
+                    "protocolVersion": 1,
+                    "skipBackSeconds": 10,
+                    "skipForwardSeconds": 10
+                },
+                "result": {
+                    "playerId": "$player"
+                }
+            }
+        },
+        {
+            "call": {
+                "method": "load",
+                "args": {
+                    "playerId": "$player",
+                    "loadId": "$load1",
+                    "generation": 1,
+                    "masterUri": "luminary://asset/1/2.m3u8",
+                    "assets": [
+                        {
+                            "uri": "luminary://asset/1/1.m3u8",
+                            "contentType": "application/vnd.apple.mpegurl",
+                            "text": "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4.0,\nhttps://cdn.example.com/s/v/0.m4s\n#EXT-X-ENDLIST\n"
+                        },
+                        {
+                            "uri": "luminary://asset/1/2.m3u8",
+                            "contentType": "application/vnd.apple.mpegurl",
+                            "text": "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=854x480\nluminary://asset/1/1.m3u8\n"
+                        }
+                    ],
+                    "recovery": {
+                        "escalationWindowMs": 10000,
+                        "maxReloadAttempts": 3,
+                        "reloadDelaysMs": [
+                            2000,
+                            4000,
+                            8000
+                        ]
+                    }
+                }
+            },
+            "only": "native"
+        },
+        {
+            "event": {
+                "name": "audiotracks-updated",
+                "payload": {
+                    "playerId": "$player",
+                    "loadId": "$load1",
+                    "tracks": [],
+                    "activeId": null
+                }
+            },
+            "only": "native"
+        },
+        {
+            "call": {
+                "method": "setMuted",
+                "args": {
+                    "playerId": "$player",
+                    "muted": true
+                }
+            },
+            "only": "native"
+        },
+        {
+            "call": {
+                "method": "setSubtitleTrack",
+                "args": {
+                    "playerId": "$player",
+                    "label": "Fran\u00e7ais"
+                }
+            },
+            "only": "native"
+        },
+        {
+            "call": {
+                "method": "setSubtitleTrack",
+                "args": {
+                    "playerId": "$player"
+                }
+            },
+            "only": "native"
+        },
+        {
+            "call": {
+                "method": "startPictureInPicture",
+                "args": {
+                    "playerId": "$player"
+                }
+            },
+            "only": "native"
+        },
+        {
+            "expectEngine": [
+                {
+                    "method": "load"
+                },
+                {
+                    "method": "setMuted",
+                    "muted": true
+                },
+                {
+                    "method": "setSubtitleTrack",
+                    "label": "Fran\u00e7ais"
+                },
+                {
+                    "method": "setSubtitleTrack"
+                },
+                {
+                    "method": "startPictureInPicture"
+                }
+            ],
+            "only": "native"
+        },
+        {
+            "engine": {
+                "signal": "muted",
+                "muted": true
+            },
+            "only": "native"
+        },
+        {
+            "event": {
+                "name": "mutedchange",
+                "payload": {
+                    "playerId": "$player",
+                    "muted": true
+                }
+            },
+            "only": "native"
+        },
+        {
+            "engine": {
+                "signal": "muted",
+                "muted": true
+            },
+            "only": "native",
+            "note": "Only on a change."
+        },
+        {
+            "engine": {
+                "signal": "muted",
+                "muted": false
+            },
+            "only": "native"
+        },
+        {
+            "event": {
+                "name": "mutedchange",
+                "payload": {
+                    "playerId": "$player",
+                    "muted": false
+                }
+            },
+            "only": "native"
+        },
+        {
+            "call": {
+                "method": "setMuted",
+                "args": {
+                    "playerId": "$player",
+                    "muted": "yes"
+                },
+                "rejects": "invalid-argument"
+            },
+            "only": "native"
+        },
+        {
+            "expectNoEvents": true,
+            "only": "native"
+        }
+    ]
+}

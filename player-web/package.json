@@ -2,7 +2,7 @@
     "name": "@luminary-media-converter/player-web",
     "version": "0.0.1",
     "private": true,
-    "description": "Deprecated: the hls.js web player, superseded by @luminary-media-converter/player-web-legacy. Kept building for the encoder app until it moves.",
+    "description": "The Luminary web player: player-core playback in the Luminary app's Video.js chrome.",
     "license": "Apache-2.0",
     "type": "module",
     "main": "./dist/index.js",
@@ -30,7 +30,9 @@
     },
     "dependencies": {
         "@luminary-media-converter/player-core": "file:../player-core",
-        "hls.js": "^1.6.0"
+        "video.js": "8.23.4",
+        "videojs-mobile-ui": "1.1.1",
+        "videojs-youtube": "3.0.1"
     },
     "peerDependencies": {
         "vue": "^3.5.0"

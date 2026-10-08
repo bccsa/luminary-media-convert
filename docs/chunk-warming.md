@@ -129,6 +129,10 @@ a half-filled bag whose defaults it would have to know.
   object; small enough that a wasted warm costs nothing worth counting.
 - **`enabled`, default on.** For hosts that want no warming at all: a proxy that
   already warms, a metered connection, a test counting requests.
+  A native adapter also honours the platform's own data saver without being asked: iOS skips
+  the warm on a constrained network (Low Data Mode), Android when the system's Data Saver is on
+  for a metered network, and the engine's own request is the fallback,
+  as for any warm that does not happen. A host's data saver turns warming off through `enabled`.
 - **`debug`, default off.** Warming is invisible by design — one small ranged
   request per chunk among hundreds of media requests — so this narrates it
   instead: the schedule shape when armed, every warm with its trigger context
@@ -164,10 +168,10 @@ platform's own scheduling primitives, following the semantics above.
   (`PlayerAdapter.warmChunks`, `ChunkWarmOptions`, `ChunkBoundary`).
 - Policy resolution: `player-core/src/controller.ts`
   (`PlayerController.updateChunkWarming`).
-- The loop, for the web: `player-web-legacy/src/adapter/chunkWarming.ts`
-  (`ChunkPrefetcher`), wired up in
-  `player-web-legacy/src/adapter/VideoJsAdapter.ts`. `player-web` carries a
-  byte-identical copy until it is retired.
-- Behaviour pinned by `player-web/__tests__/chunk-warming.test.ts` (the loop),
-  `player-web/__tests__/adapter.test.ts` (the wiring and its lifecycle) and
-  `player-core/src/controller.spec.ts` (the handover).
+- The loop, for the web: `player-web/src/adapter/chunkWarming.ts`
+  (`ChunkPrefetcher`), wired up in `player-web/src/adapter/VideoJsAdapter.ts`.
+  The retired hls.js package, `player-web-old`, carries a frozen copy.
+- Behaviour pinned by `player-web/__tests__/chunkWarming.test.ts` (the loop)
+  and `player-core/src/controller.spec.ts` (the handover). The wiring into
+  `VideoJsAdapter` has no test of its own yet; the one that pinned the hls.js
+  copy's wiring (`player-web-old/__tests__/adapter.test.ts`) no longer runs.

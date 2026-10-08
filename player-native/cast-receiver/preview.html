@@ -1,0 +1,68 @@
+<!doctype html>
+<!-- The receiver without a Cast device: a stand-in for Google's framework and for the phone, to try
+     the menu in a desktop browser with the keyboard as the remote (arrows, Enter, Esc for Back).
+     `?keys=ArrowUp,Enter` presses those keys once the page is up. Not served to a TV. -->
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <title>Receiver preview</title>
+        <link rel="stylesheet" href="receiver.css" />
+        <style>
+            cast-media-player { background: linear-gradient(135deg, #234, #567); }
+            #log { position: absolute; left: 24px; bottom: 24px; z-index: 20; max-width: 50%; font: 14px/1.5 ui-monospace, monospace;
+                   color: #cfe; background: rgba(0, 0, 0, 0.6); padding: 8px 12px; border-radius: 8px; white-space: pre-wrap; }
+        </style>
+        <script>
+            const listeners = {};
+            const tracks = {
+                audio: [{ trackId: 1, language: 'en', name: 'ENG Bandwidth Saving' }, { trackId: 2, language: 'es', name: 'SPA Bandwidth Saving' }, { trackId: 3, language: 'fr' }],
+                text: [{ trackId: 9, language: 'en' }],
+            };
+            let activeAudio = 1, activeText = [];
+            const player = {
+                addEventListener: (type, fn) => ((listeners[type] ??= []).push(fn)),
+                getAudioTracksManager: () => ({ getTracks: () => tracks.audio, getActiveId: () => activeAudio, setActiveById: _setAudio }),
+                getTextTracksManager: () => ({ getTracks: () => tracks.text, getActiveIds: () => activeText, setActiveByIds: _setText }),
+            };
+            let custom;
+            const menu = { type: 'menu', angles: [{ id: 'cam1', label: 'Stage' }, { id: 'cam2', label: 'Wide' }, { id: '__audio__', label: 'Audio only' }], activeAngleId: 'cam1', qualities: [{ id: '1080', label: '1080p' }, { id: '720', label: '720p' }, { id: '480', label: '480p' }], activeQualityId: 'auto' };
+            function log(line) {
+                const el = document.getElementById('log');
+                if (el) el.textContent = [line, ...el.textContent.split('\n')].slice(0, 8).join('\n');
+            }
+            const _setAudio = (id) => { activeAudio = id; log(`TV: audio track ${id}`); };
+            const _setText = (ids) => { activeText = ids; log(`TV: subtitles ${ids.length ? ids.join(',') : 'off'}`); };
+            window.cast = { framework: {
+                events: { EventType: { PLAYER_LOAD_COMPLETE: 'load', PAUSE: 'pause' } },
+                system: { MessageType: { JSON: 'JSON' } },
+                CastReceiverContext: { getInstance: () => ({
+                    getPlayerManager: () => player,
+                    addCustomMessageListener: (_ns, fn) => (custom = fn),
+                    sendCustomMessage: (_ns, _to, data) => {
+                        log(`to phone: ${JSON.stringify(data)}`);
+                        // The phone applies a pick and sends the menu back with it chosen.
+                        if (data.type === 'select') {
+                            if (data.kind === 'angle') menu.activeAngleId = data.id;
+                            if (data.kind === 'quality') menu.activeQualityId = data.id;
+                            setTimeout(() => { custom({ data: { ...menu } }); log('from phone: menu'); }, 300);
+                        }
+                    },
+                    start: () => setTimeout(() => {
+                        (listeners.load ?? []).forEach((fn) => fn());
+                        custom({ data: { ...menu } });
+                        log('from phone: menu — press Up to open the settings');
+                        for (const key of (new URLSearchParams(location.search).get('keys') ?? '').split(',').filter(Boolean)) {
+                            window.dispatchEvent(new KeyboardEvent('keydown', { key }));
+                        }
+                    }, 50),
+                }) },
+            } };
+        </script>
+    </head>
+    <body>
+        <cast-media-player></cast-media-player>
+        <nav id="menu" class="menu" hidden></nav>
+        <div id="log"></div>
+        <script type="module" src="receiver.js"></script>
+    </body>
+</html>

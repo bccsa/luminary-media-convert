@@ -1,0 +1,61 @@
+/* The lab's chrome: iOS-like controls, matching the native spikes. */
+:root {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    color: #000;
+    background: #f2f2f7;
+    -webkit-tap-highlight-color: transparent;
+}
+body {
+    margin: 0;
+}
+/* Native draws the video behind the page (App.vue's inline toggle): the page itself is see-through. */
+:root.lab-inline {
+    background: transparent;
+}
+.capsule {
+    font: inherit;
+    font-size: 15px;
+    border: none;
+    border-radius: 999px;
+    padding: 7px 14px;
+    background: #e9e9eb;
+    color: #007aff;
+    cursor: pointer;
+}
+.capsule--prominent {
+    background: #007aff;
+    color: #fff;
+}
+.capsule:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+.segmented {
+    display: flex;
+    padding: 3px;
+    border-radius: 999px;
+    background: #e3e3e8;
+}
+.segmented button {
+    flex: 1;
+    font: inherit;
+    font-size: 15px;
+    border: none;
+    border-radius: 999px;
+    padding: 8px 6px;
+    background: transparent;
+    color: #000;
+    cursor: pointer;
+}
+.segmented button.selected {
+    background: #fff;
+    font-weight: 600;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+.segmented button:disabled {
+    opacity: 0.35;
+}
+.segmented--small button {
+    font-size: 13px;
+    padding: 5px 10px;
+}

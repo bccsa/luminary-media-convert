@@ -1,0 +1,12 @@
+ios/Spike.xcodeproj/
+ios/Spike/Info.plist
+ios/Spike/payload.json
+ios/build/
+android/app/src/main/assets/payload.json
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+android/.kotlin/
+android/app/src/main/assets/stream/

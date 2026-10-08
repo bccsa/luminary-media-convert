@@ -53,6 +53,13 @@ export class ChunkPrefetcher {
     private readonly log: ((message: string) => void) | null;
     /** Chunk URLs already asked for — a chunk is warmed at most once. */
     private readonly warmed = new Set<string>();
+    /**
+     * Chunk URLs the armed schedules could still warm. Warming each at most
+     * once means a source runs out of work, and once this is empty there is
+     * nothing left to do for the rest of the video — so the ticker stops
+     * rather than sampling the buffer every second until the source goes.
+     */
+    private unwarmed = new Set<string>();
 
     private schedules: ChunkBoundary[][] = [];
     private timer: ReturnType<typeof setInterval> | null = null;
@@ -87,6 +94,11 @@ export class ChunkPrefetcher {
                     )
                     .join(' '),
         );
+        this.unwarmed = warmableUrls(schedules, this.warmed);
+        if (this.unwarmed.size === 0) {
+            this.log?.('nothing left to warm; not ticking');
+            return;
+        }
         this.timer = setInterval(() => this.tick(), this.intervalMs);
     }
 
@@ -117,6 +129,8 @@ export class ChunkPrefetcher {
             // run that continues in the same object needs nothing.
             if (!next || next.url === current.url) continue;
             this.warm(next.url, watermark, current);
+            // That was the last one: `warm` stopped the ticker.
+            if (this.timer === null) return;
         }
     }
 
@@ -126,6 +140,7 @@ export class ChunkPrefetcher {
         // a failed warm is not retried — the engine's own request will do the
         // warming, later and more slowly, which is the status quo anyway.
         this.warmed.add(url);
+        this.unwarmed.delete(url);
 
         this.log?.(
             `warming ${tail(url)}: buffer front ${watermark.toFixed(1)}s, ` +
@@ -147,7 +162,32 @@ export class ChunkPrefetcher {
                 // Advisory: a warm that fails changes nothing the viewer sees.
                 this.log?.(`warm failed for ${tail(url)} (not retried)`);
             });
+
+        if (this.unwarmed.size === 0) {
+            this.log?.('every chunk warmed; ticker stopped');
+            this.stop();
+        }
     }
+}
+
+/**
+ * Every URL a set of schedules could warm, less the ones already warmed: each
+ * boundary whose chunk differs from the one before it. A chain's first chunk is
+ * never warmed — the engine's own start-up requests fetch it — and a run that
+ * continues in the same object needs nothing.
+ */
+function warmableUrls(
+    schedules: ChunkBoundary[][],
+    warmed: ReadonlySet<string>,
+): Set<string> {
+    const urls = new Set<string>();
+    for (const schedule of schedules) {
+        for (let i = 1; i < schedule.length; i++) {
+            const url = schedule[i]!.url;
+            if (url !== schedule[i - 1]!.url && !warmed.has(url)) urls.add(url);
+        }
+    }
+    return urls;
 }
 
 /** The last path segment — logs want `v0_1.m4s`, not a whole URL. */

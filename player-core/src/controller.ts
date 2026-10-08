@@ -144,6 +144,13 @@ export class PlayerController implements PlayerControllerApi {
      */
     private audioChoicePending = false;
     private qualityToVariant = new Map<string, string>();
+    /**
+     * A quality chosen through {@link setQuality} on an engine that cannot pin
+     * a rendition, which the munge applies as a height cap on every attach —
+     * an angle switch and a recovery re-munge keep it. Null for `'auto'`, and
+     * cleared by `load()`, since a new source is a new decision.
+     */
+    private qualityChoice: { id: string; height: number } | null = null;
     private startPosition = 0;
     private resumePlaying = false;
     private chapterTrackPinned = false;
@@ -183,6 +190,7 @@ export class PlayerController implements PlayerControllerApi {
         this.chapterTrackPinned = false;
         this.chosenAudioTrackId = null;
         this.audioChoicePending = false;
+        this.qualityChoice = null;
         this.cache = new Map();
         // `teardownSource` above released every URL the last source was
         // served at, so nothing it memoized can be handed out again.
@@ -280,7 +288,11 @@ export class PlayerController implements PlayerControllerApi {
         info: MasterInfo,
     ): Promise<void> {
         this.master = info;
-        const angleId = defaultAngleId(info.angles);
+        const requested = this.source?.startAngleId;
+        const angleId =
+            requested && info.angles.some((angle) => angle.id === requested)
+                ? requested
+                : defaultAngleId(info.angles);
 
         this.store.setState({
             lifecycle: 'loading',
@@ -326,7 +338,11 @@ export class PlayerController implements PlayerControllerApi {
             ? null
             : await mungeSource(
                   info,
-                  { angleId, maxHeight: this.source?.maxHeight },
+                  {
+                      angleId,
+                      maxHeight: this.source?.maxHeight,
+                      selectHeight: this.qualityChoice?.height,
+                  },
                   this.context(),
               );
         if (generation !== this.generation) return;
@@ -334,8 +350,12 @@ export class PlayerController implements PlayerControllerApi {
         // The policy is completed here rather than in the pipeline: it is the
         // controller that resolves a source's overrides, and the adapter that
         // runs the ladder on the result.
+        const bandwidth = this.source?.bandwidthEstimate;
         await this.adapter.loadSource({
             ...(source ?? munged!.source),
+            ...(bandwidth && bandwidth > 0 && Number.isFinite(bandwidth)
+                ? { bandwidthEstimate: bandwidth }
+                : {}),
             recovery: this.policy,
         });
         if (generation !== this.generation) return;
@@ -355,7 +375,7 @@ export class PlayerController implements PlayerControllerApi {
         this.store.setState({
             lifecycle: 'ready',
             activeAngleId: angleId,
-            activeQualityId: 'auto',
+            activeQualityId: this.qualityChoice?.id ?? 'auto',
             qualities: munged?.qualities ?? [],
             isAudioOnly:
                 munged?.isAudioOnly ??
@@ -378,22 +398,28 @@ export class PlayerController implements PlayerControllerApi {
         const loader = this.sidecarLoader;
         if (!loader) return;
 
-        try {
-            const { tracks, adapterTracks } = await loader.loadSubtitleTracks(
-                this.source?.sidecars?.subtitles,
-            );
-            if (generation !== this.generation) return;
-            if (adapterTracks.length > 0) {
-                this.sidecarTextTracks = adapterTracks;
-                this.adapter.setTextTracks(adapterTracks);
-                this.store.setState({
-                    subtitleTracks: [...info.subtitleTracks, ...tracks],
-                });
+        // An engine that cannot render side-loaded text gets none: the files
+        // are not fetched, and the tracks are not offered. Subtitles the master
+        // carries are the engine's own, and stay.
+        if (this.adapter.capabilities.renderText) {
+            try {
+                const { tracks, adapterTracks } =
+                    await loader.loadSubtitleTracks(
+                        this.source?.sidecars?.subtitles,
+                    );
+                if (generation !== this.generation) return;
+                if (adapterTracks.length > 0) {
+                    this.sidecarTextTracks = adapterTracks;
+                    this.adapter.setTextTracks(adapterTracks);
+                    this.store.setState({
+                        subtitleTracks: [...info.subtitleTracks, ...tracks],
+                    });
+                }
+            } catch (error) {
+                if (generation !== this.generation) return;
+                // Subtitles are an enhancement — report, but keep playing.
+                this.emitNonFatal(toPlayerError(error));
             }
-        } catch (error) {
-            if (generation !== this.generation) return;
-            // Subtitles are an enhancement — report, but keep playing.
-            this.emitNonFatal(toPlayerError(error));
         }
 
         if (generation !== this.generation) return;
@@ -482,10 +508,50 @@ export class PlayerController implements PlayerControllerApi {
     }
 
     setQuality(id: string | 'auto'): void {
+        if (!this.adapter.capabilities.variantSwitching) {
+            void this.capQuality(id);
+            return;
+        }
         const variantId =
             id === 'auto' ? 'auto' : (this.qualityToVariant.get(id) ?? id);
         this.adapter.setVariant(variantId);
         this.store.setState({ activeQualityId: id });
+    }
+
+    /**
+     * A quality choice for an engine that cannot pin a rendition (AVPlayer):
+     * re-munge the current angle with the chosen height as a cap, keeping
+     * position and play state, so the engine's own ABR stays at or below it.
+     * `'auto'` lifts the cap back to the source's own `maxHeight`.
+     *
+     * A resolution-less quality has no height to cap at, so choosing one does
+     * nothing.
+     */
+    private async capQuality(id: string | 'auto'): Promise<void> {
+        if (!this.master || this.state.lifecycle === 'destroyed') return;
+        let choice: { id: string; height: number } | null = null;
+        if (id !== 'auto') {
+            const height = this.state.qualities.find((q) => q.id === id)?.height;
+            if (height === undefined) return;
+            choice = { id, height };
+        }
+        if (choice?.height === this.qualityChoice?.height) return;
+
+        this.qualityChoice = choice;
+        this.store.setState({ activeQualityId: id });
+
+        const generation = this.generation;
+        const seekTo = this.adapter.getCurrentTime();
+        const resume = this.state.playing;
+        try {
+            await this.attachAngle(generation, this.state.activeAngleId, {
+                seekTo,
+                resume,
+            });
+        } catch (error) {
+            if (generation !== this.generation) return;
+            this.fail(toPlayerError(error));
+        }
     }
 
     setAudioTrack(id: string): void {
@@ -747,10 +813,14 @@ export class PlayerController implements PlayerControllerApi {
                 this.store.setState({ bufferedEnd });
             }),
             this.adapter.on('playing', () => {
+                // Playing is proof the engine is working: after an error, it got there by itself (its
+                // own recovery, a retry), and an error panel left over it would misstate that.
+                const recovered = this.state.lifecycle === 'error';
                 this.store.setState({
                     playing: true,
                     ended: false,
                     stalled: false,
+                    ...(recovered ? { lifecycle: 'ready' as const, error: null } : {}),
                 });
             }),
             this.adapter.on('pause', () => {

@@ -84,7 +84,7 @@ Then, and only then, `error`.
 `LoadErrorHandlingPolicy` is precisely a retry-count-plus-backoff policy; wiring
 ours alongside would be two ladders on one engine, fighting. AVPlayer has no
 equivalent, so port the reference:
-`player-web-legacy/src/drivers/RecoveryLadder.ts`. It is self-contained for
+`player-web/src/drivers/RecoveryLadder.ts`. It is self-contained for
 exactly this reason — it imports one *type* from `player-core` and nothing else.
 
 ### `reattach()`
@@ -225,7 +225,7 @@ engine and nothing else, so leave it unanswered until the engine abandons it;
 failing it sends a live engine through its whole error handling - on VHS, one
 excluded rendition after another - in the moments before it is discarded.
 
-**The web implementation** is `player-web-legacy`: `BlobServeStrategy.serveLive`
+**The web implementation** is `player-web`: `BlobServeStrategy.serveLive`
 registers the spec under a synthetic `luminary://live/<n>` (a blob URL cannot
 change), and `vhsLivePlaylistInterceptor.ts` answers VHS's requests for that URI
 on the same request seam the in-memory key uses, calling `resolveLivePlaylist`
@@ -250,14 +250,14 @@ the edge is still backhauling a cold object — and "switching down" re-requests
 *the same object* at a different offset, one the backhaul may not have reached.
 Nine seconds of progress discarded, quality floored, the wait restarted.
 
-The fix on the web is `player-web-legacy/src/adapter/vhsRequestTimeout.ts`:
+The fix on the web is `player-web/src/adapter/vhsRequestTimeout.ts`:
 requests carrying a `Range` header get a backstop of ten times the target
 duration instead. If your platform has a per-request timeout with a
 bandwidth-flavoured response, check it against a cold chunk before trusting it.
 
 ## Reference implementations
 
-Everything a native adapter ports lives in `player-web-legacy/src`:
+Everything a native adapter ports lives in `player-web/src`:
 
 - **`drivers/RecoveryLadder.ts`** — the ladder, whole. The porting unit.
 - **`drivers/clock.ts`** — the monotonic-clock rule, with a name.

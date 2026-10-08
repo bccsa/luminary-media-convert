@@ -22,7 +22,8 @@
         "test:watch": "vitest"
     },
     "dependencies": {
-        "@luminary-media-converter/hls-core": "file:../hls-core"
+        "@luminary-media-converter/hls-core": "file:../hls-core",
+        "iso-639-2": "^3.0.2"
     },
     "devDependencies": {
         "typescript": "~5.7.0",

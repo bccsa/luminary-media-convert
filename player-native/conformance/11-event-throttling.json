@@ -1,0 +1,172 @@
+{
+    "name": "timeupdate at 4 Hz while playing, plus once on seek and on pause; progress at most 1 Hz",
+    "fetch": {
+        "https://cdn.example.com/s/master.m3u8": "@SIMPLE_MASTER",
+        "https://cdn.example.com/s/stream_1080/playlist.m3u8": "@PLAIN_MEDIA_PLAYLIST",
+        "https://cdn.example.com/s/stream_720/playlist.m3u8": "@PLAIN_MEDIA_PLAYLIST",
+        "https://cdn.example.com/s/stream_480/playlist.m3u8": "@PLAIN_MEDIA_PLAYLIST",
+        "https://cdn.example.com/s/audio_hi_128kbps/playlist.m3u8": "@PLAIN_MEDIA_PLAYLIST",
+        "https://cdn.example.com/s/audio_lo_64kbps/playlist.m3u8": "@PLAIN_MEDIA_PLAYLIST"
+    },
+    "steps": [
+        {"drive": {"start": {}}},
+        {"call": {"method": "getInfo", "result": {"protocolVersion": 1}}},
+        {"call": {"method": "reset"}},
+        {
+            "call": {
+                "method": "create",
+                "args": {"protocolVersion": 1, "skipBackSeconds": 10, "skipForwardSeconds": 10},
+                "result": {"playerId": "$player"}
+            }
+        },
+        {"drive": {"controller": "load", "args": {"masterUrl": "https://cdn.example.com/s/master.m3u8"}}},
+        {
+            "call": {
+                "method": "load",
+                "args": {
+                    "playerId": "$player",
+                    "loadId": "$load1",
+                    "generation": 1,
+                    "masterUri": "luminary://asset/1/2.m3u8",
+                    "assets": [
+                        {
+                            "uri": "luminary://asset/1/1.m3u8",
+                            "contentType": "application/vnd.apple.mpegurl",
+                            "text": "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4.0,\nhttps://cdn.example.com/s/v/0.m4s\n#EXT-X-ENDLIST\n"
+                        },
+                        {
+                            "uri": "luminary://asset/1/2.m3u8",
+                            "contentType": "application/vnd.apple.mpegurl",
+                            "text": "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=854x480\nluminary://asset/1/1.m3u8\n"
+                        }
+                    ],
+                    "recovery": {
+                        "escalationWindowMs": 10000,
+                        "maxReloadAttempts": 3,
+                        "reloadDelaysMs": [2000, 4000, 8000]
+                    }
+                },
+                "match": {
+                    "playerId": "$player",
+                    "loadId": "$load1",
+                    "generation": 1,
+                    "masterUri": {"$prefix": "luminary://asset/1/"},
+                    "assets": {
+                        "$each": {
+                            "uri": {"$prefix": "luminary://asset/1/"},
+                            "contentType": "application/vnd.apple.mpegurl"
+                        }
+                    },
+                    "keyHex": {"$absent": true},
+                    "recovery": {
+                        "escalationWindowMs": 10000,
+                        "maxReloadAttempts": 3,
+                        "reloadDelaysMs": [2000, 4000, 8000]
+                    }
+                }
+            }
+        },
+        {
+            "event": {
+                "name": "audiotracks-updated",
+                "payload": {"playerId": "$player", "loadId": "$load1", "tracks": [], "activeId": null}
+            }
+        },
+        {"engine": {"signal": "readyToPlay", "duration": 120}},
+        {
+            "event": {
+                "name": "durationchange",
+                "payload": {"playerId": "$player", "loadId": "$load1", "duration": 120}
+            }
+        },
+        {
+            "event": {
+                "name": "loadedmetadata",
+                "payload": {"playerId": "$player", "loadId": "$load1", "duration": 120}
+            }
+        },
+        {"drive": {"controller": "play"}},
+        {"call": {"method": "play", "args": {"playerId": "$player"}}},
+        {"engine": {"signal": "playing"}, "note": "t = 0. The 0.25 s period starts here."},
+        {"event": {"name": "playing", "payload": {"playerId": "$player", "loadId": "$load1"}}},
+        {"advanceClock": 0.125},
+        {"expectNoEvents": true},
+        {"engine": {"signal": "bufferedTo", "end": 10}, "note": "The first progress goes out at once."},
+        {
+            "event": {"name": "progress", "payload": {"playerId": "$player", "loadId": "$load1", "bufferedEnd": 10}}
+        },
+        {"engine": {"signal": "bufferedTo", "end": 12}, "note": "Within the second: held."},
+        {"expectNoEvents": true},
+        {"advanceClock": 0.375},
+        {
+            "event": {
+                "name": "timeupdate",
+                "payload": {"playerId": "$player", "loadId": "$load1", "currentTime": 0.25}
+            }
+        },
+        {
+            "event": {"name": "timeupdate", "payload": {"playerId": "$player", "loadId": "$load1", "currentTime": 0.5}}
+        },
+        {"engine": {"signal": "bufferedTo", "end": 20}, "note": "t = 0.5: replaces the held 12."},
+        {"advanceClock": 0.5},
+        {
+            "event": {
+                "name": "timeupdate",
+                "payload": {"playerId": "$player", "loadId": "$load1", "currentTime": 0.75}
+            }
+        },
+        {
+            "event": {"name": "timeupdate", "payload": {"playerId": "$player", "loadId": "$load1", "currentTime": 1.0}}
+        },
+        {
+            "advanceClock": 0.25,
+            "note": "t = 1.25: the held progress went out at 1.125, a second after the last."
+        },
+        {
+            "event": {"name": "progress", "payload": {"playerId": "$player", "loadId": "$load1", "bufferedEnd": 20}}
+        },
+        {
+            "event": {
+                "name": "timeupdate",
+                "payload": {"playerId": "$player", "loadId": "$load1", "currentTime": 1.25}
+            }
+        },
+        {"drive": {"controller": "seek", "args": [60]}},
+        {
+            "call": {
+                "method": "seek",
+                "args": {"playerId": "$player", "position": 60},
+                "match": {"playerId": "$player", "position": 60, "exact": {"$absent": true}}
+            }
+        },
+        {
+            "engine": {"signal": "seeked", "position": 60},
+            "note": "Once on seek, then the period restarts from it."
+        },
+        {
+            "event": {"name": "timeupdate", "payload": {"playerId": "$player", "loadId": "$load1", "currentTime": 60}}
+        },
+        {"event": {"name": "seeked", "payload": {"playerId": "$player", "loadId": "$load1"}}},
+        {"advanceClock": 0.25},
+        {
+            "event": {
+                "name": "timeupdate",
+                "payload": {"playerId": "$player", "loadId": "$load1", "currentTime": 60.25}
+            }
+        },
+        {"engine": {"signal": "paused"}, "note": "Once on pause."},
+        {
+            "event": {
+                "name": "timeupdate",
+                "payload": {"playerId": "$player", "loadId": "$load1", "currentTime": 60.25}
+            }
+        },
+        {"event": {"name": "pause", "payload": {"playerId": "$player", "loadId": "$load1"}}},
+        {"advanceClock": 2.0},
+        {"expectNoEvents": true},
+        {"expectState": {"playing": false, "currentTime": 60.25, "bufferedEnd": 20, "duration": 120}},
+        {
+            "expectEngine": [{"method": "load"}, {"method": "play"}, {"method": "seek", "position": 60, "exact": false}]
+        }
+    ]
+}

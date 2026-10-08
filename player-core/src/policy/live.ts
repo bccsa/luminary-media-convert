@@ -21,7 +21,7 @@
  * writes the playlist only at the end, which is why coming-soon polling
  * exists); the sources are third-party live streams. {@link resolveLivePlaylist}
  * is the per-request step every serving layer performs, and
- * `player-web-legacy`'s `BlobServeStrategy` is the first to implement
+ * `player-web`'s `BlobServeStrategy` is the first to implement
  * `serveLive` on top of it.
  */
 

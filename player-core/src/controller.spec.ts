@@ -116,6 +116,19 @@ describe('PlayerController — load', () => {
         expect(state.qualities.map((q) => q.id)).toEqual(['720', '480']);
     });
 
+    it('hands the host\'s bandwidth estimate to the engine as a hint, only when usable', async () => {
+        const { adapter, controller } = setup(simpleRoutes);
+        const spy = vi.spyOn(adapter, 'loadSource');
+
+        await controller.load({ masterUrl: MASTER_URL, bandwidthEstimate: 2_500_000 });
+        expect(spy.mock.calls.at(-1)![0].bandwidthEstimate).toBe(2_500_000);
+
+        for (const unusable of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, undefined]) {
+            await controller.load({ masterUrl: MASTER_URL, bandwidthEstimate: unusable });
+            expect(spy.mock.calls.at(-1)![0]).not.toHaveProperty('bandwidthEstimate');
+        }
+    });
+
     it('seeks to startPosition without autoplaying', async () => {
         const { adapter, controller } = setup(simpleRoutes);
         await controller.load({ masterUrl: MASTER_URL, startPosition: 42 });
@@ -621,6 +634,137 @@ describe('PlayerController — quality and tracks', () => {
     });
 });
 
+describe('PlayerController — an engine that cannot pin a rendition', () => {
+    const cannotPin = { variantSwitching: false };
+
+    /** Heights of the variants in the master the engine was last handed. */
+    function servedHeights(
+        adapter: FakeAdapter,
+        serveStrategy: FakeServeStrategy,
+    ): number[] {
+        const master = serveStrategy.textOf(adapter.loads.at(-1)!.url);
+        return [...master.matchAll(/RESOLUTION=\d+x(\d+)/g)].map((m) =>
+            Number(m[1]),
+        );
+    }
+
+    it('reloads with the chosen height as a cap, keeping position and play state', async () => {
+        const { adapter, controller, serveStrategy } = setup(
+            simpleRoutes,
+            cannotPin,
+        );
+        await controller.load({ masterUrl: MASTER_URL });
+        adapter.advanceTo(42);
+        adapter.emit('playing', undefined);
+        const plays = adapter.playCount;
+
+        controller.setQuality('720');
+        await flush();
+
+        expect(adapter.loads).toHaveLength(2);
+        expect(servedHeights(adapter, serveStrategy)).toEqual([720, 480]);
+        expect(adapter.seeks.at(-1)).toBe(42);
+        expect(adapter.playCount).toBe(plays + 1);
+        expect(adapter.variantCalls).toEqual([]);
+        expect(controller.getState()).toMatchObject({
+            activeQualityId: '720',
+            lifecycle: 'ready',
+        });
+        // The choices on offer do not shrink to the one chosen.
+        expect(controller.getState().qualities.map((q) => q.id)).toEqual([
+            '1080',
+            '720',
+            '480',
+        ]);
+    });
+
+    it("lifts the cap on 'auto', back to the source's own maxHeight", async () => {
+        const { adapter, controller, serveStrategy } = setup(
+            simpleRoutes,
+            cannotPin,
+        );
+        await controller.load({ masterUrl: MASTER_URL, maxHeight: 720 });
+
+        controller.setQuality('480');
+        await flush();
+        expect(servedHeights(adapter, serveStrategy)).toEqual([480]);
+
+        controller.setQuality('auto');
+        await flush();
+        expect(servedHeights(adapter, serveStrategy)).toEqual([720, 480]);
+        expect(controller.getState().activeQualityId).toBe('auto');
+    });
+
+    it('keeps the choice across an angle switch', async () => {
+        const { adapter, controller, serveStrategy } = setup(
+            multiAngleRoutes,
+            cannotPin,
+        );
+        await controller.load({ masterUrl: MASTER_URL });
+        controller.setQuality('720');
+        await flush();
+
+        await controller.setAngle('angle_1');
+        await controller.setAngle('angle_0');
+
+        expect(servedHeights(adapter, serveStrategy)).toEqual([720]);
+        expect(controller.getState().activeQualityId).toBe('720');
+    });
+
+    it('does not reload for the choice already in effect', async () => {
+        const { adapter, controller } = setup(simpleRoutes, cannotPin);
+        await controller.load({ masterUrl: MASTER_URL });
+
+        controller.setQuality('auto');
+        await flush();
+        expect(adapter.loads).toHaveLength(1);
+
+        controller.setQuality('720');
+        await flush();
+        controller.setQuality('720');
+        await flush();
+        expect(adapter.loads).toHaveLength(2);
+    });
+
+    it('forgets the choice on a new load', async () => {
+        const { adapter, controller, serveStrategy } = setup(
+            simpleRoutes,
+            cannotPin,
+        );
+        await controller.load({ masterUrl: MASTER_URL });
+        controller.setQuality('480');
+        await flush();
+
+        await controller.load({ masterUrl: MASTER_URL });
+
+        expect(servedHeights(adapter, serveStrategy)).toEqual([
+            1080, 720, 480,
+        ]);
+        expect(controller.getState().activeQualityId).toBe('auto');
+    });
+});
+
+describe('PlayerController — an engine that cannot render side-loaded text', () => {
+    it('neither fetches nor offers sidecar subtitles', async () => {
+        const url = `${BASE}/subs/en.vtt`;
+        const { adapter, controller, calls } = setup(
+            { ...simpleRoutes, [url]: CHAPTERS_VTT },
+            { renderText: false },
+        );
+        await controller.load({
+            masterUrl: MASTER_URL,
+            sidecars: { subtitles: [{ lang: 'en', label: 'English', url }] },
+        });
+        await flush();
+
+        expect(calls).not.toContain(url);
+        expect(adapter.textTracks).toEqual([]);
+        expect(
+            controller.getState().subtitleTracks.map((t) => t.source),
+        ).not.toContain('sidecar');
+    });
+});
+
 describe('PlayerController — chapters', () => {
     it('loads the language matching the active audio track by default', async () => {
         const { controller, calls } = setup({
@@ -810,6 +954,32 @@ describe('PlayerController — an adapter that has exhausted its recovery', () =
 
         adapter.emit('error', { category: 'network', fatal: true });
         expect(controller.getState().error?.code).toBe('network');
+    });
+});
+
+describe('PlayerController — an error the engine recovers from', () => {
+    it('clears the error panel when playback starts again by itself', async () => {
+        const { adapter, controller } = setup(simpleRoutes, { recoverResult: false });
+        await controller.load({ masterUrl: MASTER_URL, recovery: { maxReloadAttempts: 0 } });
+        adapter.emit('error', { category: 'network', fatal: true });
+        expect(controller.getState().lifecycle).toBe('error');
+
+        adapter.emit('playing', undefined);
+
+        const state = controller.getState();
+        expect(state.lifecycle).toBe('ready');
+        expect(state.error).toBeNull();
+        expect(state.playing).toBe(true);
+    });
+
+    it('leaves a destroyed player destroyed when a late playing event arrives', async () => {
+        const { adapter, controller } = setup(simpleRoutes);
+        await controller.load({ masterUrl: MASTER_URL });
+        controller.destroy();
+
+        adapter.emit('playing', undefined);
+
+        expect(controller.getState().lifecycle).toBe('destroyed');
     });
 });
 
@@ -1016,6 +1186,27 @@ describe('PlayerController — default angle', () => {
         const { controller } = setup(simpleRoutes);
         await controller.load({ masterUrl: MASTER_URL });
         expect(controller.getState().activeAngleId).toBe(DEFAULT_ANGLE_ID);
+    });
+
+    it('starts on the angle a source asks for: audio only, fetching no video', async () => {
+        const { controller, calls } = setup(multiAngleRoutes);
+        await controller.load({ masterUrl: MASTER_URL, startAngleId: AUDIO_ONLY_ANGLE_ID });
+
+        expect(controller.getState().activeAngleId).toBe(AUDIO_ONLY_ANGLE_ID);
+        expect(controller.getState().isAudioOnly).toBe(true);
+        expect(calls.some((url) => url.includes('angle'))).toBe(false);
+    });
+
+    it('starts on another camera a source asks for', async () => {
+        const { controller } = setup(multiAngleRoutes);
+        await controller.load({ masterUrl: MASTER_URL, startAngleId: 'angle_1' });
+        expect(controller.getState().activeAngleId).toBe('angle_1');
+    });
+
+    it('falls back to the default for an angle the master does not have', async () => {
+        const { controller } = setup(multiAngleRoutes);
+        await controller.load({ masterUrl: MASTER_URL, startAngleId: 'angle_9' });
+        expect(controller.getState().activeAngleId).toBe('angle_0');
     });
 });
 

@@ -1,0 +1,177 @@
+{
+    "name": "resumed() answers with the current load's snapshot, and any reload held while suspended",
+    "fetch": {
+        "https://cdn.example.com/s/master.m3u8": "@SIMPLE_MASTER",
+        "https://cdn.example.com/s/stream_1080/playlist.m3u8": "@PLAIN_MEDIA_PLAYLIST",
+        "https://cdn.example.com/s/stream_720/playlist.m3u8": "@PLAIN_MEDIA_PLAYLIST",
+        "https://cdn.example.com/s/stream_480/playlist.m3u8": "@PLAIN_MEDIA_PLAYLIST",
+        "https://cdn.example.com/s/audio_hi_128kbps/playlist.m3u8": "@PLAIN_MEDIA_PLAYLIST",
+        "https://cdn.example.com/s/audio_lo_64kbps/playlist.m3u8": "@PLAIN_MEDIA_PLAYLIST"
+    },
+    "steps": [
+        {"drive": {"start": {}}},
+        {"call": {"method": "getInfo", "result": {"protocolVersion": 1}}},
+        {"call": {"method": "reset"}},
+        {
+            "call": {
+                "method": "create",
+                "args": {"protocolVersion": 1, "skipBackSeconds": 10, "skipForwardSeconds": 10},
+                "result": {"playerId": "$player"}
+            }
+        },
+        {"drive": {"controller": "load", "args": {"masterUrl": "https://cdn.example.com/s/master.m3u8"}}},
+        {
+            "call": {
+                "method": "load",
+                "args": {
+                    "playerId": "$player",
+                    "loadId": "$load1",
+                    "generation": 1,
+                    "masterUri": "luminary://asset/1/2.m3u8",
+                    "assets": [
+                        {
+                            "uri": "luminary://asset/1/1.m3u8",
+                            "contentType": "application/vnd.apple.mpegurl",
+                            "text": "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4.0,\nhttps://cdn.example.com/s/v/0.m4s\n#EXT-X-ENDLIST\n"
+                        },
+                        {
+                            "uri": "luminary://asset/1/2.m3u8",
+                            "contentType": "application/vnd.apple.mpegurl",
+                            "text": "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=854x480\nluminary://asset/1/1.m3u8\n"
+                        }
+                    ],
+                    "recovery": {
+                        "escalationWindowMs": 10000,
+                        "maxReloadAttempts": 3,
+                        "reloadDelaysMs": [2000, 4000, 8000]
+                    }
+                },
+                "match": {
+                    "playerId": "$player",
+                    "loadId": "$load1",
+                    "generation": 1,
+                    "masterUri": {"$prefix": "luminary://asset/1/"},
+                    "assets": {
+                        "$each": {
+                            "uri": {"$prefix": "luminary://asset/1/"},
+                            "contentType": "application/vnd.apple.mpegurl"
+                        }
+                    },
+                    "keyHex": {"$absent": true},
+                    "recovery": {
+                        "escalationWindowMs": 10000,
+                        "maxReloadAttempts": 3,
+                        "reloadDelaysMs": [2000, 4000, 8000]
+                    }
+                }
+            }
+        },
+        {
+            "event": {
+                "name": "audiotracks-updated",
+                "payload": {"playerId": "$player", "loadId": "$load1", "tracks": [], "activeId": null}
+            }
+        },
+        {"engine": {"signal": "readyToPlay", "duration": 120}},
+        {
+            "event": {
+                "name": "durationchange",
+                "payload": {"playerId": "$player", "loadId": "$load1", "duration": 120}
+            }
+        },
+        {
+            "event": {
+                "name": "loadedmetadata",
+                "payload": {"playerId": "$player", "loadId": "$load1", "duration": 120}
+            }
+        },
+        {"call": {"method": "play", "args": {"playerId": "$player"}}, "only": "native"},
+        {"engine": {"signal": "playing"}},
+        {
+            "event": {"name": "playing", "payload": {"playerId": "$player", "loadId": "$load1"}},
+            "only": "native"
+        },
+        {"advanceClock": 0.5},
+        {
+            "event": {
+                "name": "timeupdate",
+                "payload": {"playerId": "$player", "loadId": "$load1", "currentTime": 0.25}
+            },
+            "only": "native"
+        },
+        {
+            "event": {"name": "timeupdate", "payload": {"playerId": "$player", "loadId": "$load1", "currentTime": 0.5}},
+            "only": "native"
+        },
+        {"engine": {"signal": "bufferedTo", "end": 30}},
+        {
+            "event": {"name": "progress", "payload": {"playerId": "$player", "loadId": "$load1", "bufferedEnd": 30}},
+            "only": "native"
+        },
+        {
+            "drive": {"adapter": "resume"},
+            "note": "Events sent while JavaScript was frozen may never have arrived; the snapshot catches up."
+        },
+        {
+            "call": {
+                "method": "resumed",
+                "args": {"playerId": "$player"},
+                "result": {
+                    "loadId": "$load1",
+                    "snapshot": {"currentTime": 0.5, "duration": 120, "bufferedEnd": 30, "playing": true},
+                    "pendingReload": {"$absent": true}
+                }
+            }
+        },
+        {"expectState": {"currentTime": 0.5, "duration": 120, "bufferedEnd": 30, "playing": true}},
+        {
+            "note": "A held reload needs the recovery ladder to produce one natively: phase 3. Its TS half is pinned now.",
+            "only": "ts",
+            "drive": {"adapter": "resume"}
+        },
+        {
+            "call": {
+                "method": "resumed",
+                "args": {"playerId": "$player"},
+                "result": {
+                    "loadId": "$load1",
+                    "snapshot": {"currentTime": 0.5, "duration": 120, "bufferedEnd": 30, "playing": true},
+                    "pendingReload": {"reason": "wedged", "attempt": 1}
+                }
+            },
+            "only": "ts"
+        },
+        {
+            "only": "ts",
+            "note": "The controller rebuilds the munged source: same generation, only a new master.",
+            "call": {
+                "method": "load",
+                "match": {
+                    "playerId": "$player",
+                    "loadId": "$load2",
+                    "generation": 1,
+                    "masterUri": {"$prefix": "luminary://asset/1/"},
+                    "assets": {
+                        "$each": {
+                            "uri": {"$prefix": "luminary://asset/1/"},
+                            "contentType": "application/vnd.apple.mpegurl"
+                        },
+                        "$length": 1
+                    },
+                    "keyHex": {"$absent": true},
+                    "recovery": {
+                        "escalationWindowMs": 10000,
+                        "maxReloadAttempts": 3,
+                        "reloadDelaysMs": [2000, 4000, 8000]
+                    }
+                }
+            }
+        },
+        {
+            "call": {"method": "seek", "match": {"playerId": "$player", "position": 0.5}},
+            "only": "ts",
+            "note": "Where it was, and playing, as before."
+        },
+        {"call": {"method": "play", "args": {"playerId": "$player"}}, "only": "ts"}
+    ]
+}

@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>YouTube embed</title>
+<style>html,body,#p{margin:0;width:100%;height:100%;background:#000;overflow:hidden}</style>
+</head>
+<body>
+<div id="p"></div>
+<script>
+// Hosted on HTTPS so YouTube sees a real Referer. Protocol: src/youtubeFrameProtocol.ts.
+var NS = 'lmc-youtube';
+// Parents allowed to drive this page; edit to the hosts that embed it.
+var PARENTS = ['capacitor://localhost', 'https://localhost', 'http://localhost'];
+var parentOrigin = null, parentWin = null, yt = null, ticker = null, pendingLoad = null;
+
+function send(msg) {
+  if (!parentWin) return;
+  msg.ns = NS;
+  parentWin.postMessage(msg, parentOrigin);
+}
+
+function tick() {
+  if (!yt || !yt.getDuration) return;
+  send({ name: 'time', time: yt.getCurrentTime(), duration: yt.getDuration() || 0,
+         loaded: yt.getVideoLoadedFraction() || 0 });
+}
+
+function create(cmd) {
+  yt = new YT.Player('p', {
+    videoId: cmd.videoId,
+    playerVars: { controls: 0, modestbranding: 1, rel: 0, playsinline: 1, start: cmd.start || 0,
+                  origin: location.origin },
+    events: {
+      onReady: function () {
+        send({ name: 'rate', rate: yt.getPlaybackRate(), rates: yt.getAvailablePlaybackRates() });
+        send({ name: 'volume', volume: yt.getVolume() / 100, muted: yt.isMuted() });
+        send({ name: 'ready' });
+        ticker = setInterval(tick, 250);
+      },
+      onStateChange: function (e) { send({ name: 'state', state: e.data }); tick(); },
+      onPlaybackRateChange: function () { send({ name: 'rate', rate: yt.getPlaybackRate(), rates: yt.getAvailablePlaybackRates() }); },
+      onError: function (e) { send({ name: 'error', code: e.data }); }
+    }
+  });
+}
+
+window.addEventListener('message', function (e) {
+  if (PARENTS.indexOf(e.origin) === -1 || !e.data || e.data.ns !== NS) return;
+  parentOrigin = e.origin; parentWin = e.source;
+  var m = e.data;
+  if (m.name === 'hello') { send({ name: 'hello' }); return; }
+  if (m.name === 'load') {
+    if (yt) { yt.loadVideoById(m.videoId, m.start || 0); return; }
+    if (window.YT && YT.Player) create(m); else pendingLoad = m;
+    return;
+  }
+  if (!yt) return;
+  switch (m.name) {
+    case 'play': yt.playVideo(); break;
+    case 'pause': yt.pauseVideo(); break;
+    case 'seek': yt.seekTo(m.value, true); break;
+    case 'mute': yt.mute(); send({ name: 'volume', volume: yt.getVolume() / 100, muted: true }); break;
+    case 'unmute': yt.unMute(); send({ name: 'volume', volume: yt.getVolume() / 100, muted: false }); break;
+    case 'volume': yt.setVolume(Math.round(m.value * 100)); send({ name: 'volume', volume: m.value, muted: yt.isMuted() }); break;
+    case 'rate': yt.setPlaybackRate(m.value); break;
+    case 'destroy': clearInterval(ticker); yt.destroy(); yt = null; break;
+  }
+});
+
+window.onYouTubeIframeAPIReady = function () { if (pendingLoad) { create(pendingLoad); pendingLoad = null; } };
+var s = document.createElement('script');
+s.src = 'https://www.youtube.com/iframe_api';
+s.onerror = function () { send({ name: 'error', code: -1 }); };
+document.head.appendChild(s);
+</script>
+</body>
+</html>
