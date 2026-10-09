@@ -40,8 +40,11 @@ import {
     isOnBar,
     pointerRatio,
     previewTimes,
+    rosterStep,
+    rosterTiles,
 } from '../ui/scrubPreview';
 import ScrubThumbnail from './ScrubThumbnail.vue';
+import ScrubRoster from './ScrubRoster.vue';
 import { imageAttempts, toPlayerImage, type PlayerImageInput } from '../image';
 import { isYouTubeUrl } from '../youtube';
 
@@ -465,6 +468,15 @@ interface ScrubState {
     left: number;
     /** Gap, in px, between the container's bottom edge and the preview's. */
     bottom: number;
+    /** While the press is held, the strip of frames around the playhead that replaces the single frame. */
+    roster: {
+        tiles: { index: number; left: number; cue: ThumbnailSpriteCue | null }[];
+        /** Where the marker sits, in px from the roster's left. */
+        markerX: number;
+        tileWidth: number;
+        /** Gap, in px, between the container's bottom edge and the time label above the timeline. */
+        labelBottom: number;
+    } | null;
 }
 
 const scrub = shallowRef<ScrubState | null>(null);
@@ -478,6 +490,15 @@ const scrubWidth = computed(() => Math.round(Math.min(340, Math.max(168, frameWi
 
 /** Room the preview keeps above the bar. */
 const SCRUB_GAP_PX = 14;
+
+/** Room between the timeline and the roster it makes way for, and between the timeline and its label. */
+const ROSTER_GAP_PX = 8;
+
+/** The roster's height: a tenth of the width, so it is a strip on a phone and not a wall on a 2000px screen. */
+const rosterHeight = computed(() => Math.round(Math.min(120, Math.max(54, frameWidth.value / 10))));
+
+/** Whether a roster is on show: the timeline has made way for it, so the layout follows this and not the pointer. */
+const rosterShown = computed(() => scrub.value?.roster != null);
 
 function hideScrub(): void {
     if (scrub.value) scrub.value = null;
@@ -525,6 +546,10 @@ function updateScrub(event: PointerEvent): void {
     const { time, lookup } = previewTimes(ratio, duration);
 
     const frame = container.getBoundingClientRect();
+    const held = scrubbing || slider.hasAttribute('data-dragging');
+    // The timeline slides up out of the way while held, so its resting position is read only when it is at rest.
+    if (!rosterShown.value) restBarTop = bar.top;
+    const roster = held ? buildRoster(instance, time, event.clientX - frame.left, frame.width, duration) : null;
     scrub.value = {
         // A lookup that lands in a gap in the cues keeps the frame already on show: a preview that blanks
         // for a moment between two frames reads as a fault, and a stale frame a hair away is not.
@@ -532,7 +557,41 @@ function updateScrub(event: PointerEvent): void {
         label: formatClock(time, duration >= 3600),
         left: clampPreviewCentre(event.clientX - frame.left, scrubWidth.value, SCRUB_EDGE_PX, frame.width - SCRUB_EDGE_PX),
         bottom: frame.bottom - bar.top + SCRUB_GAP_PX,
+        roster: roster && {
+            ...roster,
+            labelBottom: frame.bottom - (restBarTop - rosterHeight.value - ROSTER_GAP_PX) + ROSTER_GAP_PX,
+        },
     };
+}
+
+/** Where the timeline's top edge sat before it made way for the roster. */
+let restBarTop = 0;
+
+/**
+ * The strip of frames for a held press: the tile size comes from the sprite's own frame shape, the marker
+ * stays under the pointer, and each slot looks its frame up by the time it stands for.
+ */
+function buildRoster(
+    instance: PlayerControllerApi,
+    time: number,
+    pointerX: number,
+    width: number,
+    duration: number
+): {
+    tiles: { index: number; left: number; cue: ThumbnailSpriteCue | null }[];
+    markerX: number;
+    tileWidth: number;
+} | null {
+    const sample = instance.thumbnailAt(0);
+    if (!sample || !sample.w || !sample.h) return null;
+    const tileWidth = Math.max(24, Math.round((rosterHeight.value * sample.w) / sample.h));
+    const markerX = Math.min(width, Math.max(0, pointerX));
+    const tiles = rosterTiles(time, markerX, width, tileWidth, rosterStep(duration), duration).map((tile) => ({
+        index: tile.index,
+        left: tile.left,
+        cue: instance.thumbnailAt(tile.time),
+    }));
+    return { tiles, markerX, tileWidth };
 }
 
 /**
@@ -595,7 +654,9 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
             'lmpl-has-audio-choice': state.audioTracks.length > 1,
             'lmpl-has-subtitles': state.subtitleTracks.length > 0,
             'lmpl-has-thumbs': state.thumbnailsReady,
+            'lmpl-scrubbing': rosterShown,
         }"
+        :style="{ '--lmpl-roster-h': `${rosterHeight}px`, '--lmpl-roster-gap': `${ROSTER_GAP_PX}px` }"
     >
         <video-player ref="playerEl" class="lmpl-video-player">
             <media-container
@@ -652,9 +713,27 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
 
                 <media-controls class="lmpl-controls" v-html="controlsHtml"></media-controls>
 
-                <div v-if="scrub" class="lmpl-scrub-preview" :style="{ left: `${scrub.left}px`, bottom: `${scrub.bottom}px` }">
+                <div
+                    v-if="scrub && !scrub.roster"
+                    class="lmpl-scrub-preview"
+                    :style="{ left: `${scrub.left}px`, bottom: `${scrub.bottom}px` }"
+                >
                     <ScrubThumbnail :cue="scrub.cue" :label="scrub.label" :width="scrubWidth" />
                 </div>
+                <template v-if="scrub?.roster">
+                    <ScrubRoster
+                        :tiles="scrub.roster.tiles"
+                        :tile-width="scrub.roster.tileWidth"
+                        :height="rosterHeight"
+                        :marker-x="scrub.roster.markerX"
+                    />
+                    <div
+                        class="lmpl-scrub-preview lmpl-scrub-label"
+                        :style="{ left: `${scrub.left}px`, bottom: `${scrub.roster.labelBottom}px` }"
+                    >
+                        <span class="lmpl-thumb-time">{{ scrub.label }}</span>
+                    </div>
+                </template>
             </media-container>
         </video-player>
 

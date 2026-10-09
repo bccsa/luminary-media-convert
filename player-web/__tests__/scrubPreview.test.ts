@@ -6,6 +6,8 @@ import {
     isOnBar,
     pointerRatio,
     previewTimes,
+    rosterStep,
+    rosterTiles,
 } from '../src/ui/scrubPreview';
 
 describe('pointerRatio', () => {
@@ -107,5 +109,42 @@ describe('formatClock', () => {
 
     it.each([NaN, -5, Infinity])('reads %s as the start rather than as garbage', (seconds) => {
         expect(formatClock(seconds, false)).toBe('0:00');
+    });
+});
+
+describe('rosterTiles', () => {
+    it('slides the slots past the marker while keeping each one on the same time', () => {
+        const a = rosterTiles(100, 200, 800, 100, 10, 1000);
+        const b = rosterTiles(105, 200, 800, 100, 10, 1000);
+        const slot = (tiles: typeof a, index: number) => tiles.find((t) => t.index === index);
+        expect(slot(a, 10)!.time).toBe(slot(b, 10)!.time);
+        expect(slot(a, 10)!.left - slot(b, 10)!.left).toBeCloseTo(50);
+    });
+
+    it('puts the playhead under the marker', () => {
+        const tiles = rosterTiles(100, 200, 800, 100, 10, 1000);
+        const under = tiles.find((t) => t.left <= 200 && t.left + 100 > 200)!;
+        expect(under.time - 5).toBeLessThanOrEqual(100);
+        expect(under.time + 5).toBeGreaterThan(100);
+    });
+
+    it('leaves out slots outside the media', () => {
+        const tiles = rosterTiles(2, 400, 800, 100, 10, 30);
+        expect(tiles.every((t) => t.time >= 0 && t.time < 30)).toBe(true);
+        expect(Math.min(...tiles.map((t) => t.index))).toBe(0);
+        expect(Math.max(...tiles.map((t) => t.index))).toBe(2);
+    });
+
+    it('gives nothing to draw with no width or no media', () => {
+        expect(rosterTiles(0, 0, 0, 100, 10, 100)).toEqual([]);
+        expect(rosterTiles(0, 0, 800, 100, 10, 0)).toEqual([]);
+    });
+});
+
+describe('rosterStep', () => {
+    it('is clamped between one and fifteen seconds', () => {
+        expect(rosterStep(30)).toBe(1);
+        expect(rosterStep(1200)).toBe(10);
+        expect(rosterStep(100000)).toBe(15);
     });
 });

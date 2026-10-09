@@ -64,3 +64,52 @@ export function formatClock(seconds: number, withHours: boolean): string {
     const ss = String(s).padStart(2, '0');
     return withHours ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${Math.floor(total / 60)}:${ss}`;
 }
+
+/** One frame of the roster: where its left edge sits, and the time it shows. */
+export interface RosterTile {
+    /** The slot's index in time, so a tile keeps its identity as the roster slides under the pointer. */
+    index: number;
+    /** Left edge in px from the roster's left. */
+    left: number;
+    /** The time the frame is looked up at: the middle of the slot it covers. */
+    time: number;
+}
+
+/**
+ * Seconds each roster frame stands for. Fine enough on a short clip that the frames differ, and coarse
+ * enough on a long one that the strip is a stretch of the video rather than a blur of it.
+ */
+export function rosterStep(duration: number): number {
+    return Math.min(15, Math.max(1, duration / 120));
+}
+
+/**
+ * The frames of a roster that slides under a fixed marker. Slots are fixed in time, so while the playhead
+ * moves each frame keeps its picture and only its position changes: the strip scrolls rather than flickers.
+ * The marker sits at `markerX` and every slot is placed by its distance in time from `time`, `tileWidth`
+ * px standing for `step` seconds. Slots outside the media are left out.
+ */
+export function rosterTiles(
+    time: number,
+    markerX: number,
+    width: number,
+    tileWidth: number,
+    step: number,
+    duration: number
+): RosterTile[] {
+    if (!(width > 0) || !(tileWidth > 0) || !(step > 0) || !(duration > 0)) return [];
+    const pxPerSecond = tileWidth / step;
+    const first = Math.floor((time - markerX / pxPerSecond) / step);
+    const last = Math.ceil((time + (width - markerX) / pxPerSecond) / step);
+    const tiles: RosterTile[] = [];
+    for (let index = first; index <= last; index++) {
+        const start = index * step;
+        if (start >= duration || start + step <= 0) continue;
+        tiles.push({
+            index,
+            left: markerX + (start - time) * pxPerSecond,
+            time: Math.min(Math.max(0, start + step / 2), Math.max(0, duration - 0.001)),
+        });
+    }
+    return tiles;
+}
