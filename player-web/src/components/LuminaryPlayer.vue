@@ -503,8 +503,11 @@ const LABEL_GAP_PX = 8;
  */
 const TRACK_INSET_PX = 12.5;
 
-/** The roster's height: a tenth of the width, so it is a strip on a phone and not a wall on a 2000px screen. */
-const rosterHeight = computed(() => Math.round(Math.min(120, Math.max(54, frameWidth.value / 10))));
+/**
+ * The roster's height: that of the frame the hover preview shows, so the picture does not change size
+ * between hovering the timeline and holding it. Frames are 16:9.
+ */
+const rosterHeight = computed(() => Math.round((scrubWidth.value * 9) / 16));
 
 /** Whether a roster is on show: the timeline has made way for it, so the layout follows this and not the pointer. */
 const rosterShown = computed(() => scrub.value?.roster != null);
