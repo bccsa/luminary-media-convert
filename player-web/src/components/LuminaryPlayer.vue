@@ -493,8 +493,15 @@ const scrubWidth = computed(() => Math.round(Math.min(340, Math.max(168, frameWi
 /** Room the preview keeps above the bar. */
 const SCRUB_GAP_PX = 14;
 
-/** Room between the timeline and the roster it makes way for, and between the timeline and its label. */
-const ROSTER_GAP_PX = 8;
+/** Room between the timeline and its time label. */
+const LABEL_GAP_PX = 8;
+
+/**
+ * The slider is taller than the track it draws, so the track sits this far, per unit of the controls' scale,
+ * above the slider's bottom edge. The timeline lifts by the roster's height less this, so its track rests
+ * against the roster's top rather than floating above it.
+ */
+const TRACK_INSET_PX = 12.5;
 
 /** The roster's height: a tenth of the width, so it is a strip on a phone and not a wall on a 2000px screen. */
 const rosterHeight = computed(() => Math.round(Math.min(120, Math.max(54, frameWidth.value / 10))));
@@ -565,9 +572,17 @@ function updateScrub(event: PointerEvent): void {
         roster: roster && {
             ...roster,
             bottom: frame.bottom - restBarBottom,
-            labelBottom: frame.bottom - (restBarTop - rosterHeight.value - ROSTER_GAP_PX) + ROSTER_GAP_PX,
+            labelBottom:
+                frame.bottom -
+                (restBarTop - (rosterHeight.value - TRACK_INSET_PX * controlsScale(slider))) +
+                LABEL_GAP_PX,
         },
     };
+}
+
+/** The controls' current scale, which grows with the player's width. */
+function controlsScale(el: Element): number {
+    return parseFloat(getComputedStyle(el).getPropertyValue('--lmpl-s')) || 1;
 }
 
 /** Where the timeline's top and bottom edges sat before it made way for the roster. */
@@ -663,7 +678,7 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
             'lmpl-has-thumbs': state.thumbnailsReady,
             'lmpl-scrubbing': rosterShown,
         }"
-        :style="{ '--lmpl-roster-h': `${rosterHeight}px`, '--lmpl-roster-gap': `${ROSTER_GAP_PX}px` }"
+        :style="{ '--lmpl-roster-h': `${rosterHeight}px`, '--lmpl-track-inset': `${TRACK_INSET_PX}px` }"
     >
         <video-player ref="playerEl" class="lmpl-video-player">
             <media-container

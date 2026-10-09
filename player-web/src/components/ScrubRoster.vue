@@ -45,7 +45,11 @@ function frameStyle(cue: ThumbnailSpriteCue) {
     };
 }
 
-const rosterStyle = computed(() => ({ bottom: `${props.bottom}px`, height: `${props.height}px` }));
+const rosterStyle = computed(() => ({
+    bottom: `${props.bottom}px`,
+    height: `${props.height}px`,
+    '--lmpl-marker': `${props.markerX}px`,
+}));
 
 const markerStyle = computed(() => ({ left: `${props.markerX}px` }));
 </script>
@@ -55,6 +59,7 @@ const markerStyle = computed(() => ({ left: `${props.markerX}px` }));
         <div v-for="tile in tiles" :key="tile.index" class="lmpl-roster-tile" :style="tileStyle(tile)">
             <div v-if="tile.cue" class="lmpl-roster-frame" :style="frameStyle(tile.cue)"></div>
         </div>
+        <div class="lmpl-roster-vignette"></div>
         <div class="lmpl-roster-marker" :style="markerStyle"></div>
     </div>
 </template>
