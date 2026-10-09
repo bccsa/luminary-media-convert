@@ -474,6 +474,8 @@ interface ScrubState {
         /** Where the marker sits, in px from the roster's left. */
         markerX: number;
         tileWidth: number;
+        /** Gap, in px, between the container's bottom edge and the roster's: it takes the timeline's resting place. */
+        bottom: number;
         /** Gap, in px, between the container's bottom edge and the time label above the timeline. */
         labelBottom: number;
     } | null;
@@ -548,7 +550,10 @@ function updateScrub(event: PointerEvent): void {
     const frame = container.getBoundingClientRect();
     const held = scrubbing || slider.hasAttribute('data-dragging');
     // The timeline slides up out of the way while held, so its resting position is read only when it is at rest.
-    if (!rosterShown.value) restBarTop = bar.top;
+    if (!rosterShown.value) {
+        restBarTop = bar.top;
+        restBarBottom = bar.bottom;
+    }
     const roster = held ? buildRoster(instance, time, event.clientX - frame.left, frame.width, duration) : null;
     scrub.value = {
         // A lookup that lands in a gap in the cues keeps the frame already on show: a preview that blanks
@@ -559,13 +564,15 @@ function updateScrub(event: PointerEvent): void {
         bottom: frame.bottom - bar.top + SCRUB_GAP_PX,
         roster: roster && {
             ...roster,
+            bottom: frame.bottom - restBarBottom,
             labelBottom: frame.bottom - (restBarTop - rosterHeight.value - ROSTER_GAP_PX) + ROSTER_GAP_PX,
         },
     };
 }
 
-/** Where the timeline's top edge sat before it made way for the roster. */
+/** Where the timeline's top and bottom edges sat before it made way for the roster. */
 let restBarTop = 0;
+let restBarBottom = 0;
 
 /**
  * The strip of frames for a held press: the tile size comes from the sprite's own frame shape, the marker
@@ -726,6 +733,7 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
                         :tile-width="scrub.roster.tileWidth"
                         :height="rosterHeight"
                         :marker-x="scrub.roster.markerX"
+                        :bottom="scrub.roster.bottom"
                     />
                     <div
                         class="lmpl-scrub-preview lmpl-scrub-label"

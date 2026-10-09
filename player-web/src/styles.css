@@ -631,15 +631,13 @@
 /*
  * Holding the timeline opens a strip of frames under it, and the timeline slides up to make room: the
  * viewer sees the stretch of the video around the playhead, not one frame. The track thins while it is
- * held so the frames stay the subject, and the buttons give way to the strip that covers them.
+ * held so the frames stay the subject, and the strip takes the timeline's old place, above the buttons.
  */
 .lmpl-roster {
     position: absolute;
     z-index: 35;
     left: 0;
     right: 0;
-    bottom: 0;
-    height: var(--lmpl-roster-h);
     overflow: hidden;
     background: #000;
     pointer-events: none;
@@ -676,11 +674,6 @@
 
 .lmpl-root.lmpl-scrubbing .lmpl-timeline-row {
     transform: translateY(calc(-1 * (var(--lmpl-roster-h) + var(--lmpl-roster-gap))));
-}
-
-.lmpl-root.lmpl-scrubbing .lmpl-actions-row {
-    opacity: 0;
-    transition: opacity 0.12s ease;
 }
 
 .lmpl-root.lmpl-scrubbing .lmpl-time-slider .lmpl-track {

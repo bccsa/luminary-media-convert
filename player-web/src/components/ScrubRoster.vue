@@ -16,6 +16,8 @@ const props = defineProps<{
     height: number;
     /** Where the marker sits, in px from the roster's left. */
     markerX: number;
+    /** Gap, in px, between the player's bottom edge and the roster's. */
+    bottom: number;
 }>();
 
 function tileStyle(tile: { left: number }) {
@@ -43,11 +45,13 @@ function frameStyle(cue: ThumbnailSpriteCue) {
     };
 }
 
+const rosterStyle = computed(() => ({ bottom: `${props.bottom}px`, height: `${props.height}px` }));
+
 const markerStyle = computed(() => ({ left: `${props.markerX}px` }));
 </script>
 
 <template>
-    <div class="lmpl-roster" aria-hidden="true">
+    <div class="lmpl-roster" :style="rosterStyle" aria-hidden="true">
         <div v-for="tile in tiles" :key="tile.index" class="lmpl-roster-tile" :style="tileStyle(tile)">
             <div v-if="tile.cue" class="lmpl-roster-frame" :style="frameStyle(tile.cue)"></div>
         </div>
