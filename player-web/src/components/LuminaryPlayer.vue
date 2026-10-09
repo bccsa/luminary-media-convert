@@ -1,264 +1,128 @@
 <script setup lang="ts">
 /**
- * The Luminary web player: `player-core` playback inside the Luminary app's
- * Video.js chrome.
+ * The Luminary web player on Video.js 10: `player-core` playback inside controls laid out for it.
  *
- * video.js owns the chrome and this component's CSS repositions its stock
- * components into the Luminary skin. By default the controls show in every
- * mode; a host that drives playback from its own interface asks for a bare
- * windowed frame (`controls.windowedControls: false`) and gets them only in
- * fullscreen, where its interface is out of view. The poster — which is also
- * what an audio-only rendering shows — is drawn here too, inside video.js's
- * element, so it goes fullscreen with the picture.
- *
- * Two source modes:
- *
- * - **LMC** — the pipeline this repo exists for. A `PlayerController` over a
- *   `VideoJsAdapter` munges the master (LMCENC decrypt, angle extraction,
- *   quality capping) and hands the engine a blob playlist plus an in-memory
- *   key.
- * - **YouTube** — a URL `videojs-youtube` can play. The whole LMC pipeline is
- *   bypassed: no controller is built, the exposed `controller` stays null and
- *   `state` stays at its initial snapshot. This mirrors the Luminary app, where
- *   YouTube playback is likewise a different animal wearing the same chrome.
- *
- * Because `state` is the controller's, it says nothing in YouTube mode — so the
- * position, the metadata point and the end of the source are raised as events
- * instead, and `seek` is exposed to move to a saved one. That surface is the
- * same in both modes, which is what lets a host persist a resume point without
- * caring which engine is behind the picture.
- *
- * A YouTube player that cannot load raises the same error panel (and `error`
- * slot) as the pipeline does, as a `network` error: a network blocking YouTube,
- * or Google's unusual-traffic block, which WebKit turns into a redirect loop.
+ * A `PlayerController` over an `HlsJsVideoAdapter` munges the master (LMCENC decrypt, angle
+ * extraction, quality capping) and hands hls.js a blob playlist plus an in-memory key. The chrome is
+ * composed here from v10's `media-*` elements rather than taken from its packaged skin, because the
+ * packaged skin's control set is fixed: it has no skip buttons, no way to leave a menu out and no
+ * bare windowed frame. The default skin's stylesheet still draws the buttons, icons and menus.
  */
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
-import videojs from 'video.js';
-import type Player from 'video.js/dist/types/player';
-import { AUDIO_ONLY_ANGLE_ID, PlayerController } from '@luminary-media-converter/player-core';
+// The elements and icons the controls use, and no others; see the module for why not the packaged skin.
+import '../ui/register';
+import {
+    AUDIO_ONLY_ANGLE_ID,
+    PlayerController,
+    findPreferredTrack,
+} from '@luminary-media-converter/player-core';
 import type {
     PlayerControllerApi,
     PlayerControllerOptions,
     PlayerError,
     PlayerSource,
+    ThumbnailSpriteCue,
 } from '@luminary-media-converter/player-core';
-import { VideoJsAdapter } from '../adapter/VideoJsAdapter';
+import { HlsJsVideoAdapter } from '../adapter/HlsJsVideoAdapter';
+import type { HlsJsVideoElement } from '../adapter/hlsTypes';
 import { BlobServeStrategy } from '../serve/BlobServeStrategy';
 import { usePlayerState } from '../composables/usePlayerState';
 import { mergeMessages, type PlayerMessages } from '../messages';
 import { mergeControls, type PlayerControlsOptions } from '../controls';
-import { buildVideoJsOptions, preferYouTubeTech } from '../vjs/playerOptions';
-import { installAutoHide } from '../vjs/autoHide';
-import { TRANSPARENT_POSTER } from '../vjs/poster';
-import { createKeepAlive, SILENT_AUDIO_DATA_URI, type KeepAlive } from '../vjs/keepAlive';
-import { retryYouTubeApi, watchYouTubeApi, whenYouTubeApiSettles } from '../vjs/youtubeApi';
-import { findPreferredTrack } from '@luminary-media-converter/player-core';
-import { imageAttempts, toPlayerImage, type PlayerImageInput } from '../image';
-import { isYouTubeUrl, toVideoJsYouTubeUrl } from '../youtube';
+import { createKeepAlive, SILENT_AUDIO_DATA_URI, type KeepAlive } from '../ui/keepAlive';
+import { buildControlsHtml } from '../ui/controlsHtml';
+import { installAutoHide, type ControlsStore } from '../ui/autoHide';
+import { stepVolume } from '../ui/volume';
 import {
-    YOUTUBE_FRAME_TECH,
-    registerYoutubeFrameTech,
-    setYoutubeFrameEmbedUrl,
-} from '../vjs/YoutubeFrameTech';
-import { singleFlight } from '../singleFlight';
-import AudioVideoToggle from './AudioVideoToggle.vue';
+    SCRUB_EDGE_PX,
+    clampPreviewCentre,
+    formatClock,
+    isOnBar,
+    pointerRatio,
+    previewTimes,
+    rosterStep,
+    rosterTiles,
+} from '../ui/scrubPreview';
+import ScrubThumbnail from './ScrubThumbnail.vue';
+import ScrubRoster from './ScrubRoster.vue';
+import { imageAttempts, toPlayerImage, type PlayerImageInput } from '../image';
+import { isYouTubeUrl } from '../youtube';
 
 interface Props {
     /** What to play. Assigning a new object reloads the player. */
     source: PlayerSource;
-    /**
-     * Resolved UI strings merged over the built-in English defaults. Use this
-     * for apps keeping the default surface; use the `coming-soon` / `error`
-     * scoped slots to render your own instead.
-     *
-     * video.js localizes its own control bar separately, through its `languages`
-     * option — these strings cover only what this component draws.
-     */
+    /** UI strings merged over the English defaults. */
     messages?: Partial<PlayerMessages>;
-    /**
-     * Which controls to offer, and how far the skip buttons move. Sparse —
-     * anything omitted keeps the library default.
-     *
-     * Read once, when the player is constructed: video.js fixes its control-bar
-     * children at that point, so changing this afterwards does nothing until
-     * the component is remounted.
-     */
+    /** Which controls to offer, and how far the skip buttons move. Anything omitted keeps the default. */
     controls?: Partial<PlayerControlsOptions>;
     /**
-     * Artwork under the picture — windowed and in fullscreen alike. It covers
-     * the frame until the first video frame arrives, and for as long as the
-     * audio-only rendering plays, under a musical-note glyph that is always
-     * drawn then. With no poster, audio-only is black under the glyph.
-     *
-     * A URL, or a {@link PlayerImage}: a `srcset` the browser picks from by
-     * size (and can satisfy from what it has cached, offline), and a `fallback`
-     * for when the image cannot load. It is this component's own `<img>` rather
-     * than video.js's poster, which takes one URL, knows nothing of `srcset`
-     * and letterboxes where the Luminary app covers the frame.
+     * How the picture fills the frame while the player is windowed: `contain` letterboxes a source that is not the
+     * frame's shape, `cover` fills the frame and crops what overflows. Fullscreen always letterboxes, whatever
+     * this says — it is what fullscreen is for, and a cropped picture there would lose the edges of a screen-shaped
+     * view. Set on the element's own `<video>`, which lives in its shadow DOM and so cannot be reached by a host's CSS.
      */
+    windowedFit?: 'contain' | 'cover';
+    /** Artwork under the picture, until the first frame and while audio-only. */
     poster?: PlayerImageInput;
-    /**
-     * An HTTPS-hosted copy of `embed/youtube-embed.html`. Used for YouTube when
-     * the page itself is not http(s) (Capacitor iOS), where YouTube refuses the
-     * embed with error 153 because it sees a `capacitor://` Referer.
-     */
+    /** Not supported yet on the v10 player; YouTube sources raise a `media` error. */
     youtubeEmbedUrl?: string;
-    /**
-     * Language to select automatically among the stream's audio tracks, as a
-     * two- or three-letter code (`en`, `eng`, `en-US` — all normalized).
-     *
-     * Matched leniently on purpose: browsers disagree about
-     * whether a track's language is two-letter, three-letter terminological or
-     * three-letter bibliographic. See `audioTrackLanguage.ts` in `player-core`.
-     *
-     * Re-applied whenever the track list changes, when the prop changes, on
-     * `loadeddata`, and on entering or leaving fullscreen — the last two
-     * because a re-source and a fullscreen transition are both points where a
-     * browser has been observed to reset the selection under us. Ignored in
-     * YouTube mode, which has no track list to choose from.
-     *
-     * A viewer outranks it. The moment the active track becomes something this
-     * auto-apply did not select and the preference does not name — the video.js
-     * audio menu, or a host calling `setAudioTrack` — the auto-apply suspends
-     * itself and every re-application above becomes a no-op, so a language
-     * chosen by hand survives the next `loadeddata` and the next fullscreen
-     * transition. It re-arms on a new `source` or a new value of this prop,
-     * both of which are the host asking again.
-     */
+    /** Audio language to select automatically; a viewer's own choice outranks it. */
     preferredLanguage?: string;
-    /**
-     * Options handed to the default `PlayerController` — chunk-warming
-     * prefetch tuning and its debug logging live here. Read once, when the
-     * controller is built; ignored when `createController` is supplied,
-     * since that caller constructs the controller itself.
-     *
-     * `Partial`, because the controller requires a `serveStrategy` and this
-     * component supplies one: on the web that is always object URLs, and a host
-     * has no reason to think about it. Naming one here still overrides it,
-     * which is the seam a native shell uses.
-     */
+    /** Options handed to the default `PlayerController`. */
     controllerOptions?: Partial<PlayerControllerOptions>;
-    /**
-     * @internal Test seam — substitutes controller construction. Not part of
-     * the supported API; the default builds
-     * `PlayerController(VideoJsAdapter)` over the video.js player this
-     * component owns.
-     *
-     * The element passed is the tech's live `<video>`, resolved off the player
-     * at the moment the controller is built rather than captured once — a
-     * YouTube round trip swaps the tech, and the element video.js was mounted
-     * on is detached by then. The default implementation ignores it (every
-     * video.js API hangs off the player, not the element); it is handed over
-     * for a test seam that wants the live element.
-     */
-    createController?: (video: HTMLVideoElement) => PlayerControllerApi;
+    /** @internal Test seam — substitutes controller construction. */
+    createController?: (media: HlsJsVideoElement) => PlayerControllerApi;
 }
 
 const props = defineProps<Props>();
 
-/**
- * Playback events, raised in **both** source modes.
- *
- * They exist because YouTube mode has no controller: it is destroyed on the way
- * in, `state` stays at its initial snapshot, and a host watching `state` for the
- * position would see a video that never starts. A consumer that persists
- * progress — Luminary saves a resume point and clears it on completion — needs
- * the same three facts whichever engine is behind the picture, so they come off
- * the video.js player rather than off the controller.
- *
- * Deliberately thin. What a host does with a position is its own policy, and
- * this component has no opinion on it.
- */
+/** Playback events raised in every source mode, for hosts that persist a resume point. */
 const emit = defineEmits<{
-    /**
-     * The position advanced. `duration` is `Infinity` on a live stream and `0`
-     * before the engine knows it — both reported as they are, because a host
-     * that saves a resume point has to be able to tell those apart.
-     */
     timeupdate: [currentTime: number, duration: number];
-    /**
-     * Duration and the seekable range are known: the earliest point at which
-     * seeking to a saved position lands where it was asked to.
-     *
-     * `ready` is too early for that, and it is too early in a way that only
-     * shows up on YouTube, where the iframe is still coming up.
-     */
     loadedmetadata: [];
-    /**
-     * The engine reached the end.
-     *
-     * Not reliable on YouTube — the tech is known to drop it — which is why the
-     * position is emitted continuously rather than only here: a host that clears
-     * its resume point on completion needs a near-end fallback, and `timeupdate`
-     * is what it builds one from.
-     */
     ended: [];
 }>();
 
-const videoEl = ref<HTMLVideoElement | null>(null);
+const mediaEl = shallowRef<HlsJsVideoElement | null>(null);
 const keepAliveEl = ref<HTMLAudioElement | null>(null);
-const player = shallowRef<Player | null>(null);
+const playerEl = ref<HTMLElement | null>(null);
+const containerEl = ref<HTMLElement | null>(null);
 const controller = shallowRef<PlayerControllerApi | null>(null);
-
-/**
- * video.js's own element — what goes fullscreen, and where the artwork is
- * drawn so that it goes with it. Set once the player exists.
- */
-const playerEl = shallowRef<HTMLElement | null>(null);
 const isFullscreen = ref(false);
-/** The player's rendered width in CSS px, for the artwork's default `sizes`. */
 const frameWidth = ref(0);
 let frameObserver: ResizeObserver | null = null;
-
-/**
- * True while the current source is a YouTube URL — see the module comment.
- *
- * Derived rather than assigned: the flag gates the audio/video toggle and the
- * preferred-language apply, both of which read it from handlers that fire at
- * arbitrary times, and an imperatively-set flag is only correct until someone
- * returns early on the path that sets it.
- */
-const isYouTube = computed(() => isYouTubeUrl(props.source.masterUrl));
+let keepAlive: KeepAlive | null = null;
+let removeAutoHide: (() => void) | null = null;
 
 const state = usePlayerState(controller);
 const msg = computed(() => mergeMessages(props.messages));
 const mergedControls = computed(() => mergeControls(props.controls));
+const isYouTube = computed(() => isYouTubeUrl(props.source.masterUrl));
 
-let keepAlive: KeepAlive | null = null;
-let removeAutoHide: (() => void) | null = null;
-/**
- * The engine's audio-track list, held so the `change` subscription can be
- * detached on unmount. The list outlives individual sources, so it is
- * subscribed once rather than per load.
- */
-let engineAudioTracks: VjsTrackList | null = null;
+/** Element ids in the controls (menu triggers point at their menus by id) must not collide between players. */
+const instanceId = `lmpl-${Math.random().toString(36).slice(2, 9)}`;
+const controlsHtml = computed(() => buildControlsHtml(mergedControls.value, instanceId));
 
 /**
- * The live `<video>` the tech is currently rendering into.
- *
- * Not the template ref: video.js replaces the element when it swaps techs, so
- * after a YouTube round trip the one this component mounted is detached and
- * anything reading from it is reading a corpse. The ref is the fallback for the
- * one moment the player has no tech element of its own yet.
+ * Clicking the picture plays and pauses, and a touch brings the controls up. A bare windowed frame
+ * answers neither: the host's own interface is the transport, and a frame that also answered clicks
+ * would be a second one. Fullscreen has no other transport, so it answers both.
  */
-function mediaElement(instance: Player): HTMLVideoElement {
-    const live = instance.el()?.querySelector('video');
-    return (live as HTMLVideoElement | null) ?? (videoEl.value as HTMLVideoElement);
-}
+const gesturesOn = computed(() => mergedControls.value.windowedControls || isFullscreen.value);
 
-function defaultCreateController(video: HTMLVideoElement): PlayerControllerApi {
-    void video;
-    // The web's serving layer, supplied rather than defaulted: `player-core`
-    // is headless and cannot mint a URL on anyone's behalf. A host may name
-    // its own — which is how a native shell substitutes a loopback server.
-    // The adapter answers the live URIs this one mints, so it is handed the
-    // same instance; a host-supplied strategy answers its own.
+const UNSUPPORTED_YOUTUBE: PlayerError = {
+    code: 'media',
+    fatal: true,
+    message: 'YouTube sources are not supported by the Video.js 10 player yet',
+};
+const sourceError = shallowRef<PlayerError | null>(null);
+
+function defaultCreateController(media: HlsJsVideoElement): PlayerControllerApi {
     const serveStrategy =
         props.controllerOptions?.serveStrategy ??
         new BlobServeStrategy({ fetchImpl: props.controllerOptions?.fetchImpl });
-    const liveSource =
-        serveStrategy instanceof BlobServeStrategy ? serveStrategy : undefined;
-    return new PlayerController(new VideoJsAdapter(player.value!, { liveSource }), {
+    const liveSource = serveStrategy instanceof BlobServeStrategy ? serveStrategy : undefined;
+    return new PlayerController(new HlsJsVideoAdapter(media, { liveSource }), {
         ...props.controllerOptions,
         serveStrategy,
     });
@@ -266,151 +130,36 @@ function defaultCreateController(video: HTMLVideoElement): PlayerControllerApi {
 
 // --- source loading -------------------------------------------------------
 
-/** How the YouTube tech registration is waited for; see `ensureYouTubeTech`. */
-const YOUTUBE_TECH_POLL_MS = 10;
-const YOUTUBE_TECH_TIMEOUT_MS = 1_000;
-
-/**
- * The `videojs-youtube` import, at most one attempt at a time.
- *
- * `singleFlight` rather than a plain cached promise because only a success is
- * worth keeping: see its own comment for why the obvious `??=` disables YouTube
- * permanently after one failed fetch.
- */
-const importYouTubeTech = singleFlight(() => import('videojs-youtube'));
-
-/**
- * The YouTube tech, imported the first time a YouTube URL is played.
- *
- * Lazy because most sources are not YouTube and the plugin pulls in the iframe
- * API; once loaded it stays, since re-importing a registered tech does nothing.
- * The promise is kept rather than a boolean so two overlapping loads await one
- * import instead of racing two.
- *
- * The plugin registers its tech as an import side effect, and setting a source
- * before video.js knows the tech exists has been seen to land as a plain
- * unplayable source. So registration is *checked* rather than slept on: polling
- * `getTech` costs a frame or two in the normal case, where a fixed sleep costs
- * its whole duration and still guarantees nothing. The bound exists because a
- * plugin that never registers must not hang the load forever — proceeding lets
- * video.js report an unplayable source, which is the honest outcome.
- */
-async function ensureYouTubeTech(): Promise<void> {
-    // Before the import, which is what starts the plugin loading the API.
-    watchYouTubeApi();
-    try {
-        await importYouTubeTech();
-    } catch {
-        // Not rethrown, for the same reason the registration wait below is
-        // bounded rather than infinite: proceeding lets video.js declare the
-        // source unplayable, which is a state the player already renders and a
-        // host can already see. Rethrowing here escapes `loadSource` as an
-        // unhandled rejection instead — no error surface, and nothing on screen
-        // to explain why the video never started.
-        return;
-    }
-
-    const deadline = Date.now() + YOUTUBE_TECH_TIMEOUT_MS;
-    while (!videojs.getTech('Youtube') && Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, YOUTUBE_TECH_POLL_MS));
-    }
-}
-
-/**
- * Which `loadSource` call is the current one.
- *
- * Bumped at entry and re-checked after every await: the YouTube branch waits on
- * a dynamic import, and without this a slow YouTube load resuming after a newer
- * LMC source had already been handed to the player would re-src it back to the
- * video the host has moved on from. Disposal is a separate check — a stale call
- * and a dead player are different problems with the same answer.
- */
 let loadGeneration = 0;
 
-/**
- * Points the player at a source, switching modes if this one is a different
- * kind from the last.
- *
- * Mode changes both ways are supported over one player instance: video.js swaps
- * its tech on `src()`, so nothing has to be disposed. What does have to happen
- * is the controller: it is meaningless for YouTube and is destroyed on the way
- * in, and rebuilt on the way back out.
- */
 async function loadSource(source: PlayerSource): Promise<void> {
-    const instance = player.value;
-    if (!instance) return;
-
+    const media = mediaEl.value;
+    if (!media) return;
     const generation = ++loadGeneration;
-    const superseded = (): boolean => generation !== loadGeneration || player.value !== instance;
-    youtubeError.value = null;
+    sourceError.value = null;
 
     if (isYouTubeUrl(source.masterUrl)) {
-        if (controller.value) {
-            controller.value.destroy();
-            controller.value = null;
-        }
-        if (props.youtubeEmbedUrl && !/^https?:$/.test(location.protocol)) {
-            registerYoutubeFrameTech();
-            setYoutubeFrameEmbedUrl(props.youtubeEmbedUrl);
-            const order: string[] = instance.options_.techOrder;
-            if (order[0] !== YOUTUBE_FRAME_TECH) {
-                instance.options_.techOrder = [YOUTUBE_FRAME_TECH, ...order];
-            }
-            instance.src({ type: 'video/youtube', src: toVideoJsYouTubeUrl(source.masterUrl) });
-            return;
-        }
-        // A new YouTube source, or the error panel's retry, tries the API
-        // again if it failed; the queued player is handed it if it loads.
-        retryYouTubeApi();
-        await ensureYouTubeTech();
-        if (superseded()) return;
-        preferYouTubeTech(instance);
-        instance.src({ type: 'video/youtube', src: toVideoJsYouTubeUrl(source.masterUrl) });
-        if ((await whenYouTubeApiSettles()) === 'failed' && !superseded()) {
-            youtubeError.value = YOUTUBE_API_FAILED;
-        }
+        controller.value?.destroy();
+        controller.value = null;
+        sourceError.value = UNSUPPORTED_YOUTUBE;
         return;
     }
 
-    if (!controller.value) {
-        const create = props.createController ?? defaultCreateController;
-        controller.value = create(mediaElement(instance));
-    }
-    const active = controller.value;
-    // Awaited rather than fired and forgotten so this branch sits in the
-    // generation chain too: the track list only exists once the load has
-    // settled, and applying a language preference on behalf of a source the
-    // host has already replaced is exactly the bug the token exists to stop.
-    await active.load(source);
-    if (superseded()) return;
+    controller.value ??= (props.createController ?? defaultCreateController)(media);
+    await controller.value.load(source);
+    if (generation !== loadGeneration) return;
     applyPreferredLanguage();
 }
 
-// --- preferred audio language --------------------------------------------
+// --- preferred audio language ----------------------------------------------
 
-/**
- * The track id the auto-apply last selected, and whether a viewer has since
- * overruled it.
- *
- * Both are plain locals rather than refs: nothing renders from them, and a
- * reactive read inside `applyPreferredLanguage` would put the suspension flag
- * into the dependency set of every watcher that calls it.
- */
 let autoAppliedTrackId: string | null = null;
 let preferredSuspended = false;
 
 /**
- * Selects the track matching `preferredLanguage`, if there is one and the
- * viewer has not taken the decision away from us.
- *
- * This runs on every track-list change, on `loadeddata` and on every fullscreen
- * transition, because each of those is a point where a browser has been seen to
- * reset the selection. That frequency is also why it has to know when to stop:
- * re-applying unconditionally would silently undo a language the viewer picked
- * from the audio menu, on the next fullscreen toggle. So the selection it makes
- * is remembered, and the moment the active track becomes something neither this
- * function chose nor the preference names, it suspends until the host asks
- * again (a new `source`, or a new `preferredLanguage`).
+ * Selects the track matching `preferredLanguage`, unless the viewer has taken the decision away:
+ * the moment the active track becomes something neither this function chose nor the preference
+ * names, it stands down until the host asks again (a new `source` or `preferredLanguage`).
  */
 function applyPreferredLanguage(): void {
     if (isYouTube.value || preferredSuspended) return;
@@ -421,275 +170,162 @@ function applyPreferredLanguage(): void {
     const snapshot = state.value;
     const target = findPreferredTrack(snapshot.audioTracks, preferred);
     if (!target) return;
-    // Recorded even when nothing is issued: the track is the auto-applied one
-    // either way, and the watcher below tells "we put it there" apart from
-    // "someone else did" purely by this id.
     autoAppliedTrackId = target;
     if (target === snapshot.activeAudioTrackId) return;
     instance.setAudioTrack(target);
 }
 
-/**
- * Re-arms the auto-apply. A new source or a new preference is the host stating
- * an intent afresh, which outranks a selection made against the old one.
- *
- * Declared before the watchers that re-apply, so that when `preferredLanguage`
- * changes this runs first in the same flush and the new value is applied rather
- * than swallowed by a suspension the old value earned.
- */
 watch([() => props.source, () => props.preferredLanguage], () => {
     preferredSuspended = false;
     autoAppliedTrackId = null;
 });
 
-/**
- * Detects a selection this component did not make — the video.js audio menu, or
- * a host calling `setAudioTrack` itself — and stands down.
- *
- * A switch *to* the preferred language is not an override; it is agreement, and
- * suspending on it would give up on re-asserting the preference for no reason.
- *
- * Nor is an active track that arrives with a new track list. The controller
- * publishes every list together with its own pick from it — the master's first
- * track on load, the engine's first once VHS has built its own — and that is a
- * default, not a choice. Counting it suspended the auto-apply on every load
- * before it had run once, because this watcher is declared ahead of the one
- * that applies and so saw the default first. Only a change among the tracks
- * already on offer is somebody's selection.
- */
 watch(
     [() => state.value.activeAudioTrackId, () => state.value.audioTracks],
     ([id, tracks], [, previousTracks]) => {
+        // An active track arriving with a new list is a default, not a choice.
         if (tracks !== previousTracks) return;
         if (preferredSuspended || !id) return;
         const preferred = props.preferredLanguage;
         if (!preferred || id === autoAppliedTrackId) return;
         if (id === findPreferredTrack(tracks, preferred)) return;
         preferredSuspended = true;
-    },
+    }
 );
 
 watch([() => state.value.audioTracks, () => props.preferredLanguage], applyPreferredLanguage);
 
-// --- engine-driven selections ---------------------------------------------
-
-/** One entry of `player.audioTracks()`; video.js's own types name none of these. */
-interface VjsTrackList {
-    readonly length: number;
-    [index: number]: { enabled?: boolean } | undefined;
-    on(type: string, fn: () => void): void;
-    off(type: string, fn: () => void): void;
-}
-
-function audioTrackList(): VjsTrackList | null {
-    try {
-        const tracks = player.value?.audioTracks?.();
-        return (tracks as unknown as VjsTrackList | undefined) ?? null;
-    } catch {
-        return null;
-    }
-}
+// --- engine-driven selections ----------------------------------------------
 
 /**
- * Mirrors a selection made in video.js's own audio menu back into the
- * controller.
- *
- * The menu writes `track.enabled` straight onto the engine's track list, behind
- * the controller's back, and `PlayerController.refreshAudioTracks` returns
- * early when the set of ids is unchanged — so `activeAudioTrackId` would sit on
- * whatever was selected before, and every consumer reading it (the host's own
- * selectors, the preferred-language suspension above) would be wrong. Routing
- * the choice back through `setAudioTrack` keeps one source of truth.
- *
- * Ids are taken from the controller's list by position rather than re-derived
- * from the engine track: the adapter builds that list from this same list in
- * this same order, so the index is the join, and there is no id rule to keep in
- * two places. The length check is what makes that join safe — this handler is
- * attached before the adapter's, so on a source change it can see the engine's
- * new list while the controller still holds the old one, and an index into two
- * different lists is a wrong answer rather than no answer.
+ * Mirrors a selection made in the skin's audio menu back into the controller. The menu writes
+ * `track.enabled` on the element's list behind the controller's back, so without this
+ * `activeAudioTrackId` would sit on whatever was selected before. Ids are joined by position: the
+ * adapter builds its list from this same list in this same order, and the length check keeps a
+ * half-rebuilt list from being joined to the old one.
  */
 function onEngineAudioTrackChange(): void {
     const instance = controller.value;
-    const tracks = audioTrackList();
+    const tracks = mediaEl.value?.audioTracks;
     if (isYouTube.value || !instance || !tracks) return;
-
     const known = state.value.audioTracks;
     if (known.length !== tracks.length) return;
-
-    for (let i = 0; i < tracks.length; i++) {
-        if (!tracks[i]?.enabled) continue;
-        // `setAudioTrack` enables the same track again, and video.js's own
-        // `enabled` setter ignores a write that changes nothing — so no second
-        // `change` is fired and the id comparison ends the cycle either way.
-        const id = known[i]?.id;
-        if (id && id !== state.value.activeAudioTrackId) instance.setAudioTrack(id);
-        return;
+    let i = 0;
+    for (const track of tracks) {
+        if (track.enabled) {
+            const id = known[i]?.id;
+            if (id && id !== state.value.activeAudioTrackId) instance.setAudioTrack(id);
+            return;
+        }
+        i++;
     }
 }
 
-/**
- * Mirrors a selection made in video.js's own subtitles menu back into the
- * controller, on the same reasoning as the audio sync above.
- *
- * The showing track's `id` is the sidecar track id: the adapter passes it to
- * `addRemoteTextTrack`, so the value read back here is the one
- * `setSubtitleTrack` expects. Nothing showing means subtitles off, which is a
- * selection like any other and is reported as `null`.
- */
+/** Mirrors a selection made in the skin's captions menu back into the controller. */
 function onEngineTextTrackChange(): void {
     const instance = controller.value;
-    const tracks = player.value?.textTracks?.() as unknown as
-        | { readonly length: number; [index: number]: TextTrack | undefined }
-        | undefined;
+    const tracks = mediaEl.value?.textTracks;
     if (isYouTube.value || !instance || !tracks) return;
-
     let showing: string | null = null;
-    for (let i = 0; i < tracks.length; i++) {
-        const track = tracks[i];
-        if (track?.kind === 'subtitles' && track.mode === 'showing') {
+    for (const track of tracks) {
+        if (track.kind === 'subtitles' && track.mode === 'showing') {
             showing = track.id || null;
             break;
         }
     }
-    // Same loop guard as the audio sync: applying this re-fires
-    // `texttrackchange` with the same track showing, and the comparison stops
-    // the second pass from doing anything.
     if (showing !== state.value.activeSubtitleTrackId) instance.setSubtitleTrack(showing);
 }
 
 // --- lifecycle ------------------------------------------------------------
 
+const mediaListeners: [string, EventListener][] = [];
+let audioTrackList: EventTarget | undefined;
+let textTrackList: EventTarget | undefined;
+
+/**
+ * Listens to the element's audio and text track lists, for a choice made in the player's own menus.
+ * `<hlsjs-video>` builds new lists with each engine and has none before one exists, so this runs on every
+ * load, not once at mount: bound once, a language picked in the card would reach the engine but never the
+ * controller, and the player's state would go on saying English.
+ */
+function bindTrackLists(): void {
+    audioTrackList?.removeEventListener('change', onEngineAudioTrackChange);
+    textTrackList?.removeEventListener('change', onEngineTextTrackChange);
+    const media = mediaEl.value;
+    audioTrackList = media?.audioTracks as unknown as EventTarget | undefined;
+    textTrackList = media?.textTracks as unknown as EventTarget | undefined;
+    audioTrackList?.addEventListener('change', onEngineAudioTrackChange);
+    textTrackList?.addEventListener('change', onEngineTextTrackChange);
+}
+
 onMounted(() => {
-    const element = videoEl.value;
-    if (!element) return;
+    const media = mediaEl.value;
+    if (!media) return;
 
-    const instance = videojs(element, buildVideoJsOptions(mergedControls.value));
-    player.value = instance;
-    const frame = instance.el() as HTMLElement;
-    playerEl.value = frame;
+    const on = (type: string, handler: EventListener): void => {
+        media.addEventListener(type, handler);
+        mediaListeners.push([type, handler]);
+    };
+    on('play', () => keepAlive?.sync(true));
+    on('playing', () => keepAlive?.sync(true));
+    on('pause', () => keepAlive?.sync(false));
+    on('ended', () => {
+        keepAlive?.sync(false);
+        emit('ended');
+    });
+    on('timeupdate', () => emit('timeupdate', media.currentTime || 0, media.duration || 0));
+    on('loadedmetadata', () => emit('loadedmetadata'));
+    on('loadeddata', applyPreferredLanguage);
 
-    void installMobileUi(instance);
+    keepAlive = createKeepAlive(keepAliveEl.value);
 
-    // Transparent: the artwork is this component's own layer, and video.js's
-    // poster would draw a black box over it. See `vjs/poster.ts`.
-    instance.poster(TRANSPARENT_POSTER);
+    on('loadstart', bindTrackLists);
+    bindTrackLists();
+    applyFit();
+    on('loadstart', applyFit);
 
-    instance.on('fullscreenchange', onFullscreenChange);
-    // The double-click is this component's in every mode; see onFrameDoubleClick.
-    frame.addEventListener('dblclick', onFrameDoubleClick);
-    if (typeof ResizeObserver !== 'undefined') {
+    const frame = playerEl.value;
+    if (frame && typeof ResizeObserver !== 'undefined') {
         frameObserver = new ResizeObserver(([entry]) => {
             if (entry) frameWidth.value = entry.contentRect.width;
         });
         frameObserver.observe(frame);
     }
-
-    removeAutoHide = installAutoHide(instance);
-
-    keepAlive = createKeepAlive(keepAliveEl.value);
-    instance.on(['play', 'playing'], onPlaybackStarted);
-    instance.on(['pause', 'ended'], onPlaybackStopped);
-
-    instance.on('timeupdate', onTimeUpdate);
-    instance.on('loadedmetadata', () => emit('loadedmetadata'));
-    instance.on('ended', () => emit('ended'));
-
-    instance.on('loadeddata', applyPreferredLanguage);
-    instance.on('fullscreenchange', applyPreferredLanguage);
-    instance.on('texttrackchange', onEngineTextTrackChange);
-
-    engineAudioTracks = audioTrackList();
-    engineAudioTracks?.on('change', onEngineAudioTrackChange);
-
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+    if (containerEl.value) removeAutoHide = installAutoHide(containerEl.value, store);
     void loadSource(props.source);
 });
 
-/**
- * Rotation-driven fullscreen and orientation locking, the app's settings
- * verbatim.
- *
- * Imported dynamically, like `videojs-youtube`: a static import of a plugin
- * that has no types of its own puts the bare module specifier into this
- * component's emitted `.d.ts`, where a consumer type-checking with
- * `skipLibCheck: false` cannot resolve it. The `typeof` guard stays regardless —
- * the plugin registers itself as an import side effect, and a consumer bundling
- * with side effects stripped should lose the behaviour, not crash.
- */
-async function installMobileUi(instance: Player): Promise<void> {
-    await import('videojs-mobile-ui');
-    if (player.value !== instance) return;
-    if (typeof instance.mobileUi !== 'function') return;
-    // videojs-mobile-ui's rotationHandler feature-detects screen.orientation.lock,
-    // but its `fullscreenchange` listener calls it unconditionally — throws on iOS
-    // Safari, which implements screen.orientation but not .lock(). Stub a rejecting
-    // lock() so the plugin's own `.catch()` absorbs it like a real refusal would.
-    if (screen.orientation && typeof screen.orientation.lock !== 'function') {
-        screen.orientation.lock = () =>
-            Promise.reject(new DOMException('screen.orientation.lock is not supported', 'NotSupportedError'));
-    }
-    instance.mobileUi({
-        fullscreen: {
-            enterOnRotate: true,
-            exitOnRotate: true,
-            lockOnRotate: true,
-            lockToLandscapeOnEnter: true,
-            disabled: false,
-        },
-        touchControls: { disabled: true },
-    });
-}
-
-function onPlaybackStarted(): void {
-    keepAlive?.sync(true);
-}
-
-function onPlaybackStopped(): void {
-    keepAlive?.sync(false);
-}
-
-/**
- * The keep-alive follows the transport, and a fatal error is not a transport
- * event: the picture is gone, `pause` never fires, and the silence would loop
- * on holding an audio session open for playback that has stopped existing.
- *
- * Unmount is already covered — `keepAlive.dispose()` pauses and rewinds — so
- * this is the only other way out.
- */
 watch(
     () => state.value.lifecycle,
     (lifecycle) => {
+        // A fatal error is not a transport event: `pause` never fires, and the silence would
+        // loop on holding an audio session open for playback that has stopped existing.
         if (lifecycle === 'error') keepAlive?.sync(false);
-    },
+    }
 );
 
 watch(
     () => props.source,
-    (next) => {
-        void loadSource(next);
-    },
+    (next) => void loadSource(next)
 );
 
 onBeforeUnmount(() => {
+    for (const [type, handler] of mediaListeners) mediaEl.value?.removeEventListener(type, handler);
+    mediaListeners.length = 0;
+    audioTrackList?.removeEventListener('change', onEngineAudioTrackChange);
+    textTrackList?.removeEventListener('change', onEngineTextTrackChange);
+    document.removeEventListener('fullscreenchange', onFullscreenChange);
+    document.removeEventListener('webkitfullscreenchange', onFullscreenChange);
     removeAutoHide?.();
     removeAutoHide = null;
-    keepAlive?.dispose();
-    keepAlive = null;
-
-    engineAudioTracks?.off('change', onEngineAudioTrackChange);
-    engineAudioTracks = null;
-
     frameObserver?.disconnect();
     frameObserver = null;
-    playerEl.value?.removeEventListener('dblclick', onFrameDoubleClick);
-    playerEl.value = null;
-
-    // Order matters: the adapter detaches its handlers from a live player, and
-    // a disposed player throws at the first of them.
+    keepAlive?.dispose();
+    keepAlive = null;
     controller.value?.destroy();
     controller.value = null;
-    player.value?.dispose();
-    player.value = null;
 });
 
 // --- error surface --------------------------------------------------------
@@ -701,22 +337,7 @@ const ERROR_MESSAGE_KEYS: Partial<Record<PlayerError['code'], keyof PlayerMessag
     media: 'errorMedia',
 };
 
-/**
- * A YouTube source whose player could not load: the iframe API never arrived,
- * so what is behind the panel is waiting for something that is not coming. In
- * YouTube mode there is no controller whose state could say so, and without
- * this the viewer saw a dead player with no explanation.
- */
-const YOUTUBE_API_FAILED: PlayerError = {
-    code: 'network',
-    fatal: true,
-    message: 'The YouTube iframe API could not be loaded',
-};
-
-const youtubeError = shallowRef<PlayerError | null>(null);
-
-/** The error on screen, whichever mode raised it. */
-const displayedError = computed(() => youtubeError.value ?? state.value.error);
+const displayedError = computed(() => sourceError.value ?? state.value.error);
 
 const errorText = computed(() => {
     const code = displayedError.value?.code;
@@ -728,111 +349,97 @@ function retry(): void {
     void loadSource(props.source);
 }
 
-// --- fullscreen -----------------------------------------------------------
+// --- fullscreen and the media surface ---------------------------------------
+
+interface PlayerStore extends ControlsStore {
+    requestFullscreen(): Promise<void>;
+    exitFullscreen(): Promise<void>;
+    volume: number;
+    muted: boolean;
+    setVolume(volume: number): number;
+    setMuted(muted: boolean): boolean;
+}
+
+const store = (): PlayerStore | undefined => (playerEl.value as unknown as { store?: PlayerStore } | null)?.store;
+
+/** The `<video>` the element renders into; see {@link HlsJsVideoAdapter}'s own lookup for why it is found this way. */
+function innerVideo(): HTMLVideoElement | null {
+    const el = mediaEl.value as unknown as { target?: HTMLVideoElement | null; shadowRoot?: ShadowRoot | null } | null;
+    return el?.target ?? el?.shadowRoot?.querySelector('video') ?? null;
+}
+
+function applyFit(): void {
+    const video = innerVideo();
+    if (video) video.style.objectFit = isFullscreen.value ? 'contain' : (props.windowedFit ?? 'contain');
+}
+
+watch([isFullscreen, () => props.windowedFit], applyFit);
+
+function onFullscreenChange(): void {
+    const doc = document as Document & { webkitFullscreenElement?: Element | null };
+    isFullscreen.value = (doc.fullscreenElement ?? doc.webkitFullscreenElement ?? null) !== null;
+    // A control clicked in fullscreen keeps focus once the bare frame hides it again, and a focused
+    // control swallows every key but Tab: the host's shortcuts would stay dead until something else
+    // took focus.
+    if (isFullscreen.value || mergedControls.value.windowedControls) return;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && containerEl.value?.contains(active)) active.blur();
+}
 
 /**
- * video.js owns fullscreen — including the rotation handling from
- * `videojs-mobile-ui` — so these are thin pass-throughs: the way in for a host
- * with its own fullscreen button, which a bare windowed frame
- * (`controls.windowedControls: false`) has no other button for.
+ * The volume card's plus and minus buttons, caught on the container rather than bound one by one:
+ * the controls are markup, not Vue elements, and a card in the top layer is still inside it for events.
+ * Raising the volume of a muted player unmutes it, which is what pressing plus means.
  */
+function onControlsClick(event: MouseEvent): void {
+    const target = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-volume-step]') : null;
+    const player = store();
+    if (!target || !player) return;
+    const media = mediaEl.value;
+    if (!media) return;
+    const direction = target.dataset.volumeStep === '-1' ? -1 : 1;
+    // Read and written on the element, which is the truth: the store follows it a moment later, and a
+    // press in that moment would step from a volume that is already out of date, or ask the store to unmute
+    // a player it believes is not muted.
+    if (direction === 1 && media.muted) media.muted = false;
+    player.setVolume(stepVolume(media.volume, direction));
+}
+
+/**
+ * A double-click toggles fullscreen anywhere on the picture, in both directions. What is refused is a
+ * double-click on an actual control, where it is two presses of that control rather than a gesture on
+ * the picture. Not v10's own double-tap, which seeks when it lands on the left or right third.
+ */
+function onFrameDoubleClick(event: MouseEvent): void {
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('.lmpl-cluster, .lmpl-bottom, .media-popup')) return;
+    if (isFullscreen.value) exitFullscreen();
+    else void enterFullscreen();
+}
+
 async function enterFullscreen(): Promise<void> {
     try {
-        await player.value?.requestFullscreen();
+        await store()?.requestFullscreen();
     } catch {
         /* denied by the browser (no user gesture, policy) — stay inline */
     }
 }
 
 function exitFullscreen(): void {
-    // video.js rejects leaving a fullscreen nothing is in, and nobody would catch it.
-    if (player.value?.isFullscreen()) void player.value.exitFullscreen();
+    // Rejected when nothing is fullscreen, and nobody would catch it.
+    if (isFullscreen.value) void store()?.exitFullscreen();
 }
 
-/**
- * A double-click toggles fullscreen anywhere on the frame, in both directions —
- * the picture, the scrim the controls sit on, and the audio-only artwork.
- *
- * Not video.js's own handler, which listens on the tech alone and refuses
- * anything inside the control bar. In this skin the control bar *is* the frame
- * (see `styles.css`), so whenever it is up — in fullscreen, that is all the time
- * the video is paused, and on every double-click, whose first click wakes it —
- * that rule refused every double-click there was, and fullscreen could not be
- * left that way. What is refused here is a double-click on an actual control:
- * a button, a slider, a menu or a dialog, where it is two presses of that
- * control rather than a gesture on the picture. (The big play button is the one
- * control video.js does not class `vjs-control`.)
- */
-function onFrameDoubleClick(event: MouseEvent): void {
-    const target = event.target instanceof Element ? event.target : null;
-    if (target?.closest('.vjs-control, .vjs-big-play-button, .vjs-menu, .vjs-modal-dialog')) {
-        return;
-    }
-    if (frameIsFullscreen()) exitFullscreen();
-    else void enterFullscreen();
-}
-
-/**
- * Read off the class the bare-frame CSS keys on, so the script and the styles
- * cannot disagree. video.js subscribes to `fullscreenchange` before anyone else
- * does and sets the class there, so by the time a handler of ours runs it is
- * already current.
- */
-function frameIsFullscreen(): boolean {
-    return playerEl.value?.classList.contains('vjs-fullscreen') ?? false;
-}
-
-/**
- * Tracks fullscreen for the artwork's `sizes` — and, on a bare frame, hands the
- * keyboard back on the way out. A video.js control clicked in fullscreen keeps
- * focus once it is hidden again, and a focused video.js control swallows every
- * key but Tab: the host's shortcuts would stay dead until something else took
- * focus.
- */
-function onFullscreenChange(): void {
-    isFullscreen.value = frameIsFullscreen();
-    if (isFullscreen.value || mergedControls.value.windowedControls) return;
-    const active = document.activeElement;
-    if (active instanceof HTMLElement && playerEl.value?.contains(active)) active.blur();
-}
-
-// --- media surface --------------------------------------------------------
-
-/** A time video.js can be handed: real, and not before the start of the media. */
-function isSeekableTime(seconds: number): boolean {
-    return Number.isFinite(seconds) && seconds >= 0;
-}
-
-/**
- * Moves playback to `seconds`.
- *
- * The one write in this surface, and it is here rather than on the controller
- * for the same reason the events are: restoring a resume point has to work in
- * YouTube mode too. video.js clamps to the seekable range itself; what it does
- * not survive is `NaN`, which strands the element with no way back, so a time
- * that is not a time is dropped rather than passed on.
- */
+/** A time the element can be handed: real, and not before the start of the media. */
 function seek(seconds: number): void {
-    if (!isSeekableTime(seconds)) return;
-    player.value?.currentTime(seconds);
+    if (!Number.isFinite(seconds) || seconds < 0 || !mediaEl.value) return;
+    mediaEl.value.currentTime = seconds;
 }
 
-/**
- * Starts playback, and reports whether it was allowed to.
- *
- * A host embedding the player with autoplay asked for has to start it itself:
- * the component sets video.js's `autoplay` to `false` unconditionally, because
- * a library that autoplays cannot be talked out of it. Like `seek`, this goes
- * through the player rather than the controller so that it also works in
- * YouTube mode, where there is no controller.
- *
- * A browser refusing autoplay without a gesture is the expected outcome, not an
- * error, so the rejection is swallowed and reported as `false` — the caller
- * usually wants to leave the poster up rather than handle an exception.
- */
+/** Starts playback and reports whether the browser allowed it; a refusal is expected, not an error. */
 async function play(): Promise<boolean> {
     try {
-        await player.value?.play();
+        await mediaEl.value?.play();
         return true;
     } catch {
         return false;
@@ -840,102 +447,207 @@ async function play(): Promise<boolean> {
 }
 
 function pause(): void {
-    player.value?.pause();
+    mediaEl.value?.pause();
 }
 
-function onTimeUpdate(): void {
-    const instance = player.value;
-    if (!instance) return;
-    // `currentTime()` is NaN before the first frame and `duration()` is NaN
-    // until metadata lands; 0 is the honest reading of both.
-    emit('timeupdate', instance.currentTime() ?? 0, instance.duration() ?? 0);
-}
+// --- audio-only -------------------------------------------------------------
 
-// --- audio / video toggle -------------------------------------------------
-
-/**
- * Offered only when pressing it would go somewhere.
- *
- * A live controller on a playable LMC source is the precondition — YouTube has
- * no audio-only rendering to switch to, and before `ready` the angle list is not
- * known — but it is not sufficient: the pipeline synthesizes the audio-only
- * pseudo-angle from the master's audio groups, so a master with none carries no
- * {@link AUDIO_ONLY_ANGLE_ID} and the audio half has no destination. The
- * mirror case is a natively audio-only stream: it has nothing to go back to, so
- * the toggle only survives there if a real angle exists alongside.
- */
-const showAudioVideoToggle = computed(() => {
-    if (!mergedControls.value.audioVideoToggle) return false;
-    // It sits outside video.js's fullscreen element, so a bare frame — no
-    // controls while windowed — never has a place to show it.
-    if (!mergedControls.value.windowedControls) return false;
-    if (isYouTube.value || controller.value === null) return false;
-
-    const snapshot = state.value;
-    if (snapshot.lifecycle !== 'ready') return false;
-    if (!snapshot.angles.some((angle) => angle.id === AUDIO_ONLY_ANGLE_ID)) return false;
-
-    const inAudioOnly =
-        snapshot.isAudioOnly || snapshot.activeAngleId === AUDIO_ONLY_ANGLE_ID;
-    return !inAudioOnly || snapshot.angles.some((angle) => angle.id !== AUDIO_ONLY_ANGLE_ID);
-});
-
-/**
- * Whether the picture is off — the audio-only rendering is what is playing.
- *
- * Read from the controller rather than from an assignment, so it stays true
- * across a recovery or a reload that re-selects the same angle.
- */
+/** Whether the picture is off — the audio-only rendering is what is playing. Read from the controller, so it survives a reload. */
 const isAudioOnly = computed(
     () =>
         controller.value !== null &&
-        (state.value.isAudioOnly || state.value.activeAngleId === AUDIO_ONLY_ANGLE_ID),
+        (state.value.isAudioOnly || state.value.activeAngleId === AUDIO_ONLY_ANGLE_ID)
 );
 
+// --- scrub preview ----------------------------------------------------------
+
+interface ScrubState {
+    cue: ThumbnailSpriteCue | null;
+    label: string;
+    /** Centre of the preview, in px from the container's left edge. */
+    left: number;
+    /** Gap, in px, between the container's bottom edge and the preview's. */
+    bottom: number;
+    /** While the press is held, the strip of frames around the playhead that replaces the single frame. */
+    roster: {
+        tiles: { index: number; left: number; cue: ThumbnailSpriteCue | null }[];
+        /** Where the marker sits, in px from the roster's left. */
+        markerX: number;
+        tileWidth: number;
+        /** Gap, in px, between the container's bottom edge and the roster's: it takes the timeline's resting place. */
+        bottom: number;
+        /** Gap, in px, between the container's bottom edge and the time label above the timeline. */
+        labelBottom: number;
+    } | null;
+}
+
+const scrub = shallowRef<ScrubState | null>(null);
+
 /**
- * Tells video.js the picture is off, as well as the pipeline.
- *
- * Switching to the audio-only angle decides *what* is played; it says nothing
- * about what is drawn. Without this the engine is still an ordinary video
- * player that happens to have been handed a stream with no video track, so the
- * `<video>` element stays laid out and paints its own surface — a coloured
- * rectangle over the artwork, sized to the stream rather than the frame.
- *
- * `audioPosterMode` hides the tech and keeps video.js's poster up — the
- * transparent one, so what the frame shows is the artwork layer beneath it.
- * Not `audioOnlyMode` as well: video.js makes the two exclusive (turning poster
- * mode on turns audio-only mode off), and audio-only mode collapses the player
- * to the height of a control bar besides.
- *
- * Failures are swallowed: video.js rejects these before the player is ready,
- * and the watcher runs again on the next state change, which is sooner than
- * anything a viewer would notice.
+ * Scales with the player, like the controls: a thumbnail sized for a phone is a stamp on a 2000px screen.
+ * A sixth of the width, between the 168px the Video.js 8 player used and a size past which the sprite's own
+ * 160px frames only blur.
  */
-watch(isAudioOnly, (audioOnly) => {
-    const instance = player.value;
-    if (!instance) return;
-    void Promise.resolve(instance.audioPosterMode(audioOnly)).catch(() => {});
-});
+const scrubWidth = computed(() => Math.round(Math.min(340, Math.max(168, frameWidth.value / 6))));
+
+/** Room the preview keeps above the bar. */
+const SCRUB_GAP_PX = 14;
+
+/** Room between the timeline and its time label. */
+const LABEL_GAP_PX = 8;
+
+/**
+ * The slider is taller than the track it draws, so the track sits this far, per unit of the controls' scale,
+ * above the slider's bottom edge. The timeline lifts by the roster's height less this, so its track rests
+ * against the roster's top rather than floating above it.
+ */
+const TRACK_INSET_PX = 12.5;
+
+/**
+ * The roster's height: that of the frame the hover preview shows, so the picture does not change size
+ * between hovering the timeline and holding it. Frames are 16:9.
+ */
+const rosterHeight = computed(() => Math.round((scrubWidth.value * 9) / 16));
+
+/** Whether a roster is on show: the timeline has made way for it, so the layout follows this and not the pointer. */
+const rosterShown = computed(() => scrub.value?.roster != null);
+
+function hideScrub(): void {
+    if (scrub.value) scrub.value = null;
+}
+
+/**
+ * Whether a press that began on the bar is still held. Tracked here rather than read from Video.js's
+ * `data-dragging`, and not inferred from pointer capture: engines differ in both, and a drag that wanders
+ * off the bar must keep its preview for as long as the button is down, wherever the pointer goes.
+ */
+let scrubbing = false;
+
+/** The press ended, or was taken from us: nothing is being scrubbed any more. */
+function endScrub(): void {
+    scrubbing = false;
+    hideScrub();
+}
+
+/**
+ * Follows the pointer over, or dragging, the timeline: where the viewer is about to land, which is not
+ * where the video is. Driven from the container's pointer events rather than the slider's own, because
+ * they cover a mouse hovering and a finger dragging alike, and a dragged slider holds the pointer
+ * captured, so its events keep arriving after the pointer has left it.
+ *
+ * Offered only once there are frames to show: without them the timeline's own time readout stays.
+ */
+function updateScrub(event: PointerEvent): void {
+    const container = containerEl.value;
+    const slider = container?.querySelector<HTMLElement>('.lmpl-time-slider');
+    const media = mediaEl.value;
+    const instance = controller.value;
+    if (!container || !slider || !media || !instance || !state.value.thumbnailsReady) return hideScrub();
+
+    // Live has no length to scrub across.
+    const duration = media.duration;
+    if (!Number.isFinite(duration) || duration <= 0) return hideScrub();
+
+    const bar = slider.getBoundingClientRect();
+    const onBar = isOnBar(event.clientX, event.clientY, bar);
+    if (event.type === 'pointerdown' && onBar) scrubbing = true;
+    if (!scrubbing && !slider.hasAttribute('data-dragging') && !onBar) return hideScrub();
+
+    const ratio = pointerRatio(event.clientX, bar);
+    if (ratio === null) return hideScrub();
+    const { time, lookup } = previewTimes(ratio, duration);
+
+    const frame = container.getBoundingClientRect();
+    const held = scrubbing || slider.hasAttribute('data-dragging');
+    // The timeline slides up out of the way while held, so its resting position is read only when it is at rest.
+    if (!rosterShown.value) {
+        restBarTop = bar.top;
+        restBarBottom = bar.bottom;
+    }
+    const roster = held ? buildRoster(instance, time, event.clientX - frame.left, frame.width, duration) : null;
+    scrub.value = {
+        // A lookup that lands in a gap in the cues keeps the frame already on show: a preview that blanks
+        // for a moment between two frames reads as a fault, and a stale frame a hair away is not.
+        cue: instance.thumbnailAt(lookup) ?? scrub.value?.cue ?? null,
+        label: formatClock(time, duration >= 3600),
+        left: clampPreviewCentre(event.clientX - frame.left, scrubWidth.value, SCRUB_EDGE_PX, frame.width - SCRUB_EDGE_PX),
+        bottom: frame.bottom - bar.top + SCRUB_GAP_PX,
+        roster: roster && {
+            ...roster,
+            bottom: frame.bottom - restBarBottom,
+            labelBottom:
+                frame.bottom -
+                (restBarTop - (rosterHeight.value - TRACK_INSET_PX * controlsScale(slider))) +
+                LABEL_GAP_PX,
+        },
+    };
+}
+
+/** The controls' current scale, which grows with the player's width. */
+function controlsScale(el: Element): number {
+    return parseFloat(getComputedStyle(el).getPropertyValue('--lmpl-s')) || 1;
+}
+
+/** Where the timeline's top and bottom edges sat before it made way for the roster. */
+let restBarTop = 0;
+let restBarBottom = 0;
+
+/**
+ * The strip of frames for a held press: the tile size comes from the sprite's own frame shape, the marker
+ * stays under the pointer, and each slot looks its frame up by the time it stands for.
+ */
+function buildRoster(
+    instance: PlayerControllerApi,
+    time: number,
+    pointerX: number,
+    width: number,
+    duration: number
+): {
+    tiles: { index: number; left: number; cue: ThumbnailSpriteCue | null }[];
+    markerX: number;
+    tileWidth: number;
+} | null {
+    const sample = instance.thumbnailAt(0);
+    if (!sample || !sample.w || !sample.h) return null;
+    const tileWidth = Math.max(24, Math.round((rosterHeight.value * sample.w) / sample.h));
+    const markerX = Math.min(width, Math.max(0, pointerX));
+    const tiles = rosterTiles(time, markerX, width, tileWidth, rosterStep(duration), duration).map((tile) => ({
+        index: tile.index,
+        left: tile.left,
+        cue: instance.thumbnailAt(tile.time),
+    }));
+    return { tiles, markerX, tileWidth };
+}
+
+/**
+ * Fetches the first sprite sheet the moment there is one, so the first hover is not a blank frame
+ * waiting on an image. Later sheets load as the pointer reaches them.
+ */
+watch(
+    () => state.value.thumbnailsReady,
+    (ready) => {
+        if (!ready) return;
+        const first = controller.value?.thumbnailAt(0);
+        if (first) new Image().src = first.spriteUrl;
+    }
+);
+
+watch(
+    () => props.source,
+    () => hideScrub()
+);
 
 // --- artwork ----------------------------------------------------------------
 
-/** What the artwork layer draws, before the first frame and while audio-only. */
 const artworkImage = computed(() => toPlayerImage(props.poster));
-
-/** The image first, then its fallback; see `imageAttempts`. */
 const artworkAttempts = computed(() => imageAttempts(artworkImage.value));
 const artworkAttemptIndex = ref(0);
 
-/**
- * A different image starts again from its first attempt. Keyed on content
- * rather than identity, so a host re-rendering with an equal object literal
- * does not send an image that already failed round again.
- */
 watch(
     () => JSON.stringify(artworkAttempts.value),
     () => {
         artworkAttemptIndex.value = 0;
-    },
+    }
 );
 
 const artworkAttempt = computed(() => artworkAttempts.value[artworkAttemptIndex.value] ?? null);
@@ -945,11 +657,6 @@ function onArtworkError(): void {
     artworkAttemptIndex.value += 1;
 }
 
-/**
- * The host's `sizes`, or the frame's own width — and `100vw` in fullscreen, so
- * the browser can reach for a larger candidate when the frame becomes the
- * screen.
- */
 const artworkSizes = computed(() => {
     const given = artworkImage.value?.sizes;
     if (given) return given;
@@ -957,67 +664,106 @@ const artworkSizes = computed(() => {
     return `${Math.round(frameWidth.value)}px`;
 });
 
-/** Drawn at all: there is artwork, or the audio-only frame needs its black and its glyph. */
 const showArtworkLayer = computed(() => isAudioOnly.value || artworkAttempt.value !== null);
 
 defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, pause });
 </script>
 
 <template>
-    <div class="lmpl-root" :class="{ 'lmpl-windowed-bare': !mergedControls.windowedControls }">
-        <div class="lmpl-video-player">
-            <video
-                ref="videoEl"
-                class="video-js lmpl-video"
-                playsinline
-                webkit-playsinline
-                controls
-                preload="auto"
-            ></video>
-        </div>
-
-        <!--
-            Inside video.js's element, so the artwork goes fullscreen with the
-            picture; `.lmpl-artwork` is how it stays under everything video.js
-            draws there.
-        -->
-        <Teleport v-if="playerEl" :to="playerEl">
-            <div
-                v-if="showArtworkLayer"
-                class="lmpl-artwork"
-                :class="{ 'lmpl-artwork-audio': isAudioOnly }"
-                aria-hidden="true"
+    <div
+        class="lmpl-root"
+        :class="{
+            'lmpl-windowed-bare': !mergedControls.windowedControls,
+            'lmpl-is-fullscreen': isFullscreen,
+            'lmpl-has-quality-choice': state.qualities.length > 1,
+            'lmpl-has-audio-choice': state.audioTracks.length > 1,
+            'lmpl-has-subtitles': state.subtitleTracks.length > 0,
+            'lmpl-has-thumbs': state.thumbnailsReady,
+            'lmpl-scrubbing': rosterShown,
+        }"
+        :style="{ '--lmpl-roster-h': `${rosterHeight}px`, '--lmpl-track-inset': `${TRACK_INSET_PX}px` }"
+    >
+        <video-player ref="playerEl" class="lmpl-video-player">
+            <media-container
+                ref="containerEl"
+                class="media-skin media-container lmpl-container"
+                data-theme="default"
+                data-preset="video"
+                @dblclick="onFrameDoubleClick"
+                @click="onControlsClick"
+                @pointermove="updateScrub"
+                @pointerdown.capture="updateScrub"
+                @pointerleave="hideScrub"
+                @pointerup.capture="endScrub"
+                @pointercancel.capture="endScrub"
             >
-                <img
-                    v-if="artworkAttempt"
-                    :key="artworkAttemptIndex"
-                    class="lmpl-artwork-img"
-                    :srcset="artworkAttempt.srcset"
-                    :sizes="artworkAttempt.srcset ? artworkSizes : undefined"
-                    :src="artworkAttempt.src"
-                    alt=""
-                    draggable="false"
-                    @error="onArtworkError"
-                />
-                <!-- heroicons 24/solid "musical-note", as on the audio/video toggle -->
-                <svg
-                    v-if="isAudioOnly"
-                    class="lmpl-audio-glyph"
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 24 24"
-                    fill="currentColor"
+                <!-- Inside the container, so the artwork goes fullscreen with the picture. -->
+                <div
+                    v-if="showArtworkLayer"
+                    class="lmpl-artwork"
+                    :class="{ 'lmpl-artwork-audio': isAudioOnly }"
                     aria-hidden="true"
                 >
-                    <path
-                        fill-rule="evenodd"
-                        d="M19.952 1.651a.75.75 0 0 1 .298.599V16.303a3 3 0 0 1-2.176 2.884l-1.32.377a2.553 2.553 0 1 1-1.403-4.909l2.311-.66a1.5 1.5 0 0 0 1.088-1.442V6.994l-9 2.572v9.737a3 3 0 0 1-2.176 2.884l-1.32.377a2.553 2.553 0 1 1-1.402-4.909l2.31-.66a1.5 1.5 0 0 0 1.088-1.442V5.25a.75.75 0 0 1 .544-.721l10.5-3a.75.75 0 0 1 .658.122Z"
-                        clip-rule="evenodd"
+                    <img
+                        v-if="artworkAttempt"
+                        :key="artworkAttemptIndex"
+                        class="lmpl-artwork-img"
+                        :srcset="artworkAttempt.srcset"
+                        :sizes="artworkAttempt.srcset ? artworkSizes : undefined"
+                        :src="artworkAttempt.src"
+                        alt=""
+                        draggable="false"
+                        @error="onArtworkError"
                     />
-                </svg>
-            </div>
-        </Teleport>
+                    <!-- heroicons 24/solid "musical-note", as on the audio/video toggle -->
+                    <svg
+                        v-if="isAudioOnly"
+                        class="lmpl-audio-glyph"
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        aria-hidden="true"
+                    >
+                        <path
+                            fill-rule="evenodd"
+                            d="M19.952 1.651a.75.75 0 0 1 .298.599V16.303a3 3 0 0 1-2.176 2.884l-1.32.377a2.553 2.553 0 1 1-1.403-4.909l2.311-.66a1.5 1.5 0 0 0 1.088-1.442V6.994l-9 2.572v9.737a3 3 0 0 1-2.176 2.884l-1.32.377a2.553 2.553 0 1 1-1.402-4.909l2.31-.66a1.5 1.5 0 0 0 1.088-1.442V5.25a.75.75 0 0 1 .544-.721l10.5-3a.75.75 0 0 1 .658.122Z"
+                            clip-rule="evenodd"
+                        />
+                    </svg>
+                </div>
+                <hlsjs-video ref="mediaEl" class="lmpl-media" playsinline preload="auto"></hlsjs-video>
 
-        <!-- Keeps the iOS audio session open across a re-source; see vjs/keepAlive.ts. -->
+                <media-gesture v-if="gesturesOn" type="tap" action="togglePaused" pointer="mouse" region="center"></media-gesture>
+                <media-gesture v-if="gesturesOn" type="tap" action="toggleControls" pointer="touch"></media-gesture>
+
+                <media-controls class="lmpl-controls" v-html="controlsHtml"></media-controls>
+
+                <div
+                    v-if="scrub && !scrub.roster"
+                    class="lmpl-scrub-preview"
+                    :style="{ left: `${scrub.left}px`, bottom: `${scrub.bottom}px` }"
+                >
+                    <ScrubThumbnail :cue="scrub.cue" :label="scrub.label" :width="scrubWidth" />
+                </div>
+                <template v-if="scrub?.roster">
+                    <ScrubRoster
+                        :tiles="scrub.roster.tiles"
+                        :tile-width="scrub.roster.tileWidth"
+                        :height="rosterHeight"
+                        :marker-x="scrub.roster.markerX"
+                        :bottom="scrub.roster.bottom"
+                    />
+                    <div
+                        class="lmpl-scrub-preview lmpl-scrub-label"
+                        :style="{ left: `${scrub.left}px`, bottom: `${scrub.roster.labelBottom}px` }"
+                    >
+                        <span class="lmpl-thumb-time">{{ scrub.label }}</span>
+                    </div>
+                </template>
+            </media-container>
+        </video-player>
+
+        <!-- Keeps the iOS audio session open across a re-source; see ui/keepAlive.ts. -->
         <audio
             ref="keepAliveEl"
             class="lmpl-keep-alive"
@@ -1039,7 +785,7 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
             </slot>
         </template>
 
-        <template v-else-if="state.lifecycle === 'error' || youtubeError">
+        <template v-else-if="state.lifecycle === 'error' || sourceError">
             <slot name="error" :state="state" :error="displayedError" :retry="retry">
                 <div class="lmpl-panel lmpl-error">
                     <p class="lmpl-panel-text">{{ errorText }}</p>
@@ -1049,31 +795,16 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
                 </div>
             </slot>
         </template>
-
-        <transition name="lmpl-fade">
-            <AudioVideoToggle
-                v-if="showAudioVideoToggle"
-                :state="state"
-                :controller="controller"
-                :messages="msg"
-            />
-        </transition>
     </div>
 </template>
 
 <style>
 /*
- * Stylesheet order is load-bearing and this is where it is decided: the skin
- * overrides video.js's own rules, and `vite-plugin-css-injected-by-js` injects
- * in the order the bundler sees them, so the vendor sheets come first.
- *
- * They are `@import`ed from a style block rather than `import`ed from a script,
- * because TypeScript preserves a side-effect `import` in the emitted `.d.ts` —
- * where a consumer type-checking with `skipLibCheck: false` then fails to
- * resolve `.css`. A style block is invisible to declaration emit, and Vite
- * inlines these at build time exactly as it would a script import.
+ * Stylesheet order is load-bearing: the default skin's rules come first and `styles.css` overrides
+ * them. They are `@import`ed from a style block rather than `import`ed from a script, because
+ * TypeScript preserves a side-effect `import` in the emitted `.d.ts`, where a consumer type-checking
+ * with `skipLibCheck: false` then fails to resolve `.css`.
  */
-@import 'video.js/dist/video-js.css';
-@import 'videojs-mobile-ui/dist/videojs-mobile-ui.css';
+@import '../generated/skin.css';
 @import '../styles.css';
 </style>

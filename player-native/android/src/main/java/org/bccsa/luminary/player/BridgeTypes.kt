@@ -129,6 +129,8 @@ data class LoadArgs(
     val startPosition: Double?,
     val recovery: RecoveryPolicy,
     val nowPlaying: NowPlaying?,
+    /** Where the scrub frames' VTT is, for the full-screen roster; null for none. */
+    val thumbnailsUrl: String? = null,
 )
 
 data class Snapshot(
@@ -376,6 +378,7 @@ sealed interface BridgeCall {
                 nowPlaying = nowPlaying?.let {
                     NowPlaying(it.string("title"), it.optString("subtitle"), it.optString("artworkUrl"), it.optString("fallbackArtworkUrl"))
                 },
+                thumbnailsUrl = args.optString("thumbnailsUrl")?.takeIf { it.isNotEmpty() },
             )
             if (!masterUri.startsWith(ASSET_URI_PREFIX)) args.invalid("masterUri is a luminary://asset/ address")
             return load

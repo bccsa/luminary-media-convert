@@ -59,6 +59,7 @@ import org.bccsa.luminary.player.PendingReload
 import org.bccsa.luminary.player.RecoveryLadder
 import org.bccsa.luminary.player.RecoveryPolicy
 import org.bccsa.luminary.player.Snapshot
+import org.bccsa.luminary.player.Thumbnails
 import org.bccsa.luminary.player.UriRouter
 import org.bccsa.luminary.player.rewriteForCast
 import org.bccsa.luminary.player.Variant
@@ -474,6 +475,11 @@ class ExoEngine(
     /** What the full-screen controls say; the host's language once it has sent it. */
     private var texts = FullscreenTexts()
 
+    /** The frames the full-screen timeline shows while held; read by this engine, not sent by the page. */
+    private val thumbnails = Thumbnails()
+
+    override fun setThumbnails(url: String?, key: ByteArray?) = thumbnails.load(url, key)
+
     override fun enterFullscreen(texts: Map<String, String>?) {
         // A call with no texts keeps the last, or English.
         if (texts != null) this.texts = FullscreenTexts.from(texts)
@@ -482,7 +488,7 @@ class ExoEngine(
         // Audio-only has no view. Until the tracks are known the item is presumed to have one, and
         // the view is taken down again if it turns out not to (see `onTracksChanged`).
         if (knownAudioOnly(player.currentTracks)) return
-        if (presenter.present(player, ::leaveFullscreenByViewer, skin, this.texts, ::presentationDidChange)) {
+        if (presenter.present(player, ::leaveFullscreenByViewer, skin, this.texts, ::presentationDidChange, thumbnails)) {
             presentationDidChange("fullscreen")
         }
     }
@@ -512,6 +518,7 @@ class ExoEngine(
         poll?.cancel()
         poll = null
         presenter.dismiss()
+        thumbnails.release()
         inline?.destroy()
         appLifecycle.removeObserver(appVisibility)
         player.removeListener(this)

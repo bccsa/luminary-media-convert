@@ -1164,7 +1164,7 @@ function onGlobalKeyDown(e: KeyboardEvent) {
  * phase — before the focused element sees them.
  *
  * In fullscreen the player's own controls are up, and one that has been
- * clicked keeps focus. A focused video.js control swallows every key but Tab,
+ * clicked keeps focus. A focused player control swallows every key but Tab,
  * so in the bubble phase the transport keys would never reach the window; and
  * a key that did get through would act twice — Space on a focused button plays
  * and pauses at once, a digit on the focused seek bar jumps to 10%. So a

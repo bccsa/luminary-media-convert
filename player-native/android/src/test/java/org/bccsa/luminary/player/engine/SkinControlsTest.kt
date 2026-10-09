@@ -50,11 +50,13 @@ class SkinControlsTest {
     fun tearDown() = player.release()
 
     @Test
-    fun `the time reads position over duration and follows the player`() {
+    fun `the time played and the time left follow the player`() {
         val controls = controls()
         player.seekTo(7_400)
         idle(300)
-        assertTrue(controls.texts().contains("0:07 / 0:30"))
+        // The time played before the timeline, the time left after it.
+        assertTrue(controls.texts().contains("0:07"))
+        assertTrue(controls.texts().contains("-0:23"))
     }
 
     @Test
@@ -252,11 +254,10 @@ class SkinControlsTest {
         player.setPlaybackSpeed(0.7f)
         controls.find("Playback Rate")!!.performClick()
 
-        // The chosen row is the one drawn on a grey; the others have no background.
+        // The chosen row is the one marked selected (it is ticked and lit); the others are not.
         val chosen = ArrayList<View>().also { collectTexts(controls, it) }
-            .filterIsInstance<android.widget.TextView>()
-            .filter { it.background is android.graphics.drawable.ColorDrawable && it.text.toString().endsWith("x") }
-            .map { it.text.toString() }
+            .filter { it.isSelected && it.contentDescription?.toString()?.endsWith("x") == true }
+            .map { it.contentDescription.toString() }
         assertEquals(listOf("0.7x"), chosen)
     }
 
@@ -266,7 +267,7 @@ class SkinControlsTest {
     }
 
     @Test
-    fun `the skip circles sit 72 dp either side of the middle, and a little above it`() {
+    fun `the skip circles sit 100 dp either side of the middle of play, on its centre line`() {
         val controls = controls()
         val density = activity.resources.displayMetrics.density
         val width = (800 * density).toInt()
@@ -294,10 +295,11 @@ class SkinControlsTest {
         val (forwardX, forwardY) = controls.find("Skip forward 10 seconds")!!.centre()
         val (playX, playY) = controls.find("Play")!!.centre()
 
-        assertEquals(playX - 72 * density, backX, 1f)
-        assertEquals(playX + 72 * density, forwardX, 1f)
-        assertEquals(playY - 14 * density, backY, 1f)
-        assertEquals(playY - 14 * density, forwardY, 1f)
+        // Half of play (40), the 32 between, and half of a skip (28).
+        assertEquals(playX - 100 * density, backX, 1f)
+        assertEquals(playX + 100 * density, forwardX, 1f)
+        assertEquals(playY, backY, 1f)
+        assertEquals(playY, forwardY, 1f)
     }
 
     @Test

@@ -9,6 +9,7 @@
         "hls-core",
         "player-core",
         "player-web",
+        "player-web-v8",
         "player-web-old",
         "player-native",
         "player-native/example-app",
