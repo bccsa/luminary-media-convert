@@ -248,6 +248,12 @@ export interface LoadArgs {
     /** Resolved by `player-core`: native applies it, never defaults it. */
     recovery: RecoveryPolicy;
     nowPlaying?: NowPlaying;
+    /**
+     * Where the scrub frames' `thumbnails.vtt` is, for the full-screen controls to draw the roster of
+     * frames under a held timeline. Native fetches it itself (and decrypts it with `keyHex`), so it
+     * works while JavaScript is frozen; an engine with no roster ignores it, and a 404 means none.
+     */
+    thumbnailsUrl?: string;
     /** Reserved; unused in v1. */
     requestHeaders?: Record<string, string>;
 }

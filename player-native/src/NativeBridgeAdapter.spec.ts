@@ -127,6 +127,18 @@ describe('NativeBridgeAdapter — load', () => {
         expect(without).not.toHaveProperty('bandwidthEstimate');
     });
 
+    it('tells native where the scrub frames are, for the loads that follow, and omits it when there are none', async () => {
+        const { controller, adapter, loads } = await setup();
+        adapter.setThumbnailsUrl(`${BASE}/thumbnails/thumbnails.vtt`);
+        await controller.load({ masterUrl: MASTER_URL });
+        adapter.setThumbnailsUrl(undefined);
+        await controller.load({ masterUrl: MASTER_URL });
+
+        const [withFrames, without] = loads();
+        expect(withFrames!.thumbnailsUrl).toBe(`${BASE}/thumbnails/thumbnails.vtt`);
+        expect(without).not.toHaveProperty('thumbnailsUrl');
+    });
+
     it('sends only what is new on an angle switch within the generation', async () => {
         const { controller, loads, plugin } = await setup(multiAngleRoutes);
         await controller.load({ masterUrl: MASTER_URL });

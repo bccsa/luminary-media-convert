@@ -111,6 +111,7 @@ export class NativeBridgeAdapter implements PlayerAdapter {
     /** The load events are accepted for; null until the first. */
     private loadId: string | null = null;
     private nowPlaying: NowPlaying | undefined;
+    private thumbnailsUrl: string | undefined;
     private currentTime = 0;
     private duration = 0;
     private variants: AdapterVariant[] = [];
@@ -185,6 +186,11 @@ export class NativeBridgeAdapter implements PlayerAdapter {
         this.nowPlaying = nowPlaying;
     }
 
+    /** Where the scrub frames' VTT is, sent with every load that follows. */
+    setThumbnailsUrl(url: string | undefined): void {
+        this.thumbnailsUrl = url;
+    }
+
     /**
      * Hears the choices a viewer makes in native UI: an audio language or a
      * speed. The controller has to adopt them (`setAudioTrack`,
@@ -216,6 +222,7 @@ export class NativeBridgeAdapter implements PlayerAdapter {
             ...(src.bandwidthEstimate ? { bandwidthEstimate: src.bandwidthEstimate } : {}),
             recovery: src.recovery,
             ...(this.nowPlaying ? { nowPlaying: this.nowPlaying } : {}),
+            ...(this.thumbnailsUrl ? { thumbnailsUrl: this.thumbnailsUrl } : {}),
         });
     }
 

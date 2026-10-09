@@ -226,12 +226,16 @@ export const NativeLuminaryPlayer = defineComponent({
             teardowns.push(() => listeners.forEach((listening) => void listening.then((listener) => listener.remove())));
             // Sent with the load, so it is set before it.
             created.adapter.setNowPlaying(nowPlaying.value);
+            created.adapter.setThumbnailsUrl(props.source.sidecars?.thumbnails?.url);
             await created.controller.load(props.source);
         });
 
         watch(
             () => props.source,
-            (source) => void controller.value?.load(source),
+            (source) => {
+                native.value?.adapter.setThumbnailsUrl(source.sidecars?.thumbnails?.url);
+                void controller.value?.load(source);
+            },
         );
         // Takes effect with the next load: the bridge carries it on `load`.
         watch(nowPlaying, (next) => native.value?.adapter.setNowPlaying(next));

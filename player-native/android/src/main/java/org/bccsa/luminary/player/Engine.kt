@@ -18,6 +18,14 @@ interface Engine {
         bandwidthEstimate: Double?,
     )
 
+    /**
+     * Where the scrub frames' VTT is, sent with each load; null for none. The engine fetches it
+     * itself, and decrypts it with [key] (a copy it may zero) when it is LMCENC.
+     */
+    fun setThumbnails(url: String?, key: ByteArray?) {
+        key?.fill(0)
+    }
+
     /** Same assets; restore position, rate and tracks. */
     fun reattach()
 
