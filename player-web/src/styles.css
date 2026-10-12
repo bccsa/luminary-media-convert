@@ -157,7 +157,8 @@
  * a menu in the top layer still inherits from where it sits in the tree.
  */
 .lmpl-root .lmpl-controls-content,
-.lmpl-root .lmpl-scrub-preview {
+.lmpl-root .lmpl-scrub-preview,
+.lmpl-root .lmpl-tooltip {
     --lmpl-s: 1;
     --media-spacing: calc(4px * var(--lmpl-s));
 }
@@ -168,14 +169,16 @@
 
 @container media-root (min-width: 900px) {
     .lmpl-root .lmpl-controls-content,
-    .lmpl-root .lmpl-scrub-preview {
+    .lmpl-root .lmpl-scrub-preview,
+    .lmpl-root .lmpl-tooltip {
         --lmpl-s: 1.25;
     }
 }
 
 @container media-root (min-width: 1400px) {
     .lmpl-root .lmpl-controls-content,
-    .lmpl-root .lmpl-scrub-preview {
+    .lmpl-root .lmpl-scrub-preview,
+    .lmpl-root .lmpl-tooltip {
         --lmpl-s: 1.6;
     }
 }
@@ -831,4 +834,38 @@
 
 .lmpl-roster.lmpl-roster-interactive:active {
     cursor: grabbing;
+}
+
+/* --- Control names ----------------------------------------------------------- */
+
+/* The name of the control the pointer rests on: a dark pill above it. Placed by the player (see ui/controlTooltip.ts). */
+.lmpl-tooltip {
+    position: absolute;
+    z-index: 45;
+    padding: calc(6px * var(--lmpl-s)) calc(12px * var(--lmpl-s));
+    border-radius: calc(10px * var(--lmpl-s));
+    background: rgb(34 32 30 / 0.94);
+    box-shadow:
+        inset 0 0 0 1px rgb(255 255 255 / 0.14),
+        0 4px 14px rgb(0 0 0 / 0.35);
+    font-size: calc(14px * var(--lmpl-s));
+    font-weight: 500;
+    line-height: 1.2;
+    white-space: nowrap;
+    color: #fff;
+    pointer-events: none;
+    animation: lmpl-tooltip-in 0.12s ease-out both;
+}
+
+@keyframes lmpl-tooltip-in {
+    from {
+        opacity: 0;
+        transform: translateY(4px);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .lmpl-tooltip {
+        animation: none;
+    }
 }

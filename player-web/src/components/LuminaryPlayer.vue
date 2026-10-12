@@ -36,6 +36,7 @@ import { buildControlsHtml } from '../ui/controlsHtml';
 import { installAutoHide, type ControlsStore } from '../ui/autoHide';
 import { stepVolume } from '../ui/volume';
 import { chapterMask, formatChapterOf } from '../ui/chapterBar';
+import { attachControlTooltips, clampTooltipLeft, type Tooltip } from '../ui/controlTooltip';
 import {
     SCRUB_EDGE_PX,
     clampPreviewCentre,
@@ -262,7 +263,24 @@ function bindTrackLists(): void {
     textTrackList?.addEventListener('change', onEngineTextTrackChange);
 }
 
+/** The name of the control the pointer rests on, or that the keyboard has reached; see ui/controlTooltip.ts. */
+const tooltip = shallowRef<Tooltip | null>(null);
+const tooltipEl = ref<HTMLElement | null>(null);
+let removeTooltips: (() => void) | null = null;
+// Placed once it is drawn: its width decides how far from the edge it must stay.
+watch(
+    tooltip,
+    (tip) => {
+        const el = tooltipEl.value;
+        const container = containerEl.value;
+        if (!tip || !el || !container) return;
+        el.style.left = `${clampTooltipLeft(tip.centre, el.offsetWidth, container.clientWidth)}px`;
+    },
+    { flush: 'post' }
+);
+
 onMounted(() => {
+    if (containerEl.value) removeTooltips = attachControlTooltips(containerEl.value, (tip) => (tooltip.value = tip));
     const media = mediaEl.value;
     if (!media) return;
 
@@ -316,6 +334,8 @@ watch(
 );
 
 onBeforeUnmount(() => {
+    removeTooltips?.();
+    removeTooltips = null;
     for (const [type, handler] of mediaListeners) mediaEl.value?.removeEventListener(type, handler);
     mediaListeners.length = 0;
     audioTrackList?.removeEventListener('change', onEngineAudioTrackChange);
@@ -1037,6 +1057,16 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
                         >
                     </div>
                 </template>
+                <!-- The name of the control under the pointer; its left edge is set once it is drawn, to stay inside the frame. -->
+                <div
+                    v-if="tooltip"
+                    ref="tooltipEl"
+                    class="lmpl-tooltip"
+                    role="tooltip"
+                    :style="{ left: `${tooltip.centre}px`, bottom: `${tooltip.bottom}px` }"
+                >
+                    {{ tooltip.text }}
+                </div>
             </media-container>
         </video-player>
 
