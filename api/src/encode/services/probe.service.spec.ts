@@ -353,7 +353,7 @@ describe('ProbeService', () => {
                         format_name: 'matroska,webm',
                     },
                 }),
-                '0,100000\n0,100000\n0,100000\n1,10000\n1,10000\n',
+                'stream_index=0|size=100000\nstream_index=0|size=100000\nstream_index=0|size=100000\nstream_index=1|size=10000\nstream_index=1|size=10000\n',
             ]);
 
             const result = await service.probe('/tmp/test.mkv');
@@ -387,7 +387,7 @@ describe('ProbeService', () => {
                         format_name: 'matroska,webm',
                     },
                 }),
-                '0,500000\n',
+                'stream_index=0|size=500000\n',
             ]);
 
             await service.probe('/tmp/test.mkv');
@@ -438,11 +438,11 @@ describe('ProbeService', () => {
                 mockExecFileSequence([
                     makeFfprobeOutput(oneVideoOneAudio),
                     [
-                        '1,250,60.0', // opening: near silence
-                        '1,250,61.0',
-                        '1,160000,300.0', // middle: real audio
-                        '1,160000,301.0',
-                        '1,80000,540.0', // end: quieter again
+                        'stream_index=1|pts_time=60.0|size=250', // opening: near silence
+                        'stream_index=1|pts_time=61.0|size=250',
+                        'stream_index=1|pts_time=300.0|size=160000', // middle: real audio
+                        'stream_index=1|pts_time=301.0|size=160000',
+                        'stream_index=1|pts_time=540.0|size=80000', // end: quieter again
                     ].join('\n') + '\n',
                 ]);
 
@@ -458,9 +458,11 @@ describe('ProbeService', () => {
                 // neither the quiet stretches nor the loud one.
                 mockExecFileSequence([
                     makeFfprobeOutput(oneVideoOneAudio),
-                    ['1,30000,60.0', '1,160000,300.0', '1,30000,540.0'].join(
-                        '\n'
-                    ) + '\n',
+                    [
+                        'stream_index=1|pts_time=60.0|size=30000',
+                        'stream_index=1|pts_time=300.0|size=160000',
+                        'stream_index=1|pts_time=540.0|size=30000',
+                    ].join('\n') + '\n',
                 ]);
 
                 const result = await service.probe('/tmp/quiet-open.mkv');
@@ -473,10 +475,10 @@ describe('ProbeService', () => {
                 mockExecFileSequence([
                     makeFfprobeOutput(oneVideoOneAudio),
                     [
-                        '0,600000,60.0', // video loud at the head
-                        '1,250,60.0', // audio silent at the head
-                        '0,600000,300.0',
-                        '1,160000,300.0', // audio loud in the middle
+                        'stream_index=0|pts_time=60.0|size=600000', // video loud at the head
+                        'stream_index=1|pts_time=60.0|size=250', // audio silent at the head
+                        'stream_index=0|pts_time=300.0|size=600000',
+                        'stream_index=1|pts_time=300.0|size=160000', // audio loud in the middle
                     ].join('\n') + '\n',
                 ]);
 
@@ -507,7 +509,7 @@ describe('ProbeService', () => {
                             format_name: 'matroska,webm',
                         },
                     }),
-                    '0,500000,0.0\n',
+                    'stream_index=0|pts_time=0.0|size=500000\n',
                 ]);
 
                 await service.probe('/tmp/short.mkv');
@@ -520,7 +522,7 @@ describe('ProbeService', () => {
                 // Rather than discarding them and under-reporting the stream.
                 mockExecFileSequence([
                     makeFfprobeOutput(oneVideoOneAudio),
-                    '1,160000,N/A\n1,160000,N/A\n',
+                    'stream_index=1|pts_time=N/A|size=160000\nstream_index=1|pts_time=N/A|size=160000\n',
                 ]);
 
                 const result = await service.probe('/tmp/nopts.mkv');
@@ -528,10 +530,24 @@ describe('ProbeService', () => {
                 expect(result.audioTracks[0].bitrateKbps).toBe(256);
             });
 
+            it('reads fields by name, whatever order ffprobe prints them in', async () => {
+                // ffprobe emits stream_index, pts_time, size no matter how the
+                // entries were requested, and some builds add a trailing '|'.
+                mockExecFileSequence([
+                    makeFfprobeOutput(oneVideoOneAudio),
+                    'stream_index=1|pts_time=0.000000|size=160000|\n' +
+                        'stream_index=1|pts_time=1.000000|size=160000|\n',
+                ]);
+
+                const result = await service.probe('/tmp/order.mkv');
+
+                expect(result.audioTracks[0].bitrateKbps).toBe(256);
+            });
+
             it('asks ffprobe for the timestamps it needs to separate samples', async () => {
                 mockExecFileSequence([
                     makeFfprobeOutput(oneVideoOneAudio),
-                    '1,160000,300.0\n',
+                    'stream_index=1|pts_time=300.0|size=160000\n',
                 ]);
 
                 await service.probe('/tmp/test.mkv');
@@ -567,7 +583,7 @@ describe('ProbeService', () => {
                         format_name: 'matroska,webm',
                     },
                 }),
-                '0,100000\n0,100000\n0,100000\n1,10000\n1,10000\n',
+                'stream_index=0|size=100000\nstream_index=0|size=100000\nstream_index=0|size=100000\nstream_index=1|size=10000\nstream_index=1|size=10000\n',
             ]);
 
             const result = await service.probe('/tmp/short.mkv');
@@ -1160,7 +1176,10 @@ describe('ProbeService', () => {
      * decision then treated the coded frame as if its pixels were square.
      */
     describe('display dimensions', () => {
-        async function displayFor(sampleAspectRatio?: string, dims = [720, 576]) {
+        async function displayFor(
+            sampleAspectRatio?: string,
+            dims = [720, 576]
+        ) {
             mockExecFileResult(
                 makeFfprobeOutput({
                     streams: [
@@ -1213,7 +1232,7 @@ describe('ProbeService', () => {
 
         it.each([
             ['an absent tag', undefined],
-            ['ffprobe\'s unknown ratio', '0:1'],
+            ["ffprobe's unknown ratio", '0:1'],
             ['a literal N/A', 'N/A'],
             ['a malformed value', 'garbage'],
         ])('reads %s as square pixels', async (_label, sar) => {
