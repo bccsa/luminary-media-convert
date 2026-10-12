@@ -53,6 +53,27 @@ Android.
   cannot fetch. Checked in the Simulator: a reload with the server down closed full-screen onto
   "This video could not be played." and "Try again".
 
+## Update (Video.js 10)
+
+`player-web`'s main player is Video.js 10 now, and Android's full-screen (`SkinControls.kt`) is drawn to
+that layout instead of the Video.js 8 one: skip back, play / pause and skip forward as dark round
+buttons in the middle (56 / 80 / 56 dp, 32 dp apart); under them the timeline with the time played
+before it and the time left after it; under that one row of buttons (mute, language, speed, captions
+at the left; picture in picture and leave full-screen at the right). Icons are Video.js 10's own,
+written to `V10Icons.kt` by `android/scripts/extract-v10-icons.mjs`. Sizes scale as the web's `--lmpl-s`
+does (1, then 1.25 from 900 dp, then 1.6 from 1400 dp), and a dark fade rises from the bottom edge.
+
+**Scrub roster.** Holding the timeline lifts it, thin, onto a roster of frames that fills the timeline's
+old place; the frames slide past a marker under the finger and the time label follows it. The frames
+come from `thumbnails.vtt`: the page passes its address on `load` (`thumbnailsUrl`, which the host
+puts in `PlayerSource.sidecars.thumbnails`), and native fetches it itself, decrypts it with the load's
+key when it is LMCENC, and fetches the sprite sheets as they are wanted (`Thumbnails.kt`). It works while
+JavaScript is frozen, and a 404 means no roster. `Roster` in the same file is a port of `rosterStep` /
+`rosterTiles` in `player-web/src/ui/scrubPreview.ts`; the roster is as tall as the web's hover preview.
+iOS ignores `thumbnailsUrl` until it has the same.
+
+Not drawn natively yet: the quality menu, the volume card (native stays a mute button) and casting.
+
 ## Goal
 
 Pressing play in the Capacitor app opens full-screen, as intended. That full-screen is today the

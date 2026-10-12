@@ -11,7 +11,7 @@
  *
  * This file is the contract between the two halves — the serving layer that
  * mints the URI (`BlobServeStrategy`) and the adapter seam that answers it
- * (`vhsLivePlaylistInterceptor`) — so that neither has to import the other.
+ * (`hlsLoaders`) — so that neither has to import the other.
  */
 
 /** Every URI `serveLive` mints starts with this. */

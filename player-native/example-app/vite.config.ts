@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
+import { isVideoJsElement } from '../../player-web/src/elements';
 import { buildTargetVirtuals } from './vite-plugins/buildTargetVirtuals';
 import { sampleStream } from './vite-plugins/sampleStream';
 
@@ -33,7 +34,8 @@ if (process.env.VITE_NATIVE_IMPL_DIR && !process.env.VITE_LAB_ORIGIN) {
  */
 export default defineConfig({
     plugins: [
-        vue(),
+        // The player's source is compiled here, so Video.js 10's custom elements must be left to the browser.
+        vue({ template: { compilerOptions: { isCustomElement: isVideoJsElement } } }),
         buildTargetVirtuals(),
         sampleStream(at('../spike/android/app/src/main/assets/stream')),
         // Where `scripts/live-stream.sh` writes; the same default on both sides.
@@ -45,6 +47,7 @@ export default defineConfig({
             '@luminary-media-converter/player-core': at('../../player-core/src/index.ts'),
             '@luminary-media-converter/hls-core': at('../../hls-core/src/index.ts'),
             '@luminary-media-converter/player-web': at('../../player-web/src/index.ts'),
+            '@luminary-media-converter/player-web-v8': at('../../player-web-v8/src/index.ts'),
             // Before the package's own entry, which would otherwise match this as a prefix.
             '@luminary-media-converter/player-native/vue': at('../src/vue/index.ts'),
             '@luminary-media-converter/player-native': at('../src/index.ts'),

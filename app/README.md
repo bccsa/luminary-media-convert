@@ -87,6 +87,6 @@ Some specs were intentionally left broken during the local-only migration (`api.
 - Vue 3 (Composition API, `<script setup>`)
 - Vite 6, Tailwind CSS v4, TypeScript
 - Vue Router 4 (history mode)
-- `@luminary-media-converter/player-web` (Video.js 8 / VHS), bare outside fullscreen (`controls.windowedControls: false`) — every control comes from the trim timeline
+- `@luminary-media-converter/player-web` (Video.js 10 / hls.js), bare outside fullscreen (`controls.windowedControls: false`) — every control comes from the trim timeline
 - `@luminary-media-converter/{player-core,encode-config,hls-core}`, and the segment editor at `src/components/segment-editor/`
 - Vitest + `@vue/test-utils` + jsdom

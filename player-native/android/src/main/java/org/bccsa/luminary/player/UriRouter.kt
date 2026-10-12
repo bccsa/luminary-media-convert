@@ -106,7 +106,7 @@ class HttpUpstream(client: OkHttpClient) {
     )
 
     companion object {
-        /** The web's backstop (`vhsRequestTimeout.ts`) at this encoder's default 6 s segments. */
+        /** The web's backstop (`BYTE_RANGE_TTFB_MS` in `player-web`) at this encoder's default 6 s segments. */
         const val BYTE_RANGE_READ_TIMEOUT_SECONDS = 60L
     }
 }

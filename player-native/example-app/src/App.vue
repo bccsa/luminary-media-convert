@@ -11,7 +11,7 @@ import { SimulatedNativePlugin } from '@/players/SimulatedNativePlugin';
 import HealthBoard from '@/lab/HealthBoard.vue';
 import StressPanel from '@/lab/StressPanel.vue';
 import { probe, type Observation } from '@/lab/probe';
-import { DEFAULT_YOUTUBE, presets } from '@/lab/sources';
+import { DEFAULT_YOUTUBE, presets, thumbnailSidecar } from '@/lab/sources';
 import { landedAt, type Intensity, type StressContext } from '@/lab/stress';
 
 const service = inject(VideoPlayerKey)!;
@@ -59,10 +59,15 @@ const source = computed<PlayerSource>(() => {
     void nonce.value; // A reload is a new source object for the same stream.
     if (mode.value === 'youtube') return { masterUrl: youtubeUrl.value };
     const preset = sourcePresets.find((p) => p.id === presetId.value) ?? sourcePresets[0]!;
+    const withFrames = (masterUrl: string) => {
+        const sidecars = thumbnailSidecar(masterUrl);
+        return sidecars ? { sidecars } : {};
+    };
     if (preset.id === 'custom') {
-        return { masterUrl: customUrl.value.trim(), ...(customKey.value.trim() ? { keyHex: customKey.value.trim().toLowerCase() } : {}) };
+        const masterUrl = customUrl.value.trim();
+        return { masterUrl, ...(customKey.value.trim() ? { keyHex: customKey.value.trim().toLowerCase() } : {}), ...withFrames(masterUrl) };
     }
-    return { masterUrl: preset.masterUrl, ...(preset.keyHex ? { keyHex: preset.keyHex } : {}) };
+    return { masterUrl: preset.masterUrl, ...(preset.keyHex ? { keyHex: preset.keyHex } : {}), ...withFrames(preset.masterUrl) };
 });
 
 const playerComponent = computed(() => service.component(mode.value));

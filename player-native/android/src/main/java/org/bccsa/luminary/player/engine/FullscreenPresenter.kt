@@ -118,6 +118,8 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         texts: FullscreenTexts = FullscreenTexts(),
         /** `pip` when the picture has moved to its own small window, `fullscreen` when it is back. */
         onPresentation: (String) -> Unit = {},
+        /** The scrub frames the controls draw under a held timeline; none when null. */
+        thumbnails: org.bccsa.luminary.player.Thumbnails? = null,
     ): Boolean {
         if (view != null) return false
         val activity = activity() ?: return false
@@ -133,6 +135,7 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         val controls = SkinControls(
             activity, player, skin, texts,
             onPictureInPicture = if (pictureInPictureAvailable(activity)) ({ startPictureInPicture() }) else null,
+            thumbnails = thumbnails,
             onLeave = onLeave,
         )
         val view = FrameLayout(activity).apply {

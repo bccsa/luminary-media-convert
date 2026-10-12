@@ -20,6 +20,7 @@
         "@luminary-media-converter/player-core": "file:../../player-core",
         "@luminary-media-converter/player-native": "file:..",
         "@luminary-media-converter/player-web": "file:../../player-web",
+        "@luminary-media-converter/player-web-v8": "file:../../player-web-v8",
         "vue": "^3.5.0"
     },
     "devDependencies": {

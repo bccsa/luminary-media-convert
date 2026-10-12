@@ -1,33 +1,17 @@
 import { defineConfig } from 'vite';
-import vue from '@vitejs/plugin-vue';
 import { resolve } from 'node:path';
+import { vuePlugin } from './vite.config';
 
-/**
- * Dev server for the test harness in `demo/` — a page that plays any master
- * URL (plus optional session key) through the real LuminaryPlayer.
- *
- * The workspace libraries are aliased to their SOURCE entry points, so the
- * harness needs no build step and always reflects the working tree; the
- * library build config above it stays untouched.
- */
+/** Dev server for the test harness in `demo/`; workspace libraries resolve to source, so no build is needed. */
 export default defineConfig({
     root: resolve(__dirname, 'demo'),
-    plugins: [vue()],
+    plugins: [vuePlugin()],
     resolve: {
         alias: {
-            '@luminary-media-converter/player-core': resolve(
-                __dirname,
-                '../player-core/src/index.ts'
-            ),
-            '@luminary-media-converter/hls-core': resolve(
-                __dirname,
-                '../hls-core/src/index.ts'
-            ),
+            '@luminary-media-converter/player-core': resolve(__dirname, '../player-core/src/index.ts'),
+            '@luminary-media-converter/hls-core': resolve(__dirname, '../hls-core/src/index.ts'),
         },
         dedupe: ['vue'],
     },
-    server: {
-        port: 5182,
-        strictPort: true,
-    },
+    server: { host: '127.0.0.1', port: 5182, strictPort: true },
 });

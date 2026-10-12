@@ -42,6 +42,7 @@ class PlayerHost(
         beginLoad(args.loadId)
         engine.setSourceCastable(isCastable(args.assets))
         engine.load(args.masterUri, args.startPosition, args.nowPlaying, args.recovery, args.bandwidthEstimate)
+        engine.setThumbnails(args.thumbnailsUrl, this.key.copy())
         assets.purgeReleasedBefore(args.generation)
     }
 

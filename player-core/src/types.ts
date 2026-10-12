@@ -669,7 +669,7 @@ export interface PlayerAdapter {
      *
      * Reference implementation:
      * `player-web/src/adapter/chunkWarming.ts` (`ChunkPrefetcher`),
-     * wired up in `player-web/src/adapter/VideoJsAdapter.ts`. Prose
+     * wired up in `player-web/src/adapter/HlsJsVideoAdapter.ts`. Prose
      * versions, for porting: `docs/chunk-warming.md` for the loop itself, and
      * `docs/suspension-safe-playback.md` for the rule it is one case of.
      */

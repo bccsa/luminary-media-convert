@@ -21,6 +21,17 @@ export function labOrigin(): string {
     return (import.meta.env.VITE_LAB_ORIGIN as string | undefined) || window.location.origin;
 }
 
+/**
+ * Where an encode's scrub frames would be: `thumbnails/thumbnails.vtt` beside the master. Offered for
+ * every stream, as a host that knows its encodes do; a stream without them has no file there, and
+ * the player shows no roster.
+ */
+export function thumbnailSidecar(masterUrl: string): { thumbnails: { url: string } } | undefined {
+    const path = masterUrl.split(/[?#]/)[0] ?? masterUrl;
+    const slash = path.lastIndexOf('/');
+    return slash < 0 ? undefined : { thumbnails: { url: `${path.slice(0, slash)}/thumbnails/thumbnails.vtt` } };
+}
+
 export function presets(): LabSource[] {
     return [
         {
