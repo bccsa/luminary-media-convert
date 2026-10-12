@@ -142,7 +142,8 @@ final class GlyphButton: UIControl {
         set {
             guard newValue?.seconds != skipGlyph?.seconds || newValue?.forward != skipGlyph?.forward else { return }
             skipGlyph = newValue
-            if newValue != nil { layers = nil } else { rebuild() }
+            layers = nil
+            rebuild()
         }
     }
     private var skipGlyph: (seconds: Int, forward: Bool)?
