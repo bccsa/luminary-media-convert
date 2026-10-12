@@ -1,6 +1,7 @@
 package org.bccsa.luminary.player.engine
 
 import android.os.Looper
+import android.os.SystemClock
 import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.media3.common.Player
@@ -333,9 +334,12 @@ class SkinControlsTest {
         idle(5_000)
         assertTrue("paused controls stay up", controls.controlsShown)
 
+        // The three seconds start at play(), so time spent loading counts against them.
+        val playedAt = SystemClock.uptimeMillis()
         player.play()
         TestPlayerRunHelper.advance(player).untilState(Player.STATE_READY)
-        idle(2_900)
+        val loading = SystemClock.uptimeMillis() - playedAt
+        idle(2_900 - loading)
         assertTrue(controls.controlsShown)
         idle(200)
         assertFalse(controls.controlsShown)
