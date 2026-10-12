@@ -50,6 +50,10 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     private var routeObservation: NSKeyValueObservation?
     private let progress = ProgressBar()
     private let timeLabel = UILabel()
+    /// The frames shown above the timeline while it is held, and the time under the finger.
+    private let roster = RosterView()
+    private let rosterLabel = UILabel()
+    private var rosterFraction: Double?
 
     private var state = FullscreenControlsState()
     private var layout: FullscreenControlsLayout?
@@ -160,6 +164,18 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         timeLabel.font = Skin.text
         timeLabel.textColor = .white
         controls.addSubview(timeLabel)
+        roster.isHidden = true
+        controls.addSubview(roster)
+        rosterLabel.font = Skin.text
+        rosterLabel.textColor = .white
+        rosterLabel.textAlignment = .center
+        rosterLabel.isHidden = true
+        controls.addSubview(rosterLabel)
+        roster.configure(commands.thumbnails)
+        commands.thumbnails?.onChange = { [weak self] in
+            guard let self, let fraction = self.rosterFraction else { return }
+            self.updateRoster(fraction)
+        }
 
         exitButton.glyph = VideoJsIcons.fullscreenExit
         exitButton.accessibilityLabel = texts.exitFullscreen
@@ -209,6 +225,8 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         stopObserving()
         visibility.stop()
         closeMenu()
+        hideRoster()
+        commands.thumbnails?.onChange = nil
         videoView.playerLayer.player = nil
     }
 
@@ -245,6 +263,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         progress.frame = CGRect(x: barStart, y: area.maxY - Skin.control, width: area.maxX - 50 - barStart, height: Skin.control)
 
         menu.map(place)
+        if let fraction = rosterFraction { updateRoster(fraction) }
     }
 
     private func square(_ side: CGFloat, at centre: CGPoint) -> CGRect {
@@ -394,11 +413,49 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         let position = min(max(fraction, 0), 1) * state.duration
         if ended {
             scrubbing = nil
+            hideRoster()
             commands.seek(position)
         } else {
             scrubbing = position
+            if commands.thumbnails?.ready == true { updateRoster(fraction) }
         }
         refresh()
+    }
+
+    // MARK: Roster
+
+    /// The frame the web's hover preview shows: a sixth of the width, 16:9.
+    private func rosterHeight(_ width: CGFloat) -> CGFloat {
+        min(340, max(168, width / 6)) * 9 / 16
+    }
+
+    private func updateRoster(_ fraction: Double) {
+        guard state.duration > 0 else { return }
+        let fraction = min(max(fraction, 0), 1)
+        rosterFraction = fraction
+        let area = view.bounds.inset(by: view.safeAreaInsets)
+        let height = rosterHeight(area.width)
+        // The strip rests on the bottom row, the whole width of the safe area.
+        roster.frame = CGRect(x: area.minX, y: area.maxY - Skin.control - height, width: area.width, height: height)
+        let markerX = progress.frame.minX + CGFloat(fraction) * progress.frame.width - roster.frame.minX
+        let time = fraction * state.duration
+        roster.show(time: time, markerX: min(max(markerX, 0), roster.frame.width), duration: state.duration)
+        roster.isHidden = false
+        rosterLabel.text = formatTime(time, guide: state.duration)
+        rosterLabel.sizeToFit()
+        let half = rosterLabel.bounds.width / 2
+        let centre = min(max(roster.frame.minX + markerX, area.minX + half + 8), area.maxX - half - 8)
+        rosterLabel.frame = CGRect(
+            x: centre - half, y: roster.frame.minY - rosterLabel.bounds.height - 6,
+            width: rosterLabel.bounds.width, height: rosterLabel.bounds.height
+        )
+        rosterLabel.isHidden = false
+    }
+
+    private func hideRoster() {
+        rosterFraction = nil
+        roster.isHidden = true
+        rosterLabel.isHidden = true
     }
 
     @objc private func tapped() {

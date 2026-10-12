@@ -21,6 +21,8 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     private var inlineFrame: InlineFrame?
     /// The skip intervals, for the lock screen and the full-screen controls.
     private let skin: SkinOptions
+    /// The scrub frames of the item, read by native so the roster works while JavaScript sleeps.
+    private let thumbnails = Thumbnails()
 
     private var masterUri: String?
     private var item: AVPlayerItem?
@@ -470,7 +472,8 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
             setAudioTrack: { [weak self] id in self?.setAudioTrack(id) },
             audioTracks: { [weak self] in self?.currentAudio() ?? ([], nil) },
             playbackWanted: { [weak self] in self?.intendedPlaying ?? false },
-            skin: skin
+            skin: skin,
+            thumbnails: thumbnails
         )
     }
 
@@ -486,7 +489,12 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         if hasVideo, inlineFrame == nil { pause() }
     }
 
+    public func setThumbnails(url: String?, keyHex: String?) {
+        thumbnails.load(url: url, keyHex: keyHex)
+    }
+
     public func destroy() {
+        thumbnails.release()
         ladder?.destroy()
         ladder = nil
         nowPlaying?.clear()

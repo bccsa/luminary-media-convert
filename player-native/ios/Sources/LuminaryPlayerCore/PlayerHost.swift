@@ -64,6 +64,7 @@ public final class PlayerHost {
             nowPlaying: args.nowPlaying,
             recovery: args.recovery
         )
+        engine.setThumbnails(url: args.thumbnailsUrl, keyHex: args.keyHex)
         assets.purgeReleased(before: args.generation)
     }
 

@@ -146,6 +146,8 @@ public struct LoadArgs: Sendable {
     public let startPosition: Double?
     public let recovery: RecoveryPolicy
     public let nowPlaying: NowPlaying?
+    /// Where the scrub frames' VTT is; nil for none.
+    public let thumbnailsUrl: String?
 }
 
 public struct Snapshot: Sendable {
@@ -447,7 +449,8 @@ public enum BridgeCall: Sendable {
                     artworkUrl: try $0.optionalString("artworkUrl"),
                     fallbackArtworkUrl: try $0.optionalString("fallbackArtworkUrl")
                 )
-            }
+            },
+            thumbnailsUrl: try args.optionalString("thumbnailsUrl")
         )
         if !masterUri.hasPrefix(assetUriPrefix) { throw args.invalid("masterUri is a luminary://asset/ address") }
         return load

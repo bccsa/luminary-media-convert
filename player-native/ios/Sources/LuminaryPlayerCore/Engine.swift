@@ -48,6 +48,10 @@ public protocol Engine: AnyObject {
     /// `texts` are what the controls say, in the host's language; nil keeps the last, or English.
     func enterFullscreen(texts: [String: String]?)
     func exitFullscreen()
+
+    /// Where the scrub frames' VTT is, sent with each load; nil for none. The engine reads it
+    /// itself, and decrypts it with `keyHex` when it is LMCENC. Engines without a roster ignore it.
+    func setThumbnails(url: String?, keyHex: String?)
     func destroy()
 
     var events: EventSink? { get set }
@@ -55,3 +59,7 @@ public protocol Engine: AnyObject {
 
 /// Builds a player's engine over that player's ``UriRouter``.
 public typealias EngineFactory = (UriRouter, Clock, CreateOptions) -> Engine
+
+extension Engine {
+    public func setThumbnails(url: String?, keyHex: String?) {}
+}
