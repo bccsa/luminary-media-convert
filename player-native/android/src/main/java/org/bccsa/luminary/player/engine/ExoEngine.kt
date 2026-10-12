@@ -488,7 +488,7 @@ class ExoEngine(
         // Audio-only has no view. Until the tracks are known the item is presumed to have one, and
         // the view is taken down again if it turns out not to (see `onTracksChanged`).
         if (knownAudioOnly(player.currentTracks)) return
-        if (presenter.present(player, ::leaveFullscreenByViewer, skin, this.texts, ::presentationDidChange, thumbnails)) {
+        if (presenter.present(player, ::leaveFullscreenByViewer, skin, this.texts, ::presentationDidChange, thumbnails, cast?.let { { showAirPlayPicker() } })) {
             presentationDidChange("fullscreen")
         }
     }

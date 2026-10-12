@@ -124,6 +124,8 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         onPresentation: (String) -> Unit = {},
         /** The scrub frames the controls draw under a held timeline; none when null. */
         thumbnails: org.bccsa.luminary.player.Thumbnails? = null,
+        /** Opens the list of Cast devices; no button when null. */
+        onCast: (() -> Unit)? = null,
     ): Boolean {
         if (view != null) return false
         val activity = activity() ?: return false
@@ -139,6 +141,7 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         val controls = SkinControls(
             activity, player, skin, texts,
             onPictureInPicture = if (pictureInPictureAvailable(activity)) ({ startPictureInPicture() }) else null,
+            onCast = onCast,
             thumbnails = thumbnails,
             onLeave = onLeave,
         )

@@ -68,6 +68,8 @@ internal class SkinControls(
     private val texts: FullscreenTexts = FullscreenTexts(),
     /** Starts picture in picture; no button when null. */
     private val onPictureInPicture: (() -> Unit)? = null,
+    /** Opens the list of Cast devices; no button when null. */
+    private val onCast: (() -> Unit)? = null,
     /** The scrub frames; no roster when null or empty. */
     private val thumbnails: Thumbnails? = null,
     private val onLeave: () -> Unit,
@@ -82,6 +84,7 @@ internal class SkinControls(
     private val forward: Icon?
     private val audioButton = Icon(context, V10Icons.speech)
     private val pipButton = Icon(context, V10Icons.pip)
+    private val castButton = Icon(context, V10Icons.cast)
     private val subtitlesButton = Icon(context, V10Icons.captions)
     private val rateButton = Icon(context, V10Icons.speed)
     private val muteButton = Icon(context, V10Icons.volumeHigh)
@@ -173,6 +176,7 @@ internal class SkinControls(
         actionsRow.addView(rateButton.tap { openRateMenu() })
         actionsRow.addView(subtitlesButton.tap { openSubtitlesMenu() })
         actionsRow.addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
+        actionsRow.addView(castButton.tap { onCast?.invoke() })
         actionsRow.addView(pipButton.tap { onPictureInPicture?.invoke() })
         actionsRow.addView(exitButton.tap { onLeave() })
         column.addView(actionsRow)
@@ -200,6 +204,8 @@ internal class SkinControls(
         pipButton.contentDescription = texts.pictureInPicture
         subtitlesButton.contentDescription = texts.subtitlesMenu
         pipButton.visibility = if (onPictureInPicture != null) VISIBLE else GONE
+        castButton.contentDescription = texts.cast
+        castButton.visibility = if (onCast != null) VISIBLE else GONE
         spinner.contentDescription = texts.loading
         exitButton.contentDescription = texts.exitFullscreen
         timeline.contentDescription = texts.seek
@@ -639,7 +645,7 @@ internal class SkinControls(
                 gravity = Gravity.CENTER_VERTICAL
             }
         }
-        listOf(muteButton, audioButton, rateButton, subtitlesButton, pipButton, exitButton).forEach {
+        listOf(muteButton, audioButton, rateButton, subtitlesButton, castButton, pipButton, exitButton).forEach {
             it.iconDp = 22f * s
             it.lp(px(40f), px(40f), margin = 1)
         }
