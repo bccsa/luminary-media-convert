@@ -8,6 +8,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.graphics.Rect
 import android.graphics.drawable.Icon
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
@@ -29,6 +30,7 @@ import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.annotation.OptIn
+import androidx.annotation.RequiresApi
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -99,10 +101,34 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         return listOf(RemoteAction(icon, label, label, intent))
     }
 
+    /**
+     * The small window's shape and where it grows from: the picture's own bounds, so entering and
+     * leaving animate from the picture rather than from the whole screen. [autoEnter] lets Home
+     * take the picture into the window, as other video apps do (Android 12 and up).
+     */
+    @RequiresApi(Build.VERSION_CODES.O)
+    private fun pipParams(activity: Activity, autoEnter: Boolean): PictureInPictureParams {
+        val size = player?.videoSize
+        val ratio = if (size != null && size.width > 0 && size.height > 0) Rational(size.width, size.height) else Rational(16, 9)
+        // The system refuses what is wider than 2.39:1 or taller than 1:2.39.
+        val clamped = if (ratio.toFloat() > MAX_RATIO) Rational(239, 100) else if (ratio.toFloat() < 1 / MAX_RATIO) Rational(100, 239) else ratio
+        val builder = PictureInPictureParams.Builder().setAspectRatio(clamped).setActions(pipActions(activity))
+        val bounds = Rect()
+        if (surface?.getGlobalVisibleRect(bounds) == true && !bounds.isEmpty) builder.setSourceRectHint(bounds)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) builder.setAutoEnterEnabled(autoEnter)
+        return builder.build()
+    }
+
     private fun refreshPipActions() {
         val activity = host ?: return
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || !activity.isInPictureInPictureMode) return
-        runCatching { activity.setPictureInPictureParams(PictureInPictureParams.Builder().setActions(pipActions(activity)).build()) }
+        runCatching { activity.setPictureInPictureParams(pipParams(activity, autoEnter = true)) }
+    }
+
+    /** Keeps Home-to-window ready while full-screen is up, and takes it away when it is not. */
+    private fun armAutoEnter(activity: Activity, on: Boolean) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || !pictureInPictureAvailable(activity)) return
+        runCatching { activity.setPictureInPictureParams(pipParams(activity, autoEnter = on)) }
     }
 
     private fun watchPipPlayback() {
@@ -240,6 +266,7 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         this.host = activity
         this.controls = controls
         this.surface = surface
+        view.post { armAutoEnter(activity, true) }
         return true
     }
 
@@ -251,16 +278,8 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         val activity = host ?: return false
         val view = view ?: return false
         if (!pictureInPictureAvailable(activity) || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
-        val size = player?.videoSize
-        val ratio = if (size != null && size.width > 0 && size.height > 0) {
-            Rational(size.width, size.height)
-        } else {
-            Rational(16, 9)
-        }
-        // The system refuses what is wider than 2.39:1 or taller than 1:2.39.
-        val clamped = if (ratio.toFloat() > MAX_RATIO) Rational(239, 100) else if (ratio.toFloat() < 1 / MAX_RATIO) Rational(100, 239) else ratio
         return try {
-            activity.enterPictureInPictureMode(PictureInPictureParams.Builder().setAspectRatio(clamped).setActions(pipActions(activity)).build())
+            activity.enterPictureInPictureMode(pipParams(activity, autoEnter = true))
         } catch (refused: IllegalStateException) {
             false
         } catch (refused: IllegalArgumentException) {
@@ -274,6 +293,7 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         val activity = host
         stopWatching()
         unwatchPipPlayback()
+        if (activity != null) armAutoEnter(activity, false)
         (activity as? OnPictureInPictureModeChangedProvider)?.removeOnPictureInPictureModeChangedListener(pipListener)
         // Taking the view down while it is in the small window ends it.
         backCallback?.remove()
