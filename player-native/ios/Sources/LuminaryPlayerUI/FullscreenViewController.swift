@@ -54,7 +54,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     private let fade = FadeView()
     /// The frames shown above the timeline while it is held, and the time under the finger.
     private let roster = RosterView()
-    private let rosterLabel = UILabel()
+    private let rosterLabel = PillLabel()
     private var rosterFraction: Double?
     /// The roster is pinned: left open after the finger lifted, centred on the playhead, and dragged or
     /// tapped on its own for the slow, precise way through the video (the bar is the fast one).
@@ -181,9 +181,6 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         controls.addSubview(remainingLabel)
         roster.isHidden = true
         controls.addSubview(roster)
-        rosterLabel.font = Skin.text
-        rosterLabel.textColor = .white
-        rosterLabel.textAlignment = .center
         rosterLabel.isHidden = true
         controls.addSubview(rosterLabel)
         roster.configure(commands.thumbnails)
@@ -215,9 +212,9 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         on(exitButton) { $0.onLeave?() }
         on(pipButton) { $0.onPictureInPicture?() }
         on(muteButton) { $0.player.isMuted.toggle(); $0.refresh() }
-        on(rateButton, opensMenu: true) { $0.openMenu(from: $0.rateButton, items: $0.rateItems()) }
-        on(audioButton, opensMenu: true) { $0.openMenu(from: $0.audioButton, items: $0.audioItems()) }
-        on(subtitlesButton, opensMenu: true) { $0.openMenu(from: $0.subtitlesButton, items: $0.subtitleItems()) }
+        on(rateButton, opensMenu: true) { $0.openMenu(from: $0.rateButton, title: $0.texts.playbackRate, items: $0.rateItems()) }
+        on(audioButton, opensMenu: true) { $0.openMenu(from: $0.audioButton, title: $0.texts.audioMenu, items: $0.audioItems()) }
+        on(subtitlesButton, opensMenu: true) { $0.openMenu(from: $0.subtitlesButton, title: $0.texts.subtitlesMenu, items: $0.subtitleItems()) }
         progress.onScrub = { [weak self] fraction, ended in self?.scrub(to: fraction, ended: ended) }
 
         let doubleTap = UITapGestureRecognizer(target: self, action: #selector(doubleTapped))
@@ -680,12 +677,12 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         }
     }
 
-    private func openMenu(from button: UIView, items: [FullscreenMenu.Item]) {
+    private func openMenu(from button: UIView, title: String, items: [FullscreenMenu.Item]) {
         let reopen = menu?.tag != button.hash
         closeMenu()
         guard reopen, !items.isEmpty else { return }
         // A pick is a touch like any other: the controls stay another 3 s, then hide.
-        let menu = FullscreenMenu(items: items.map { item in
+        let menu = FullscreenMenu(title: title, items: items.map { item in
             .init(title: item.title, selected: item.selected) { [weak self] in
                 item.pick()
                 self?.visibility.touched()

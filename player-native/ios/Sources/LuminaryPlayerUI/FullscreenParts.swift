@@ -40,6 +40,39 @@ enum Skin {
     static let hideDuration: TimeInterval = 0.5
 }
 
+/// A label with room around its text, drawn as the Video.js 10 time pill: dark glass, a thin light edge.
+final class PillLabel: UILabel {
+    private let inset = UIEdgeInsets(top: 4, left: 11, bottom: 4, right: 11)
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        font = .systemFont(ofSize: 14, weight: .medium)
+        textColor = .white
+        textAlignment = .center
+        backgroundColor = UIColor(red: 20 / 255, green: 20 / 255, blue: 24 / 255, alpha: 0.72)
+        layer.borderWidth = 1
+        layer.borderColor = UIColor(white: 1, alpha: 0.16).cgColor
+        layer.masksToBounds = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        layer.cornerRadius = bounds.height / 2
+    }
+
+    override func drawText(in rect: CGRect) { super.drawText(in: rect.inset(by: inset)) }
+
+    override var intrinsicContentSize: CGSize {
+        let size = super.intrinsicContentSize
+        return CGSize(width: size.width + inset.left + inset.right, height: size.height + inset.top + inset.bottom)
+    }
+
+    override func sizeThatFits(_ size: CGSize) -> CGSize { intrinsicContentSize }
+}
+
 /// The foot-of-picture fade behind the bottom controls.
 final class FadeView: UIView {
     override class var layerClass: AnyClass { CAGradientLayer.self }
@@ -166,46 +199,56 @@ final class FullscreenMenu: UIView {
         let pick: () -> Void
     }
 
-    static let width: CGFloat = 152
-    static let itemHeight: CGFloat = 48
+    /// The Video.js 10 card: dark, 168 wide, a small heading, rows 40 tall with the choice in force
+    /// lifted and ticked. The same as Android's.
+    static let width: CGFloat = 168
+    static let itemHeight: CGFloat = 40
+    private static let pad: CGFloat = 4
+    private static let headerHeight: CGFloat = 26
 
-    init(items: [Item]) {
-        super.init(frame: CGRect(x: 0, y: 0, width: Self.width, height: Self.itemHeight * CGFloat(items.count)))
-        backgroundColor = UIColor { $0.userInterfaceStyle == .dark ? Self.rgb(0x52525B) : Self.rgb(0xFAFAFA) }
-        layer.cornerRadius = 6
+    init(title: String? = nil, items: [Item]) {
+        let header = title == nil ? 0 : Self.headerHeight
+        super.init(frame: CGRect(x: 0, y: 0, width: Self.width, height: Self.pad * 2 + header + Self.itemHeight * CGFloat(items.count)))
+        backgroundColor = UIColor(red: 24 / 255, green: 24 / 255, blue: 27 / 255, alpha: 0.97)
+        layer.cornerRadius = 14
+        layer.borderWidth = 1
+        layer.borderColor = UIColor(white: 1, alpha: 0.12).cgColor
         layer.shadowColor = UIColor.black.cgColor
-        layer.shadowOpacity = 0.1
+        layer.shadowOpacity = 0.35
         layer.shadowRadius = 10
-        layer.shadowOffset = CGSize(width: 0, height: 10)
+        layer.shadowOffset = CGSize(width: 0, height: 6)
+        var top = Self.pad
+        if let title {
+            let heading = UILabel(frame: CGRect(x: Self.pad + 10, y: top, width: Self.width - 2 * Self.pad - 20, height: Self.headerHeight))
+            heading.attributedText = NSAttributedString(string: title.uppercased(), attributes: [
+                .font: UIFont.systemFont(ofSize: 11, weight: .bold),
+                .kern: 0.66,
+                .foregroundColor: UIColor(white: 1, alpha: 0.6),
+            ])
+            heading.isAccessibilityElement = false
+            addSubview(heading)
+            top += Self.headerHeight
+        }
+        let rowWidth = Self.width - 2 * Self.pad
         for (index, item) in items.enumerated() {
             let button = UIButton(type: .custom)
-            button.frame = CGRect(x: 0, y: CGFloat(index) * Self.itemHeight, width: Self.width, height: Self.itemHeight)
+            button.frame = CGRect(x: Self.pad, y: top + CGFloat(index) * Self.itemHeight, width: rowWidth, height: Self.itemHeight)
             button.contentHorizontalAlignment = .left
-            button.contentEdgeInsets = UIEdgeInsets(top: 12, left: 14, bottom: 12, right: 40)
+            button.contentEdgeInsets = UIEdgeInsets(top: 10, left: 10, bottom: 10, right: 36)
             button.setTitle(item.title, for: .normal)
-            button.titleLabel?.font = item.selected ? .boldSystemFont(ofSize: 16) : .systemFont(ofSize: 16)
+            button.titleLabel?.font = item.selected ? .boldSystemFont(ofSize: 14) : .systemFont(ofSize: 14)
             button.titleLabel?.lineBreakMode = .byTruncatingTail
-            button.setTitleColor(UIColor { $0.userInterfaceStyle == .dark ? Self.rgb(0xF1F5F9) : Self.rgb(0x18181B) }, for: .normal)
+            button.setTitleColor(.white, for: .normal)
+            button.layer.cornerRadius = 9
             if item.selected {
-                // Three cues, so the choice in force reads at a glance and not by weight alone: a
-                // yellow row, yellow text, and a check at the end of the row.
-                let ink = UIColor { $0.userInterfaceStyle == .dark ? Self.rgb(0xFACC15) : Self.rgb(0x854D0E) }
-                button.backgroundColor = UIColor { $0.userInterfaceStyle == .dark
-                    ? UIColor(red: 250 / 255, green: 204 / 255, blue: 21 / 255, alpha: 0.24)
-                    : UIColor(red: 234 / 255, green: 179 / 255, blue: 8 / 255, alpha: 0.30) }
-                button.setTitleColor(ink, for: .normal)
-                let check = UIImageView(image: UIImage(systemName: "checkmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .bold)))
-                check.tintColor = ink
+                button.backgroundColor = UIColor(white: 1, alpha: 0.12)
+                let check = UIImageView(image: UIImage(systemName: "checkmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 13, weight: .bold)))
+                check.tintColor = .white
                 check.contentMode = .center
-                check.frame = CGRect(x: Self.width - 36, y: 0, width: 24, height: Self.itemHeight)
+                check.frame = CGRect(x: rowWidth - 30, y: 0, width: 20, height: Self.itemHeight)
                 check.isUserInteractionEnabled = false
                 button.addSubview(check)
                 button.accessibilityTraits.insert(.selected)
-            }
-            if index == 0 { button.layer.cornerRadius = 6; button.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner] }
-            if index == items.count - 1 {
-                button.layer.cornerRadius = 6
-                button.layer.maskedCorners.formUnion([.layerMinXMaxYCorner, .layerMaxXMaxYCorner])
             }
             button.addAction(UIAction { _ in item.pick() }, for: .touchUpInside)
             addSubview(button)
@@ -214,10 +257,6 @@ final class FullscreenMenu: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
-
-    private static func rgb(_ hex: Int) -> UIColor {
-        UIColor(red: CGFloat(hex >> 16 & 0xFF) / 255, green: CGFloat(hex >> 8 & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
-    }
 }
 
 /// The frames under a held timeline: a strip that slides past a marker kept under the finger, with
