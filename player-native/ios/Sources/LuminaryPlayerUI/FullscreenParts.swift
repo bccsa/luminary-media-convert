@@ -127,21 +127,25 @@ final class GlyphButton: UIControl {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
-    /// A Video.js 10 icon, on its 18-unit grid.
+    /// A Video.js 10 icon, on its 18-unit grid. Setting one takes the skip glyph away.
     var layers: [V10Icons.Layer]? {
         didSet {
-            skip = nil
+            guard layers != oldValue else { return }
+            if layers != nil { skipGlyph = nil }
             rebuild()
         }
     }
 
-    /// The skip glyph, on a 24-unit grid: `skipIcon` in `controlsHtml.ts`.
+    /// The skip glyph, on a 24-unit grid: `skipIcon` in `controlsHtml.ts`. Setting one takes the icon away.
     var skip: (seconds: Int, forward: Bool)? {
-        didSet {
-            if skip != nil { layers = nil }
-            rebuild()
+        get { skipGlyph }
+        set {
+            guard newValue?.seconds != skipGlyph?.seconds || newValue?.forward != skipGlyph?.forward else { return }
+            skipGlyph = newValue
+            if newValue != nil { layers = nil } else { rebuild() }
         }
     }
+    private var skipGlyph: (seconds: Int, forward: Bool)?
 
     private func rebuild() {
         icon.sublayers?.forEach { $0.removeFromSuperlayer() }
@@ -151,7 +155,7 @@ final class GlyphButton: UIControl {
             for item in layers {
                 icon.addSublayer(shape(item.path, unit: unit, alpha: item.alpha, stroke: item.strokeWidth))
             }
-        } else if let skip {
+        } else if let skip = skipGlyph {
             let unit = iconSize / 24
             let arc = skip.forward ? "M20.5 12a8.5 8.5 0 1 1-2.9-6.4" : "M3.5 12a8.5 8.5 0 1 0 2.9-6.4"
             let head = skip.forward ? "M20.8 4.2v4.4h-4.4" : "M3.2 4.2v4.4h4.4"

@@ -16,7 +16,7 @@ out = [
     "public enum V10Icons {",
     "    public static let grid: Double = 18",
     "",
-    "    public struct Layer: Sendable {",
+    "    public struct Layer: Sendable, Equatable {",
     "        public let path: String",
     "        public let alpha: Double",
     "        public let strokeWidth: Double",
