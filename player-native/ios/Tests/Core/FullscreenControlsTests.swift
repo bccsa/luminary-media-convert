@@ -94,8 +94,10 @@ struct FullscreenControlsTextTests {
         state.position = 7.4
         state.duration = 120
         #expect(timeText(state) == "0:07 / 2:00")
+        #expect(timeTexts(state) == ("0:07", "-1:53"))
         state.live = true
         #expect(timeText(state) == "LIVE")
+        #expect(timeTexts(state) == ("LIVE", ""))
     }
 
     @Test("labels speeds as video.js does")
@@ -121,6 +123,30 @@ struct FullscreenControlsVisibilityTests {
     }
 
     final class Box { var values: [Bool] = [] }
+
+    @Test("a pinned roster keeps the controls, and a tap on the picture does not hide them")
+    func pinnedHolds() {
+        let (visibility, clock, _) = make()
+        visibility.playbackChanged(playing: true)
+        visibility.pinned = true
+        clock.advance(10)
+        #expect(visibility.visible)
+        visibility.tappedPicture()
+        #expect(visibility.visible)
+    }
+
+    @Test("closing the roster starts the countdown again")
+    func unpinned() {
+        let (visibility, clock, _) = make()
+        visibility.playbackChanged(playing: true)
+        visibility.pinned = true
+        clock.advance(10)
+        visibility.pinned = false
+        clock.advance(2.9)
+        #expect(visibility.visible)
+        clock.advance(0.1)
+        #expect(!visibility.visible)
+    }
 
     @Test("hide 3 s after playback starts")
     func hidesWhilePlaying() {

@@ -98,6 +98,16 @@ public func timeText(_ state: FullscreenControlsState) -> String {
     return "\(formatTime(state.position, guide: duration)) / \(formatTime(duration, guide: duration))"
 }
 
+/// The time row's two ends: what has played, and what is left (`-1:53`), as the Video.js 10 skin
+/// draws them either side of the bar. Whole seconds, so the two always add up to the length. A live
+/// stream has only `LIVE`.
+public func timeTexts(_ state: FullscreenControlsState) -> (elapsed: String, remaining: String) {
+    if state.live { return ("LIVE", "") }
+    let total = max(state.duration, state.position)
+    let left = max(total.rounded(.down) - state.position.rounded(.down), 0)
+    return (formatTime(state.position, guide: total), "-" + formatTime(left, guide: total))
+}
+
 /// When the controls show: `player-web`'s auto-hide (`vjs/autoHide.ts`). They hide 3 s after the
 /// last touch while playing, and stay while paused. A tap on the picture while they show hides
 /// them; while hidden, it shows them.
@@ -105,6 +115,18 @@ public final class FullscreenControlsVisibility {
     public static let hideAfter: Double = 3
 
     public private(set) var visible = true
+    /// A roster is pinned open: the controls stay, whatever the viewer does, until it is closed.
+    public var pinned = false {
+        didSet {
+            guard pinned != oldValue else { return }
+            if pinned {
+                timer?.cancel()
+                set(true)
+            } else {
+                restart()
+            }
+        }
+    }
     /// Called whenever ``visible`` changes.
     public var onChange: ((Bool) -> Void)?
 
@@ -124,7 +146,7 @@ public final class FullscreenControlsVisibility {
 
     /// A tap on the picture itself.
     public func tappedPicture() {
-        if visible, playing {
+        if visible, playing, !pinned {
             timer?.cancel()
             set(false)
         } else {
@@ -157,7 +179,7 @@ public final class FullscreenControlsVisibility {
 
     private func restart() {
         timer?.cancel()
-        guard playing else { return }
+        guard playing, !pinned else { return }
         timer = clock.schedule(Self.hideAfter) { [weak self] in self?.set(false) }
     }
 
@@ -186,6 +208,8 @@ public struct FullscreenTexts: Equatable {
     public var mute = "Mute"
     public var unmute = "Unmute"
     public var loading = "Loading"
+    /// The button that closes the pinned frame roster.
+    public var closeRoster = "Hide frames"
 
     public init() {}
 
@@ -210,6 +234,7 @@ public struct FullscreenTexts: Equatable {
         take("mute", into: &mute)
         take("unmute", into: &unmute)
         take("loading", into: &loading)
+        take("closeRoster", into: &closeRoster)
     }
 
     public func skipBack(_ seconds: Int) -> String { skipBack.replacingOccurrences(of: "{seconds}", with: "\(seconds)") }

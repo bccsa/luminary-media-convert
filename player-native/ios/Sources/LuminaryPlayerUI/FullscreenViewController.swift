@@ -50,10 +50,20 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     private var routeObservation: NSKeyValueObservation?
     private let progress = ProgressBar()
     private let timeLabel = UILabel()
+    private let remainingLabel = UILabel()
+    private let fade = FadeView()
     /// The frames shown above the timeline while it is held, and the time under the finger.
     private let roster = RosterView()
     private let rosterLabel = UILabel()
     private var rosterFraction: Double?
+    /// The roster is pinned: left open after the finger lifted, centred on the playhead, and dragged or
+    /// tapped on its own for the slow, precise way through the video (the bar is the fast one).
+    private var rosterPinned = false
+    private var pinDrag: (startTime: Double, time: Double, moved: Bool)?
+    /// Where the strip rests after a seek, until playback has caught up; else it snaps back to the old time.
+    private var pinAnchor: Double?
+    private var pinAnchorTimeout: DispatchWorkItem?
+    private var pinLink: CADisplayLink?
 
     private var state = FullscreenControlsState()
     private var layout: FullscreenControlsLayout?
@@ -148,8 +158,9 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         videoView.playerLayer.videoGravity = .resizeAspect
         view.addSubview(videoView)
 
-        controls.backgroundColor = Skin.scrim
+        controls.backgroundColor = .clear
         view.addSubview(controls)
+        controls.addSubview(fade)
         for button in [playPause, skipBack, skipForward, audioButton, pipButton, subtitlesButton, rateButton, muteButton, exitButton] {
             controls.addSubview(button)
         }
@@ -164,6 +175,10 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         timeLabel.font = Skin.text
         timeLabel.textColor = .white
         controls.addSubview(timeLabel)
+        remainingLabel.font = Skin.text
+        remainingLabel.textColor = .white
+        remainingLabel.textAlignment = .right
+        controls.addSubview(remainingLabel)
         roster.isHidden = true
         controls.addSubview(roster)
         rosterLabel.font = Skin.text
@@ -173,9 +188,13 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         controls.addSubview(rosterLabel)
         roster.configure(commands.thumbnails)
         commands.thumbnails?.onChange = { [weak self] in
-            guard let self, let fraction = self.rosterFraction else { return }
-            self.updateRoster(fraction)
+            guard let self else { return }
+            if let fraction = self.rosterFraction { self.updateRoster(fraction) }
+            if self.rosterPinned { self.updatePinned() }
         }
+        roster.onPan = { [weak self] dx, state in self?.pinPanned(dx, state) }
+        roster.onTap = { [weak self] x in self?.pinTapped(x) }
+        roster.onClose = { [weak self] in self?.closePin() }
 
         exitButton.glyph = VideoJsIcons.fullscreenExit
         exitButton.accessibilityLabel = texts.exitFullscreen
@@ -225,6 +244,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         stopObserving()
         visibility.stop()
         closeMenu()
+        closePin()
         hideRoster()
         commands.thumbnails?.onChange = nil
         videoView.playerLayer.player = nil
@@ -238,11 +258,15 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         controls.frame = view.bounds
         let area = view.bounds.inset(by: view.safeAreaInsets)
         let centre = CGPoint(x: area.midX, y: area.midY)
+        let scale = Skin.scale(forWidth: area.width)
+        // The fade covers the foot of the picture: the bottom row and the room the roster lifts into.
+        let fadeHeight = min(view.bounds.height, (Skin.control + 120) * scale)
+        fade.frame = CGRect(x: 0, y: view.bounds.height - fadeHeight, width: view.bounds.width, height: fadeHeight)
 
-        playPause.frame = square(Skin.play, at: centre)
+        playPause.frame = square(Skin.play * scale, at: centre)
         spinner.frame = playPause.frame
-        skipBack.frame = square(Skin.skip, at: CGPoint(x: centre.x - Skin.skipOffset, y: centre.y - Skin.skipLift))
-        skipForward.frame = square(Skin.skip, at: CGPoint(x: centre.x + Skin.skipOffset, y: centre.y - Skin.skipLift))
+        skipBack.frame = square(Skin.skip * scale, at: CGPoint(x: centre.x - Skin.skipOffset * scale, y: centre.y - Skin.skipLift))
+        skipForward.frame = square(Skin.skip * scale, at: CGPoint(x: centre.x + Skin.skipOffset * scale, y: centre.y - Skin.skipLift))
 
         // The top row, in `player-web`'s order, closing up around what is hidden.
         var x = area.minX
@@ -252,18 +276,27 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         }
 
         exitButton.frame = CGRect(x: area.maxX - Skin.control, y: area.maxY - Skin.control, width: Skin.control, height: Skin.control)
-        // The bottom row: the time (native only), then the bar up to the exit button's corner.
+        // The bottom row: what has played, the bar, what is left, then the exit button's corner.
         let rowMid = area.maxY - Skin.control / 2
         timeLabel.sizeToFit()
+        remainingLabel.sizeToFit()
+        let timeWidth = max(timeLabel.bounds.width, remainingLabel.bounds.width, 40 * scale)
         timeLabel.frame = CGRect(
-            x: area.minX + 8, y: rowMid - timeLabel.bounds.height / 2,
-            width: timeLabel.bounds.width, height: timeLabel.bounds.height
+            x: area.minX + 8, y: rowMid - timeLabel.bounds.height / 2, width: timeWidth, height: timeLabel.bounds.height
         )
-        let barStart = timeLabel.text?.isEmpty == false ? timeLabel.frame.maxX + 10 : area.minX + Skin.progressInset
-        progress.frame = CGRect(x: barStart, y: area.maxY - Skin.control, width: area.maxX - 50 - barStart, height: Skin.control)
+        let barEnd = area.maxX - Skin.control
+        let remainingWidth = remainingLabel.text?.isEmpty == false ? timeWidth : 0
+        remainingLabel.frame = CGRect(
+            x: barEnd - remainingWidth, y: rowMid - remainingLabel.bounds.height / 2,
+            width: remainingWidth, height: remainingLabel.bounds.height
+        )
+        let barStart = timeLabel.text?.isEmpty == false ? timeLabel.frame.maxX + Skin.timeGap : area.minX + Skin.progressInset
+        let barStop = remainingWidth > 0 ? remainingLabel.frame.minX - Skin.timeGap : barEnd
+        progress.frame = CGRect(x: barStart, y: area.maxY - Skin.control, width: max(barStop - barStart, 0), height: Skin.control)
 
         menu.map(place)
         if let fraction = rosterFraction { updateRoster(fraction) }
+        if rosterPinned { updatePinned() }
     }
 
     private func square(_ side: CGFloat, at centre: CGPoint) -> CGRect {
@@ -300,6 +333,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     /// A reattach or a load gives the player a new item, whose subtitles are its own.
     private func itemChanged() {
         guard subtitles?.item !== player.currentItem else { return }
+        closePin()
         subtitles = nil
         if menu?.tag == subtitlesButton.hash { closeMenu() }
         loadSubtitles()
@@ -366,9 +400,13 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
             progress.update(played: next.position / next.duration, loaded: next.loadedEnd / next.duration)
             progress.accessibilityValue = timeText(next)
         }
-        let time = timeText(next)
-        if timeLabel.text != time {
-            timeLabel.text = time
+        // While the finger is on the bar the times follow it, as the roster's label does.
+        var shown = next
+        if let held = scrubbing { shown.position = held }
+        let (elapsed, remaining) = timeTexts(shown)
+        if timeLabel.text != elapsed || remainingLabel.text != remaining {
+            timeLabel.text = elapsed
+            remainingLabel.text = remaining
             view.setNeedsLayout()
         }
         if rowChanged { view.setNeedsLayout() }
@@ -413,10 +451,14 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         let position = min(max(fraction, 0), 1) * state.duration
         if ended {
             scrubbing = nil
+            // A roster the press had open stays open, centred on where the video is going.
+            let held = rosterFraction != nil && commands.thumbnails?.ready == true
             hideRoster()
             commands.seek(position)
+            if held { openPin(at: position) }
         } else {
             scrubbing = position
+            if rosterPinned { closePin() }
             if commands.thumbnails?.ready == true { updateRoster(fraction) }
         }
         refresh()
@@ -458,6 +500,114 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         rosterLabel.isHidden = true
     }
 
+    // MARK: Pinned roster
+
+    private func openPin(at time: Double) {
+        guard state.duration > 0, commands.thumbnails?.ready == true else { return }
+        rosterPinned = true
+        visibility.pinned = true
+        roster.setInteractive(true, closeLabel: texts.closeRoster)
+        rest(at: time)
+        pinLink?.invalidate()
+        let link = CADisplayLink(target: self, selector: #selector(pinTick))
+        link.add(to: .main, forMode: .common)
+        pinLink = link
+        updatePinned()
+    }
+
+    private func closePin() {
+        guard rosterPinned else { return }
+        rosterPinned = false
+        pinLink?.invalidate()
+        pinLink = nil
+        pinDrag = nil
+        pinAnchor = nil
+        pinAnchorTimeout?.cancel()
+        roster.setInteractive(false)
+        hideRoster()
+        visibility.pinned = false
+    }
+
+    /// Keeps the strip at `time` while the video gets there.
+    private func rest(at time: Double) {
+        pinAnchor = time
+        pinAnchorTimeout?.cancel()
+        let timeout = DispatchWorkItem { [weak self] in self?.pinAnchor = nil }
+        pinAnchorTimeout = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: timeout)
+    }
+
+    /// Where the strip is: under the finger while it is dragged, else where the video is going, else the playhead.
+    private var pinTime: Double {
+        let now = player.currentTime().seconds
+        return pinDrag?.time ?? pinAnchor ?? (now.isFinite ? now : 0)
+    }
+
+    @objc private func pinTick() {
+        // The strip glides with the playhead, read every frame: the periodic observer is a few times a second.
+        if let anchor = pinAnchor, abs(player.currentTime().seconds - anchor) < 0.75 { pinAnchor = nil }
+        updatePinned()
+    }
+
+    private func updatePinned() {
+        guard rosterPinned, state.duration > 0 else { return }
+        let area = view.bounds.inset(by: view.safeAreaInsets)
+        let height = rosterHeight(area.width)
+        roster.frame = CGRect(x: area.minX, y: area.maxY - Skin.control - height, width: area.width, height: height)
+        let markerX = roster.frame.width / 2
+        let time = min(max(pinTime, 0), state.duration)
+        roster.show(time: time, markerX: markerX, duration: state.duration, step: Roster.fineStep(duration: state.duration))
+        roster.isHidden = false
+        rosterLabel.text = formatTime(time, guide: state.duration)
+        rosterLabel.sizeToFit()
+        let half = rosterLabel.bounds.width / 2
+        rosterLabel.frame = CGRect(
+            x: roster.frame.midX - half, y: roster.frame.minY - rosterLabel.bounds.height - 6,
+            width: rosterLabel.bounds.width, height: rosterLabel.bounds.height
+        )
+        rosterLabel.isHidden = false
+    }
+
+    private func pinPanned(_ dx: CGFloat, _ gesture: UIGestureRecognizer.State) {
+        guard rosterPinned, state.duration > 0,
+              let perSecond = roster.pointsPerSecond(step: Roster.fineStep(duration: state.duration)) else { return }
+        visibility.touched()
+        switch gesture {
+        case .began:
+            pinDrag = (pinTime, pinTime, false)
+        case .changed:
+            guard let drag = pinDrag else { return }
+            // The strip follows the finger, so a drag to the right is back in time.
+            let time = Roster.timeAfterDrag(
+                startTime: drag.startTime, dx: Double(dx), pointsPerSecond: Double(perSecond), duration: state.duration
+            )
+            pinDrag = (drag.startTime, time, drag.moved || abs(dx) > 4)
+        case .ended:
+            guard let drag = pinDrag else { return }
+            pinDrag = nil
+            if drag.moved {
+                rest(at: drag.time)
+                commands.seek(drag.time)
+            }
+        default:
+            pinDrag = nil
+        }
+        updatePinned()
+    }
+
+    private func pinTapped(_ x: CGFloat) {
+        guard rosterPinned, state.duration > 0,
+              let perSecond = roster.pointsPerSecond(step: Roster.fineStep(duration: state.duration)) else { return }
+        visibility.touched()
+        let target = Roster.timeAtTap(
+            time: pinTime, x: Double(x), markerX: Double(roster.frame.width / 2),
+            pointsPerSecond: Double(perSecond), duration: state.duration
+        )
+        rest(at: target)
+        commands.seek(target)
+        updatePinned()
+    }
+
     @objc private func tapped() {
         if menu != nil {
             closeMenu()
@@ -475,7 +625,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
         var view = touch.view
         while let current = view, current !== self.view {
-            if current is UIControl || current === progress || current is FullscreenMenu { return false }
+            if current is UIControl || current === progress || current === roster || current is FullscreenMenu { return false }
             view = current.superview
         }
         return true

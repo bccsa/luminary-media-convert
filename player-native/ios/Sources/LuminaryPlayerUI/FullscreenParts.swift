@@ -11,28 +11,52 @@ enum Skin {
     static let control: CGFloat = 44
     /// video.js draws an icon at 1.8 em: 0.875 rem → 25 pt.
     static let icon: CGFloat = 25
-    static let play: CGFloat = 96
-    /// 1.875 rem × 1.8.
-    static let playIcon: CGFloat = 54
+    /// The Video.js 10 centre cluster: play 80, the skips 56 round, 32 between the parts, on one line.
+    static let play: CGFloat = 80
+    static let playIcon: CGFloat = 38
     static let skip: CGFloat = 56
-    /// 1.25 rem × 1.8.
-    static let skipIcon: CGFloat = 36
+    static let skipIcon: CGFloat = 32
+    static let clusterGap: CGFloat = 32
     /// The skip circles' centres sit this far either side of the play button's.
-    static let skipOffset: CGFloat = 72
-    /// …and this far above it (`translateY(-75%)` on a 56 pt circle).
-    static let skipLift: CGFloat = 14
+    static let skipOffset: CGFloat = play / 2 + clusterGap + skip / 2
+    static let skipLift: CGFloat = 0
+    /// `--lmpl-s`: one up to 900 pt wide, then 1.25, then 1.6, so the controls are not a stamp on an iPad.
+    static func scale(forWidth width: CGFloat) -> CGFloat { width >= 1400 ? 1.6 : width >= 900 ? 1.25 : 1 }
+    /// The gap the elapsed and remaining times keep from the bar.
+    static let timeGap: CGFloat = 12
     static let progressHeight: CGFloat = 4
     static let knob: CGFloat = 12
     /// The progress bar's inset from the leading edge.
     static let progressInset: CGFloat = 18
-    static let scrim = UIColor(white: 0, alpha: 0.3)
+    /// The fade the controls stand on: dark at the foot of the picture, clear above it.
+    static let fadeColors = [UIColor(white: 0, alpha: 0.75), UIColor(white: 0, alpha: 0.4), UIColor(white: 0, alpha: 0)]
+    static let fadeLocations: [NSNumber] = [0, 0.55, 1]
     static let progressTrack = UIColor(red: 115 / 255, green: 133 / 255, blue: 159 / 255, alpha: 0.5)
     static let progressLoaded = UIColor(red: 115 / 255, green: 133 / 255, blue: 159 / 255, alpha: 0.75)
-    static let text = UIFont.systemFont(ofSize: 14)
+    static let text = UIFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
     /// video.js's rate label: 1.5 em of 0.875 rem.
     static let rateText = UIFont.systemFont(ofSize: 21)
     static let showDuration: TimeInterval = 0.1
-    static let hideDuration: TimeInterval = 1
+    static let hideDuration: TimeInterval = 0.5
+}
+
+/// The foot-of-picture fade behind the bottom controls.
+final class FadeView: UIView {
+    override class var layerClass: AnyClass { CAGradientLayer.self }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        let gradient = layer as! CAGradientLayer
+        // Bottom to top.
+        gradient.startPoint = CGPoint(x: 0.5, y: 1)
+        gradient.endPoint = CGPoint(x: 0.5, y: 0)
+        gradient.colors = Skin.fadeColors.map(\.cgColor)
+        gradient.locations = Skin.fadeLocations
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 }
 
 /// A control drawn with a video.js glyph, or with text (the speed's `1x`).
@@ -205,6 +229,15 @@ final class RosterView: UIView {
     private var time: Double = 0
     private var markerX: CGFloat = 0
     private var duration: Double = 0
+    /// Seconds a frame stands for; the held roster's step unless a pinned one asks for its own.
+    private var step: Double?
+    /// The pinned roster is dragged and tapped, and has a button to close it.
+    var onPan: ((_ translationX: CGFloat, _ state: UIGestureRecognizer.State) -> Void)?
+    var onTap: ((_ x: CGFloat) -> Void)?
+    var onClose: (() -> Void)?
+    private let closeButton = UIButton(type: .system)
+    private lazy var pan = UIPanGestureRecognizer(target: self, action: #selector(panned))
+    private lazy var tap = UITapGestureRecognizer(target: self, action: #selector(tapped))
     /// Decoded sheets, by address; the data itself lives in ``Thumbnails``' own cache.
     private var decoded: [String: CGImage] = [:]
 
@@ -215,6 +248,41 @@ final class RosterView: UIView {
         isUserInteractionEnabled = false
         clipsToBounds = true
         contentMode = .redraw
+        addGestureRecognizer(pan)
+        addGestureRecognizer(tap)
+        closeButton.setImage(UIImage(systemName: "xmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 14, weight: .bold)), for: .normal)
+        closeButton.tintColor = .white
+        closeButton.backgroundColor = UIColor(white: 0, alpha: 0.55)
+        closeButton.layer.cornerRadius = 16
+        closeButton.isHidden = true
+        closeButton.addAction(UIAction { [weak self] _ in self?.onClose?() }, for: .touchUpInside)
+        addSubview(closeButton)
+    }
+
+    /// Whether the roster takes the finger (pinned) or lets it through to the controls under it.
+    func setInteractive(_ on: Bool, closeLabel: String = "") {
+        isUserInteractionEnabled = on
+        closeButton.isHidden = !on
+        closeButton.accessibilityLabel = closeLabel
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        closeButton.frame = CGRect(x: bounds.maxX - 40, y: 8, width: 32, height: 32)
+    }
+
+    /// Points to the second at the roster's tile size and `step`, or nil until there are frames.
+    func pointsPerSecond(step: Double) -> CGFloat? {
+        guard let sample = frames?.sample(), step > 0 else { return nil }
+        return max(24, bounds.height * CGFloat(sample.w) / CGFloat(max(sample.h, 1))) / CGFloat(step)
+    }
+
+    @objc private func panned(_ pan: UIPanGestureRecognizer) {
+        onPan?(pan.translation(in: self).x, pan.state)
+    }
+
+    @objc private func tapped(_ tap: UITapGestureRecognizer) {
+        onTap?(tap.location(in: self).x)
     }
 
     @available(*, unavailable)
@@ -225,10 +293,11 @@ final class RosterView: UIView {
         decoded.removeAll()
     }
 
-    func show(time: Double, markerX: CGFloat, duration: Double) {
+    func show(time: Double, markerX: CGFloat, duration: Double, step: Double? = nil) {
         self.time = time
         self.markerX = markerX
         self.duration = duration
+        self.step = step
         setNeedsDisplay()
     }
 
@@ -245,7 +314,7 @@ final class RosterView: UIView {
         let w = bounds.width
         let h = bounds.height
         let tileWidth = max(24, h * CGFloat(sample.w) / CGFloat(max(sample.h, 1)))
-        let step = Roster.step(duration: duration)
+        let step = self.step ?? Roster.step(duration: duration)
         for tile in Roster.tiles(
             time: time, markerX: Double(markerX), width: Double(w), tileWidth: Double(tileWidth), step: step, duration: duration
         ) {
