@@ -72,6 +72,50 @@ export class EncodeService {
         private readonly segmentPipelineService: SegmentPipelineService
     ) {}
 
+    private encryptionEnabled(session: {
+        config: { encryption?: { enabled?: boolean } | null };
+    }): boolean {
+        return (
+            session.config.encryption != null &&
+            session.config.encryption.enabled !== false
+        );
+    }
+
+    /**
+     * Settle what a caller needs to save the output against its own record: the
+     * playback URL and, for an encrypted session, the key.
+     *
+     * Both are fully determined before the encode starts — the destination
+     * prefix is fixed and the encode writes exactly one master playlist at a
+     * known name; the key is random and local — so they are published when the
+     * session is queued, not when its turn comes. A session waiting behind a
+     * long encode can then be saved straight away. Idempotent: an existing key
+     * is kept, which is what lets a retry stay playable from a record that
+     * already holds it.
+     */
+    prepareDelivery(sessionId: string): void {
+        const session = this.sessionService.get(sessionId);
+        if (!session) return;
+
+        // The key goes on first: the event that announces the URL is the one a
+        // caller reacts to by asking for the key.
+        if (this.encryptionEnabled(session) && !session.encryptionKeyHex) {
+            this.sessionService.setEncryptionKey(
+                sessionId,
+                this.encryptionService.generateKey().toString('hex')
+            );
+        }
+
+        if (session.publicBaseUrl && !session.hlsUrl) {
+            const masterKey = posix.join(
+                S3Service.canonicalPrefix(session.config.s3.pathPrefix),
+                'master.m3u8'
+            );
+            const base = session.publicBaseUrl.replace(/\/+$/, '');
+            this.sessionService.setHlsUrl(sessionId, `${base}/${masterKey}`);
+        }
+    }
+
     async processSession(sessionId: string): Promise<void> {
         const session = this.sessionService.get(sessionId);
         if (!session) {
@@ -120,28 +164,22 @@ export class EncodeService {
             | undefined;
 
         try {
-            const encryptionEnabled =
-                session.config.encryption != null &&
-                session.config.encryption.enabled !== false;
+            const encryptionEnabled = this.encryptionEnabled(session);
 
-            // Pre-compute encryption materials. This happens before the status
-            // flips to 'encoding' so anything watching that transition can be
-            // handed the key it will need to play the output back.
+            // Normally settled when the session was queued, so a CMS already
+            // holds this key; a session that skipped the queue gets it here.
+            // Either way it is on the session before the status flips, so the
+            // 'encoding' event and every status read after it can serve it.
             let encryptionKey: Buffer | undefined;
             let encryptionIV: Buffer | undefined;
 
             if (encryptionEnabled) {
-                encryptionKey = this.encryptionService.generateKey();
-                encryptionIV = this.encryptionService.generateIV();
-                // On the session before the status flips, so the 'encoding'
-                // event and every status read after it carry the key. A CMS
-                // that only learned it at completion would have a playable URL
-                // in hand, and nothing able to decrypt it, for the length of
-                // the encode.
-                this.sessionService.setEncryptionKey(
-                    sessionId,
-                    encryptionKey.toString('hex')
+                this.prepareDelivery(sessionId);
+                encryptionKey = Buffer.from(
+                    this.sessionService.get(sessionId)!.encryptionKeyHex!,
+                    'hex'
                 );
+                encryptionIV = this.encryptionService.generateIV();
             }
 
             this.sessionService.updateStatus(sessionId, 'encoding');
@@ -155,19 +193,7 @@ export class EncodeService {
                 session.config.s3.pathPrefix
             );
 
-            // The playback URL is fully determined once the prefix is — the
-            // encode writes exactly one master playlist, at a known name — so
-            // it is published now rather than on completion. The caller can
-            // save it against its own record while the encode runs, instead of
-            // holding a half-finished record open for however long that takes.
-            if (session.publicBaseUrl) {
-                const masterKey = posix.join(s3PathPrefix, 'master.m3u8');
-                const base = session.publicBaseUrl.replace(/\/+$/, '');
-                this.sessionService.setHlsUrl(
-                    sessionId,
-                    `${base}/${masterKey}`
-                );
-            }
+            this.prepareDelivery(sessionId);
 
             // Current pipeline progress state (updated by both FFmpeg and pipeline callbacks)
             // Initialize all bars so the UI shows them from the start
