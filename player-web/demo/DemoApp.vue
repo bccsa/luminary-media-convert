@@ -35,6 +35,7 @@ const saved = (() => {
             prefetchDebug?: boolean;
             bare?: boolean;
             thumbs?: boolean;
+            chapters?: boolean;
         };
     } catch {
         return {};
@@ -54,6 +55,8 @@ const form = reactive({
     bare: saved.bare ?? false,
     // Whether to hand the player a `thumbnails.vtt` beside the master, as a host that knows one exists would.
     thumbs: saved.thumbs ?? false,
+    // Whether to hand the player a `chapters/en.vtt` beside the master: the timeline is cut at its chapters.
+    chapters: saved.chapters ?? false,
 });
 
 const source = shallowRef<PlayerSource | null>(null);
@@ -64,6 +67,7 @@ const query = new URLSearchParams(location.search);
 if (query.has('master')) form.url = query.get('master') ?? '';
 if (query.has('key')) form.keyHex = query.get('key') ?? '';
 if (query.has('thumbs')) form.thumbs = query.get('thumbs') !== '0';
+if (query.has('chapters')) form.chapters = query.get('chapters') !== '0';
 // `?embed` drops the form and the notes, for a side-by-side page that only wants the player.
 const embed = query.has('embed');
 onMounted(() => {
@@ -118,6 +122,7 @@ function load() {
             prefetchDebug: form.prefetchDebug,
             bare: form.bare,
             thumbs: form.thumbs,
+            chapters: form.chapters,
         }),
     );
     // Controller options and `controls` are read once at construction, so a
@@ -141,7 +146,14 @@ function load() {
     source.value = {
         masterUrl: url,
         ...(keyHex ? { keyHex } : {}),
-        ...(form.thumbs ? { sidecars: { thumbnails: { url: new URL('thumbnails.vtt', url).href } } } : {}),
+        ...(form.thumbs || form.chapters
+            ? {
+                  sidecars: {
+                      ...(form.thumbs ? { thumbnails: { url: new URL('thumbnails.vtt', url).href } } : {}),
+                      ...(form.chapters ? { chapters: [{ lang: 'en', url: new URL('chapters/en.vtt', url).href }] } : {}),
+                  },
+              }
+            : {}),
     };
 }
 
@@ -236,6 +248,10 @@ const fmt = (n: number | undefined) => (n ?? 0).toFixed(1);
             <label class="demo-check">
                 <input v-model="form.thumbs" type="checkbox" />
                 Scrub thumbnails — a <code>thumbnails.vtt</code> beside the master (applies on Load)
+            </label>
+            <label class="demo-check">
+                <input v-model="form.chapters" type="checkbox" />
+                Chapters — a <code>chapters/en.vtt</code> beside the master: the timeline is cut at them (applies on Load)
             </label>
             <button type="submit">Load</button>
             <p v-if="formError" class="demo-error">{{ formError }}</p>

@@ -21,6 +21,8 @@ const props = withDefaults(
         width?: number;
         /** Timecode drawn under the frame. */
         label: string;
+        /** The chapter the frame is in, drawn beside the timecode. */
+        chapter?: string;
     }>(),
     { width: 168 }
 );
@@ -68,5 +70,6 @@ const boxStyle = computed(() => {
             <div class="lmpl-thumb-frame" :style="frameStyle"></div>
         </div>
         <span class="lmpl-thumb-time">{{ label }}</span>
+        <span v-if="chapter" class="lmpl-thumb-chapter">{{ chapter }}</span>
     </div>
 </template>

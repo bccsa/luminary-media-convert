@@ -424,6 +424,12 @@
  * Thick and round, and no thumb — the fill is the playhead. The slider itself is taller than the
  * track so there is something generous to hit; the track grows a little under the pointer.
  */
+/* Cut into chapters: the mask opens a gap at each chapter start (see ui/chapterBar.ts). */
+.lmpl-root .lmpl-track {
+    -webkit-mask-image: var(--lmpl-chapter-mask, none);
+    mask-image: var(--lmpl-chapter-mask, none);
+}
+
 .lmpl-root .lmpl-time-slider {
     flex: 1;
     height: calc(30px * var(--lmpl-s));
@@ -621,6 +627,36 @@
     color: #fff;
 }
 
+/* The chapter named beside the timecode; a long title is cut, never wrapped. */
+.lmpl-thumb-chapter {
+    max-width: calc(220px * var(--lmpl-s));
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: calc(12px * var(--lmpl-s));
+    font-weight: 500;
+    color: rgb(255 255 255 / 0.85);
+    text-shadow: 0 1px 2px rgb(0 0 0 / 0.7);
+}
+
+/* Above the timeline: where the playhead is among the chapters. Gone while a preview or the roster takes that place. */
+.lmpl-chapter-now {
+    margin-bottom: calc(2px * var(--lmpl-s));
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: calc(13px * var(--lmpl-s));
+    font-weight: 600;
+    color: #fff;
+    text-shadow: 0 1px 2px rgb(0 0 0 / 0.7);
+    transition: opacity 0.12s ease;
+}
+
+.lmpl-root.lmpl-previewing .lmpl-chapter-now,
+.lmpl-root.lmpl-scrubbing .lmpl-chapter-now {
+    opacity: 0;
+}
+
 /* With frames to show, the preview carries its own timecode; the timeline's plain readout would stack on it. */
 .lmpl-root.lmpl-has-thumbs .lmpl-preview {
     display: none;
@@ -701,6 +737,19 @@
 
 .lmpl-scrub-label {
     z-index: 40;
+}
+
+/* On the roster the chapter is part of the one pill, after the timecode. */
+.lmpl-scrub-label .lmpl-thumb-time {
+    display: inline-flex;
+    align-items: baseline;
+    gap: calc(8px * var(--lmpl-s));
+    max-width: min(80vw, calc(420px * var(--lmpl-s)));
+}
+
+.lmpl-scrub-label .lmpl-thumb-chapter {
+    min-width: 0;
+    text-shadow: none;
 }
 
 .lmpl-scrub-label .lmpl-thumb-time {

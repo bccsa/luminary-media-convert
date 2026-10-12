@@ -155,10 +155,17 @@ describe('buildControlsHtml', () => {
 
     it('puts the timeline on its own row above the buttons, with the times at its ends', () => {
         const bottom = render().querySelector('.lmpl-bottom')!;
-        expect([...bottom.children].map((e) => e.className)).toEqual(['lmpl-timeline-row', 'lmpl-actions-row']);
+        expect([...bottom.children].map((e) => e.className)).toEqual(['lmpl-chapter-now', 'lmpl-timeline-row', 'lmpl-actions-row']);
         const row = bottom.querySelector('.lmpl-timeline-row')!;
         expect([...row.children].map((e) => e.localName)).toEqual(['media-time', 'media-time-slider', 'media-time']);
         expect(bottom.querySelector('.lmpl-actions-row .lmpl-remote media-fullscreen-button')).not.toBeNull();
+    });
+
+    it('has a place for the chapter label above the timeline, hidden until the player has something to say', () => {
+        const label = render().querySelector<HTMLElement>('.lmpl-bottom > .lmpl-chapter-now')!;
+        expect(label.hidden).toBe(true);
+        expect(label.textContent).toBe('');
+        expect(label.nextElementSibling?.className).toBe('lmpl-timeline-row');
     });
 
     it('does not put an audio/video toggle in the player', () => {

@@ -14,6 +14,8 @@ import '../ui/register';
 import {
     AUDIO_ONLY_ANGLE_ID,
     PlayerController,
+    chapterIndexAt,
+    chapterSegments,
     findPreferredTrack,
 } from '@luminary-media-converter/player-core';
 import type {
@@ -33,6 +35,7 @@ import { createKeepAlive, SILENT_AUDIO_DATA_URI, type KeepAlive } from '../ui/ke
 import { buildControlsHtml } from '../ui/controlsHtml';
 import { installAutoHide, type ControlsStore } from '../ui/autoHide';
 import { stepVolume } from '../ui/volume';
+import { chapterMask, formatChapterOf } from '../ui/chapterBar';
 import {
     SCRUB_EDGE_PX,
     clampPreviewCentre,
@@ -478,6 +481,8 @@ interface ScrubState {
     left: number;
     /** Gap, in px, between the container's bottom edge and the preview's. */
     bottom: number;
+    /** Title of the chapter the previewed moment is in; empty when there are no chapters. */
+    chapter: string;
     /** While the press is held, the strip of frames around the playhead that replaces the single frame. */
     roster: {
         tiles: { key: string; left: number; cue: ThumbnailSpriteCue | null }[];
@@ -496,6 +501,36 @@ interface ScrubState {
 }
 
 const scrub = shallowRef<ScrubState | null>(null);
+
+/** The title of the chapter a moment is in, or nothing when the video has no chapters or the moment is before the first. */
+function chapterTitleAt(time: number): string {
+    const chapters = state.value.chapters;
+    const index = chapterIndexAt(chapters, time);
+    return index < 0 ? '' : (chapters[index]?.title ?? '');
+}
+
+/** The timeline cut at the chapter starts; one plain bar when there are fewer than two chapters. */
+const chapterBarMask = computed(() => chapterMask(chapterSegments(state.value.chapters, state.value.duration)));
+
+/** "Chapter 4 of 7" above the timeline, for the chapter the playhead is in; nothing without chapters. */
+const chapterNowText = computed(() => {
+    const chapters = state.value.chapters;
+    if (chapters.length < 2) return '';
+    const index = chapterIndexAt(chapters, state.value.currentTime);
+    if (index < 0) return '';
+    const title = chapters[index]?.title ?? '';
+    return `${formatChapterOf(msg.value.chapterOf, index + 1, chapters.length)}${title ? ` · ${title}` : ''}`;
+});
+watch(
+    chapterNowText,
+    (text) => {
+        const el = containerEl.value?.querySelector<HTMLElement>('.lmpl-chapter-now');
+        if (!el) return;
+        el.textContent = text;
+        el.hidden = !text;
+    },
+    { flush: 'post' }
+);
 
 /**
  * Scales with the player, like the controls: a thumbnail sized for a phone is a stamp on a 2000px screen.
@@ -600,6 +635,7 @@ function updateScrub(event: PointerEvent): void {
         // for a moment between two frames reads as a fault, and a stale frame a hair away is not.
         cue: instance.thumbnailAt(lookup) ?? scrub.value?.cue ?? null,
         label: formatClock(time, duration >= 3600),
+        chapter: chapterTitleAt(time),
         time,
         held,
         left: clampPreviewCentre(event.clientX - frame.left, scrubWidth.value, SCRUB_EDGE_PX, frame.width - SCRUB_EDGE_PX),
@@ -774,6 +810,7 @@ const pinnedView = computed(() => {
         ...placed,
         time,
         label: formatClock(time, duration >= 3600),
+        chapter: chapterTitleAt(time),
         cue: instance.thumbnailAt(Math.min(time, Math.max(0, duration - 0.001))),
     };
 });
@@ -885,8 +922,13 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
             'lmpl-has-subtitles': state.subtitleTracks.length > 0,
             'lmpl-has-thumbs': state.thumbnailsReady,
             'lmpl-scrubbing': rosterShown,
+            'lmpl-previewing': scrub !== null,
         }"
-        :style="{ '--lmpl-roster-h': `${rosterHeight}px`, '--lmpl-track-inset': `${TRACK_INSET_PX}px` }"
+        :style="{
+            '--lmpl-roster-h': `${rosterHeight}px`,
+            '--lmpl-track-inset': `${TRACK_INSET_PX}px`,
+            '--lmpl-chapter-mask': chapterBarMask || undefined,
+        }"
     >
         <video-player ref="playerEl" class="lmpl-video-player">
             <media-container
@@ -953,7 +995,7 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
                     class="lmpl-scrub-preview"
                     :style="{ left: `${scrub.left}px`, bottom: `${scrub.bottom}px` }"
                 >
-                    <ScrubThumbnail :cue="scrub.cue" :label="scrub.label" :width="scrubWidth" />
+                    <ScrubThumbnail :cue="scrub.cue" :label="scrub.label" :chapter="scrub.chapter" :width="scrubWidth" />
                 </div>
                 <template v-if="pinnedView">
                     <ScrubRoster
@@ -973,7 +1015,9 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
                         class="lmpl-scrub-preview lmpl-scrub-label"
                         :style="{ left: `${pinnedView.markerX}px`, bottom: `${pinnedView.labelBottom}px` }"
                     >
-                        <span class="lmpl-thumb-time">{{ pinnedView.label }}</span>
+                        <span class="lmpl-thumb-time"
+                            >{{ pinnedView.label }}<span v-if="pinnedView.chapter" class="lmpl-thumb-chapter">{{ pinnedView.chapter }}</span></span
+                        >
                     </div>
                 </template>
                 <template v-if="scrub?.roster">
@@ -988,7 +1032,9 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
                         class="lmpl-scrub-preview lmpl-scrub-label"
                         :style="{ left: `${scrub.left}px`, bottom: `${scrub.roster.labelBottom}px` }"
                     >
-                        <span class="lmpl-thumb-time">{{ scrub.label }}</span>
+                        <span class="lmpl-thumb-time"
+                            >{{ scrub.label }}<span v-if="scrub.chapter" class="lmpl-thumb-chapter">{{ scrub.chapter }}</span></span
+                        >
                     </div>
                 </template>
             </media-container>

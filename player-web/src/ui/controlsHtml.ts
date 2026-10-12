@@ -181,6 +181,7 @@ function centreCluster(options: ControlsHtmlOptions): string {
 function bottomBar(options: ControlsHtmlOptions, id: string): string {
     return (
         '<div class="lmpl-bottom">' +
+        '<div class="lmpl-chapter-now" hidden></div>' +
         '<div class="lmpl-timeline-row">' +
         '<media-time class="lmpl-time" type="current"></media-time>' +
         '<media-time-slider class="media-slider media-time-slider lmpl-time-slider">' +

@@ -42,6 +42,11 @@ export interface PlayerMessages {
     skipBack: string;
     /** Skip-forward button label. `{seconds}` is replaced as above. */
     skipForward: string;
+    /**
+     * Where the playhead is among the chapters, above the timeline. `{index}` is the chapter it is in and `{count}` how
+     * many there are; a translation may move either.
+     */
+    chapterOf: string;
 
     // --- Fullscreen --------------------------------------------------------
     /**
@@ -88,6 +93,7 @@ export const DEFAULT_MESSAGES: PlayerMessages = {
     durationLabel: 'Total time',
     skipBack: 'Skip back {seconds} seconds',
     skipForward: 'Skip forward {seconds} seconds',
+    chapterOf: 'Chapter {index} of {count}',
 
     exitFullscreen: 'Exit full screen',
 
