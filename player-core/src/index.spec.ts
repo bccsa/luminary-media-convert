@@ -34,6 +34,8 @@ const RUNTIME_EXPORTS = [
     'buildAudioOnlyMaster',
     'buildChunkSchedules',
     'bytesToHex',
+    'chapterIndexAt',
+    'chapterSegments',
     'chapterTrackId',
     'collectMasterRefs',
     'createInitialState',
