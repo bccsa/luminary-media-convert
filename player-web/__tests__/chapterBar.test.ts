@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { chapterSegments, type Chapter } from '@luminary-media-converter/player-core';
-import { chapterMask, formatChapterOf } from '../src/ui/chapterBar';
+import { DENSE_CHAPTERS, MAX_CUT_CHAPTERS, chapterMask, formatChapterOf } from '../src/ui/chapterBar';
 
 const chapter = (startTime: number, title = ''): Chapter => ({ startTime, endTime: startTime + 1, title });
 const bands = (mask: string) => (mask.match(/transparent calc/g) ?? []).length / 2;
@@ -30,6 +30,26 @@ describe('chapterMask', () => {
 
     it('cuts a leading stretch before a late first chapter', () => {
         expect(bands(chapterMask(chapterSegments([chapter(10), chapter(60)], 100)))).toBe(2);
+    });
+});
+
+describe('chapterMask with many chapters', () => {
+    const many = (count: number) => chapterSegments(Array.from({ length: count }, (_, i) => chapter(i * 10)), count * 10);
+
+    it('keeps the full gap up to the dense limit', () => {
+        expect(chapterMask(many(DENSE_CHAPTERS))).toContain('* 1.5px');
+    });
+
+    it('thins the gap to a hairline past it', () => {
+        const mask = chapterMask(many(DENSE_CHAPTERS + 1));
+        expect(mask).toContain('* 0.5px');
+        expect(mask).not.toContain('* 1.5px');
+        expect(bands(mask)).toBe(DENSE_CHAPTERS);
+    });
+
+    it('leaves the bar whole past the cut limit', () => {
+        expect(chapterMask(many(MAX_CUT_CHAPTERS))).not.toBe('');
+        expect(chapterMask(many(MAX_CUT_CHAPTERS + 1))).toBe('');
     });
 });
 
