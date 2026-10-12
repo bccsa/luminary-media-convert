@@ -215,15 +215,41 @@ export function sourceCapKbps(
     rungHeight: number,
     sourceKbps: number,
     sourceDisplayWidth: number,
-    sourceDisplayHeight: number
+    sourceDisplayHeight: number,
+    sourceCodec?: string
 ): number {
     const rungPx = rungWidth * rungHeight;
     const sourcePx = sourceDisplayWidth * sourceDisplayHeight;
     if (!(sourceKbps > 0) || !(rungPx > 0) || !(sourcePx > 0)) return Infinity;
-    return Math.min(
-        sourceKbps,
-        Math.round(sourceKbps * Math.pow(rungPx / sourcePx, 0.75))
+    const equivalentKbps = Math.round(
+        sourceKbps * codecEfficiency(sourceCodec)
     );
+    return Math.min(
+        equivalentKbps,
+        Math.round(equivalentKbps * Math.pow(rungPx / sourcePx, 0.75))
+    );
+}
+
+/**
+ * Roughly how many H.264 bits one bit of the codec is worth at equal quality.
+ * The ladder is H.264, so a source's bitrate only says what the picture needs
+ * once it is restated in H.264 terms: 1800 kbps of HEVC holds what H.264 spends
+ * about 2900 on. Approximate by nature; a codec not listed counts as H.264.
+ */
+const CODEC_EFFICIENCY: Record<string, number> = {
+    hevc: 1.6,
+    h265: 1.6,
+    av1: 1.8,
+    vp9: 1.5,
+    mpeg2video: 0.5,
+    mpeg4: 0.7,
+    msmpeg4v3: 0.6,
+    vc1: 0.8,
+    wmv3: 0.8,
+};
+
+function codecEfficiency(codec?: string): number {
+    return CODEC_EFFICIENCY[(codec ?? '').toLowerCase()] ?? 1;
 }
 
 /** One ladder rung, priced for the source in front of it. */
@@ -318,7 +344,8 @@ export function suggestLadder(
             rung.height,
             track.bitrateKbps,
             display.width,
-            display.height
+            display.height,
+            track.codec
         );
         const ceiling = Number.isFinite(cap)
             ? Math.round(cap * Math.min(f, 1))
