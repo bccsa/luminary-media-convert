@@ -94,8 +94,10 @@ struct FullscreenControlsTextTests {
         state.position = 7.4
         state.duration = 120
         #expect(timeText(state) == "0:07 / 2:00")
+        #expect(timeTexts(state) == ("0:07", "-1:53"))
         state.live = true
         #expect(timeText(state) == "LIVE")
+        #expect(timeTexts(state) == ("LIVE", ""))
     }
 
     @Test("labels speeds as video.js does")

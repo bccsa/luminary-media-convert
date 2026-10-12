@@ -11,28 +11,52 @@ enum Skin {
     static let control: CGFloat = 44
     /// video.js draws an icon at 1.8 em: 0.875 rem → 25 pt.
     static let icon: CGFloat = 25
-    static let play: CGFloat = 96
-    /// 1.875 rem × 1.8.
-    static let playIcon: CGFloat = 54
+    /// The Video.js 10 centre cluster: play 80, the skips 56 round, 32 between the parts, on one line.
+    static let play: CGFloat = 80
+    static let playIcon: CGFloat = 38
     static let skip: CGFloat = 56
-    /// 1.25 rem × 1.8.
-    static let skipIcon: CGFloat = 36
+    static let skipIcon: CGFloat = 32
+    static let clusterGap: CGFloat = 32
     /// The skip circles' centres sit this far either side of the play button's.
-    static let skipOffset: CGFloat = 72
-    /// …and this far above it (`translateY(-75%)` on a 56 pt circle).
-    static let skipLift: CGFloat = 14
+    static let skipOffset: CGFloat = play / 2 + clusterGap + skip / 2
+    static let skipLift: CGFloat = 0
+    /// `--lmpl-s`: one up to 900 pt wide, then 1.25, then 1.6, so the controls are not a stamp on an iPad.
+    static func scale(forWidth width: CGFloat) -> CGFloat { width >= 1400 ? 1.6 : width >= 900 ? 1.25 : 1 }
+    /// The gap the elapsed and remaining times keep from the bar.
+    static let timeGap: CGFloat = 12
     static let progressHeight: CGFloat = 4
     static let knob: CGFloat = 12
     /// The progress bar's inset from the leading edge.
     static let progressInset: CGFloat = 18
-    static let scrim = UIColor(white: 0, alpha: 0.3)
+    /// The fade the controls stand on: dark at the foot of the picture, clear above it.
+    static let fadeColors = [UIColor(white: 0, alpha: 0.75), UIColor(white: 0, alpha: 0.4), UIColor(white: 0, alpha: 0)]
+    static let fadeLocations: [NSNumber] = [0, 0.55, 1]
     static let progressTrack = UIColor(red: 115 / 255, green: 133 / 255, blue: 159 / 255, alpha: 0.5)
     static let progressLoaded = UIColor(red: 115 / 255, green: 133 / 255, blue: 159 / 255, alpha: 0.75)
-    static let text = UIFont.systemFont(ofSize: 14)
+    static let text = UIFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
     /// video.js's rate label: 1.5 em of 0.875 rem.
     static let rateText = UIFont.systemFont(ofSize: 21)
     static let showDuration: TimeInterval = 0.1
-    static let hideDuration: TimeInterval = 1
+    static let hideDuration: TimeInterval = 0.5
+}
+
+/// The foot-of-picture fade behind the bottom controls.
+final class FadeView: UIView {
+    override class var layerClass: AnyClass { CAGradientLayer.self }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        let gradient = layer as! CAGradientLayer
+        // Bottom to top.
+        gradient.startPoint = CGPoint(x: 0.5, y: 1)
+        gradient.endPoint = CGPoint(x: 0.5, y: 0)
+        gradient.colors = Skin.fadeColors.map(\.cgColor)
+        gradient.locations = Skin.fadeLocations
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 }
 
 /// A control drawn with a video.js glyph, or with text (the speed's `1x`).

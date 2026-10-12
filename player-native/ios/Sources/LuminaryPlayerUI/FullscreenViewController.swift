@@ -50,6 +50,8 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     private var routeObservation: NSKeyValueObservation?
     private let progress = ProgressBar()
     private let timeLabel = UILabel()
+    private let remainingLabel = UILabel()
+    private let fade = FadeView()
     /// The frames shown above the timeline while it is held, and the time under the finger.
     private let roster = RosterView()
     private let rosterLabel = UILabel()
@@ -156,8 +158,9 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         videoView.playerLayer.videoGravity = .resizeAspect
         view.addSubview(videoView)
 
-        controls.backgroundColor = Skin.scrim
+        controls.backgroundColor = .clear
         view.addSubview(controls)
+        controls.addSubview(fade)
         for button in [playPause, skipBack, skipForward, audioButton, pipButton, subtitlesButton, rateButton, muteButton, exitButton] {
             controls.addSubview(button)
         }
@@ -172,6 +175,10 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         timeLabel.font = Skin.text
         timeLabel.textColor = .white
         controls.addSubview(timeLabel)
+        remainingLabel.font = Skin.text
+        remainingLabel.textColor = .white
+        remainingLabel.textAlignment = .right
+        controls.addSubview(remainingLabel)
         roster.isHidden = true
         controls.addSubview(roster)
         rosterLabel.font = Skin.text
@@ -251,11 +258,15 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         controls.frame = view.bounds
         let area = view.bounds.inset(by: view.safeAreaInsets)
         let centre = CGPoint(x: area.midX, y: area.midY)
+        let scale = Skin.scale(forWidth: area.width)
+        // The fade covers the foot of the picture: the bottom row and the room the roster lifts into.
+        let fadeHeight = min(view.bounds.height, (Skin.control + 120) * scale)
+        fade.frame = CGRect(x: 0, y: view.bounds.height - fadeHeight, width: view.bounds.width, height: fadeHeight)
 
-        playPause.frame = square(Skin.play, at: centre)
+        playPause.frame = square(Skin.play * scale, at: centre)
         spinner.frame = playPause.frame
-        skipBack.frame = square(Skin.skip, at: CGPoint(x: centre.x - Skin.skipOffset, y: centre.y - Skin.skipLift))
-        skipForward.frame = square(Skin.skip, at: CGPoint(x: centre.x + Skin.skipOffset, y: centre.y - Skin.skipLift))
+        skipBack.frame = square(Skin.skip * scale, at: CGPoint(x: centre.x - Skin.skipOffset * scale, y: centre.y - Skin.skipLift))
+        skipForward.frame = square(Skin.skip * scale, at: CGPoint(x: centre.x + Skin.skipOffset * scale, y: centre.y - Skin.skipLift))
 
         // The top row, in `player-web`'s order, closing up around what is hidden.
         var x = area.minX
@@ -265,15 +276,23 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         }
 
         exitButton.frame = CGRect(x: area.maxX - Skin.control, y: area.maxY - Skin.control, width: Skin.control, height: Skin.control)
-        // The bottom row: the time (native only), then the bar up to the exit button's corner.
+        // The bottom row: what has played, the bar, what is left, then the exit button's corner.
         let rowMid = area.maxY - Skin.control / 2
         timeLabel.sizeToFit()
+        remainingLabel.sizeToFit()
+        let timeWidth = max(timeLabel.bounds.width, remainingLabel.bounds.width, 40 * scale)
         timeLabel.frame = CGRect(
-            x: area.minX + 8, y: rowMid - timeLabel.bounds.height / 2,
-            width: timeLabel.bounds.width, height: timeLabel.bounds.height
+            x: area.minX + 8, y: rowMid - timeLabel.bounds.height / 2, width: timeWidth, height: timeLabel.bounds.height
         )
-        let barStart = timeLabel.text?.isEmpty == false ? timeLabel.frame.maxX + 10 : area.minX + Skin.progressInset
-        progress.frame = CGRect(x: barStart, y: area.maxY - Skin.control, width: area.maxX - 50 - barStart, height: Skin.control)
+        let barEnd = area.maxX - Skin.control
+        let remainingWidth = remainingLabel.text?.isEmpty == false ? timeWidth : 0
+        remainingLabel.frame = CGRect(
+            x: barEnd - remainingWidth, y: rowMid - remainingLabel.bounds.height / 2,
+            width: remainingWidth, height: remainingLabel.bounds.height
+        )
+        let barStart = timeLabel.text?.isEmpty == false ? timeLabel.frame.maxX + Skin.timeGap : area.minX + Skin.progressInset
+        let barStop = remainingWidth > 0 ? remainingLabel.frame.minX - Skin.timeGap : barEnd
+        progress.frame = CGRect(x: barStart, y: area.maxY - Skin.control, width: max(barStop - barStart, 0), height: Skin.control)
 
         menu.map(place)
         if let fraction = rosterFraction { updateRoster(fraction) }
@@ -381,9 +400,13 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
             progress.update(played: next.position / next.duration, loaded: next.loadedEnd / next.duration)
             progress.accessibilityValue = timeText(next)
         }
-        let time = timeText(next)
-        if timeLabel.text != time {
-            timeLabel.text = time
+        // While the finger is on the bar the times follow it, as the roster's label does.
+        var shown = next
+        if let held = scrubbing { shown.position = held }
+        let (elapsed, remaining) = timeTexts(shown)
+        if timeLabel.text != elapsed || remainingLabel.text != remaining {
+            timeLabel.text = elapsed
+            remainingLabel.text = remaining
             view.setNeedsLayout()
         }
         if rowChanged { view.setNeedsLayout() }
