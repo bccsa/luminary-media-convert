@@ -20,7 +20,10 @@ const ICONS = {
     captions: 'captions-off',
     cast: 'cast-enter',
     pip: 'pip-enter',
+    fullscreenEnter: 'fullscreen-enter',
     fullscreenExit: 'fullscreen-exit',
+    airplay: 'airplay-enter',
+    captionsOn: 'captions-on',
     check: 'check',
 };
 
