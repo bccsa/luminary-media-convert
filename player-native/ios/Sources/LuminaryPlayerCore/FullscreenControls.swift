@@ -105,6 +105,18 @@ public final class FullscreenControlsVisibility {
     public static let hideAfter: Double = 3
 
     public private(set) var visible = true
+    /// A roster is pinned open: the controls stay, whatever the viewer does, until it is closed.
+    public var pinned = false {
+        didSet {
+            guard pinned != oldValue else { return }
+            if pinned {
+                timer?.cancel()
+                set(true)
+            } else {
+                restart()
+            }
+        }
+    }
     /// Called whenever ``visible`` changes.
     public var onChange: ((Bool) -> Void)?
 
@@ -124,7 +136,7 @@ public final class FullscreenControlsVisibility {
 
     /// A tap on the picture itself.
     public func tappedPicture() {
-        if visible, playing {
+        if visible, playing, !pinned {
             timer?.cancel()
             set(false)
         } else {
@@ -157,7 +169,7 @@ public final class FullscreenControlsVisibility {
 
     private func restart() {
         timer?.cancel()
-        guard playing else { return }
+        guard playing, !pinned else { return }
         timer = clock.schedule(Self.hideAfter) { [weak self] in self?.set(false) }
     }
 
@@ -186,6 +198,8 @@ public struct FullscreenTexts: Equatable {
     public var mute = "Mute"
     public var unmute = "Unmute"
     public var loading = "Loading"
+    /// The button that closes the pinned frame roster.
+    public var closeRoster = "Hide frames"
 
     public init() {}
 
@@ -210,6 +224,7 @@ public struct FullscreenTexts: Equatable {
         take("mute", into: &mute)
         take("unmute", into: &unmute)
         take("loading", into: &loading)
+        take("closeRoster", into: &closeRoster)
     }
 
     public func skipBack(_ seconds: Int) -> String { skipBack.replacingOccurrences(of: "{seconds}", with: "\(seconds)") }

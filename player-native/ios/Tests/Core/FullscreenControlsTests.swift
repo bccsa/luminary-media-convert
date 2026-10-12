@@ -122,6 +122,30 @@ struct FullscreenControlsVisibilityTests {
 
     final class Box { var values: [Bool] = [] }
 
+    @Test("a pinned roster keeps the controls, and a tap on the picture does not hide them")
+    func pinnedHolds() {
+        let (visibility, clock, _) = make()
+        visibility.playbackChanged(playing: true)
+        visibility.pinned = true
+        clock.advance(10)
+        #expect(visibility.visible)
+        visibility.tappedPicture()
+        #expect(visibility.visible)
+    }
+
+    @Test("closing the roster starts the countdown again")
+    func unpinned() {
+        let (visibility, clock, _) = make()
+        visibility.playbackChanged(playing: true)
+        visibility.pinned = true
+        clock.advance(10)
+        visibility.pinned = false
+        clock.advance(2.9)
+        #expect(visibility.visible)
+        clock.advance(0.1)
+        #expect(!visibility.visible)
+    }
+
     @Test("hide 3 s after playback starts")
     func hidesWhilePlaying() {
         let (visibility, clock, changes) = make()

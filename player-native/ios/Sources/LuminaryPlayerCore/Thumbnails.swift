@@ -97,6 +97,26 @@ public enum Roster {
         min(max(duration / 120, 1), 15)
     }
 
+    /// Seconds each frame stands for in the pinned roster, the slow, precise way through the video: a
+    /// quarter of the step the held roster uses (the fast way), never finer than a sprite can resolve.
+    /// Constant while it is dragged, so the strip moves under the finger without ever rescaling.
+    public static func fineStep(duration: Double) -> Double {
+        max(0.5, step(duration: duration) / 4)
+    }
+
+    /// Where a pinned roster lands when it is dragged `dx` points from `startTime`: the strip follows the
+    /// finger, so a drag to the right is back in time. Kept inside the media, a hair short of its end.
+    public static func timeAfterDrag(startTime: Double, dx: Double, pointsPerSecond: Double, duration: Double) -> Double {
+        guard pointsPerSecond > 0 else { return startTime }
+        return min(max(startTime - dx / pointsPerSecond, 0), max(duration - 0.001, 0))
+    }
+
+    /// The time of a tap `x` points from the roster's marker, with the strip resting at `time`.
+    public static func timeAtTap(time: Double, x: Double, markerX: Double, pointsPerSecond: Double, duration: Double) -> Double {
+        guard pointsPerSecond > 0 else { return time }
+        return min(max(time + (x - markerX) / pointsPerSecond, 0), max(duration - 0.001, 0))
+    }
+
     public static func tiles(
         time: Double, markerX: Double, width: Double, tileWidth: Double, step: Double, duration: Double
     ) -> [Tile] {
