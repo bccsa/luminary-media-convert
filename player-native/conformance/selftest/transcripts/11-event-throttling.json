@@ -292,7 +292,8 @@
    "method": "seek",
    "args": {
     "playerId": "player-1",
-    "position": 60
+    "position": 60,
+    "exact": true
    },
    "result": {
     "resolved": {}
@@ -388,7 +389,7 @@
     {
      "method": "seek",
      "position": 60,
-     "exact": false
+     "exact": true
     }
    ]
   },

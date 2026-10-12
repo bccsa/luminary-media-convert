@@ -13,6 +13,7 @@ import { describeLiveness, resolveLivePlaylist } from './policy/live.js';
  */
 const RUNTIME_EXPORTS = [
     'AUDIO_ONLY_ANGLE_ID',
+    'DATA_SAVER_START_BPS',
     'DEFAULT_ANGLE_ID',
     'DEFAULT_LEAD_SECONDS',
     'DEFAULT_POLL_INTERVAL_MS',

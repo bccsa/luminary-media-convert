@@ -36,6 +36,7 @@ import {
 import { StateStore, createInitialState } from './store.js';
 import {
     AUDIO_ONLY_ANGLE_ID,
+    DATA_SAVER_START_BPS,
     type AdapterErrorPayload,
     type AdapterTextTrack,
     type Angle,
@@ -350,12 +351,16 @@ export class PlayerController implements PlayerControllerApi {
         // The policy is completed here rather than in the pipeline: it is the
         // controller that resolves a source's overrides, and the adapter that
         // runs the ladder on the result.
-        const bandwidth = this.source?.bandwidthEstimate;
+        const dataSaver = this.source?.dataSaver === true;
+        const measured = this.source?.bandwidthEstimate;
+        const usable = measured && measured > 0 && Number.isFinite(measured) ? measured : undefined;
+        // A data saver starts low whatever the host measured: the estimate is the one input both
+        // engines already start from, so clamping it here needs no engine to know about data savers.
+        const bandwidth = dataSaver ? Math.min(usable ?? Infinity, DATA_SAVER_START_BPS) : usable;
         await this.adapter.loadSource({
             ...(source ?? munged!.source),
-            ...(bandwidth && bandwidth > 0 && Number.isFinite(bandwidth)
-                ? { bandwidthEstimate: bandwidth }
-                : {}),
+            ...(bandwidth !== undefined ? { bandwidthEstimate: bandwidth } : {}),
+            ...(dataSaver ? { dataSaver } : {}),
             recovery: this.policy,
         });
         if (generation !== this.generation) return;

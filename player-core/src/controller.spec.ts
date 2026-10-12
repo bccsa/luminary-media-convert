@@ -129,6 +129,23 @@ describe('PlayerController — load', () => {
         }
     });
 
+    it('starts a data saver low, whatever the host measured', async () => {
+        const { adapter, controller } = setup(simpleRoutes);
+        const spy = vi.spyOn(adapter, 'loadSource');
+
+        await controller.load({ masterUrl: MASTER_URL, bandwidthEstimate: 20_000_000, dataSaver: true });
+        expect(spy.mock.calls.at(-1)![0]).toMatchObject({ bandwidthEstimate: 1_000_000, dataSaver: true });
+
+        await controller.load({ masterUrl: MASTER_URL, bandwidthEstimate: 400_000, dataSaver: true });
+        expect(spy.mock.calls.at(-1)![0].bandwidthEstimate).toBe(400_000);
+
+        await controller.load({ masterUrl: MASTER_URL, dataSaver: true });
+        expect(spy.mock.calls.at(-1)![0].bandwidthEstimate).toBe(1_000_000);
+
+        await controller.load({ masterUrl: MASTER_URL, bandwidthEstimate: 20_000_000 });
+        expect(spy.mock.calls.at(-1)![0]).not.toHaveProperty('dataSaver');
+    });
+
     it('seeks to startPosition without autoplaying', async () => {
         const { adapter, controller } = setup(simpleRoutes);
         await controller.load({ masterUrl: MASTER_URL, startPosition: 42 });

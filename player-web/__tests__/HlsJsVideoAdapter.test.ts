@@ -79,6 +79,17 @@ describe('loadSource', () => {
         expect(engineConfig().abrEwmaDefaultEstimate).toBe(3_000_000);
     });
 
+    it('chooses the start level by the measure, and starts lowest without one or on a data saver', async () => {
+        await adapter.loadSource(adapterSource({ bandwidthEstimate: 3_000_000 }));
+        expect(engineConfig().startLevel).toBe(-1);
+
+        await adapter.loadSource(adapterSource({ bandwidthEstimate: 3_000_000, dataSaver: true }));
+        expect(engineConfig().startLevel).toBe(0);
+
+        await adapter.loadSource(adapterSource({ bandwidthEstimate: 0 }));
+        expect(engineConfig().startLevel).toBe(0);
+    });
+
     it('refuses munged content when the browser has no Media Source, and says why', async () => {
         vi.spyOn(Hls, 'isSupported').mockReturnValue(false);
         const seen = events(adapter, 'error');
@@ -214,7 +225,7 @@ describe('variants', () => {
 
     it('pins a variant by its level index', () => {
         adapter.setVariant('360');
-        expect(el.engine!.nextLevel).toBe(1);
+        expect(el.engine!.currentLevel).toBe(1);
     });
 
     it('returns to automatic selection', () => {

@@ -51,6 +51,10 @@ export {
     isOnBar,
     pointerRatio,
     previewTimes,
+    rosterFineStep,
+    rosterStep,
+    rosterTiles,
+    type RosterTile,
 } from './ui/scrubPreview';
 export { default as ScrubThumbnail } from './components/ScrubThumbnail.vue';
 export { installAutoHide, AUTO_HIDE_MS, type ControlsStore } from './ui/autoHide';

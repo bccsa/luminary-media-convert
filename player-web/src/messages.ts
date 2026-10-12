@@ -50,8 +50,6 @@ export interface PlayerMessages {
      * not floating over the picture. Call `enterFullscreen()` on the player.
      */
     exitFullscreen: string;
-    /** Label of the button that closes the pinned frame roster. */
-    closeRoster: string;
 
     // --- Track menus -------------------------------------------------------
     audioMenuLabel: string;
@@ -92,7 +90,6 @@ export const DEFAULT_MESSAGES: PlayerMessages = {
     skipForward: 'Skip forward {seconds} seconds',
 
     exitFullscreen: 'Exit full screen',
-    closeRoster: 'Hide frames',
 
     audioMenuLabel: 'Audio',
     subtitlesMenuLabel: 'Subtitles',

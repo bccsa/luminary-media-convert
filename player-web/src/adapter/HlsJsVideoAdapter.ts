@@ -116,6 +116,7 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
     private listeners = new Map<AdapterEventName, Set<(payload: never) => void>>();
     private destroyed = false;
     private baseConfig: HlsJsConfig | null = null;
+    private configKey = '';
 
     constructor(el: HlsJsVideoElement, options: HlsJsVideoAdapterOptions = {}) {
         this.el = el;
@@ -142,8 +143,14 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
      * angle switches. Everything per-source is read through closures at request time.
      */
     private config(): HlsJsConfig {
-        if (this.baseConfig) return this.baseConfig;
-        const start = initialBandwidth(this.lastSource?.bandwidthEstimate);
+        // Rebuilt only when what the host supplied changes. The stored record moves every few
+        // seconds, so it is read when the config is built and is not part of the key: the engine
+        // is reused across angle switches.
+        const dataSaver = this.lastSource?.dataSaver === true;
+        const key = `${this.lastSource?.bandwidthEstimate ?? ''}|${dataSaver}`;
+        if (this.baseConfig && key === this.configKey) return this.baseConfig;
+        this.configKey = key;
+        const start = initialBandwidth(this.lastSource?.bandwidthEstimate, undefined, dataSaver);
         this.baseConfig = {
             ...loadPolicyConfig(),
             loader: createLuminaryLoader({
@@ -154,8 +161,9 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
             // build capped by size × device pixel ratio and never on FPS, so match that explicitly.
             capLevelToPlayerSize: false,
             capLevelOnFPSDrop: false,
-            // VHS's `enableLowInitialPlaylist`: start from the lowest rendition and climb.
-            startLevel: 0,
+            // VHS's `enableLowInitialPlaylist`: start from the lowest rendition and climb, unless
+            // there is a measure to choose by (and the viewer is not on a data saver).
+            startLevel: start && !dataSaver ? -1 : 0,
             ...(start ? { abrEwmaDefaultEstimate: start } : {}),
             ...this.options.hlsConfig,
         };
@@ -313,7 +321,10 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
                 i++;
             }
         }
-        engine.nextLevel = index;
+        // A pick is switched to at once; `nextLevel` waits for the next fragment, which took
+        // seconds on a slow link. Auto only lifts the pin, so it has nothing to hurry.
+        if (index >= 0) engine.currentLevel = index;
+        else engine.nextLevel = index;
     }
 
     // -- audio --------------------------------------------------------------

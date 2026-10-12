@@ -18,12 +18,9 @@ const props = defineProps<{
     markerX: number;
     /** Gap, in px, between the player's bottom edge and the roster's. */
     bottom: number;
-    /** A pinned roster: it takes the pointer (to be dragged) and offers a button to close it. */
+    /** A pinned roster: it takes the pointer (to be dragged). A press outside it closes it. */
     interactive?: boolean;
-    closeLabel?: string;
 }>();
-
-const emit = defineEmits<{ close: [] }>();
 
 function tileStyle(tile: { left: number }) {
     return { left: `${tile.left}px`, width: `${props.tileWidth}px`, height: `${props.height}px` };
@@ -71,17 +68,5 @@ const markerStyle = computed(() => ({ left: `${props.markerX}px` }));
         </div>
         <div class="lmpl-roster-vignette"></div>
         <div class="lmpl-roster-marker" :style="markerStyle"></div>
-        <button
-            v-if="interactive"
-            type="button"
-            class="lmpl-roster-close"
-            :aria-label="closeLabel"
-            :title="closeLabel"
-            @pointerdown.stop
-            @pointerup.stop
-            @click.stop="emit('close')"
-        >
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
-        </button>
     </div>
 </template>

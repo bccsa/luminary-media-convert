@@ -121,6 +121,13 @@ export interface PlayerSource {
      * Absent or non-positive: no hint.
      */
     bandwidthEstimate?: number;
+    /**
+     * The viewer is on the host's data saver. The engine starts from a low
+     * rendition whatever {@link bandwidthEstimate} or its own record says (the
+     * estimate is clamped to {@link DATA_SAVER_START_BPS}), and climbs only as it
+     * measures. Not a cap: {@link maxHeight} is the cap.
+     */
+    dataSaver?: boolean;
     /** Start position in seconds for the initial load. */
     startPosition?: number;
     /**
@@ -379,6 +386,9 @@ export interface AdapterCapabilities {
     renderText: boolean;
 }
 
+/** What a data saver starts the adaptive logic from, in bits per second: the lowest rungs. */
+export const DATA_SAVER_START_BPS = 1_000_000;
+
 /** What the wrapper hands the engine to play. */
 export interface AdapterSource {
     /** Munged master (blob URL) — or the original URL when munging was skipped. */
@@ -388,6 +398,8 @@ export interface AdapterSource {
     keyHex?: string;
     /** {@link PlayerSource.bandwidthEstimate}, passed on only when it is a usable number. */
     bandwidthEstimate?: number;
+    /** {@link PlayerSource.dataSaver}: the engine ignores its own record of this device's throughput. */
+    dataSaver?: boolean;
     /**
      * The recovery ladder's tuning for this source, already resolved — the
      * adapter is handed decisions, never a partial bag whose defaults it would

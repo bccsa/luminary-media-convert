@@ -630,8 +630,8 @@
 
 /*
  * Holding the timeline opens a strip of frames under it, and the timeline slides up to make room: the
- * viewer sees the stretch of the video around the playhead, not one frame. The track thins while it is
- * held so the frames stay the subject, and the strip takes the timeline's old place, above the buttons.
+ * viewer sees the stretch of the video around the playhead, not one frame. The strip rises from the bottom
+ * edge over the buttons, and the track thickens while it is held so it is easy to hold on to.
  */
 .lmpl-roster {
     position: absolute;
@@ -724,7 +724,14 @@
 }
 
 .lmpl-root.lmpl-scrubbing .lmpl-time-slider .lmpl-track {
-    height: calc(5px * var(--lmpl-s));
+    height: calc(16px * var(--lmpl-s));
+}
+
+/* The strip is the only thing the viewer is looking at: the skip and play buttons would show through behind it. */
+.lmpl-root.lmpl-scrubbing .lmpl-cluster {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s ease;
 }
 
 /* The roster carries the label; the timeline's own end times would only crowd it. */
@@ -775,22 +782,4 @@
 
 .lmpl-roster.lmpl-roster-interactive:active {
     cursor: grabbing;
-}
-
-.lmpl-roster-close {
-    position: absolute;
-    top: 6px;
-    right: 6px;
-    z-index: 2;
-    display: grid;
-    place-items: center;
-    width: calc(28px * var(--lmpl-s));
-    height: calc(28px * var(--lmpl-s));
-    padding: 0;
-    border: 0;
-    border-radius: 9999px;
-    background: rgb(20 20 24 / 0.7);
-    box-shadow: 0 0 0 1px rgb(255 255 255 / 0.18);
-    color: #fff;
-    cursor: pointer;
 }

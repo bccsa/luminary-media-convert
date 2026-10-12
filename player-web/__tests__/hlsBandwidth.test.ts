@@ -23,6 +23,7 @@ describe('initialBandwidth', () => {
 
     it('ignores a stored value that is not a usable number', () => {
         expect(initialBandwidth(3_000_000, storage({ bandwidth: 'fast' }))).toBe(3_000_000);
+        expect(initialBandwidth(900_000, storage({ bandwidth: 9_000_000 }), true)).toBe(900_000);
         expect(initialBandwidth(3_000_000, storage({ bandwidth: 0 }))).toBe(3_000_000);
     });
 

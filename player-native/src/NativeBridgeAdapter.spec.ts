@@ -459,7 +459,7 @@ describe('NativeBridgeAdapter — transport', () => {
 
         controller.seek(42);
         expect(adapter.getCurrentTime()).toBe(42);
-        expect(plugin.argsOf('seek').at(-1)).toEqual({ playerId: PLAYER_ID, position: 42 });
+        expect(plugin.argsOf('seek').at(-1)).toEqual({ playerId: PLAYER_ID, position: 42, exact: true });
     });
 
     it('reports a failed fire-and-forget call instead of throwing it', async () => {

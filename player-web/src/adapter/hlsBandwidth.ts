@@ -18,13 +18,15 @@ const defaultStorage = (): Storage | undefined => (typeof localStorage === 'unde
 /**
  * The bandwidth hls.js should start from: this device's own record when there is one, else the
  * host's measurement, else nothing (hls.js's default). A host's probe is a hint — a measurement
- * of this device fetching this kind of segment is better, as it was with VHS.
+ * of this device fetching this kind of segment is better, as it was with VHS. Under a data saver
+ * the record is not used: it holds what the device managed, not what the viewer wants to spend.
  */
 export function initialBandwidth(
     hostEstimate: number | undefined,
-    storage: Pick<Storage, 'getItem'> | undefined = defaultStorage()
+    storage: Pick<Storage, 'getItem'> | undefined = defaultStorage(),
+    dataSaver = false
 ): number | undefined {
-    const stored = storedBandwidth(storage);
+    const stored = dataSaver ? undefined : storedBandwidth(storage);
     if (stored) return stored;
     return hostEstimate && hostEstimate > 0 && Number.isFinite(hostEstimate) ? hostEstimate : undefined;
 }

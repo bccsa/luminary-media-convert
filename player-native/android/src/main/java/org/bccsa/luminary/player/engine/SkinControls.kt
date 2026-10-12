@@ -51,8 +51,8 @@ import org.bccsa.luminary.player.Thumbnails
  * and picture in picture and leaving full-screen at the right. A dark fade rises from the bottom edge
  * so white controls read over a bright picture.
  *
- * Holding the timeline opens a roster of frames in the timeline's place and lifts the timeline onto
- * it, thin, so the frames around the playhead can be seen as it is dragged ([Thumbnails] has them).
+ * Holding the timeline opens a roster of frames over the buttons and lifts the timeline onto
+ * it, thicker, so the frames around the playhead can be seen as it is dragged ([Thumbnails] has them).
  *
  * A tap shows or hides the controls and a double tap leaves full-screen, as the web component's own
  * double-click does. A spinner takes the place of play / pause while waiting for data the viewer
@@ -105,6 +105,9 @@ internal class SkinControls(
     private var attached = false
     private var safe = Insets.NONE
     private var rosterOpen = false
+    /** The time the strip is held at by a finger on it (the slow scrub), until it lifts. */
+    private var sliding: Double? = null
+    private var closedByThisTouch = false
     private var scale = 1f
     private var widthDp = 0f
 
@@ -120,6 +123,8 @@ internal class SkinControls(
 
         override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
             if (inPictureInPicture) return true
+            // The press that put the roster away was for that, not for the controls.
+            if (closedByThisTouch) return true
             if (menuOpen) closeMenu() else setShown(!shown)
             return true
         }
@@ -208,7 +213,18 @@ internal class SkinControls(
         addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> padClearOfSystem() }
         thumbnails?.onChange = {
             roster.invalidate()
-            if (rosterOpen) updateRoster(timeline.dragAt)
+            if (rosterOpen) updateRoster(rosterTime)
+        }
+        roster.onSlide = { time ->
+            sliding = time
+            updateRoster(time)
+            refresh()
+        }
+        roster.onSlideEnd = { commit ->
+            sliding?.let { if (commit) player.seekTo((it * 1000).roundToLong()) }
+            sliding = null
+            refresh()
+            scheduleHide()
         }
         applyScale()
         refresh()
@@ -247,6 +263,20 @@ internal class SkinControls(
     // Touch: only what the controls did not take.
 
     override fun onTouchEvent(event: MotionEvent): Boolean = gestures.onTouchEvent(event)
+
+    /** A press anywhere but the roster and the timeline puts the roster away. */
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            closedByThisTouch = rosterOpen && !hits(roster, event) && !hits(timeline, event)
+            if (closedByThisTouch) closeRoster()
+        }
+        return super.dispatchTouchEvent(event)
+    }
+
+    private fun hits(view: View, event: MotionEvent): Boolean {
+        val at = IntArray(2).also { view.getLocationOnScreen(it) }
+        return event.rawX >= at[0] && event.rawX <= at[0] + view.width && event.rawY >= at[1] && event.rawY <= at[1] + view.height
+    }
 
     // The player, followed.
 
@@ -310,13 +340,18 @@ internal class SkinControls(
         val position = player.currentPosition / 1000.0
         val total = max((duration ?: 0L) / 1000.0, position)
         // While held the times follow the finger. Whole seconds, so the two always add up to the length.
-        val shownAt = if (timeline.dragging) timeline.dragAt * total else position
+        val shownAt = sliding ?: if (timeline.dragging) timeline.dragAt * total else position
         val left = if (isLive) "LIVE" else formatTime(shownAt, total)
         val right = if (isLive) "" else "-" + formatTime(max(Math.floor(total) - Math.floor(shownAt), 0.0), total)
         if (elapsed.text.toString() != left) elapsed.text = left
         if (remaining.text.toString() != right) remaining.text = right
 
-        if (duration != null) timeline.show(player.currentPosition.toDouble() / duration, player.bufferedPosition.toDouble() / duration)
+        if (duration != null) {
+            val at = sliding?.let { it * 1000 } ?: player.currentPosition.toDouble()
+            timeline.show(at / duration, player.bufferedPosition.toDouble() / duration)
+        }
+        // Held open after the finger lifts, the roster follows the playhead until it is touched again.
+        if (rosterOpen && !timeline.dragging && sliding == null) updateRoster(position)
     }
 
     // Actions.
@@ -347,7 +382,7 @@ internal class SkinControls(
     /** The finger is on the timeline at [fraction] of the way along it. */
     private fun scrubbed(fraction: Double, x: Float) {
         if (rosterWanted() && !rosterOpen) openRoster()
-        if (rosterOpen) updateRoster(fraction, x)
+        if (rosterOpen) updateRoster(fraction * (player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0L) / 1000.0, x)
         refresh()
     }
 
@@ -357,7 +392,7 @@ internal class SkinControls(
             val duration = player.duration.takeIf { it != C.TIME_UNSET }
             if (duration != null) player.seekTo((duration * fraction).roundToLong())
         }
-        closeRoster()
+        // The roster stays until a press lands outside it and the timeline.
         refresh()
         scheduleHide()
     }
@@ -372,12 +407,20 @@ internal class SkinControls(
     private fun openRoster() {
         val frames = thumbnails ?: return
         rosterOpen = true
-        timeline.thin = true
+        timeline.onRoster = true
         val height = rosterHeight()
-        // The roster fills the strip the timeline leaves, and the timeline rests on top of it.
+        // The roster rises from the bottom edge over the buttons, and the timeline rests on its top.
         val rowBottom = column.top + timelineRow.bottom
-        roster.lp(height.roundToInt(), panel.height - panel.paddingBottom - rowBottom)
-        roster.configure(frames, height)
+        val reach = height + (panel.height - rowBottom)
+        roster.lp(reach.roundToInt(), -panel.paddingBottom)
+        roster.configure(frames, reach)
+        // Nothing but the timeline and the roster stays: the buttons would show through behind the strip.
+        for (part in listOf(actionsRow, centre)) {
+            part.animate().alpha(0f).setDuration(120).withEndAction { if (rosterOpen) part.visibility = INVISIBLE }.start()
+        }
+        // The fade that darkens the controls would only dim the strip over them.
+        fade.alpha = 0
+        column.invalidate()
         roster.visibility = VISIBLE
         roster.alpha = 0f
         roster.translationY = dpf(6f)
@@ -391,17 +434,26 @@ internal class SkinControls(
     private fun closeRoster() {
         if (!rosterOpen) return
         rosterOpen = false
-        timeline.thin = false
+        timeline.onRoster = false
         roster.animate().cancel()
         roster.visibility = GONE
+        for (part in listOf(actionsRow, centre)) {
+            part.animate().cancel()
+            part.visibility = VISIBLE
+            part.alpha = 1f
+        }
+        fade.alpha = 255
+        column.invalidate()
         timelineRow.animate().translationY(0f).setDuration(180).start()
         label.animate().cancel()
         label.visibility = GONE
     }
 
-    private fun updateRoster(fraction: Double, pointerX: Float = timeline.pointerX) {
+    private var rosterTime = 0.0
+
+    private fun updateRoster(time: Double, pointerX: Float = timeline.pointerX) {
         val duration = player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: return
-        val time = fraction * duration / 1000.0
+        rosterTime = time
         // The marker sits under the finger, in the roster's own coordinates.
         val at = IntArray(2).also { timeline.getLocationInWindow(it) }
         val here = IntArray(2).also { roster.getLocationInWindow(it) }
@@ -425,7 +477,7 @@ internal class SkinControls(
 
     // Auto-hide: three seconds, only while playing and with nothing open or being dragged.
 
-    private fun canHide() = !menuOpen && !timeline.dragging && !Util.shouldShowPlayButton(player)
+    private fun canHide() = !menuOpen && !timeline.dragging && !rosterOpen && !Util.shouldShowPlayButton(player)
 
     private fun scheduleHide() {
         main.removeCallbacks(hide)
@@ -750,8 +802,8 @@ private class Timeline(
     var pointerX = 0f
         private set
 
-    /** The roster is under the timeline: the track is as thin as the skin's `5px`. */
-    var thin = false
+    /** The roster is under the timeline: the track is as thick as when held, and stays so while the roster is up. */
+    var onRoster = false
         set(value) {
             field = value
             invalidate()
@@ -771,7 +823,7 @@ private class Timeline(
     override fun onDraw(canvas: Canvas) {
         val density = resources.displayMetrics.density
         val dp = when {
-            thin -> 5f
+            onRoster -> 16f
             dragging -> 16f
             else -> 12f
         } * scale
@@ -841,6 +893,32 @@ private class RosterView(context: Context) : View(context) {
 
     fun lp(height: Int, bottom: Int) {
         layoutParams = FrameLayout.LayoutParams(MATCH_PARENT, height, Gravity.BOTTOM).apply { bottomMargin = bottom }
+    }
+
+    /** The slow scrub: a finger on the strip slides it under the marker. The time it reaches, and then the lift. */
+    var onSlide: ((Double) -> Unit)? = null
+    var onSlideEnd: ((Boolean) -> Unit)? = null
+    private var downX = 0f
+    private var downTime = 0.0
+
+    private fun secondsPerPx(): Double {
+        val sample = frames?.sample() ?: return 0.0
+        val tileWidth = max(24f * resources.displayMetrics.density, tileHeight * sample.w / sample.h)
+        return Roster.step(duration) / tileWidth
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downX = event.x
+                downTime = time
+                parent.requestDisallowInterceptTouchEvent(true)
+            }
+            MotionEvent.ACTION_MOVE -> onSlide?.invoke((downTime - (event.x - downX) * secondsPerPx()).coerceIn(0.0, duration))
+            MotionEvent.ACTION_UP -> onSlideEnd?.invoke(true)
+            MotionEvent.ACTION_CANCEL -> onSlideEnd?.invoke(false)
+        }
+        return true
     }
 
     fun show(time: Double, markerX: Float, duration: Double) {

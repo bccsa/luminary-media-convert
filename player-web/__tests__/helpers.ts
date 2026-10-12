@@ -22,6 +22,7 @@ export class FakeList<T> extends EventTarget {
 export interface FakeEngine {
     handlers: Map<string, Set<(event: string, data: unknown) => void>>;
     nextLevel: number;
+    currentLevel: number;
     recoverMediaError: ReturnType<typeof vi.fn>;
     startLoad: ReturnType<typeof vi.fn>;
     bandwidthEstimate: number;
@@ -35,6 +36,7 @@ export function fakeEngine(): FakeEngine {
     return {
         handlers,
         nextLevel: -1,
+        currentLevel: -1,
         recoverMediaError: vi.fn(),
         startLoad: vi.fn(),
         bandwidthEstimate: 0,

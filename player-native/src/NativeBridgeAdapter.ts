@@ -285,7 +285,9 @@ export class NativeBridgeAdapter implements PlayerAdapter {
         this.currentTime = seconds;
         this.send(
             'seek',
-            this.plugin.seek({ playerId: this.playerId, position: seconds }),
+            // Exact, as a video element's seek is: the engine's default snaps to a keyframe, which
+            // landed up to several seconds before the target and played on to it.
+            this.plugin.seek({ playerId: this.playerId, position: seconds, exact: true }),
         );
     }
 

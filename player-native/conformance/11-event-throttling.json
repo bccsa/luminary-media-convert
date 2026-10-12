@@ -135,8 +135,8 @@
         {
             "call": {
                 "method": "seek",
-                "args": {"playerId": "$player", "position": 60},
-                "match": {"playerId": "$player", "position": 60, "exact": {"$absent": true}}
+                "args": {"playerId": "$player", "position": 60, "exact": true},
+                "match": {"playerId": "$player", "position": 60, "exact": true}
             }
         },
         {
@@ -166,7 +166,7 @@
         {"expectNoEvents": true},
         {"expectState": {"playing": false, "currentTime": 60.25, "bufferedEnd": 20, "duration": 120}},
         {
-            "expectEngine": [{"method": "load"}, {"method": "play"}, {"method": "seek", "position": 60, "exact": false}]
+            "expectEngine": [{"method": "load"}, {"method": "play"}, {"method": "seek", "position": 60, "exact": true}]
         }
     ]
 }

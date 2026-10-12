@@ -3,11 +3,13 @@
  * The player lab. It knows the player only through `virtual:video-player`'s contract, as the
  * Luminary app will: `inject(VideoPlayerKey)`, then `<component :is>` of what the service returns.
  */
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch, watchEffect } from 'vue';
 import type { PlayerSource } from '@luminary-media-converter/player-core';
 import { VideoPlayerKey, type PlaybackMode, type PlayerHandle } from '@/build-time/contracts/plugin-registry';
 import { NativePluginKey } from '@/players/nativePlugin';
 import { SimulatedNativePlugin } from '@/players/SimulatedNativePlugin';
+import ScrubRoster from '@/lab/ScrubRoster.vue';
 import HealthBoard from '@/lab/HealthBoard.vue';
 import StressPanel from '@/lab/StressPanel.vue';
 import { probe, type Observation } from '@/lab/probe';
@@ -77,6 +79,20 @@ const source = computed<PlayerSource>(() => {
     }
     return { masterUrl: preset.masterUrl, ...(preset.keyHex ? { keyHex: preset.keyHex } : {}), ...withFrames(preset.masterUrl) };
 });
+
+/** Portrait carries no controls of the player's own: the page drives playback, and only fullscreen shows them. */
+const BARE_FRAME = { windowedControls: false };
+
+/**
+ * Full screen is always landscape. The Web mode's WebView ignores the browser's orientation lock, so on a
+ * device the page asks the activity; native mode turns the screen itself.
+ */
+const orientation = Capacitor.isNativePlatform() ? registerPlugin<{ lockLandscape(o: { locked: boolean }): Promise<void> }>('LabOrientation') : null;
+function onFullscreenChange(): void {
+    void orientation?.lockLandscape({ locked: document.fullscreenElement !== null }).catch(() => {});
+}
+document.addEventListener('fullscreenchange', onFullscreenChange);
+onBeforeUnmount(() => document.removeEventListener('fullscreenchange', onFullscreenChange));
 
 const playerComponent = computed(() => service.component(mode.value));
 const playerKey = ref(0);
@@ -186,6 +202,20 @@ function applySource(): void {
 
 // Transport.
 const state = computed(() => (player.value?.controller ? player.value.state : null));
+
+// Scrub: the slider is the fast way and opens the roster over the picture; the roster is the slow way.
+const scrubOpen = ref(false);
+const scrubAt = ref(0);
+const duration = computed(() => (state.value && Number.isFinite(state.value.duration) ? state.value.duration : 0));
+const scrubTime = computed(() => (scrubOpen.value ? scrubAt.value : (state.value?.currentTime ?? 0)));
+function scrubInput(seconds: number): void {
+    scrubAt.value = seconds;
+    scrubOpen.value = true;
+}
+function scrubCommit(seconds: number): void {
+    scrubAt.value = seconds;
+    player.value?.seek(seconds);
+}
 function play() {
     void player.value?.play();
     void probe.expect('play', 'play', (o) => o.playing);
@@ -270,7 +300,7 @@ watch(latency, (value) => {
             Video in the page (native, behind a see-through page)
         </label>
 
-        <div class="player">
+        <div class="player" :class="{ 'player--scrubbing': scrubOpen }">
             <component
                 :is="playerComponent"
                 :key="`${mode}-${playerKey}`"
@@ -278,10 +308,32 @@ watch(latency, (value) => {
                 :source="source"
                 :youtube-embed-url="youtubeEmbedUrl"
                 :inline="inlineActive"
+                v-bind="mode === 'web' ? { controls: BARE_FRAME } : {}"
                 @timeupdate="onTimeupdate"
                 @loadedmetadata="onLoadedmetadata"
             />
+            <ScrubRoster
+                v-if="scrubOpen && duration > 0 && player?.controller"
+                :time="scrubAt"
+                :duration="duration"
+                :thumbnail-at="(seconds: number) => player?.controller?.thumbnailAt(seconds) ?? null"
+                @update:time="scrubAt = $event"
+                @commit="scrubCommit"
+                @close="scrubOpen = false"
+            />
         </div>
+        <input
+            v-if="duration > 0"
+            class="scrub-slider"
+            data-scrub
+            type="range"
+            min="0"
+            :max="duration"
+            step="0.1"
+            :value="scrubTime"
+            @input="scrubInput(Number(($event.target as HTMLInputElement).value))"
+            @change="scrubCommit(Number(($event.target as HTMLInputElement).value))"
+        />
 
         <div class="row">
             <button class="capsule" type="button" @click="play">Play</button>
@@ -443,9 +495,13 @@ watch(latency, (value) => {
     background: transparent;
 }
 .player {
+    position: relative;
     background: #000;
     border-radius: 12px;
     overflow: hidden;
+}
+.scrub-slider {
+    width: 100%;
 }
 .row,
 .group {

@@ -3,6 +3,7 @@ package org.bccsa.luminary.player.engine
 import android.app.Activity
 import android.app.PictureInPictureParams
 import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
@@ -48,6 +49,9 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
     private var player: Player? = null
     private val main = Handler(Looper.getMainLooper())
     private var settle: Runnable? = null
+    private var wasPortrait = false
+    /** Turning back to portrait, then handing the orientation back to what it was. */
+    private var restoring: Runnable? = null
 
     /** The system's word on the picture's small window; the activity is the one that is in it. */
     private val pipListener = Consumer<PictureInPictureModeChangedInfo> { info ->
@@ -148,8 +152,11 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
             view,
             ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
         )
+        finishRestoring()
         savedOrientation = activity.requestedOrientation
-        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+        wasPortrait = activity.resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
+        // Always landscape (either way up): portrait is the host app's own media experience.
+        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         WindowCompat.getInsetsController(activity.window, view).apply {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             hide(WindowInsetsCompat.Type.systemBars())
@@ -209,7 +216,7 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         if (activity != null) {
             WindowCompat.getInsetsController(activity.window, activity.window.decorView)
                 .show(WindowInsetsCompat.Type.systemBars())
-            activity.requestedOrientation = savedOrientation
+            restoreOrientation(activity)
         }
         this.view = null
         this.host = null
@@ -221,12 +228,37 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         return true
     }
 
+    /**
+     * Leaving a landscape lock does not turn a phone that was upright back by itself when its sensor gives
+     * no signal (flat on a table), so portrait is asked for first, and the old setting handed back after.
+     */
+    private fun restoreOrientation(activity: Activity) {
+        if (!wasPortrait) {
+            activity.requestedOrientation = savedOrientation
+            return
+        }
+        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        val handBack = Runnable {
+            restoring = null
+            activity.requestedOrientation = savedOrientation
+        }
+        restoring = handBack
+        main.postDelayed(handBack, ORIENTATION_SETTLE_MS)
+    }
+
+    private fun finishRestoring() {
+        val pending = restoring ?: return
+        main.removeCallbacks(pending)
+        pending.run()
+    }
+
     /** The controls currently on screen, for tests. */
     internal fun skinControls(): SkinControls? = controls
 
     companion object {
         private const val PIP_SETTLE_MS = 1500L
         private const val MAX_RATIO = 2.39f
+        private const val ORIENTATION_SETTLE_MS = 600L
 
         /** `ActivityInfo.FLAG_SUPPORTS_PICTURE_IN_PICTURE`: set by `android:supportsPictureInPicture`, and not in the public API. */
         private const val FLAG_SUPPORTS_PICTURE_IN_PICTURE = 0x400000

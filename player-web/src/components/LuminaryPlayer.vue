@@ -379,6 +379,11 @@ watch([isFullscreen, () => props.windowedFit], applyFit);
 function onFullscreenChange(): void {
     const doc = document as Document & { webkitFullscreenElement?: Element | null };
     isFullscreen.value = (doc.fullscreenElement ?? doc.webkitFullscreenElement ?? null) !== null;
+    // Fullscreen is always landscape: portrait is the host app's own page. A guarded no-op where the
+    // browser cannot lock (iOS Safari), and the lock is let go when fullscreen ends.
+    const orientation = (screen as Screen & { orientation?: { lock?: (type: string) => Promise<void>; unlock?: () => void } }).orientation;
+    if (isFullscreen.value) void orientation?.lock?.('landscape')?.catch(() => {});
+    else orientation?.unlock?.();
     // A control clicked in fullscreen keeps focus once the bare frame hides it again, and a focused
     // control swallows every key but Tab: the host's shortcuts would stay dead until something else
     // took focus.
@@ -479,8 +484,12 @@ interface ScrubState {
         /** Where the marker sits, in px from the roster's left. */
         markerX: number;
         tileWidth: number;
-        /** Gap, in px, between the container's bottom edge and the roster's: it takes the timeline's resting place. */
+        /** Gap, in px, between the container's bottom edge and the roster's: none, it rises from the edge over the controls. */
         bottom: number;
+        /** How far the roster reaches up: the strip above the timeline's resting place plus everything under it. */
+        height: number;
+        /** The room between the timeline's resting place and the bottom edge, which the roster covers. */
+        gap: number;
         /** Gap, in px, between the container's bottom edge and the time label above the timeline. */
         labelBottom: number;
     } | null;
@@ -534,7 +543,7 @@ function endScrub(event?: PointerEvent): void {
     // A press that opened the roster leaves it open: the viewer lifted a finger to look, not to be done.
     const roster = scrub.value?.roster;
     if (roster && event?.type === 'pointerup') {
-        pin.value = { bottom: roster.bottom, labelBottom: roster.labelBottom };
+        pin.value = { bottom: roster.bottom, labelBottom: roster.labelBottom, gap: roster.gap };
         pinAnchor.value = scrub.value?.time ?? null;
         armAnchorTimeout();
     }
@@ -564,6 +573,8 @@ function updateScrub(event: PointerEvent): void {
 
     const bar = slider.getBoundingClientRect();
     const onBar = isOnBar(event.clientX, event.clientY, bar);
+    // A press anywhere but the roster and the timeline (the fast way, which the roster is there to refine) closes a pinned roster.
+    if (event.type === 'pointerdown' && pin.value && !onBar) closePin();
     if (event.type === 'pointerdown' && onBar) scrubbing = true;
     if (!scrubbing && !slider.hasAttribute('data-dragging') && !onBar) return hideScrub();
 
@@ -582,7 +593,7 @@ function updateScrub(event: PointerEvent): void {
     }
     const roster =
         held && mergedControls.value.scrubRoster
-            ? buildRoster(instance, time, event.clientX - frame.left, frame.width, duration, rosterStep(duration))
+            ? buildRoster(instance, time, event.clientX - frame.left, frame.width, duration, rosterStep(duration), frame.bottom - restBarBottom)
             : null;
     scrub.value = {
         // A lookup that lands in a gap in the cues keeps the frame already on show: a preview that blanks
@@ -597,7 +608,9 @@ function updateScrub(event: PointerEvent): void {
             tiles: roster.tiles,
             markerX: roster.markerX,
             tileWidth: roster.tileWidth,
-            bottom: frame.bottom - restBarBottom,
+            bottom: 0,
+            height: roster.height,
+            gap: frame.bottom - restBarBottom,
             labelBottom:
                 frame.bottom -
                 (restBarTop - (rosterHeight.value - TRACK_INSET_PX * controlsScale(slider))) +
@@ -660,16 +673,20 @@ function buildRoster(
     pointerX: number,
     width: number,
     duration: number,
-    step: number
+    step: number,
+    gap: number
 ): {
     tiles: { key: string; left: number; cue: ThumbnailSpriteCue | null }[];
     markerX: number;
     tileWidth: number;
+    height: number;
     step: number;
 } | null {
     const sample = instance.thumbnailAt(0);
     if (!sample || !sample.w || !sample.h) return null;
-    const tileWidth = Math.max(24, Math.round((rosterHeight.value * sample.w) / sample.h));
+    // The roster rises from the bottom edge over the controls, and its frames fill all of that.
+    const height = rosterHeight.value + gap;
+    const tileWidth = Math.max(24, Math.round((height * sample.w) / sample.h));
     const markerX = Math.min(width, Math.max(0, pointerX));
     const tiles = rosterTiles(time, markerX, width, tileWidth, step, duration).map((tile) => ({
         // A different step makes the same index a different slot, so the step is part of the identity.
@@ -677,7 +694,7 @@ function buildRoster(
         left: tile.left,
         cue: instance.thumbnailAt(tile.time),
     }));
-    return { tiles, markerX, tileWidth, step };
+    return { tiles, markerX, tileWidth, height, step };
 }
 
 
@@ -687,9 +704,9 @@ function buildRoster(
  * A roster left open after the press ends. It is centred on the playhead and follows playback, and it can
  * itself be dragged, the slow and precise way through the video (the timeline is the fast one): the strip moves with the finger,
  * the picture shows the frame it is passing, and the video goes there when the finger comes up. A tap on a
- * frame goes to that frame. It stays until closed — the button on it, a new source, or a change of layout.
+ * frame goes to that frame. It stays until closed — a press outside it, a new source, or a change of layout.
  */
-const pin = shallowRef<{ bottom: number; labelBottom: number } | null>(null);
+const pin = shallowRef<{ bottom: number; labelBottom: number; gap: number } | null>(null);
 
 interface PinDrag {
     startX: number;
@@ -750,7 +767,7 @@ const pinnedView = computed(() => {
     const drag = pinDrag.value;
     const time = drag?.time ?? pinAnchor.value ?? pinNow.value;
     const step = rosterFineStep(duration);
-    const built = buildRoster(instance, time, width / 2, width, duration, step);
+    const built = buildRoster(instance, time, width / 2, width, duration, step, placed.gap);
     if (!built) return null;
     return {
         ...built,
@@ -942,12 +959,10 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
                     <ScrubRoster
                         :tiles="pinnedView.tiles"
                         :tile-width="pinnedView.tileWidth"
-                        :height="rosterHeight"
+                        :height="pinnedView.height"
                         :marker-x="pinnedView.markerX"
                         :bottom="pinnedView.bottom"
                         interactive
-                        :close-label="msg.closeRoster"
-                        @close="closePin"
                         @pointerdown.stop="onPinDown"
                         @pointermove.stop="onPinMove"
                         @pointerup.stop="onPinUp"
@@ -965,7 +980,7 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
                     <ScrubRoster
                         :tiles="scrub.roster.tiles"
                         :tile-width="scrub.roster.tileWidth"
-                        :height="rosterHeight"
+                        :height="scrub.roster.height"
                         :marker-x="scrub.roster.markerX"
                         :bottom="scrub.roster.bottom"
                     />
