@@ -74,6 +74,23 @@ struct BridgeTypesTests {
         #expect(bare.nowPlaying?.fallbackArtworkUrl == nil)
     }
 
+    @Test("the scrub frames' VTT address decodes, and is absent when none is sent")
+    func thumbnailsDecode() throws {
+        var args = load(maxReloadAttempts: .number(3))
+        guard case .load(let without) = try BridgeCall.decode("load", args) else {
+            Issue.record("not a load")
+            return
+        }
+        #expect(without.thumbnailsUrl == nil)
+
+        args["thumbnailsUrl"] = .string("https://cdn.example.com/m/thumbnails/thumbnails.vtt")
+        guard case .load(let with) = try BridgeCall.decode("load", args) else {
+            Issue.record("not a load")
+            return
+        }
+        #expect(with.thumbnailsUrl == "https://cdn.example.com/m/thumbnails/thumbnails.vtt")
+    }
+
     @Test("counts that fit decode as they are")
     func countsDecode() throws {
         guard case .load(let args) = try BridgeCall.decode("load", load(maxReloadAttempts: .number(3))) else {

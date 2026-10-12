@@ -21,6 +21,8 @@ public struct FullscreenCommands {
     public var playbackWanted: () -> Bool
     /// The skip intervals.
     public var skin: SkinOptions
+    /// The frames shown under a held timeline; nil for none.
+    public var thumbnails: Thumbnails?
 
     public init(
         play: @escaping () -> Void,
@@ -31,7 +33,8 @@ public struct FullscreenCommands {
         setAudioTrack: @escaping (String) -> Void,
         audioTracks: @escaping () -> (tracks: [AudioTrack], activeId: String?),
         playbackWanted: @escaping () -> Bool,
-        skin: SkinOptions
+        skin: SkinOptions,
+        thumbnails: Thumbnails? = nil
     ) {
         self.play = play
         self.pause = pause
@@ -42,6 +45,7 @@ public struct FullscreenCommands {
         self.audioTracks = audioTracks
         self.playbackWanted = playbackWanted
         self.skin = skin
+        self.thumbnails = thumbnails
     }
 }
 

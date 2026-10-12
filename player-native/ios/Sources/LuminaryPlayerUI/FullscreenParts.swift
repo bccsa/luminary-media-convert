@@ -195,4 +195,103 @@ final class FullscreenMenu: UIView {
         UIColor(red: CGFloat(hex >> 16 & 0xFF) / 255, green: CGFloat(hex >> 8 & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
     }
 }
+
+/// The frames under a held timeline: a strip that slides past a marker kept under the finger, with
+/// those further from it falling away into the dark, so it reads as a lens on the playhead. Drawn
+/// from ``Thumbnails``' sheets; a frame whose sheet has not arrived is left dark. The same strip as
+/// Android's `RosterView`.
+final class RosterView: UIView {
+    private var frames: Thumbnails?
+    private var time: Double = 0
+    private var markerX: CGFloat = 0
+    private var duration: Double = 0
+    /// Decoded sheets, by address; the data itself lives in ``Thumbnails``' own cache.
+    private var decoded: [String: CGImage] = [:]
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = UIColor(red: 11 / 255, green: 11 / 255, blue: 13 / 255, alpha: 1)
+        isOpaque = true
+        isUserInteractionEnabled = false
+        clipsToBounds = true
+        contentMode = .redraw
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    func configure(_ frames: Thumbnails?) {
+        self.frames = frames
+        decoded.removeAll()
+    }
+
+    func show(time: Double, markerX: CGFloat, duration: Double) {
+        self.time = time
+        self.markerX = markerX
+        self.duration = duration
+        setNeedsDisplay()
+    }
+
+    private func image(for cue: ThumbnailCue, in frames: Thumbnails) -> CGImage? {
+        if let image = decoded[cue.url] { return image }
+        guard let data = frames.sheet(for: cue), let image = UIImage(data: data)?.cgImage else { return nil }
+        if decoded.count > 8 { decoded.removeAll() }
+        decoded[cue.url] = image
+        return image
+    }
+
+    override func draw(_ rect: CGRect) {
+        guard let frames, let context = UIGraphicsGetCurrentContext(), let sample = frames.sample() else { return }
+        let w = bounds.width
+        let h = bounds.height
+        let tileWidth = max(24, h * CGFloat(sample.w) / CGFloat(max(sample.h, 1)))
+        let step = Roster.step(duration: duration)
+        for tile in Roster.tiles(
+            time: time, markerX: Double(markerX), width: Double(w), tileWidth: Double(tileWidth), step: step, duration: duration
+        ) {
+            let dst = CGRect(x: CGFloat(tile.left), y: 0, width: tileWidth, height: h)
+            UIColor(red: 21 / 255, green: 21 / 255, blue: 24 / 255, alpha: 1).setFill()
+            context.fill(dst)
+            if let cue = frames.cue(at: tile.time), let sheet = image(for: cue, in: frames),
+               let crop = sheet.cropping(to: CGRect(x: cue.x, y: cue.y, width: max(cue.w, 1), height: max(cue.h, 1))) {
+                UIImage(cgImage: crop).draw(in: dst)
+            }
+            // A frame apart from its neighbour, without a gutter.
+            UIColor(white: 0, alpha: 0.55).setFill()
+            context.fill(CGRect(x: dst.maxX - 1, y: 0, width: 1, height: h))
+        }
+        // The frames nearest the marker are the ones that matter: the rest fall away.
+        func at(_ x: CGFloat) -> CGFloat { min(max(x / w, 0), 1) }
+        var stops: [CGFloat] = [0, at(markerX - 0.22 * w), at(markerX - 0.08 * w), at(markerX + 0.08 * w), at(markerX + 0.22 * w), 1]
+        for i in 1..<stops.count { stops[i] = max(stops[i], stops[i - 1]) }
+        let edge = UIColor(red: 8 / 255, green: 10 / 255, blue: 10 / 255, alpha: 0.78).cgColor
+        let mid = UIColor(red: 8 / 255, green: 10 / 255, blue: 10 / 255, alpha: 0.35).cgColor
+        let clear = UIColor(red: 8 / 255, green: 10 / 255, blue: 10 / 255, alpha: 0).cgColor
+        if let shade = CGGradient(
+            colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: [edge, mid, clear, clear, mid, edge] as CFArray, locations: stops
+        ) {
+            context.drawLinearGradient(shade, start: .zero, end: CGPoint(x: w, y: 0), options: [])
+        }
+        if let vertical = CGGradient(
+            colorsSpace: CGColorSpaceCreateDeviceRGB(),
+            colors: [UIColor(white: 0, alpha: 0.28).cgColor, UIColor(white: 0, alpha: 0).cgColor,
+                     UIColor(white: 0, alpha: 0).cgColor, UIColor(white: 0, alpha: 0.4).cgColor] as CFArray,
+            locations: [0, 0.35, 0.7, 1]
+        ) {
+            context.drawLinearGradient(vertical, start: .zero, end: CGPoint(x: 0, y: h), options: [])
+        }
+        // A hairline of light where the timeline rests on the strip.
+        UIColor(white: 1, alpha: 0.14).setFill()
+        context.fill(CGRect(x: 0, y: h - 1, width: w, height: 1))
+        // The marker: a rounded white bar with an outline and a glow.
+        let bar: CGFloat = 3
+        context.setFillColor(UIColor(white: 0, alpha: 0.4).cgColor)
+        context.addPath(CGPath(roundedRect: CGRect(x: markerX - bar / 2 - 1, y: 0, width: bar + 2, height: h), cornerWidth: bar, cornerHeight: bar, transform: nil))
+        context.fillPath()
+        context.setShadow(offset: .zero, blur: 14, color: UIColor(white: 1, alpha: 0.55).cgColor)
+        context.setFillColor(UIColor.white.cgColor)
+        context.addPath(CGPath(roundedRect: CGRect(x: markerX - bar / 2, y: 0, width: bar, height: h), cornerWidth: bar / 2, cornerHeight: bar / 2, transform: nil))
+        context.fillPath()
+    }
+}
 #endif
