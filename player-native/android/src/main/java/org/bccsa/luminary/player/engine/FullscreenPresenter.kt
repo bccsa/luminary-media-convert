@@ -1,7 +1,14 @@
 package org.bccsa.luminary.player.engine
 
 import android.app.Activity
+import android.app.PendingIntent
 import android.app.PictureInPictureParams
+import android.app.RemoteAction
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.graphics.drawable.Icon
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.content.pm.PackageManager
@@ -9,6 +16,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Rational
+import androidx.core.content.ContextCompat
 import androidx.core.util.Consumer
 import androidx.core.app.OnPictureInPictureModeChangedProvider
 import androidx.core.app.PictureInPictureModeChangedInfo
@@ -26,6 +34,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.common.util.Util
 import androidx.media3.ui.PlayerView
 
 /**
@@ -53,16 +62,69 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
     /** Turning back to portrait, then handing the orientation back to what it was. */
     private var restoring: Runnable? = null
 
+    private var texts = FullscreenTexts()
+    private var pipReceiver: BroadcastReceiver? = null
+    private val pipPlayerListener = object : Player.Listener {
+        override fun onIsPlayingChanged(isPlaying: Boolean) = refreshPipActions()
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) = refreshPipActions()
+    }
+
     /** The system's word on the picture's small window; the activity is the one that is in it. */
     private val pipListener = Consumer<PictureInPictureModeChangedInfo> { info ->
         val controls = controls ?: return@Consumer
         stopWatching()
         if (info.isInPictureInPictureMode) {
+            watchPipPlayback()
             controls.setPictureInPicture(true)
             onPresentation?.invoke("pip")
             return@Consumer
         }
+        unwatchPipPlayback()
         decideAfterSmallWindow(controls)
+    }
+
+    /**
+     * The small window offers one control of the app's own, play / pause. Without it the system
+     * crowds in the media session's previous / next as well, which do not fit a window this small.
+     */
+    private fun pipActions(activity: Activity): List<RemoteAction> {
+        val player = player ?: return emptyList()
+        val showPlay = Util.shouldShowPlayButton(player)
+        val label = if (showPlay) texts.play else texts.pause
+        val icon = Icon.createWithResource(activity, if (showPlay) android.R.drawable.ic_media_play else android.R.drawable.ic_media_pause)
+        val intent = PendingIntent.getBroadcast(
+            activity, 0, Intent(PIP_TOGGLE).setPackage(activity.packageName),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        return listOf(RemoteAction(icon, label, label, intent))
+    }
+
+    private fun refreshPipActions() {
+        val activity = host ?: return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || !activity.isInPictureInPictureMode) return
+        runCatching { activity.setPictureInPictureParams(PictureInPictureParams.Builder().setActions(pipActions(activity)).build()) }
+    }
+
+    private fun watchPipPlayback() {
+        val activity = host ?: return
+        player?.addListener(pipPlayerListener)
+        if (pipReceiver == null) {
+            val receiver = object : BroadcastReceiver() {
+                override fun onReceive(context: Context?, intent: Intent?) {
+                    val player = player ?: return
+                    if (Util.shouldShowPlayButton(player)) Util.handlePlayButtonAction(player) else Util.handlePauseButtonAction(player)
+                }
+            }
+            ContextCompat.registerReceiver(activity, receiver, IntentFilter(PIP_TOGGLE), ContextCompat.RECEIVER_NOT_EXPORTED)
+            pipReceiver = receiver
+        }
+        refreshPipActions()
+    }
+
+    private fun unwatchPipPlayback() {
+        player?.removeListener(pipPlayerListener)
+        pipReceiver?.let { runCatching { host?.unregisterReceiver(it) } }
+        pipReceiver = null
     }
 
     private var watching: LifecycleEventObserver? = null
@@ -171,6 +233,7 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         }
         this.onLeave = onLeave
         this.onPresentation = onPresentation
+        this.texts = texts
         this.player = player
         (activity as? OnPictureInPictureModeChangedProvider)?.addOnPictureInPictureModeChangedListener(pipListener)
         this.view = view
@@ -197,7 +260,7 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         // The system refuses what is wider than 2.39:1 or taller than 1:2.39.
         val clamped = if (ratio.toFloat() > MAX_RATIO) Rational(239, 100) else if (ratio.toFloat() < 1 / MAX_RATIO) Rational(100, 239) else ratio
         return try {
-            activity.enterPictureInPictureMode(PictureInPictureParams.Builder().setAspectRatio(clamped).build())
+            activity.enterPictureInPictureMode(PictureInPictureParams.Builder().setAspectRatio(clamped).setActions(pipActions(activity)).build())
         } catch (refused: IllegalStateException) {
             false
         } catch (refused: IllegalArgumentException) {
@@ -210,6 +273,7 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         val view = view ?: return false
         val activity = host
         stopWatching()
+        unwatchPipPlayback()
         (activity as? OnPictureInPictureModeChangedProvider)?.removeOnPictureInPictureModeChangedListener(pipListener)
         // Taking the view down while it is in the small window ends it.
         backCallback?.remove()
@@ -260,6 +324,7 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
 
     companion object {
         private const val PIP_SETTLE_MS = 1500L
+        private const val PIP_TOGGLE = "org.bccsa.luminary.player.PIP_TOGGLE"
         private const val MAX_RATIO = 2.39f
         private const val ORIENTATION_SETTLE_MS = 600L
 
