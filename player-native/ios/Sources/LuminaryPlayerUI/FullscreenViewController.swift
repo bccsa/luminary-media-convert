@@ -33,10 +33,10 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     private let visibility: FullscreenControlsVisibility
 
     private let controls = UIView()
-    private let playPause = GlyphButton(size: Skin.play, iconSize: Skin.playIcon)
+    private let playPause = GlyphButton(size: Skin.play, iconSize: Skin.playIcon, circle: true)
     private let spinner = SpinnerView()
-    private let skipBack = GlyphButton(size: Skin.skip, iconSize: Skin.skipIcon)
-    private let skipForward = GlyphButton(size: Skin.skip, iconSize: Skin.skipIcon)
+    private let skipBack = GlyphButton(size: Skin.skip, iconSize: Skin.skipIcon, circle: true)
+    private let skipForward = GlyphButton(size: Skin.skip, iconSize: Skin.skipIcon, circle: true)
     private let audioButton = GlyphButton(size: Skin.control, iconSize: Skin.icon)
     private let pipButton = GlyphButton(size: Skin.control, iconSize: Skin.icon)
     private let subtitlesButton = GlyphButton(size: Skin.control, iconSize: Skin.icon)
@@ -193,14 +193,15 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         roster.onTap = { [weak self] x in self?.pinTapped(x) }
         roster.onClose = { [weak self] in self?.closePin() }
 
-        exitButton.glyph = VideoJsIcons.fullscreenExit
+        exitButton.layers = V10Icons.fullscreenExit
         exitButton.accessibilityLabel = texts.exitFullscreen
-        pipButton.glyph = VideoJsIcons.pictureInPictureEnter
+        pipButton.layers = V10Icons.pip
         pipButton.accessibilityLabel = texts.pictureInPicture
-        audioButton.glyph = VideoJsIcons.audio
+        audioButton.layers = V10Icons.speech
         audioButton.accessibilityLabel = texts.audioMenu
-        subtitlesButton.glyph = VideoJsIcons.subtitles
+        subtitlesButton.layers = V10Icons.captions
         subtitlesButton.accessibilityLabel = texts.subtitlesMenu
+        rateButton.layers = V10Icons.speed
         rateButton.accessibilityLabel = texts.playbackRate
         rateButton.accessibilityValue = rateLabel(rate)
         spinner.accessibilityLabel = texts.loading
@@ -372,24 +373,23 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
             || $0.showsSubtitlesMenu != layout.showsSubtitlesMenu || $0.showsRate != layout.showsRate } ?? true
         self.layout = layout
 
-        playPause.glyph = layout.showsPause ? VideoJsIcons.pause : VideoJsIcons.play
+        playPause.layers = layout.showsPause ? V10Icons.pause : V10Icons.play
         playPause.accessibilityLabel = layout.showsPause ? texts.pause : texts.play
         playPause.isHidden = layout.showsSpinner
         spinner.isHidden = !layout.showsSpinner
         skipBack.isHidden = layout.skipBack == nil
-        skipBack.glyph = layout.skipBack.map(Self.replayGlyph)
+        skipBack.skip = layout.skipBack.map { ($0, false) }
         skipBack.accessibilityLabel = layout.skipBack.map(texts.skipBack)
         skipForward.isHidden = layout.skipForward == nil
-        skipForward.glyph = layout.skipForward.map(Self.forwardGlyph)
+        skipForward.skip = layout.skipForward.map { ($0, true) }
         skipForward.accessibilityLabel = layout.skipForward.map(texts.skipForward)
         audioButton.isHidden = !layout.showsAudioMenu
         subtitlesButton.isHidden = !layout.showsSubtitlesMenu
         pipButton.isHidden = !pictureInPictureAvailable
         airPlayButton.isHidden = !routeDetector.multipleRoutesDetected && !player.isExternalPlaybackActive
         rateButton.isHidden = !layout.showsRate
-        rateButton.text = rateLabel(next.rate)
         rateButton.accessibilityValue = rateLabel(next.rate)
-        muteButton.glyph = next.muted ? VideoJsIcons.volumeMute : VideoJsIcons.volumeHigh
+        muteButton.layers = next.muted ? V10Icons.volumeOff : V10Icons.volumeHigh
         muteButton.accessibilityLabel = next.muted ? texts.unmute : texts.mute
 
         progress.isHidden = !layout.showsProgress
@@ -414,14 +414,6 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         guard let ranges = item?.loadedTimeRanges.map(\.timeRangeValue) else { return 0 }
         let containing = ranges.first { $0.start.seconds <= position + 0.5 && position <= $0.end.seconds + 0.5 }
         return containing?.end.seconds ?? 0
-    }
-
-    private static func replayGlyph(_ seconds: Int) -> VideoJsGlyph {
-        seconds == 5 ? VideoJsIcons.replay5 : seconds == 30 ? VideoJsIcons.replay30 : VideoJsIcons.replay10
-    }
-
-    private static func forwardGlyph(_ seconds: Int) -> VideoJsGlyph {
-        seconds == 5 ? VideoJsIcons.forward5 : seconds == 30 ? VideoJsIcons.forward30 : VideoJsIcons.forward10
     }
 
     // MARK: Actions

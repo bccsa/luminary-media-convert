@@ -10,7 +10,7 @@ enum Skin {
     /// The top row's buttons and the corner buttons.
     static let control: CGFloat = 44
     /// video.js draws an icon at 1.8 em: 0.875 rem → 25 pt.
-    static let icon: CGFloat = 25
+    static let icon: CGFloat = 22
     /// The Video.js 10 centre cluster: play 80, the skips 56 round, 32 between the parts, on one line.
     static let play: CGFloat = 80
     static let playIcon: CGFloat = 38
@@ -92,23 +92,34 @@ final class FadeView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 }
 
-/// A control drawn with a video.js glyph, or with text (the speed's `1x`).
+/// A control drawn with a Video.js 10 icon: its path layers on an 18-unit grid, or the skip glyph
+/// (an arc, an arrowhead and the seconds), in a round dark button when `circle`. Pressing shrinks it a
+/// touch, as the web's does.
 final class GlyphButton: UIControl {
-    private let shape = CAShapeLayer()
-    private let label = UILabel()
+    private let backing = CAShapeLayer()
+    private let icon = CALayer()
+    private let seconds = UILabel()
     private let iconSize: CGFloat
 
-    init(size: CGFloat, iconSize: CGFloat) {
+    init(size: CGFloat, iconSize: CGFloat, circle: Bool = false) {
         self.iconSize = iconSize
         super.init(frame: CGRect(x: 0, y: 0, width: size, height: size))
-        shape.fillColor = UIColor.white.cgColor
-        shape.fillRule = .evenOdd
-        layer.addSublayer(shape)
-        label.textColor = .white
-        label.font = Skin.rateText
-        label.textAlignment = .center
-        label.isHidden = true
-        addSubview(label)
+        if circle {
+            backing.fillColor = UIColor(red: 24 / 255, green: 24 / 255, blue: 27 / 255, alpha: 0.58).cgColor
+            backing.strokeColor = UIColor(white: 1, alpha: 0.18).cgColor
+            backing.lineWidth = 1
+            layer.addSublayer(backing)
+        }
+        // Legible over any picture, as the skin's drop shadow makes it.
+        icon.shadowColor = UIColor.black.cgColor
+        icon.shadowOpacity = 0.6
+        icon.shadowRadius = iconSize * 0.05
+        icon.shadowOffset = CGSize(width: 0, height: iconSize * 0.04)
+        layer.addSublayer(icon)
+        seconds.textColor = .white
+        seconds.textAlignment = .center
+        seconds.isHidden = true
+        addSubview(seconds)
         isAccessibilityElement = true
         accessibilityTraits = .button
     }
@@ -116,34 +127,80 @@ final class GlyphButton: UIControl {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
-    var glyph: VideoJsGlyph? {
+    /// A Video.js 10 icon, on its 18-unit grid.
+    var layers: [V10Icons.Layer]? {
         didSet {
-            shape.path = glyph?.cgPath(size: iconSize)
-            label.isHidden = true
-            setNeedsLayout()
+            skip = nil
+            rebuild()
         }
     }
 
-    var text: String? {
+    /// The skip glyph, on a 24-unit grid: `skipIcon` in `controlsHtml.ts`.
+    var skip: (seconds: Int, forward: Bool)? {
         didSet {
-            label.text = text
-            label.isHidden = text == nil
-            shape.path = nil
+            if skip != nil { layers = nil }
+            rebuild()
         }
     }
+
+    private func rebuild() {
+        icon.sublayers?.forEach { $0.removeFromSuperlayer() }
+        seconds.isHidden = true
+        if let layers {
+            let unit = iconSize / CGFloat(V10Icons.grid)
+            for item in layers {
+                icon.addSublayer(shape(item.path, unit: unit, alpha: item.alpha, stroke: item.strokeWidth))
+            }
+        } else if let skip {
+            let unit = iconSize / 24
+            let arc = skip.forward ? "M20.5 12a8.5 8.5 0 1 1-2.9-6.4" : "M3.5 12a8.5 8.5 0 1 0 2.9-6.4"
+            let head = skip.forward ? "M20.8 4.2v4.4h-4.4" : "M3.2 4.2v4.4h4.4"
+            icon.addSublayer(shape(arc, unit: unit, alpha: 1, stroke: 1.8))
+            icon.addSublayer(shape(head, unit: unit, alpha: 1, stroke: 1.8))
+            seconds.text = "\(skip.seconds)"
+            seconds.font = .systemFont(ofSize: (skip.seconds >= 100 ? 6 : 7.5) * unit, weight: .bold)
+            seconds.isHidden = false
+        }
+        setNeedsLayout()
+    }
+
+    private func shape(_ data: String, unit: CGFloat, alpha: Double, stroke: Double) -> CAShapeLayer {
+        let layer = CAShapeLayer()
+        var transform = CGAffineTransform(scaleX: unit, y: unit)
+        layer.path = svgPath(data).copy(using: &transform)
+        if stroke > 0 {
+            layer.fillColor = nil
+            layer.strokeColor = UIColor(white: 1, alpha: alpha).cgColor
+            layer.lineWidth = stroke * unit
+            layer.lineCap = .round
+            layer.lineJoin = .round
+        } else {
+            layer.fillColor = UIColor(white: 1, alpha: alpha).cgColor
+        }
+        return layer
+    }
+
+    var text: String?
 
     override var intrinsicContentSize: CGSize { bounds.size }
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        shape.frame = CGRect(
+        icon.frame = CGRect(
             x: (bounds.width - iconSize) / 2, y: (bounds.height - iconSize) / 2, width: iconSize, height: iconSize
         )
-        label.frame = bounds
+        let side = min(bounds.width, bounds.height) - 2
+        backing.path = CGPath(ellipseIn: CGRect(x: (bounds.width - side) / 2, y: (bounds.height - side) / 2, width: side, height: side), transform: nil)
+        // The seconds sit a little below the middle of the arc, where the skip glyph keeps them.
+        let unit = iconSize / 24
+        seconds.sizeToFit()
+        seconds.center = CGPoint(x: bounds.midX, y: icon.frame.minY + 12.6 * unit)
     }
 
     override var isHighlighted: Bool {
-        didSet { alpha = isHighlighted ? 0.6 : 1 }
+        didSet {
+            UIView.animate(withDuration: 0.12) { self.transform = self.isHighlighted ? CGAffineTransform(scaleX: 0.94, y: 0.94) : .identity }
+        }
     }
 }
 
