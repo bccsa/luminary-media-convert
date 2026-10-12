@@ -101,6 +101,13 @@ public final class EventSink {
         send("airplaychange", ["available": .bool(available), "active": .bool(active)])
     }
 
+    /// The current state again, whether or not it changed: for a page that has just loaded and was not
+    /// there when it last did. Changes only would leave it at "no device" until a device came or went.
+    public func airPlayResend(available: Bool, active: Bool) {
+        airPlay = (available, active)
+        send("airplaychange", ["available": .bool(available), "active": .bool(active)])
+    }
+
     /// Only on a change, whoever made it: a `setRate`, or the viewer in native UI.
     public func rateChanged(_ rate: Double) {
         if rate == self.rate { return }

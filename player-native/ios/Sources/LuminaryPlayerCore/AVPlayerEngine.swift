@@ -241,6 +241,8 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         ladder?.noteSourceLoaded()
         attach(startAt: startPosition)
         if resume { play() }
+        // A page that loads a source is told where AirPlay stands now, not only when it next changes.
+        reportAirPlay(resend: true)
     }
 
     /// The same item again, built from scratch: position is restored here, the rate stays on the
@@ -395,12 +397,15 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         _ = inline?.showRoutePicker()
     }
 
-    private func reportAirPlay() {
+    private func reportAirPlay(resend: Bool = false) {
         #if os(iOS)
-        events?.airPlayChanged(
-            available: routeDetector?.multipleRoutesDetected ?? false,
-            active: player.isExternalPlaybackActive
-        )
+        let available = routeDetector?.multipleRoutesDetected ?? false
+        let active = player.isExternalPlaybackActive
+        if resend {
+            events?.airPlayResend(available: available, active: active)
+        } else {
+            events?.airPlayChanged(available: available, active: active)
+        }
         #endif
     }
 
