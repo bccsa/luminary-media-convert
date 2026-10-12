@@ -65,6 +65,15 @@ export function formatClock(seconds: number, withHours: boolean): string {
     return withHours ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${Math.floor(total / 60)}:${ss}`;
 }
 
+/**
+ * Seconds each frame stands for in the pinned roster, which is the slow, precise way through the video:
+ * a quarter of the step the timeline's roster uses (the fast way), never finer than a sprite can resolve.
+ * Constant while it is dragged, so the strip moves under the finger without ever rescaling.
+ */
+export function rosterFineStep(duration: number): number {
+    return Math.max(0.5, rosterStep(duration) / 4);
+}
+
 /** One frame of the roster: where its left edge sits, and the time it shows. */
 export interface RosterTile {
     /** The slot's index in time, so a tile keeps its identity as the roster slides under the pointer. */

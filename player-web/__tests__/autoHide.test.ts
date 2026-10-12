@@ -31,6 +31,18 @@ afterEach(() => vi.useRealTimers());
 const move = () => target.dispatchEvent(new Event('pointermove'));
 
 describe('installAutoHide', () => {
+    it('keeps the controls up for as long as the host holds them', () => {
+        const { store, calls } = fakeStore();
+        let held = true;
+        installAutoHide(target, () => store, AUTO_HIDE_MS, () => held);
+        move();
+        vi.advanceTimersByTime(AUTO_HIDE_MS * 3);
+        expect(calls).not.toContain('toggle(false)');
+        held = false;
+        vi.advanceTimersByTime(AUTO_HIDE_MS);
+        expect(calls).toContain('toggle(false)');
+    });
+
     it('waits three seconds, not v10\'s two', () => {
         expect(AUTO_HIDE_MS).toBe(3000);
         const { store, calls } = fakeStore();

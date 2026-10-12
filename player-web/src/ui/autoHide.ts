@@ -23,18 +23,24 @@ const ACTIVITY = ['pointermove', 'pointerdown', 'pointerup'] as const;
 /**
  * Starts hiding the controls 3 s after the last pointer activity on `target`. Returns the uninstall
  * function; it clears the pending timer and gives the lock back, because a timer firing after the
- * player is gone calls an action on a dead store.
+ * player is gone calls an action on a dead store. While `shouldHold()` is true the controls stay up.
  */
 export function installAutoHide(
     target: HTMLElement,
     getStore: () => ControlsStore | undefined,
-    delayMs = AUTO_HIDE_MS
+    delayMs = AUTO_HIDE_MS,
+    shouldHold: () => boolean = () => false
 ): () => void {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let release: (() => void) | undefined;
 
     const hide = (): void => {
         timer = undefined;
+        // Something on the picture is being read (the pinned roster): the controls wait for it.
+        if (shouldHold()) {
+            timer = setTimeout(hide, delayMs);
+            return;
+        }
         const store = getStore();
         release?.();
         release = undefined;

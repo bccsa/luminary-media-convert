@@ -44,6 +44,7 @@ FIRST_CHUNK_SECONDS = 20
 LADDER = [(720, 1500), (360, 600), (240, 250)]  # height, kbps
 ANGLES = [("Wide", ""), ("Mirror", "hflip,")]
 AUDIO_KBPS = 128
+THUMB_SECONDS, THUMB_W, THUMB_H, THUMB_COLUMNS, THUMB_ROWS = 2, 160, 90, 10, 6
 LANGUAGES = {
     "eng": ("en", "English"), "spa": ("es", "Español"), "fra": ("fr", "Français"),
     "deu": ("de", "Deutsch"), "por": ("pt", "Português"), "afr": ("af", "Afrikaans"),
@@ -151,6 +152,57 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         pass
 
 
+def vtt_time(seconds):
+    return f"{int(seconds // 3600):02d}:{int(seconds % 3600 // 60):02d}:{seconds % 60:06.3f}"
+
+
+def write_lmcenc(path, text):
+    """An encrypted session's .vtt: LMCENC01 + a fresh IV + AES-128-CBC of the text."""
+    iv = os.urandom(16)
+    body = subprocess.run(["openssl", "enc", "-aes-128-cbc", "-K", KEY_HEX, "-iv", iv.hex()],
+                          input=text.encode(), capture_output=True, check=True).stdout
+    with open(path, "wb") as f:
+        f.write(b"LMCENC01" + iv + body)
+
+
+def write_sidecars(source, duration):
+    """thumbnails/, chapters/ and subtitles/ beside the master, as the encoder lays them out."""
+    # Scrub frames: one 160x90 frame every THUMB_SECONDS, tiled into sprite sheets.
+    thumbs = os.path.join(OUT, "thumbnails")
+    os.makedirs(thumbs)
+    frames = math.ceil(duration / THUMB_SECONDS)
+    per_sheet = THUMB_COLUMNS * THUMB_ROWS
+    cues = ["WEBVTT", ""]
+    for sheet in range(math.ceil(frames / per_sheet)):
+        start = sheet * per_sheet * THUMB_SECONDS
+        run("ffmpeg", "-v", "error", "-y", "-ss", str(start), "-i", source, "-an", "-frames:v", "1",
+            "-vf", f"fps=1/{THUMB_SECONDS},scale={THUMB_W}:{THUMB_H},tile={THUMB_COLUMNS}x{THUMB_ROWS}",
+            "-q:v", "5", os.path.join(thumbs, f"sprite_{sheet}.jpg"))
+        for i in range(min(per_sheet, frames - sheet * per_sheet)):
+            t = start + i * THUMB_SECONDS
+            col, row = i % THUMB_COLUMNS, i // THUMB_COLUMNS
+            cues += [f"{vtt_time(t)} --> {vtt_time(min(t + THUMB_SECONDS, duration))}",
+                     f"sprite_{sheet}.jpg#xywh={col * THUMB_W},{row * THUMB_H},{THUMB_W},{THUMB_H}", ""]
+    write_lmcenc(os.path.join(thumbs, "thumbnails.vtt"), "\n".join(cues))
+
+    # Chapters and subtitles in two languages: enough to exercise switching.
+    titles = {"en": ["Opening", "Setup", "Middle", "Turn", "Finale"],
+              "es": ["Apertura", "Preparación", "Desarrollo", "Giro", "Final"]}
+    lines = {"en": "Subtitle line", "es": "Línea de subtítulo"}
+    for sub in ("chapters", "subtitles"):
+        os.makedirs(os.path.join(OUT, sub))
+    for lang, names in titles.items():
+        step = duration / len(names)
+        chapters = ["WEBVTT", ""]
+        for i, name in enumerate(names):
+            chapters += [f"{vtt_time(i * step)} --> {vtt_time((i + 1) * step)}", name, ""]
+        write_lmcenc(os.path.join(OUT, "chapters", f"{lang}.vtt"), "\n".join(chapters))
+        subs = ["WEBVTT", ""]
+        for i in range(int(duration // 4)):
+            subs += [f"{vtt_time(i * 4)} --> {vtt_time(i * 4 + 3)}", f"{lines[lang]} {i + 1} ({vtt_time(i * 4)})", ""]
+        write_lmcenc(os.path.join(OUT, "subtitles", f"{lang}.vtt"), "\n".join(subs))
+
+
 def main():
     source = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_SOURCE
     audio_tracks = [s for s in probe(source, "stream=index,codec_type:stream_tags=language")["streams"]
@@ -209,6 +261,8 @@ def main():
                      f'VIDEO="angle_{a}",AUDIO="aud"')
         lines.append(f"{name}/index.m3u8")
     open(os.path.join(OUT, "master.m3u8"), "w").write("\n".join(lines) + "\n")
+
+    write_sidecars(source, float(probe(source, "format=duration")["format"]["duration"]))
 
     size = sum(os.path.getsize(os.path.join(d, f)) for d, _, files in os.walk(OUT) for f in files)
     print(f"stream: {size / 1024 / 1024:.1f} MiB in {OUT}")

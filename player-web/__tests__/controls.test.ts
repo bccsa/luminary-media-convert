@@ -30,6 +30,13 @@ describe('mergeControls', () => {
         expect(mergeControls({ audioMenu: 1 as unknown as boolean }).audioMenu).toBe(true);
     });
 
+    it('offers the roster and the picture preview unless a host turns them off', () => {
+        expect(DEFAULT_CONTROLS.scrubRoster).toBe(true);
+        expect(DEFAULT_CONTROLS.scrubPicture).toBe(true);
+        expect(mergeControls({ scrubRoster: false }).scrubRoster).toBe(false);
+        expect(mergeControls({ scrubPicture: false }).scrubPicture).toBe(false);
+    });
+
     it('no longer offers an audio/video toggle: another experience owns it', () => {
         expect(DEFAULT_CONTROLS).not.toHaveProperty('audioVideoToggle');
         expect(mergeControls({ audioVideoToggle: false } as never)).not.toHaveProperty('audioVideoToggle');

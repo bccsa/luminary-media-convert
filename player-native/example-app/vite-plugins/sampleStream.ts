@@ -14,6 +14,8 @@ export function sampleStream(directory: string, mount = '/sample'): Plugin {
         '.mp4': 'video/mp4',
         '.m4s': 'video/iso.segment',
         '.ts': 'video/mp2t',
+        '.vtt': 'text/vtt',
+        '.jpg': 'image/jpeg',
     };
 
     return {

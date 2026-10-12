@@ -40,6 +40,7 @@ import {
     isOnBar,
     pointerRatio,
     previewTimes,
+    rosterFineStep,
     rosterStep,
     rosterTiles,
 } from '../ui/scrubPreview';
@@ -293,7 +294,7 @@ onMounted(() => {
     }
     document.addEventListener('fullscreenchange', onFullscreenChange);
     document.addEventListener('webkitfullscreenchange', onFullscreenChange);
-    if (containerEl.value) removeAutoHide = installAutoHide(containerEl.value, store);
+    if (containerEl.value) removeAutoHide = installAutoHide(containerEl.value, store, undefined, () => pin.value !== null);
     void loadSource(props.source);
 });
 
@@ -412,7 +413,7 @@ function onControlsClick(event: MouseEvent): void {
  */
 function onFrameDoubleClick(event: MouseEvent): void {
     const target = event.target instanceof Element ? event.target : null;
-    if (target?.closest('.lmpl-cluster, .lmpl-bottom, .media-popup')) return;
+    if (target?.closest('.lmpl-cluster, .lmpl-bottom, .media-popup, .lmpl-roster')) return;
     if (isFullscreen.value) exitFullscreen();
     else void enterFullscreen();
 }
@@ -464,13 +465,17 @@ const isAudioOnly = computed(
 interface ScrubState {
     cue: ThumbnailSpriteCue | null;
     label: string;
+    /** The time the pointer names, in seconds. */
+    time: number;
+    /** The press is held: the frame under it is where the video would jump to. */
+    held: boolean;
     /** Centre of the preview, in px from the container's left edge. */
     left: number;
     /** Gap, in px, between the container's bottom edge and the preview's. */
     bottom: number;
     /** While the press is held, the strip of frames around the playhead that replaces the single frame. */
     roster: {
-        tiles: { index: number; left: number; cue: ThumbnailSpriteCue | null }[];
+        tiles: { key: string; left: number; cue: ThumbnailSpriteCue | null }[];
         /** Where the marker sits, in px from the roster's left. */
         markerX: number;
         tileWidth: number;
@@ -510,7 +515,7 @@ const TRACK_INSET_PX = 12.5;
 const rosterHeight = computed(() => Math.round((scrubWidth.value * 9) / 16));
 
 /** Whether a roster is on show: the timeline has made way for it, so the layout follows this and not the pointer. */
-const rosterShown = computed(() => scrub.value?.roster != null);
+const rosterShown = computed(() => scrub.value?.roster != null || pin.value !== null);
 
 function hideScrub(): void {
     if (scrub.value) scrub.value = null;
@@ -524,8 +529,15 @@ function hideScrub(): void {
 let scrubbing = false;
 
 /** The press ended, or was taken from us: nothing is being scrubbed any more. */
-function endScrub(): void {
+function endScrub(event?: PointerEvent): void {
     scrubbing = false;
+    // A press that opened the roster leaves it open: the viewer lifted a finger to look, not to be done.
+    const roster = scrub.value?.roster;
+    if (roster && event?.type === 'pointerup') {
+        pin.value = { bottom: roster.bottom, labelBottom: roster.labelBottom };
+        pinAnchor.value = scrub.value?.time ?? null;
+        armAnchorTimeout();
+    }
     hideScrub();
 }
 
@@ -538,6 +550,8 @@ function endScrub(): void {
  * Offered only once there are frames to show: without them the timeline's own time readout stays.
  */
 function updateScrub(event: PointerEvent): void {
+    // The pinned roster is dragged by its own handlers; what happens on it is not a press on the timeline.
+    if (event.target instanceof Element && event.target.closest('.lmpl-roster')) return;
     const container = containerEl.value;
     const slider = container?.querySelector<HTMLElement>('.lmpl-time-slider');
     const media = mediaEl.value;
@@ -559,21 +573,30 @@ function updateScrub(event: PointerEvent): void {
 
     const frame = container.getBoundingClientRect();
     const held = scrubbing || slider.hasAttribute('data-dragging');
+    // With a roster pinned, hovering the bar has nothing to add: it is already showing the frames.
+    if (pin.value && !held) return hideScrub();
     // The timeline slides up out of the way while held, so its resting position is read only when it is at rest.
     if (!rosterShown.value) {
         restBarTop = bar.top;
         restBarBottom = bar.bottom;
     }
-    const roster = held ? buildRoster(instance, time, event.clientX - frame.left, frame.width, duration) : null;
+    const roster =
+        held && mergedControls.value.scrubRoster
+            ? buildRoster(instance, time, event.clientX - frame.left, frame.width, duration, rosterStep(duration))
+            : null;
     scrub.value = {
         // A lookup that lands in a gap in the cues keeps the frame already on show: a preview that blanks
         // for a moment between two frames reads as a fault, and a stale frame a hair away is not.
         cue: instance.thumbnailAt(lookup) ?? scrub.value?.cue ?? null,
         label: formatClock(time, duration >= 3600),
+        time,
+        held,
         left: clampPreviewCentre(event.clientX - frame.left, scrubWidth.value, SCRUB_EDGE_PX, frame.width - SCRUB_EDGE_PX),
         bottom: frame.bottom - bar.top + SCRUB_GAP_PX,
         roster: roster && {
-            ...roster,
+            tiles: roster.tiles,
+            markerX: roster.markerX,
+            tileWidth: roster.tileWidth,
             bottom: frame.bottom - restBarBottom,
             labelBottom:
                 frame.bottom -
@@ -582,6 +605,41 @@ function updateScrub(event: PointerEvent): void {
         },
     };
 }
+
+/**
+ * The scrubbed frame drawn over the whole picture. A crop of a sheet cannot be `cover`ed directly, so the
+ * element is the crop's own size and scaled up to the frame, as the hover thumbnail is scaled to its width.
+ */
+function pictureStyle(cue: ThumbnailSpriteCue): Record<string, string> {
+    if (!cue.w || !cue.h) {
+        return {
+            width: '100%',
+            height: '100%',
+            backgroundImage: `url("${cue.spriteUrl}")`,
+            backgroundSize: 'contain',
+            backgroundPosition: 'center',
+            backgroundRepeat: 'no-repeat',
+        };
+    }
+    const frame = containerEl.value?.getBoundingClientRect();
+    const scale = frame ? Math.min(frame.width / cue.w, frame.height / cue.h) : 1;
+    return {
+        width: `${cue.w}px`,
+        height: `${cue.h}px`,
+        backgroundImage: `url("${cue.spriteUrl}")`,
+        backgroundPosition: `-${cue.x}px -${cue.y}px`,
+        backgroundRepeat: 'no-repeat',
+        transform: `scale(${scale})`,
+        transformOrigin: 'center',
+    };
+}
+
+/** The frame laid over the picture: the one a held press names, or the one a pinned roster is dragged to. */
+const pictureCue = computed(() => {
+    if (!mergedControls.value.scrubPicture) return null;
+    if (scrub.value?.held) return scrub.value.cue;
+    return pinDrag.value?.moved ? (pinnedView.value?.cue ?? null) : null;
+});
 
 /** The controls' current scale, which grows with the player's width. */
 function controlsScale(el: Element): number {
@@ -601,22 +659,152 @@ function buildRoster(
     time: number,
     pointerX: number,
     width: number,
-    duration: number
+    duration: number,
+    step: number
 ): {
-    tiles: { index: number; left: number; cue: ThumbnailSpriteCue | null }[];
+    tiles: { key: string; left: number; cue: ThumbnailSpriteCue | null }[];
     markerX: number;
     tileWidth: number;
+    step: number;
 } | null {
     const sample = instance.thumbnailAt(0);
     if (!sample || !sample.w || !sample.h) return null;
     const tileWidth = Math.max(24, Math.round((rosterHeight.value * sample.w) / sample.h));
     const markerX = Math.min(width, Math.max(0, pointerX));
-    const tiles = rosterTiles(time, markerX, width, tileWidth, rosterStep(duration), duration).map((tile) => ({
-        index: tile.index,
+    const tiles = rosterTiles(time, markerX, width, tileWidth, step, duration).map((tile) => ({
+        // A different step makes the same index a different slot, so the step is part of the identity.
+        key: `${step}:${tile.index}`,
         left: tile.left,
         cue: instance.thumbnailAt(tile.time),
     }));
-    return { tiles, markerX, tileWidth };
+    return { tiles, markerX, tileWidth, step };
+}
+
+
+// --- pinned roster ------------------------------------------------------------
+
+/**
+ * A roster left open after the press ends. It is centred on the playhead and follows playback, and it can
+ * itself be dragged, the slow and precise way through the video (the timeline is the fast one): the strip moves with the finger,
+ * the picture shows the frame it is passing, and the video goes there when the finger comes up. A tap on a
+ * frame goes to that frame. It stays until closed — the button on it, a new source, or a change of layout.
+ */
+const pin = shallowRef<{ bottom: number; labelBottom: number } | null>(null);
+
+interface PinDrag {
+    startX: number;
+    lastX: number;
+    time: number;
+    moved: boolean;
+}
+const pinDrag = shallowRef<PinDrag | null>(null);
+
+/** The playhead, read every frame while a roster is pinned: `timeupdate` is a few times a second, which steps the strip. */
+const pinNow = ref(0);
+let pinFrame = 0;
+
+function trackPlayhead(): void {
+    const media = mediaEl.value;
+    if (media && Number.isFinite(media.currentTime)) pinNow.value = media.currentTime;
+    pinFrame = requestAnimationFrame(trackPlayhead);
+}
+
+watch(
+    () => pin.value !== null,
+    (open) => {
+        cancelAnimationFrame(pinFrame);
+        if (open) trackPlayhead();
+    }
+);
+onBeforeUnmount(() => cancelAnimationFrame(pinFrame));
+
+/** Where the roster stays, after a seek, until the video has caught up; else it would snap back to the old time. */
+const pinAnchor = ref<number | null>(null);
+let anchorTimer: ReturnType<typeof setTimeout> | undefined;
+
+function armAnchorTimeout(): void {
+    if (anchorTimer) clearTimeout(anchorTimer);
+    anchorTimer = setTimeout(() => (pinAnchor.value = null), 1500);
+}
+
+watch(pinNow, (now) => {
+    if (pinAnchor.value !== null && Math.abs(now - pinAnchor.value) < 0.75) pinAnchor.value = null;
+});
+
+function closePin(): void {
+    pin.value = null;
+    pinDrag.value = null;
+    pinAnchor.value = null;
+    if (anchorTimer) clearTimeout(anchorTimer);
+}
+
+watch([isFullscreen, frameWidth, () => props.source], closePin);
+onBeforeUnmount(() => anchorTimer && clearTimeout(anchorTimer));
+
+const pinnedView = computed(() => {
+    const placed = pin.value;
+    const instance = controller.value;
+    const duration = state.value.duration;
+    const width = frameWidth.value;
+    if (!placed || scrub.value?.roster || !instance || !(duration > 0) || !(width > 0)) return null;
+    const drag = pinDrag.value;
+    const time = drag?.time ?? pinAnchor.value ?? pinNow.value;
+    const step = rosterFineStep(duration);
+    const built = buildRoster(instance, time, width / 2, width, duration, step);
+    if (!built) return null;
+    return {
+        ...built,
+        ...placed,
+        time,
+        label: formatClock(time, duration >= 3600),
+        cue: instance.thumbnailAt(Math.min(time, Math.max(0, duration - 0.001))),
+    };
+});
+
+function onPinDown(event: PointerEvent): void {
+    const view = pinnedView.value;
+    if (!view) return;
+    (event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId);
+    pinDrag.value = {
+        startX: event.clientX,
+        lastX: event.clientX,
+        time: view.time,
+        moved: false,
+    };
+}
+
+function onPinMove(event: PointerEvent): void {
+    const drag = pinDrag.value;
+    const duration = state.value.duration;
+    if (!drag || !(duration > 0)) return;
+    const view = pinnedView.value;
+    if (!view) return;
+    // The strip follows the finger one-to-one, at a scale that never changes during the drag.
+    const time = drag.time - (event.clientX - drag.lastX) / (view.tileWidth / view.step);
+    pinDrag.value = {
+        ...drag,
+        lastX: event.clientX,
+        time: Math.min(Math.max(0, time), Math.max(0, duration - 0.001)),
+        moved: drag.moved || Math.abs(event.clientX - drag.startX) > 4,
+    };
+}
+
+function onPinUp(event: PointerEvent): void {
+    const drag = pinDrag.value;
+    const view = pinnedView.value;
+    pinDrag.value = null;
+    if (!drag || !view || event.type !== 'pointerup') return;
+    let target = drag.time;
+    if (!drag.moved) {
+        // A tap: the frame under the finger, read off the strip's own scale.
+        const frame = containerEl.value?.getBoundingClientRect();
+        const duration = state.value.duration;
+        target = view.time + (event.clientX - (frame?.left ?? 0) - view.markerX) / (view.tileWidth / view.step);
+        target = Math.min(Math.max(0, target), Math.max(0, duration - 0.001));
+    }
+    pinAnchor.value = target;
+    armAnchorTimeout();
+    seek(target);
 }
 
 /**
@@ -738,6 +926,11 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
 
                 <media-controls class="lmpl-controls" v-html="controlsHtml"></media-controls>
 
+                <!-- While held, the frame being scrubbed over the picture: a fast-forward, VHS style. -->
+                <div v-if="pictureCue" class="lmpl-scrub-picture" aria-hidden="true">
+                    <div class="lmpl-scrub-picture-frame" :style="pictureStyle(pictureCue)"></div>
+                </div>
+
                 <div
                     v-if="scrub && !scrub.roster"
                     class="lmpl-scrub-preview"
@@ -745,6 +938,29 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
                 >
                     <ScrubThumbnail :cue="scrub.cue" :label="scrub.label" :width="scrubWidth" />
                 </div>
+                <template v-if="pinnedView">
+                    <ScrubRoster
+                        :tiles="pinnedView.tiles"
+                        :tile-width="pinnedView.tileWidth"
+                        :height="rosterHeight"
+                        :marker-x="pinnedView.markerX"
+                        :bottom="pinnedView.bottom"
+                        interactive
+                        :close-label="msg.closeRoster"
+                        @close="closePin"
+                        @pointerdown.stop="onPinDown"
+                        @pointermove.stop="onPinMove"
+                        @pointerup.stop="onPinUp"
+                        @pointercancel.stop="onPinUp"
+                        @click.stop
+                    />
+                    <div
+                        class="lmpl-scrub-preview lmpl-scrub-label"
+                        :style="{ left: `${pinnedView.markerX}px`, bottom: `${pinnedView.labelBottom}px` }"
+                    >
+                        <span class="lmpl-thumb-time">{{ pinnedView.label }}</span>
+                    </div>
+                </template>
                 <template v-if="scrub?.roster">
                     <ScrubRoster
                         :tiles="scrub.roster.tiles"

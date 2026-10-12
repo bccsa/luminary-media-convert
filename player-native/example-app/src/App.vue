@@ -11,7 +11,7 @@ import { SimulatedNativePlugin } from '@/players/SimulatedNativePlugin';
 import HealthBoard from '@/lab/HealthBoard.vue';
 import StressPanel from '@/lab/StressPanel.vue';
 import { probe, type Observation } from '@/lab/probe';
-import { DEFAULT_YOUTUBE, presets, thumbnailSidecar } from '@/lab/sources';
+import { DEFAULT_YOUTUBE, bipbopSidecars, presets, sampleSidecars, thumbnailSidecar } from '@/lab/sources';
 import { landedAt, type Intensity, type StressContext } from '@/lab/stress';
 
 const service = inject(VideoPlayerKey)!;
@@ -66,6 +66,14 @@ const source = computed<PlayerSource>(() => {
     if (preset.id === 'custom') {
         const masterUrl = customUrl.value.trim();
         return { masterUrl, ...(customKey.value.trim() ? { keyHex: customKey.value.trim().toLowerCase() } : {}), ...withFrames(masterUrl) };
+    }
+    if (preset.id === 'bipbop') return { masterUrl: preset.masterUrl, sidecars: bipbopSidecars() };
+    if (preset.id === 'sample') {
+        return {
+            masterUrl: preset.masterUrl,
+            keyHex: preset.keyHex,
+            sidecars: { ...thumbnailSidecar(preset.masterUrl), ...sampleSidecars(preset.masterUrl) },
+        };
     }
     return { masterUrl: preset.masterUrl, ...(preset.keyHex ? { keyHex: preset.keyHex } : {}), ...withFrames(preset.masterUrl) };
 });

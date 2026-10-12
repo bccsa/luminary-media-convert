@@ -1,3 +1,5 @@
+import type { ChapterSidecar, SubtitleSidecar } from '@luminary-media-converter/player-core';
+
 /** `make-sample-stream.py`'s key: bundled with the stream it opens, so it protects nothing. */
 export const SAMPLE_KEY = '6c756d696e6172792d737069a4e2c0de';
 
@@ -30,6 +32,32 @@ export function thumbnailSidecar(masterUrl: string): { thumbnails: { url: string
     const path = masterUrl.split(/[?#]/)[0] ?? masterUrl;
     const slash = path.lastIndexOf('/');
     return slash < 0 ? undefined : { thumbnails: { url: `${path.slice(0, slash)}/thumbnails/thumbnails.vtt` } };
+}
+
+/**
+ * The sample stream's chapters and subtitles, in the two languages `make-sample-stream.py` writes
+ * beside the master. Other streams carry none of these files, so only the sample is offered them.
+ */
+export function sampleSidecars(masterUrl: string): { chapters: ChapterSidecar[]; subtitles: SubtitleSidecar[] } {
+    return sidecarsAt(masterUrl.slice(0, masterUrl.lastIndexOf('/')));
+}
+
+/**
+ * Apple's bipbop lives on Apple's CDN, where nothing can be added beside its master, so its scrub
+ * frames, chapters and subtitles (`make-bipbop-sidecars.py`) are served by the dev server at
+ * `/bipbop/` and offered by URL, which is all a sidecar needs.
+ */
+export function bipbopSidecars(): ReturnType<typeof sidecarsAt> & { thumbnails: { url: string } } {
+    const base = `${labOrigin()}/bipbop`;
+    return { ...sidecarsAt(base), thumbnails: { url: `${base}/thumbnails/thumbnails.vtt` } };
+}
+
+function sidecarsAt(base: string): { chapters: ChapterSidecar[]; subtitles: SubtitleSidecar[] } {
+    const languages = [['en', 'English'], ['es', 'Español']] as const;
+    return {
+        chapters: languages.map(([lang, label]) => ({ lang, label, url: `${base}/chapters/${lang}.vtt` })),
+        subtitles: languages.map(([lang, label]) => ({ lang, label, url: `${base}/subtitles/${lang}.vtt` })),
+    };
 }
 
 export function presets(): LabSource[] {

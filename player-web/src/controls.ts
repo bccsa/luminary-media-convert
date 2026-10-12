@@ -60,6 +60,16 @@ export interface PlayerControlsOptions {
      * picture's.
      */
     windowedControls: boolean;
+    /**
+     * Hold the timeline to open the roster: a strip of frames around the playhead. Slow drags show
+     * fine-grained frames and fast drags coarse ones. `false` keeps the single hover/drag thumbnail.
+     */
+    scrubRoster: boolean;
+    /**
+     * While the timeline is held, draw the frame being scrubbed over the picture, so a drag reads as a
+     * fast-forward. Costs nothing beyond moving a background offset: the sprite is already loaded.
+     */
+    scrubPicture: boolean;
 }
 
 /** The behaviour the library had before any of this was configurable. */
@@ -69,6 +79,8 @@ export const DEFAULT_CONTROLS: PlayerControlsOptions = {
     skipBackSeconds: 10,
     skipForwardSeconds: 10,
     windowedControls: true,
+    scrubRoster: true,
+    scrubPicture: true,
 };
 
 /**
@@ -88,7 +100,7 @@ export function mergeControls(
     const merged = { ...DEFAULT_CONTROLS };
     if (!partial) return merged;
 
-    for (const key of ['audioMenu', 'subtitlesMenu', 'windowedControls'] as const) {
+    for (const key of ['audioMenu', 'subtitlesMenu', 'windowedControls', 'scrubRoster', 'scrubPicture'] as const) {
         const value = partial[key];
         if (typeof value === 'boolean') {
             merged[key] = value;

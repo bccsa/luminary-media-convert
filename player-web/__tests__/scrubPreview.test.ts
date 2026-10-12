@@ -7,6 +7,7 @@ import {
     pointerRatio,
     previewTimes,
     rosterStep,
+    rosterFineStep,
     rosterTiles,
 } from '../src/ui/scrubPreview';
 
@@ -146,5 +147,15 @@ describe('rosterStep', () => {
         expect(rosterStep(30)).toBe(1);
         expect(rosterStep(1200)).toBe(10);
         expect(rosterStep(100000)).toBe(15);
+    });
+});
+
+describe('rosterFineStep', () => {
+    it('is a quarter of the timeline roster step, so a drag on it is the slow way through', () => {
+        expect(rosterFineStep(1200)).toBe(rosterStep(1200) / 4);
+    });
+
+    it('never goes finer than the sprite can resolve', () => {
+        expect(rosterFineStep(30)).toBe(0.5);
     });
 });

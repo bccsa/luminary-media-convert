@@ -38,6 +38,8 @@ export default defineConfig({
         vue({ template: { compilerOptions: { isCustomElement: isVideoJsElement } } }),
         buildTargetVirtuals(),
         sampleStream(at('../spike/android/app/src/main/assets/stream')),
+        // Scrub frames, chapters and subtitles for the Apple bipbop preset, which has none of its own.
+        sampleStream(at('../spike/bipbop-sidecars'), '/bipbop'),
         // Where `scripts/live-stream.sh` writes; the same default on both sides.
         sampleStream(process.env.LAB_LIVE_DIR ?? path.join(tmpdir(), 'luminary-lab-live'), '/live'),
     ],

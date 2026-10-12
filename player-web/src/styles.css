@@ -731,3 +731,66 @@
 .lmpl-root.lmpl-scrubbing .lmpl-time {
     opacity: 0;
 }
+
+/*
+ * The scrubbed frame over the picture while the timeline is held. Upscaled from a sprite, so it is soft on
+ * purpose: scanlines and a slight tint make that read as tape rather than as a low-resolution fault.
+ * Under the controls and roster, over the video.
+ */
+.lmpl-scrub-picture {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    background: #000;
+    pointer-events: none;
+}
+
+.lmpl-scrub-picture-frame {
+    flex: none;
+    image-rendering: auto;
+    filter: saturate(1.15) contrast(1.05);
+}
+
+.lmpl-scrub-picture::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(to bottom, rgb(0 0 0 / 0.14) 0 1px, transparent 1px 3px);
+}
+
+/*
+ * A pinned roster stays open after the press ends, so the viewer can stop and look. It takes the pointer:
+ * dragging it scrolls through the video, a tap on a frame goes there.
+ */
+.lmpl-roster.lmpl-roster-interactive {
+    pointer-events: auto;
+    touch-action: none;
+    cursor: grab;
+    animation: none;
+}
+
+.lmpl-roster.lmpl-roster-interactive:active {
+    cursor: grabbing;
+}
+
+.lmpl-roster-close {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    z-index: 2;
+    display: grid;
+    place-items: center;
+    width: calc(28px * var(--lmpl-s));
+    height: calc(28px * var(--lmpl-s));
+    padding: 0;
+    border: 0;
+    border-radius: 9999px;
+    background: rgb(20 20 24 / 0.7);
+    box-shadow: 0 0 0 1px rgb(255 255 255 / 0.18);
+    color: #fff;
+    cursor: pointer;
+}
