@@ -1651,6 +1651,12 @@
     transform: none;
 }
 
+/* Longer than the room above its button: it scrolls inside (see `placeMenu`). */
+.lmpl-afs-menu {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
 .lmpl-afs-menuitem {
     display: flex;
     align-items: center;
@@ -1831,4 +1837,11 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+/* A short view, a phone on its side: the rows close up so the sleep timer's eight fit without scrolling. */
+@media (max-height: 480px) {
+    .lmpl-afs-menuitem {
+        min-height: 34px;
+    }
 }

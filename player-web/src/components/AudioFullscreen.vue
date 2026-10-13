@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import type { Chapter, SleepTimerOption, SleepTimerState } from '@luminary-media-converter/player-core';
 import { formatSeconds, type PlayerMessages } from '../messages';
 import { skipIcon } from '../ui/controlsHtml';
@@ -63,6 +63,35 @@ const emit = defineEmits<{
 type MenuId = 'speed' | 'language' | 'sleep';
 const menu = ref<MenuId | null>(null);
 const rootEl = ref<HTMLElement | null>(null);
+
+const MENU_GAP = 12;
+
+/**
+ * Keeps an open menu on the screen: no taller than the room above its button, scrolling inside if it is longer,
+ * and no further out than the screen's edges. The menu sits over its button centred, which in a short, wide view
+ * puts it past the edge or the top.
+ */
+function placeMenu(): void {
+    const root = rootEl.value;
+    const menuEl = root?.querySelector<HTMLElement>('[role=menu]');
+    const tool = menuEl?.parentElement;
+    if (!root || !menuEl || !tool) return;
+    const bounds = root.getBoundingClientRect();
+    const room = tool.getBoundingClientRect().top - bounds.top - MENU_GAP - 8;
+    menuEl.style.maxHeight = `${Math.max(120, room)}px`;
+    menuEl.style.translate = '0 0';
+    const rect = menuEl.getBoundingClientRect();
+    const over = rect.right - (bounds.right - MENU_GAP);
+    const under = bounds.left + MENU_GAP - rect.left;
+    const shift = over > 0 ? -over : under > 0 ? under : 0;
+    menuEl.style.translate = `${shift}px 0`;
+}
+
+watch(menu, async (id) => {
+    if (!id) return;
+    await nextTick();
+    placeMenu();
+});
 
 function toggleMenu(id: MenuId): void {
     menu.value = menu.value === id ? null : id;

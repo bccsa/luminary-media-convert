@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
 import AudioFullscreen from '../src/components/AudioFullscreen.vue';
 import { DEFAULT_MESSAGES } from '../src/messages';
@@ -263,6 +263,28 @@ describe('AudioFullscreen — the menus', () => {
         await find(wrapper, 'afsSpeed').trigger('click');
         await find(wrapper, 'afsSpeed').trigger('pointerdown');
         expect(wrapper.find('[role=menu]').exists()).toBe(true);
+    });
+
+    it('are kept on the screen: no taller than the room above their button, and no further out than its edges', async () => {
+        const rect = (left: number, top: number, width: number, height: number) => ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) });
+        const spy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+            if (this.matches('.lmpl-afs')) return rect(0, 0, 844, 390) as DOMRect;
+            if (this.matches('.lmpl-afs-tool')) return rect(700, 330, 52, 52) as DOMRect;
+            if (this.matches('[role=menu]')) return rect(690, 30, 150, 290) as DOMRect;
+            return rect(0, 0, 0, 0) as DOMRect;
+        });
+        try {
+            const wrapper = mountScreen();
+            await find(wrapper, 'afsSleep').trigger('click');
+            await wrapper.vm.$nextTick();
+            const menu = wrapper.find('[role=menu]').element as HTMLElement;
+            // 330 (the button's top) - 12 (the gap) - 8 (the margin) leaves 310 px.
+            expect(menu.style.maxHeight).toBe('310px');
+            // The menu ends at 840, past the 832 that keeps a 12 px margin: it moves 8 px in.
+            expect(menu.style.translate).toBe('-8px 0');
+        } finally {
+            spy.mockRestore();
+        }
     });
 
     it('open one at a time', async () => {
