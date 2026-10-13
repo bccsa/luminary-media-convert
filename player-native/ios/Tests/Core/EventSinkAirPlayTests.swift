@@ -38,4 +38,21 @@ struct EventSinkAirPlayTests {
         sink.airPlayResend(available: true, active: false)
         #expect(airPlayEvents(log) == [true, true])
     }
+
+    @Test("a subtitle chosen in native UI is told once, and turning it off is told as null")
+    func subtitleChanges() {
+        let (sink, log) = make()
+        func labels() -> [String?] {
+            log.events.filter { $0.0 == "subtitlechange" }.map {
+                if case .string(let label)? = $0.1["label"] { return label }
+                return nil
+            }
+        }
+        sink.subtitleChanged(nil)
+        #expect(labels().isEmpty)
+        sink.subtitleChanged("English")
+        sink.subtitleChanged("English")
+        sink.subtitleChanged(nil)
+        #expect(labels() == ["English", nil])
+    }
 }

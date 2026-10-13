@@ -4,8 +4,10 @@ import { mount, type VueWrapper } from '@vue/test-utils';
 import { nextTick } from 'vue';
 import {
     AUDIO_ONLY_MASTER,
+    CHAPTERS_VTT,
     PLAIN_MEDIA_PLAYLIST,
     SIMPLE_MASTER,
+    SUBTITLE_MEDIA_PLAYLIST,
     flush,
     makeFetch,
     type RouteBody,
@@ -26,6 +28,8 @@ function routesFor(master: string): Record<string, RouteBody> {
         [`${BASE}/audio_hi_128kbps/playlist.m3u8`]: PLAIN_MEDIA_PLAYLIST,
         [`${BASE}/audio_lo_64kbps/playlist.m3u8`]: PLAIN_MEDIA_PLAYLIST,
         [`${BASE}/audio_128kbps/playlist.m3u8`]: PLAIN_MEDIA_PLAYLIST,
+        [`${BASE}/subs_en/playlist.m3u8`]: SUBTITLE_MEDIA_PLAYLIST,
+        [`${BASE}/subs_en/en_0.vtt`]: CHAPTERS_VTT,
     };
 }
 
@@ -371,6 +375,34 @@ describe('NativeLuminaryPlayer', () => {
 
             const texts = plugin.argsOf<{ texts: Record<string, string> }>('enterFullscreen').at(-1)!.texts;
             expect(texts).toMatchObject({ chapters: 'Chapitres', upNext: 'À suivre', browse: 'Chapters and up next', closeBrowse: 'Close' });
+        });
+    });
+
+    describe('the subtitle the viewer picks in native UI', () => {
+        const WITH_SUBTITLES = SIMPLE_MASTER.replace(
+            '#EXT-X-STREAM-INF:BANDWIDTH=5000000',
+            '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="English",LANGUAGE="en",DEFAULT=NO,URI="subs_en/playlist.m3u8"\n#EXT-X-STREAM-INF:BANDWIDTH=5000000',
+        );
+
+        it('is followed by the page\'s own state, and turned off with it', async () => {
+            const { plugin, exposed } = await mountPlayer({}, WITH_SUBTITLES);
+            await ready(plugin);
+            const load = plugin.argsOf<LoadArgs>('load').at(-1)!;
+            expect(exposed.state.subtitleTracks.map((track) => track.label)).toEqual(['English']);
+            expect(exposed.state.activeSubtitleTrackId).toBeNull();
+
+            plugin.emit('subtitlechange', { playerId: load.playerId, loadId: load.loadId }, { label: 'English' });
+            await flush();
+            expect(exposed.state.activeSubtitleTrackId).toBe(exposed.state.subtitleTracks[0]!.id);
+
+            plugin.emit('subtitlechange', { playerId: load.playerId, loadId: load.loadId }, { label: null });
+            await flush();
+            expect(exposed.state.activeSubtitleTrackId).toBeNull();
+
+            // A name the master does not list changes nothing.
+            plugin.emit('subtitlechange', { playerId: load.playerId, loadId: load.loadId }, { label: 'Klingon' });
+            await flush();
+            expect(exposed.state.activeSubtitleTrackId).toBeNull();
         });
     });
 

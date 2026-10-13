@@ -192,6 +192,15 @@ class EventSink(
         send("mutedchange", buildJsonObject { put("muted", muted) })
     }
 
+    private var subtitle: String? = null
+
+    /** Only on a change, whoever made it: a `setSubtitleTrack`, or the viewer in native UI. The label is the track's name; null is off. */
+    fun subtitleChanged(label: String?) {
+        if (label == subtitle) return
+        subtitle = label
+        send("subtitlechange", buildJsonObject { put("label", label) })
+    }
+
     /** Only on a change, whoever made it: a `setRate`, or the viewer in native UI. */
     fun rateChanged(rate: Double) {
         if (rate == this.rate) return

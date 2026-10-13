@@ -63,6 +63,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     private var playingBeforeInterruption = false
 
     private var audioGroup: AVMediaSelectionGroup?
+    private var legibleGroup: AVMediaSelectionGroup?
     private var audioOptions: [(id: String, option: AVMediaSelectionOption)] = []
     private var reportedAudio: (ids: [String], activeId: String?)?
     /// The audio a reattach restores once the rebuilt item lists it.
@@ -267,6 +268,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         stalled = false
         reportedBufferedEnd = -1
         audioGroup = nil
+        legibleGroup = nil
         audioOptions = []
         reportedAudio = nil
 
@@ -576,7 +578,9 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
                 [weak self] _ in self?.stall()
             },
             center.addObserver(forName: AVPlayerItem.mediaSelectionDidChangeNotification, object: item, queue: .main) {
-                [weak self] _ in self?.reportAudio()
+                [weak self] _ in
+                self?.reportAudio()
+                self?.reportSubtitle()
             },
             center.addObserver(forName: AVPlayerItem.newErrorLogEntryNotification, object: item, queue: .main) {
                 [weak self] _ in self?.errorLogged()
@@ -590,6 +594,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         case .readyToPlay:
             announceMetadata()
             loadAudioGroup(of: item)
+            loadLegibleGroup(of: item)
             leaveIfUpright()
         case .failed:
             fail(item.error)
@@ -717,6 +722,27 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         MainActor.assumeIsolated {
             item.asset.loadMediaSelectionGroup(for: .audible, completionHandler: loaded)
         }
+    }
+
+    /// The subtitle the viewer chose in native UI (the full-screen menu), told to the page, so its own menu follows.
+    private func loadLegibleGroup(of item: AVPlayerItem) {
+        let expected = ObjectIdentifier(item)
+        let loaded: @Sendable (AVMediaSelectionGroup?, (any Error)?) -> Void = { [weak self] group, _ in
+            nonisolated(unsafe) let group = group
+            DispatchQueue.main.async {
+                guard let self, let item = self.item, ObjectIdentifier(item) == expected else { return }
+                self.legibleGroup = group
+                self.reportSubtitle()
+            }
+        }
+        MainActor.assumeIsolated {
+            item.asset.loadMediaSelectionGroup(for: .legible, completionHandler: loaded)
+        }
+    }
+
+    private func reportSubtitle() {
+        guard let item, let group = legibleGroup else { return }
+        events?.subtitleChanged(item.currentMediaSelection.selectedMediaOption(in: group)?.displayName)
     }
 
     private func audioGroupLoaded(_ group: AVMediaSelectionGroup?, in item: AVPlayerItem) {

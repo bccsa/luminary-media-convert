@@ -501,6 +501,11 @@ export interface BridgeEventMap {
     /** On change: a `setMuted`, or the viewer's pick in native UI. Not on `load`: muting outlives the item. */
     mutedchange: { muted: boolean };
     /**
+     * On change: a `setSubtitleTrack`, or the viewer's pick in native UI (the full-screen menu). `label` is the
+     * subtitle's name as the master lists it, or null for off. Not outside the item: a load starts with none.
+     */
+    subtitlechange: { label: string | null };
+    /**
      * On change: another AirPlay device appeared or went (`available`), or playback went to one or
      * came back (`active`). Not on `load`: the devices around outlive the item.
      */
@@ -542,6 +547,7 @@ export const BRIDGE_EVENT_NAMES: readonly BridgeEventName[] = [
     'audiotracks-updated',
     'ratechange',
     'mutedchange',
+    'subtitlechange',
     'airplaychange',
     'castselect',
     'browseselect',

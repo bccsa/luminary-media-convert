@@ -595,6 +595,7 @@ export class NativeBridgeAdapter implements PlayerAdapter {
             case 'presentationchange':
             case 'ratechange':
             case 'mutedchange':
+            case 'subtitlechange':
             case 'airplaychange':
                 return;
         }

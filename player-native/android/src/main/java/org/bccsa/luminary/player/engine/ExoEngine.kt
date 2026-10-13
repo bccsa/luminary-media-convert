@@ -180,6 +180,7 @@ class ExoEngine(
     private var reportedBufferedEnd = -1.0
     private var poll: Cancellable? = null
     private var sleepTimer: Cancellable? = null
+    private var reportedSubtitle: String? = null
 
     /** The id `setVariant` pinned; re-applied to a rebuilt ladder that still offers it. */
     private var pinnedVariant: String? = null
@@ -689,6 +690,11 @@ class ExoEngine(
         if (audio.isNotEmpty() && reportedAudio != audio to activeAudio) {
             reportedAudio = audio to activeAudio
             events.audioTracks(audio, activeAudio)
+        }
+        if (subtitleChoicesOf(tracks).isNotEmpty() || reportedSubtitle != null) {
+            val selected = subtitleChoicesOf(tracks).firstOrNull { it.selected }?.label
+            reportedSubtitle = selected
+            events.subtitleChanged(selected)
         }
         val pinHeld = applyVariantPin(tracks)
         if (variants.isNotEmpty() && (variants != reportedVariants || !pinHeld)) {

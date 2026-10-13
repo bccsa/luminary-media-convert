@@ -245,6 +245,14 @@ export const NativeLuminaryPlayer = defineComponent({
                 props.plugin.addListener('mutedchange', (payload) => {
                     if (mine(payload)) muted.value = payload.muted;
                 }),
+                // The subtitle the viewer picked in native UI, so the page's own menu follows it.
+                props.plugin.addListener('subtitlechange', (payload) => {
+                    if (!mine(payload) || !created.controller) return;
+                    const track = payload.label === null ? null : created.controller.getState().subtitleTracks.find((t) => t.label === payload.label);
+                    const id = track?.id ?? null;
+                    if (payload.label !== null && !track) return;
+                    if (id !== created.controller.getState().activeSubtitleTrackId) created.controller.setSubtitleTrack(id);
+                }),
                 // The devices around, and whether playback is on one: the player's, not a load's.
                 props.plugin.addListener('airplaychange', (payload) => {
                     if (!mine(payload)) return;

@@ -92,6 +92,16 @@ public final class EventSink {
         send("mutedchange", ["muted": .bool(muted)])
     }
 
+    private var subtitle: String?
+
+    /// Only on a change, whoever made it: a `setSubtitleTrack`, or the viewer in native UI (the full-screen menu).
+    /// The label is the option's name; nil is off.
+    public func subtitleChanged(_ label: String?) {
+        if label == subtitle { return }
+        subtitle = label
+        send("subtitlechange", ["label": label.map { .string($0) } ?? .null])
+    }
+
     private var airPlay = (available: false, active: false)
 
     /// Only on a change: a device came or went, or playback moved to or from one.
