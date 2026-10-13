@@ -235,7 +235,7 @@ const cover = computed(() => {
     <div
         ref="rootEl"
         class="lmpl-afs"
-        :class="`lmpl-afs-${appearance}`"
+        :class="[`lmpl-afs-${appearance}`, { 'lmpl-afs-nolist': !showChapterList }]"
         :style="{ '--lmpl-chapter-mask': chapterMask || undefined }"
         data-test="audioFullscreen"
         @keydown="onKeydown"

@@ -1685,6 +1685,12 @@
         min-width: 0;
     }
 
+    /* No chapter list to fill the column: the title and the controls sit together, level with the picture, not at
+       the two ends of an empty column. */
+    .lmpl-afs-nolist .lmpl-afs-controls {
+        margin-top: 12px;
+    }
+
     .lmpl-afs-chapters {
         display: flex;
     }
