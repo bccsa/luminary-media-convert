@@ -779,13 +779,13 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         guard let item, let group = audioGroup else { return ([], nil) }
         let selected = item.currentMediaSelection.selectedMediaOption(in: group).map(Self.audioKey)
         return (
-            audioOptions.map { AudioTrack(id: $0.id, lang: $0.option.extendedLanguageTag, label: $0.option.displayName) },
+            audioOptions.map { AudioTrack(id: $0.id, lang: $0.option.extendedLanguageTag, label: $0.option.playlistName) },
             audioOptions.first { $0.id == selected }?.id
         )
     }
 
     private static func audioKey(_ option: AVMediaSelectionOption) -> String {
-        AudioRenditions.key(language: option.extendedLanguageTag, name: option.displayName)
+        AudioRenditions.key(language: option.extendedLanguageTag, name: option.playlistName)
     }
 
     // MARK: Now playing, the audio session and interruptions
