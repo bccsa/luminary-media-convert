@@ -139,8 +139,27 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
         picker.alpha = 0.011
         if picker.superview !== container { container.addSubview(picker) }
         routePicker = picker
-        for case let button as UIButton in picker.subviews { button.sendActions(for: .touchUpInside) }
+        // The picker makes its button when it is first laid out: a press before that finds none, which is
+        // why the first press after it was added, or after the screen turned, could show nothing.
+        picker.layoutIfNeeded()
+        if !pressRoutePicker(picker) {
+            DispatchQueue.main.async { [weak self, weak picker] in
+                guard let self, let picker else { return }
+                picker.layoutIfNeeded()
+                _ = self.pressRoutePicker(picker)
+            }
+        }
         return true
+    }
+
+    @discardableResult
+    private func pressRoutePicker(_ picker: AVRoutePickerView) -> Bool {
+        var pressed = false
+        for case let button as UIButton in picker.subviews {
+            button.sendActions(for: .touchUpInside)
+            pressed = true
+        }
+        return pressed
     }
 
     public func holdPicture() {
