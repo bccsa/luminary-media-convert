@@ -197,7 +197,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         exitButton.accessibilityLabel = texts.exitFullscreen
         pipButton.layers = V10Icons.pip
         pipButton.accessibilityLabel = texts.pictureInPicture
-        audioButton.layers = V10Icons.speech
+        audioButton.layers = V10Icons.language
         audioButton.accessibilityLabel = texts.audioMenu
         subtitlesButton.layers = V10Icons.captions
         subtitlesButton.accessibilityLabel = texts.subtitlesMenu

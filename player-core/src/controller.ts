@@ -14,6 +14,7 @@ import type { SubtleLike } from './pipeline/decrypt.js';
 import { isMissing, toPlayerError } from './pipeline/fetch.js';
 import {
     DEFAULT_ANGLE_ID,
+    dedupeByName,
     loadMaster,
     mungeSource,
     type MasterInfo,
@@ -785,11 +786,13 @@ export class PlayerController implements PlayerControllerApi {
             return;
         }
 
-        const mapped = tracks.map((track) => ({
-            id: track.id,
-            lang: track.lang,
-            label: track.label,
-        }));
+        const mapped = dedupeByName(
+            tracks.map((track) => ({
+                id: track.id,
+                lang: track.lang,
+                label: track.label,
+            })),
+        );
         const chosen = this.chosenAudioTrackId;
         const chosenListed =
             chosen !== null && mapped.some((track) => track.id === chosen);

@@ -279,7 +279,7 @@ export function describeMaster(
         wasEncrypted,
         isMaster: true,
         angles,
-        audioTracks: dedupeById(audioTracks),
+        audioTracks: dedupeByName(dedupeById(audioTracks)),
         subtitleTracks: dedupeById(subtitleTracks),
         nativelyAudioOnly,
     };
@@ -610,6 +610,17 @@ function masterTrackId(
     language: string | undefined,
 ): string {
     return `${prefix}:${groupId ?? ''}:${name ?? language ?? ''}`;
+}
+
+/** One entry per language and name: a master that repeats its audio in each group lists a track once. */
+export function dedupeByName<T extends { lang?: string; label: string }>(items: T[]): T[] {
+    const seen = new Set<string>();
+    return items.filter((item) => {
+        const key = `${item.lang ?? ''}|${item.label}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
 }
 
 function dedupeById<T extends { id: string }>(items: T[]): T[] {
