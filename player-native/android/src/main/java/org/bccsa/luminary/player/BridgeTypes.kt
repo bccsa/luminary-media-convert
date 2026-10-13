@@ -227,7 +227,7 @@ sealed interface BridgeCall {
     data class SetCastMenu(override val playerId: String, val menu: CastMenu) : BridgeCall
 
     /** [texts] are what the controls say in the host's language; null keeps the last, or English. */
-    data class EnterFullscreen(override val playerId: String, val texts: Map<String, String>?) : BridgeCall
+    data class EnterFullscreen(override val playerId: String, val texts: Map<String, String>?, val browse: Browse? = null) : BridgeCall
     data class ExitFullscreen(override val playerId: String) : BridgeCall
     data class Resumed(override val playerId: String) : BridgeCall
     data class Destroy(override val playerId: String) : BridgeCall
@@ -342,7 +342,7 @@ sealed interface BridgeCall {
                         ),
                     )
                 }
-                "enterFullscreen" -> EnterFullscreen(args.string("playerId"), args.optObj("texts")?.strings())
+                "enterFullscreen" -> EnterFullscreen(args.string("playerId"), args.optObj("texts")?.strings(), args.optObj("browse")?.browse())
                 "exitFullscreen" -> ExitFullscreen(args.string("playerId"))
                 "resumed" -> Resumed(args.string("playerId"))
                 "destroy" -> Destroy(args.string("playerId"))
@@ -453,6 +453,20 @@ private class Args(private val json: JsonObject, private val path: String) {
         primitive.content
     }
 
+    /** `{ chapters, upNext }`: each entry's required fields are strings (numbers for a chapter's times); refused whole when one is not. */
+    fun browse(): Browse = Browse(
+        chapters = array("chapters").mapIndexed { i, element ->
+            val chapter = Args(element as? JsonObject ?: invalid("chapters[$i] is not an object"), "$path.chapters[$i]")
+            BrowseChapter(chapter.string("title"), chapter.number("startTime"), chapter.number("endTime"))
+        },
+        upNext = array("upNext").mapIndexed { i, element ->
+            val item = Args(element as? JsonObject ?: invalid("upNext[$i] is not an object"), "$path.upNext[$i]")
+            BrowseItem(
+                item.string("id"), item.string("title"), item.optString("subtitle"), item.optString("imageUrl"), item.optString("section"),
+            )
+        },
+    )
+
     fun array(key: String): JsonArray = present(key) as? JsonArray ?: invalid("$key is not an array")
 
     fun optKeyHex(key: String): String? =
@@ -488,3 +502,14 @@ data class CastMenu(
     val qualities: List<CastChoice>,
     val activeQualityId: String,
 )
+
+/** A chapter in full-screen's panel: tapping it seeks to [start], in seconds. */
+data class BrowseChapter(val title: String, val start: Double, val end: Double)
+
+/** A video offered after this one; [section] is the heading above each run of items that share it. */
+data class BrowseItem(val id: String, val title: String, val subtitle: String?, val imageUrl: String?, val section: String?)
+
+/** What full-screen's chapters / up-next panel lists. */
+data class Browse(val chapters: List<BrowseChapter>, val upNext: List<BrowseItem>) {
+    val isEmpty: Boolean get() = chapters.isEmpty() && upNext.isEmpty()
+}

@@ -35,9 +35,11 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.Player
+import androidx.media3.common.util.BitmapLoader
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.util.Util
 import androidx.media3.ui.PlayerView
+import org.bccsa.luminary.player.Browse
 
 /**
  * A full-window picture over the WebView: system bars hidden, orientation following the sensor,
@@ -214,6 +216,12 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         thumbnails: org.bccsa.luminary.player.Thumbnails? = null,
         /** Opens the list of Cast devices; no button when null. */
         onCast: (() -> Unit)? = null,
+        /** The chapters and up next the controls' panel lists; no button when null or empty. */
+        browse: Browse? = null,
+        /** An up-next item's id, when the viewer picks it in the panel. */
+        onBrowseSelect: ((String) -> Unit)? = null,
+        /** Loads the up-next pictures. */
+        images: BitmapLoader? = null,
     ): Boolean {
         if (view != null) return false
         val activity = activity() ?: return false
@@ -231,6 +239,9 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
             onPictureInPicture = if (pictureInPictureAvailable(activity)) ({ startPictureInPicture() }) else null,
             onCast = onCast,
             thumbnails = thumbnails,
+            browse = browse,
+            onBrowseSelect = onBrowseSelect,
+            images = images,
             onLeave = onLeave,
         )
         val view = FrameLayout(activity).apply {
@@ -254,7 +265,11 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         }
         if (activity is ComponentActivity) {
             backCallback = object : OnBackPressedCallback(true) {
-                override fun handleOnBackPressed() = onLeave()
+                // Back puts the panel away before it leaves full-screen.
+                override fun handleOnBackPressed() {
+                    if (controls.closeBrowse()) return
+                    onLeave()
+                }
             }.also { activity.onBackPressedDispatcher.addCallback(it) }
         }
         this.onLeave = onLeave
@@ -268,6 +283,11 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         this.surface = surface
         view.post { armAutoEnter(activity, true) }
         return true
+    }
+
+    /** Replaces the lists the panel offers while full-screen is up; a no-op when it is not. */
+    fun setBrowse(browse: Browse?) {
+        controls?.setBrowse(browse)
     }
 
     /**

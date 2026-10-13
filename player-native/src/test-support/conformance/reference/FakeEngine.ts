@@ -4,7 +4,7 @@
  * nothing changes until a signal says so.
  */
 
-import type { InlineFrame } from '../../../bridge.js';
+import type { FullscreenBrowse, InlineFrame } from '../../../bridge.js';
 import type { Json, JsonObject } from '../scenario.js';
 import type { VirtualClock } from './clock.js';
 
@@ -94,8 +94,12 @@ export class FakeEngine {
     setInlineFrame(frame: InlineFrame | null): void {
         this.record(frame ? { method: 'setInlineFrame', ...frame } : { method: 'setInlineFrame' });
     }
-    enterFullscreen(texts: Record<string, string> | null = null): void {
-        this.record(texts ? { method: 'enterFullscreen', texts } : { method: 'enterFullscreen' });
+    enterFullscreen(texts: Record<string, string> | null = null, browse: FullscreenBrowse | null = null): void {
+        this.record({
+            method: 'enterFullscreen',
+            ...(texts ? { texts } : {}),
+            ...(browse ? { browse: browse as unknown as Json } : {}),
+        });
     }
     exitFullscreen(): void {
         this.record({ method: 'exitFullscreen' });

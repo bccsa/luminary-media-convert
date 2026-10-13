@@ -576,6 +576,7 @@ export class NativeBridgeAdapter implements PlayerAdapter {
             }
             // For the host component, which listens on the plugin itself.
             case 'loadedmetadata':
+            case 'browseselect':
             case 'presentationchange':
             case 'ratechange':
             case 'mutedchange':

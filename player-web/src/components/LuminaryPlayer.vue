@@ -8,7 +8,7 @@
  * packaged skin's control set is fixed: it has no skip buttons, no way to leave a menu out and no
  * bare windowed frame. The default skin's stylesheet still draws the buttons, icons and menus.
  */
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 // The elements and icons the controls use, and no others; see the module for why not the packaged skin.
 import '../ui/register';
 import {
@@ -19,6 +19,7 @@ import {
     findPreferredTrack,
 } from '@luminary-media-converter/player-core';
 import type {
+    Chapter,
     PlayerControllerApi,
     PlayerControllerOptions,
     PlayerError,
@@ -50,8 +51,10 @@ import {
 } from '../ui/scrubPreview';
 import ScrubThumbnail from './ScrubThumbnail.vue';
 import ScrubRoster from './ScrubRoster.vue';
+import NextUpThumb from './NextUpThumb.vue';
 import { imageAttempts, toPlayerImage, type PlayerImageInput } from '../image';
 import { isYouTubeUrl } from '../youtube';
+import { withSectionHeadings, type PlayerUpNextItem } from '../upNext';
 
 interface Props {
     /** What to play. Assigning a new object reloads the player. */
@@ -71,6 +74,13 @@ interface Props {
     poster?: PlayerImageInput;
     /** Not supported yet on the v10 player; YouTube sources raise a `media` error. */
     youtubeEmbedUrl?: string;
+    /** Videos offered after this one, listed in the fullscreen panel; a tap raises `upnextselect`. */
+    upNext?: PlayerUpNextItem[];
+    /**
+     * The videos that may follow this one, best first. In fullscreen, with {@link NEXT_UP_LEAD_SECONDS} or less
+     * left, a strip of cards offers them; unless dismissed the first is raised as `nextupselect` when this video ends.
+     */
+    nextUp?: PlayerUpNextItem[];
     /** Audio language to select automatically; a viewer's own choice outranks it. */
     preferredLanguage?: string;
     /** Options handed to the default `PlayerController`. */
@@ -86,7 +96,18 @@ const emit = defineEmits<{
     timeupdate: [currentTime: number, duration: number];
     loadedmetadata: [];
     ended: [];
+    /** The viewer picked a video from the up-next list; carries its `id`. */
+    upnextselect: [id: string];
+    /** A next video was chosen, by its card or (the first) by this one ending; carries its `id`. Raised before `ended`. */
+    nextupselect: [id: string];
+    /** The viewer closed the card, so nothing follows this video. */
+    nextupdismiss: [];
 }>();
+
+/** How long before the end the up-next card appears. */
+const NEXT_UP_LEAD_SECONDS = 60;
+/** How many cards the strip holds. */
+const NEXT_UP_MAX = 5;
 
 const mediaEl = shallowRef<HlsJsVideoElement | null>(null);
 const keepAliveEl = ref<HTMLAudioElement | null>(null);
@@ -106,7 +127,9 @@ const isYouTube = computed(() => isYouTubeUrl(props.source.masterUrl));
 
 /** Element ids in the controls (menu triggers point at their menus by id) must not collide between players. */
 const instanceId = `lmpl-${Math.random().toString(36).slice(2, 9)}`;
-const controlsHtml = computed(() => buildControlsHtml(mergedControls.value, instanceId));
+const controlsHtml = computed(() =>
+    buildControlsHtml(mergedControls.value, instanceId, { browse: msg.value.browse })
+);
 
 /**
  * Clicking the picture plays and pauses, and a touch brings the controls up. A bare windowed frame
@@ -293,6 +316,8 @@ onMounted(() => {
     on('pause', () => keepAlive?.sync(false));
     on('ended', () => {
         keepAlive?.sync(false);
+        // First, so a host sees the advance coming before it reacts to the end (e.g. leaving fullscreen).
+        if (props.nextUp?.length && isFullscreen.value && !nextUpClosed.value) selectNextUp();
         emit('ended');
     });
     on('timeupdate', () => emit('timeupdate', media.currentTime || 0, media.duration || 0));
@@ -315,7 +340,17 @@ onMounted(() => {
     }
     document.addEventListener('fullscreenchange', onFullscreenChange);
     document.addEventListener('webkitfullscreenchange', onFullscreenChange);
-    if (containerEl.value) removeAutoHide = installAutoHide(containerEl.value, store, undefined, () => pin.value !== null);
+    if (containerEl.value) {
+        removeAutoHide = installAutoHide(
+            containerEl.value,
+            store,
+            undefined,
+            () => pin.value !== null || browseOpen.value || nextUpHasFocus()
+        );
+        controlsObserver = new MutationObserver(readControlsShown);
+        controlsObserver.observe(containerEl.value, { attributes: true, attributeFilter: [CONTROLS_VISIBLE_ATTR] });
+        readControlsShown();
+    }
     void loadSource(props.source);
 });
 
@@ -344,6 +379,8 @@ onBeforeUnmount(() => {
     document.removeEventListener('webkitfullscreenchange', onFullscreenChange);
     removeAutoHide?.();
     removeAutoHide = null;
+    controlsObserver?.disconnect();
+    controlsObserver = null;
     frameObserver?.disconnect();
     frameObserver = null;
     keepAlive?.dispose();
@@ -421,6 +458,10 @@ function onFullscreenChange(): void {
  * Raising the volume of a muted player unmutes it, which is what pressing plus means.
  */
 function onControlsClick(event: MouseEvent): void {
+    if (event.target instanceof Element && event.target.closest('[data-browse-toggle]')) {
+        toggleBrowse();
+        return;
+    }
     const target = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-volume-step]') : null;
     const player = store();
     if (!target || !player) return;
@@ -899,6 +940,208 @@ watch(
     () => hideScrub()
 );
 
+// --- chapters and up next ---------------------------------------------------
+
+type BrowseTab = 'chapters' | 'upnext';
+
+const chapters = computed<Chapter[]>(() => state.value.chapters ?? []);
+const upNextRows = computed(() => withSectionHeadings(props.upNext ?? []));
+
+/** A tab with nothing in it is not offered. */
+const browseTabs = computed<{ id: BrowseTab; label: string }[]>(() => [
+    ...(chapters.value.length ? [{ id: 'chapters' as const, label: msg.value.chapters }] : []),
+    ...(upNextRows.value.length ? [{ id: 'upnext' as const, label: msg.value.upNext }] : []),
+]);
+const hasBrowse = computed(() => browseTabs.value.length > 0);
+
+const browseOpen = ref(false);
+const requestedTab = ref<BrowseTab>('chapters');
+const browseTab = computed<BrowseTab | null>(
+    () => browseTabs.value.find((tab) => tab.id === requestedTab.value)?.id ?? browseTabs.value[0]?.id ?? null
+);
+const browseEl = ref<HTMLElement | null>(null);
+const browseId = `${instanceId}-browse`;
+const tabId = (tab: BrowseTab): string => `${browseId}-tab-${tab}`;
+
+/** Start times share one format, so a long video's list lines up. */
+const chaptersHaveHours = computed(() => chapters.value.some((chapter) => chapter.startTime >= 3600));
+
+const currentChapter = computed(() => {
+    const now = state.value.currentTime;
+    return chapters.value.findIndex((chapter) => now >= chapter.startTime && now < chapter.endTime);
+});
+
+function toggleButton(): HTMLElement | null {
+    return containerEl.value?.querySelector<HTMLElement>('[data-browse-toggle]') ?? null;
+}
+
+async function openBrowse(): Promise<void> {
+    if (!hasBrowse.value || !isFullscreen.value) return;
+    requestedTab.value = browseTab.value ?? 'chapters';
+    browseOpen.value = true;
+    await nextTick();
+    browseEl.value?.querySelector<HTMLElement>('[aria-current="true"]')?.scrollIntoView?.({ block: 'center' });
+    browseEl.value?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
+}
+
+/** Focus goes back to the button only when it was in the panel: a tap elsewhere has moved it on already. */
+function closeBrowse(): void {
+    if (!browseOpen.value) return;
+    const hadFocus = browseEl.value?.contains(document.activeElement) ?? false;
+    browseOpen.value = false;
+    if (hadFocus) void nextTick(() => toggleButton()?.focus());
+}
+
+function toggleBrowse(): void {
+    if (browseOpen.value) closeBrowse();
+    else void openBrowse();
+}
+
+function selectBrowseTab(tab: BrowseTab, focus = false): void {
+    requestedTab.value = tab;
+    if (focus) void nextTick(() => document.getElementById(tabId(tab))?.focus());
+}
+
+function onBrowseKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        closeBrowse();
+        return;
+    }
+    const tabs = browseTabs.value;
+    const onTab = event.target instanceof Element && event.target.closest('[role="tab"]') !== null;
+    if (!onTab || tabs.length < 2) return;
+    const index = tabs.findIndex((tab) => tab.id === browseTab.value);
+    const last = tabs.length - 1;
+    const next =
+        event.key === 'ArrowRight' ? (index + 1) % tabs.length
+        : event.key === 'ArrowLeft' ? (index + last) % tabs.length
+        : event.key === 'Home' ? 0
+        : event.key === 'End' ? last
+        : -1;
+    if (next < 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    selectBrowseTab(tabs[next]!.id, true);
+}
+
+function pickChapter(chapter: Chapter): void {
+    seek(chapter.startTime);
+    closeBrowse();
+}
+
+function pickUpNext(id: string): void {
+    emit('upnextselect', id);
+    closeBrowse();
+}
+
+/** Leaving fullscreen, nothing left to browse, or another video: the panel has no business staying. */
+watch([isFullscreen, hasBrowse, () => props.source], ([full, any]) => {
+    if (!full || !any) browseOpen.value = false;
+    else closeBrowse();
+});
+
+/** The button's expanded state is markup the component does not render, so it is kept current by hand. */
+watch(
+    [browseOpen, controlsHtml],
+    () => {
+        toggleButton()?.setAttribute('aria-expanded', String(browseOpen.value));
+    },
+    { flush: 'post' }
+);
+
+// --- up next card ------------------------------------------------------------
+
+/** Set by the container while its controls are up; the card rides above them, and sits at the edge without. */
+const CONTROLS_VISIBLE_ATTR = 'data-controls-visible';
+const controlsShown = ref(false);
+let controlsObserver: MutationObserver | null = null;
+
+function readControlsShown(): void {
+    controlsShown.value = containerEl.value?.hasAttribute(CONTROLS_VISIBLE_ATTR) ?? false;
+}
+
+/** Dismissed or already chosen: either way the card has done its job for this video. */
+const nextUpClosed = ref(false);
+const nextUpEl = ref<HTMLElement | null>(null);
+
+const nextUpVisible = computed(() => {
+    if (!props.nextUp?.length || !isFullscreen.value || nextUpClosed.value || browseOpen.value) return false;
+    const { duration, currentTime } = state.value;
+    // Live and not-yet-known lengths have no end to count down to.
+    if (!Number.isFinite(duration) || !(duration > 0)) return false;
+    return duration - currentTime <= NEXT_UP_LEAD_SECONDS;
+});
+
+/** The card holds the controls up while the viewer is working it by keyboard. */
+function nextUpHasFocus(): boolean {
+    return nextUpEl.value?.contains(document.activeElement) ?? false;
+}
+
+/** Chooses `id`, or the first on offer. */
+function selectNextUp(id?: string): void {
+    const next = id ?? props.nextUp?.[0]?.id;
+    if (!next || nextUpClosed.value) return;
+    nextUpClosed.value = true;
+    emit('nextupselect', next);
+}
+
+/** Room for this many cards in the strip. */
+const nextUpItems = computed(() => (props.nextUp ?? []).slice(0, NEXT_UP_MAX));
+
+function dismissNextUp(): void {
+    if (nextUpClosed.value) return;
+    nextUpClosed.value = true;
+    emit('nextupdismiss');
+}
+
+function onNextUpKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        dismissNextUp();
+        return;
+    }
+    const cards = [...(nextUpEl.value?.querySelectorAll<HTMLElement>('.lmpl-nextup-card') ?? [])];
+    const index = cards.findIndex((card) => card === document.activeElement);
+    if (index < 0) return;
+    const target =
+        event.key === 'ArrowRight' ? Math.min(cards.length - 1, index + 1)
+        : event.key === 'ArrowLeft' ? Math.max(0, index - 1)
+        : event.key === 'Home' ? 0
+        : event.key === 'End' ? cards.length - 1
+        : -1;
+    if (target < 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    cards[target]!.focus();
+    cards[target]!.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+}
+
+/** A vertical wheel scrolls the strip sideways, which a mouse has no other way to do. */
+function onNextUpWheel(event: WheelEvent): void {
+    const strip = event.currentTarget as HTMLElement;
+    if (Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
+    strip.scrollLeft += event.deltaY;
+    event.preventDefault();
+}
+
+// The strip opens at its first card, whatever it was scrolled to before.
+watch(nextUpVisible, async (shown) => {
+    if (!shown) return;
+    await nextTick();
+    nextUpEl.value?.querySelector<HTMLElement>('.lmpl-nextup-strip')?.scrollTo?.({ left: 0 });
+});
+
+// A new video is a new offer; fullscreen itself is kept across the change.
+watch(
+    () => props.source,
+    () => {
+        nextUpClosed.value = false;
+    }
+);
+
 // --- artwork ----------------------------------------------------------------
 
 const artworkImage = computed(() => toPlayerImage(props.poster));
@@ -941,6 +1184,7 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
             'lmpl-has-audio-choice': state.audioTracks.length > 1,
             'lmpl-has-subtitles': state.subtitleTracks.length > 0,
             'lmpl-has-thumbs': state.thumbnailsReady,
+            'lmpl-has-browse': hasBrowse,
             'lmpl-scrubbing': rosterShown,
             'lmpl-previewing': scrub !== null,
         }"
@@ -1066,6 +1310,141 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
                     :style="{ left: `${tooltip.centre}px`, bottom: `${tooltip.bottom}px` }"
                 >
                     {{ tooltip.text }}
+                </div>
+
+                <!-- Chapters and up next, over the picture so it goes fullscreen with it. -->
+                <template v-if="browseOpen && isFullscreen">
+                    <!-- Taps outside close it; stopped here so they do not also pause the video. -->
+                    <div
+                        class="lmpl-browse-scrim"
+                        aria-hidden="true"
+                        @pointerdown.stop
+                        @pointerup.stop
+                        @dblclick.stop
+                        @click.stop="closeBrowse"
+                    ></div>
+                    <div
+                        :id="browseId"
+                        ref="browseEl"
+                        class="lmpl-browse"
+                        role="dialog"
+                        :aria-label="msg.browse"
+                        @keydown="onBrowseKeydown"
+                        @pointerdown.stop
+                        @pointerup.stop
+                        @dblclick.stop
+                        @click.stop
+                    >
+                        <div class="lmpl-browse-head">
+                            <div class="lmpl-browse-tabs" role="tablist" :aria-label="msg.browse">
+                                <button
+                                    v-for="tab in browseTabs"
+                                    :id="tabId(tab.id)"
+                                    :key="tab.id"
+                                    type="button"
+                                    role="tab"
+                                    class="lmpl-browse-tab"
+                                    :aria-selected="browseTab === tab.id"
+                                    :aria-controls="`${tabId(tab.id)}-panel`"
+                                    :tabindex="browseTab === tab.id ? 0 : -1"
+                                    @click="selectBrowseTab(tab.id)"
+                                >
+                                    {{ tab.label }}
+                                </button>
+                            </div>
+                            <button
+                                type="button"
+                                class="media-button lmpl-icon-btn lmpl-browse-close"
+                                :aria-label="msg.closeBrowse"
+                                @click="closeBrowse"
+                            >
+                                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
+                                    <path d="M6 6l12 12M18 6L6 18" />
+                                </svg>
+                            </button>
+                        </div>
+
+                        <div
+                            v-if="browseTab"
+                            :id="`${tabId(browseTab)}-panel`"
+                            class="lmpl-browse-body"
+                            role="tabpanel"
+                            :aria-labelledby="tabId(browseTab)"
+                        >
+                            <ol v-if="browseTab === 'chapters'" class="lmpl-browse-list">
+                                <li v-for="(chapter, index) in chapters" :key="`${chapter.startTime}-${index}`">
+                                    <button
+                                        type="button"
+                                        class="lmpl-browse-row lmpl-chapter"
+                                        :aria-current="index === currentChapter ? 'true' : undefined"
+                                        @click="pickChapter(chapter)"
+                                    >
+                                        <span class="lmpl-chapter-title">{{ chapter.title }}</span>
+                                        <span class="lmpl-chapter-time">{{ formatClock(chapter.startTime, chaptersHaveHours) }}</span>
+                                    </button>
+                                </li>
+                            </ol>
+                            <ul v-else class="lmpl-browse-list">
+                                <template v-for="row in upNextRows" :key="row.item.id">
+                                    <li v-if="row.heading" class="lmpl-browse-heading" role="presentation">{{ row.heading }}</li>
+                                    <li>
+                                        <button type="button" class="lmpl-browse-row lmpl-upnext" @click="pickUpNext(row.item.id)">
+                                            <span class="lmpl-upnext-thumb">
+                                                <img v-if="row.item.imageUrl" :src="row.item.imageUrl" alt="" loading="lazy" draggable="false" />
+                                            </span>
+                                            <span class="lmpl-upnext-text">
+                                                <span class="lmpl-upnext-title">{{ row.item.title }}</span>
+                                                <span v-if="row.item.subtitle" class="lmpl-upnext-subtitle">{{ row.item.subtitle }}</span>
+                                            </span>
+                                        </button>
+                                    </li>
+                                </template>
+                            </ul>
+                        </div>
+                    </div>
+                </template>
+                <!-- The videos that may follow, offered near the end; rides above the controls while they show. -->
+                <div
+                    v-if="nextUpItems.length && nextUpVisible"
+                    ref="nextUpEl"
+                    class="lmpl-nextup"
+                    :class="{ 'lmpl-nextup-raised': controlsShown }"
+                    role="region"
+                    :aria-label="msg.nextUp"
+                    @keydown="onNextUpKeydown"
+                    @pointerdown.stop
+                    @pointerup.stop
+                    @dblclick.stop
+                    @click.stop
+                >
+                    <div class="lmpl-nextup-head">
+                        <span class="lmpl-nextup-label">{{ msg.nextUp }}</span>
+                        <button
+                            type="button"
+                            class="media-button lmpl-icon-btn lmpl-nextup-close"
+                            :aria-label="msg.dismiss"
+                            @click="dismissNextUp"
+                        >
+                            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
+                                <path d="M6 6l12 12M18 6L6 18" />
+                            </svg>
+                        </button>
+                    </div>
+                    <ul class="lmpl-nextup-strip" @wheel="onNextUpWheel">
+                        <li v-for="item in nextUpItems" :key="item.id" class="lmpl-nextup-item">
+                            <button
+                                type="button"
+                                class="lmpl-nextup-card"
+                                @click="selectNextUp(item.id)"
+                            >
+                                <span class="lmpl-nextup-thumb">
+                                    <NextUpThumb :item="item" />
+                                </span>
+                                <span v-if="item.section" class="lmpl-nextup-section">{{ item.section }}</span>
+                                <span class="lmpl-nextup-title">{{ item.title }}</span>
+                            </button>
+                        </li>
+                    </ul>
                 </div>
             </media-container>
         </video-player>

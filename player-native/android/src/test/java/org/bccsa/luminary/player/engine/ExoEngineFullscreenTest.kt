@@ -1,6 +1,8 @@
 package org.bccsa.luminary.player.engine
 
 import android.content.Intent
+import android.view.View
+import android.view.ViewGroup
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -124,6 +126,61 @@ class ExoEngineFullscreenTest {
         call("exitFullscreen")
         assertFalse(presenter.isPresented)
         assertEquals(listOf("fullscreen", "inline"), presentationChanges())
+    }
+
+    private fun enterWith(browse: JsonObject) =
+        registry.call("enterFullscreen", buildJsonObject { put("playerId", playerId); put("browse", browse) })
+
+    private fun lists(vararg upNext: String) = buildJsonObject {
+        put("chapters", buildJsonArray { add(buildJsonObject { put("title", "Intro"); put("startTime", 0); put("endTime", 30) }) })
+        put("upNext", buildJsonArray { upNext.forEach { id -> add(buildJsonObject { put("id", id); put("title", "Title $id") }) } })
+    }
+
+    private fun View.descended(): List<View> =
+        listOf(this) + ((this as? ViewGroup)?.let { group -> (0 until group.childCount).flatMap { group.getChildAt(it).descended() } } ?: emptyList())
+
+    private fun described(description: String) =
+        presenter.skinControls()!!.descended().firstOrNull { it.contentDescription?.toString() == description && it.visibility == View.VISIBLE }
+
+    @Test
+    fun `the lists the page sends open a panel, and an up-next pick reaches the page as browseselect`() {
+        create()
+        load(audioOnly = false)
+
+        enterWith(lists("p2"))
+        described("Chapters and up next")!!.performClick()
+        described("Up next")!!.performClick()
+        described("Title p2")!!.performClick()
+
+        val picks = events.filter { it.first == "browseselect" }.map { it.second }
+        assertEquals(1, picks.size)
+        assertEquals("upnext", picks.single().getValue("kind").jsonPrimitive.content)
+        assertEquals("p2", picks.single().getValue("id").jsonPrimitive.content)
+        assertEquals("load1", picks.single().getValue("loadId").jsonPrimitive.content)
+    }
+
+    @Test
+    fun `lists sent while full-screen is up replace the ones on screen, without presenting again`() {
+        create()
+        load(audioOnly = false)
+        enterWith(lists())
+        described("Chapters and up next")!!.performClick()
+        assertNull(described("Up next"))
+
+        enterWith(lists("late"))
+
+        assertNotNull(described("Up next"))
+        assertEquals(listOf("fullscreen"), presentationChanges())
+    }
+
+    @Test
+    fun `full-screen with no lists has no panel button`() {
+        create()
+        load(audioOnly = false)
+
+        call("enterFullscreen")
+
+        assertNull(described("Chapters and up next"))
     }
 
     @Test

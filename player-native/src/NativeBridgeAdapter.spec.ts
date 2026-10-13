@@ -656,4 +656,17 @@ describe('NativeBridgeAdapter — the TV menu', () => {
         expect(plugin.argsOf('setVariant')).toHaveLength(1);
         expect(plugin.argsOf<MenuArgs>('setCastMenu').at(-1)!.menu.activeQualityId).toBe(quality);
     });
+
+    it('leaves an up-next pick to the host component: the controller is not told of a choice', async () => {
+        const { controller, emitNow, adapter, reports } = await setup(multiAngleRoutes, { castMenu: true });
+        await controller.load({ masterUrl: MASTER_URL });
+        const choices: unknown[] = [];
+        adapter.onViewerChoice((choice) => choices.push(choice));
+
+        emitNow('browseselect', { kind: 'upnext', id: 'post-2' });
+        await flush();
+
+        expect(choices).toEqual([]);
+        expect(reports).toEqual([]);
+    });
 });

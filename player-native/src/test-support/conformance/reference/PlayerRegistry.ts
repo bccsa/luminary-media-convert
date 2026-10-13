@@ -12,6 +12,7 @@ import {
     PROTOCOL_VERSION,
     type BridgeAsset,
     type BridgeErrorCode,
+    type FullscreenBrowse,
     type InlineFrame,
 } from '../../../bridge.js';
 import type { CallResult, ConformanceHarness, RouteResult } from '../harness.js';
@@ -97,7 +98,23 @@ const SHAPES: Record<string, { fields: Record<string, Shape>; optional?: Record<
     setSubtitleTrack: { fields: PLAYER, optional: { label: 'string' } },
     startPictureInPicture: { fields: PLAYER },
     showAirPlayPicker: { fields: PLAYER },
-    enterFullscreen: { fields: PLAYER, optional: { texts: 'object' } },
+    enterFullscreen: { fields: PLAYER, optional: {
+            texts: 'object',
+            browse: {
+                fields: {
+                    chapters: {
+                        array: { fields: { title: 'string', startTime: 'number', endTime: 'number' } },
+                    },
+                    upNext: {
+                        array: {
+                            fields: { id: 'string', title: 'string' },
+                            optional: { subtitle: 'string', imageUrl: 'string', section: 'string' },
+                        },
+                    },
+                },
+            },
+        },
+    },
     exitFullscreen: { fields: PLAYER },
     resumed: { fields: PLAYER },
     destroy: { fields: PLAYER },
@@ -273,7 +290,10 @@ export class PlayerRegistry {
                 player.setInlineFrame((args.frame as unknown as InlineFrame | undefined) ?? null);
                 break;
             case 'enterFullscreen':
-                player.engine.enterFullscreen((args.texts as Record<string, string> | undefined) ?? null);
+                player.engine.enterFullscreen(
+                    (args.texts as Record<string, string> | undefined) ?? null,
+                    (args.browse as unknown as FullscreenBrowse | undefined) ?? null,
+                );
                 break;
             case 'exitFullscreen':
                 player.exitFullscreen();

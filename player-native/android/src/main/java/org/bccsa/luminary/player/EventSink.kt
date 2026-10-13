@@ -167,6 +167,17 @@ class EventSink(
         )
     }
 
+    /** The viewer picked an up-next item in full-screen's panel; the page plays it. */
+    fun browseSelect(id: String) {
+        send(
+            "browseselect",
+            buildJsonObject {
+                put("kind", "upnext")
+                put("id", id)
+            },
+        )
+    }
+
     private var muted = false
 
     /** Only on a change, whoever made it: a `setMuted`, or the viewer in native UI. */

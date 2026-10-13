@@ -2,6 +2,7 @@ package org.bccsa.luminary.player.engine
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ColorFilter
@@ -15,6 +16,7 @@ import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.util.TypedValue
@@ -22,12 +24,16 @@ import android.view.GestureDetector
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewOutlineProvider
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import androidx.annotation.OptIn
+import androidx.core.content.ContextCompat
 import androidx.core.graphics.Insets
 import androidx.core.graphics.PathParser
 import androidx.core.view.ViewCompat
@@ -35,12 +41,18 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
+import androidx.media3.common.util.BitmapLoader
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.util.Util
+import com.google.common.util.concurrent.FutureCallback
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
+import org.bccsa.luminary.player.Browse
+import org.bccsa.luminary.player.BrowseChapter
 import org.bccsa.luminary.player.Roster
 import org.bccsa.luminary.player.Thumbnails
 
@@ -72,11 +84,18 @@ internal class SkinControls(
     private val onCast: (() -> Unit)? = null,
     /** The scrub frames; no roster when null or empty. */
     private val thumbnails: Thumbnails? = null,
+    /** The chapters and up next the panel lists; no button while there are none. */
+    browse: Browse? = null,
+    /** Called with the id of the up-next item the viewer picked. */
+    private val onBrowseSelect: ((String) -> Unit)? = null,
+    /** Loads the up-next pictures; the rows keep a plain tile without it. */
+    private val images: BitmapLoader? = null,
     private val onLeave: () -> Unit,
 ) : FrameLayout(context), Player.Listener {
     private val main = Handler(Looper.getMainLooper())
     private val panel = FrameLayout(context)
     private val menuLayer = FrameLayout(context)
+    private val browseLayer = FrameLayout(context)
 
     private val play = Icon(context, V10Icons.play, circle = true)
     private val spinner = Spinner(context)
@@ -86,6 +105,7 @@ internal class SkinControls(
     private val pipButton = Icon(context, V10Icons.pip)
     private val castButton = Icon(context, V10Icons.cast)
     private val subtitlesButton = Icon(context, V10Icons.captions)
+    private val browseButton = Icon(context, BrowseIcons.list)
     private val rateButton = Icon(context, V10Icons.speed)
     private val muteButton = Icon(context, V10Icons.volumeHigh)
     private val exitButton = Icon(context, V10Icons.fullscreenExit)
@@ -104,6 +124,15 @@ internal class SkinControls(
     private var volumeBeforeMute = 1f
     private var inPictureInPicture = false
     private var menuOpen = false
+    private var browse: Browse? = browse?.takeUnless { it.isEmpty }
+    private var browseOpen = false
+    private var browseTab = BrowseTab.CHAPTERS
+    private var browseSheet: LinearLayout? = null
+    private var browseScroll: ScrollView? = null
+    private var chapterRows: List<ChapterRow> = emptyList()
+    private var currentChapter = -1
+    private val loadingImages = mutableListOf<ListenableFuture<Bitmap>>()
+    private var inset = Insets.NONE
     private var shown = true
     private var attached = false
     private var safe = Insets.NONE
@@ -175,6 +204,7 @@ internal class SkinControls(
         actionsRow.addView(audioButton.tap { openAudioMenu() })
         actionsRow.addView(rateButton.tap { openRateMenu() })
         actionsRow.addView(subtitlesButton.tap { openSubtitlesMenu() })
+        actionsRow.addView(browseButton.tap { if (browseOpen) closeBrowse() else openBrowse() })
         actionsRow.addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
         actionsRow.addView(castButton.tap { onCast?.invoke() })
         actionsRow.addView(pipButton.tap { onPictureInPicture?.invoke() })
@@ -203,6 +233,8 @@ internal class SkinControls(
         muteButton.contentDescription = texts.mute
         pipButton.contentDescription = texts.pictureInPicture
         subtitlesButton.contentDescription = texts.subtitlesMenu
+        browseButton.contentDescription = texts.browse
+        browseButton.visibility = if (this.browse != null) VISIBLE else GONE
         pipButton.visibility = if (onPictureInPicture != null) VISIBLE else GONE
         castButton.contentDescription = texts.cast
         castButton.visibility = if (onCast != null) VISIBLE else GONE
@@ -210,6 +242,7 @@ internal class SkinControls(
         exitButton.contentDescription = texts.exitFullscreen
         timeline.contentDescription = texts.seek
         addView(menuLayer, LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        addView(browseLayer, LayoutParams(MATCH_PARENT, MATCH_PARENT))
         // The controls stay clear of the system's own edges.
         ViewCompat.setOnApplyWindowInsetsListener(this) { _, insets ->
             safe = safeInsets(insets)
@@ -254,6 +287,7 @@ internal class SkinControls(
         main.removeCallbacks(tick)
         main.removeCallbacks(hide)
         if (thumbnails?.onChange != null) thumbnails.onChange = null
+        cancelImages()
         super.onDetachedFromWindow()
     }
 
@@ -263,6 +297,8 @@ internal class SkinControls(
         if (dp != widthDp) {
             widthDp = dp
             applyScale()
+            // Not inside this layout pass: the sheet is rebuilt for the new width.
+            if (browseOpen) post { if (browseOpen) renderBrowse(keepScroll = true) }
         }
     }
 
@@ -302,7 +338,12 @@ internal class SkinControls(
         inPictureInPicture = active
         panel.visibility = if (active) GONE else VISIBLE
         menuLayer.visibility = if (active) GONE else VISIBLE
-        if (active) closeMenu() else setShown(true)
+        if (active) {
+            closeMenu()
+            closeBrowse()
+        } else {
+            setShown(true)
+        }
     }
 
     override fun onPlaybackParametersChanged(playbackParameters: androidx.media3.common.PlaybackParameters) = refresh()
@@ -356,6 +397,7 @@ internal class SkinControls(
             val at = sliding?.let { it * 1000 } ?: player.currentPosition.toDouble()
             timeline.show(at / duration, player.bufferedPosition.toDouble() / duration)
         }
+        if (browseOpen && browseTab == BrowseTab.CHAPTERS) markCurrentChapter()
         // Held open after the finger lifts, the roster follows the playhead until it is touched again.
         if (rosterOpen && !timeline.dragging && sliding == null) updateRoster(position)
     }
@@ -483,7 +525,7 @@ internal class SkinControls(
 
     // Auto-hide: three seconds, only while playing and with nothing open or being dragged.
 
-    private fun canHide() = !menuOpen && !timeline.dragging && !rosterOpen && !Util.shouldShowPlayButton(player)
+    private fun canHide() = !menuOpen && !browseOpen && !timeline.dragging && !rosterOpen && !Util.shouldShowPlayButton(player)
 
     private fun scheduleHide() {
         main.removeCallbacks(hide)
@@ -619,6 +661,313 @@ internal class SkinControls(
     /** True while a menu is open; it swallows the tap that would have toggled the controls. */
     val hasMenuOpen: Boolean get() = menuOpen
 
+    // The chapters / up-next panel: a sheet down the right-hand side, with the rest of the picture dimmed.
+
+    private enum class BrowseTab { CHAPTERS, UP_NEXT }
+
+    private class ChapterRow(val row: View, val title: TextView, val marker: View)
+
+    /** True while the panel is open. */
+    val hasBrowseOpen: Boolean get() = browseOpen
+
+    /** Replaces what the panel lists, also while it is open; with nothing to list the button goes and the panel closes. */
+    fun setBrowse(next: Browse?) {
+        browse = next?.takeUnless { it.isEmpty }
+        browseButton.visibility = if (browse != null) VISIBLE else GONE
+        if (!browseOpen) return
+        if (browse == null) closeBrowse() else renderBrowse(keepScroll = true)
+    }
+
+    private fun openBrowse() {
+        val lists = browse ?: return
+        closeMenu()
+        closeRoster()
+        browseOpen = true
+        browseTab = if (lists.chapters.isNotEmpty()) BrowseTab.CHAPTERS else BrowseTab.UP_NEXT
+        main.removeCallbacks(hide)
+        renderBrowse(keepScroll = false)
+    }
+
+    /** False when the panel was not open, so a back gesture knows whether it was for the panel. */
+    fun closeBrowse(): Boolean {
+        if (!browseOpen) return false
+        browseOpen = false
+        cancelImages()
+        browseLayer.removeAllViews()
+        browseSheet = null
+        browseScroll = null
+        chapterRows = emptyList()
+        currentChapter = -1
+        scheduleHide()
+        return true
+    }
+
+    private fun browseWidthPx(): Int {
+        // A third of a landscape screen is enough for a list; a portrait one needs nearly all of its width.
+        val wide = (width * BROWSE_FRACTION).roundToInt()
+        val floor = min(dpf(BROWSE_MIN_DP * scale).roundToInt(), (width * 0.92f).roundToInt())
+        return max(wide, floor)
+    }
+
+    private fun renderBrowse(keepScroll: Boolean) {
+        val lists = browse ?: return
+        val keep = if (keepScroll) browseScroll?.scrollY ?: 0 else 0
+        cancelImages()
+        browseLayer.removeAllViews()
+        if (lists.chapters.isEmpty()) browseTab = BrowseTab.UP_NEXT else if (lists.upNext.isEmpty()) browseTab = BrowseTab.CHAPTERS
+        fun px(dp: Float) = dpf(dp * scale).roundToInt()
+
+        // Anywhere outside the sheet puts it away; the scrim also keeps those taps from the controls beneath.
+        browseLayer.addView(
+            View(context).apply {
+                setBackgroundColor(0x4D000000)
+                isClickable = true
+                importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+                setOnClickListener { closeBrowse() }
+            },
+            LayoutParams(MATCH_PARENT, MATCH_PARENT),
+        )
+        val sheet = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable().apply {
+                setColor(BROWSE_SHEET)
+                cornerRadii = floatArrayOf(dpf(16f * scale), dpf(16f * scale), 0f, 0f, 0f, 0f, dpf(16f * scale), dpf(16f * scale))
+            }
+            elevation = dpf(12f)
+            isClickable = true
+            ViewCompat.setAccessibilityPaneTitle(this, texts.browse)
+            setPadding(0, inset.top, inset.right, inset.bottom)
+        }
+        val header = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(px(8f), px(4f), px(4f), 0)
+        }
+        fun tab(label: String, which: BrowseTab) = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            val selected = browseTab == which
+            addView(
+                TextView(context).apply {
+                    text = label
+                    setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15f * scale)
+                    typeface = if (selected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+                    setTextColor(if (selected) Color.WHITE else 0x99FFFFFF.toInt())
+                    setPadding(px(12f), px(12f), px(12f), px(8f))
+                },
+            )
+            addView(
+                View(context).apply { setBackgroundColor(if (selected) Color.WHITE else Color.TRANSPARENT) },
+                LinearLayout.LayoutParams(MATCH_PARENT, dpf(2f).roundToInt()),
+            )
+            contentDescription = label
+            isSelected = selected
+            isClickable = true
+            setOnClickListener {
+                browseTab = which
+                renderBrowse(keepScroll = false)
+            }
+        }
+        if (lists.chapters.isNotEmpty()) header.addView(tab(texts.chapters, BrowseTab.CHAPTERS))
+        if (lists.upNext.isNotEmpty()) header.addView(tab(texts.upNext, BrowseTab.UP_NEXT))
+        header.addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
+        header.addView(
+            Icon(context, BrowseIcons.close).apply {
+                iconDp = 20f * scale
+                contentDescription = texts.closeBrowse
+                isClickable = true
+                setOnClickListener { closeBrowse() }
+                lp(px(40f), px(40f))
+            },
+        )
+        sheet.addView(header, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        sheet.addView(View(context).apply { setBackgroundColor(0x1FFFFFFF) }, LinearLayout.LayoutParams(MATCH_PARENT, dpf(1f).roundToInt()))
+
+        val list = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(px(8f), px(8f), px(8f), px(16f))
+        }
+        if (browseTab == BrowseTab.CHAPTERS) fillChapters(list, lists.chapters) else fillUpNext(list, lists)
+        val scroll = ScrollView(context).apply {
+            isVerticalScrollBarEnabled = false
+            overScrollMode = OVER_SCROLL_NEVER
+            addView(list, LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        }
+        sheet.addView(scroll, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
+        browseLayer.addView(sheet, LayoutParams(browseWidthPx(), MATCH_PARENT, Gravity.END))
+        browseSheet = sheet
+        browseScroll = scroll
+        scroll.post {
+            if (keep > 0) {
+                scroll.scrollY = keep
+            } else if (browseTab == BrowseTab.CHAPTERS) {
+                // Open where the playhead is.
+                chapterRows.getOrNull(currentChapter)?.let { scroll.scrollY = max(it.row.top - px(48f), 0) }
+            }
+        }
+    }
+
+    private fun rowBackground(selected: Boolean) = GradientDrawable().apply {
+        setColor(if (selected) 0x26FFFFFF else Color.TRANSPARENT)
+        cornerRadius = dpf(10f * scale)
+    }
+
+    private fun chapterIndex(chapters: List<BrowseChapter>, seconds: Double) =
+        chapters.indexOfFirst { seconds >= it.start && seconds < it.end }
+
+    private fun fillChapters(into: LinearLayout, chapters: List<BrowseChapter>) {
+        fun px(dp: Float) = dpf(dp * scale).roundToInt()
+        val guide = max(chapters.maxOfOrNull { it.end } ?: 0.0, player.duration.takeIf { it != C.TIME_UNSET }?.div(1000.0) ?: 0.0)
+        currentChapter = chapterIndex(chapters, player.currentPosition / 1000.0)
+        chapterRows = chapters.mapIndexed { index, chapter ->
+            val now = index == currentChapter
+            val marker = Icon(context, V10Icons.play).apply {
+                iconDp = 14f * scale
+                visibility = if (now) VISIBLE else INVISIBLE
+            }
+            val title = TextView(context).apply {
+                text = chapter.title
+                setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15f * scale)
+                setTextColor(Color.WHITE)
+                typeface = if (now) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+                maxLines = 2
+            }
+            val time = formatTime(chapter.start, guide)
+            val row = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                minimumHeight = px(48f)
+                setPadding(px(8f), px(10f), px(12f), px(10f))
+                background = rowBackground(now)
+                addView(marker, LinearLayout.LayoutParams(px(18f), px(18f)))
+                addView(title, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { marginStart = px(6f) })
+                addView(
+                    TextView(context).apply {
+                        text = time
+                        setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13f * scale)
+                        setTextColor(0x99FFFFFF.toInt())
+                        fontFeatureSettings = "tnum"
+                    },
+                    LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { marginStart = px(12f) },
+                )
+                contentDescription = "${chapter.title}, $time"
+                isSelected = now
+                isClickable = true
+                setOnClickListener {
+                    player.seekTo((chapter.start * 1000).roundToLong())
+                    closeBrowse()
+                }
+            }
+            into.addView(row, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = px(2f) })
+            ChapterRow(row, title, marker)
+        }
+    }
+
+    /** Follows the playhead from chapter to chapter while the panel is open. */
+    private fun markCurrentChapter() {
+        val chapters = browse?.chapters ?: return
+        val index = chapterIndex(chapters, player.currentPosition / 1000.0)
+        if (index == currentChapter) return
+        currentChapter = index
+        chapterRows.forEachIndexed { i, row ->
+            val now = i == index
+            row.row.background = rowBackground(now)
+            row.row.isSelected = now
+            row.title.typeface = if (now) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+            row.marker.visibility = if (now) VISIBLE else INVISIBLE
+        }
+    }
+
+    private fun fillUpNext(into: LinearLayout, lists: Browse) {
+        fun px(dp: Float) = dpf(dp * scale).roundToInt()
+        lists.upNext.forEachIndexed { index, item ->
+            // A section's name shows once, over the first item of each run that carries it.
+            if (item.section != null && item.section != lists.upNext.getOrNull(index - 1)?.section) {
+                into.addView(
+                    TextView(context).apply {
+                        text = item.section.uppercase()
+                        setTextSize(TypedValue.COMPLEX_UNIT_DIP, 11f * scale)
+                        typeface = Typeface.DEFAULT_BOLD
+                        letterSpacing = 0.06f
+                        setTextColor(0x99FFFFFF.toInt())
+                        setPadding(px(8f), if (index == 0) px(4f) else px(14f), px(8f), px(6f))
+                    },
+                    LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT),
+                )
+            }
+            val picture = ImageView(context).apply {
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                background = GradientDrawable().apply { setColor(0xFF151518.toInt()) }
+                clipToOutline = true
+                outlineProvider = object : ViewOutlineProvider() {
+                    override fun getOutline(view: View, outline: android.graphics.Outline) =
+                        outline.setRoundRect(0, 0, view.width, view.height, dpf(8f * scale))
+                }
+                importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+            }
+            item.imageUrl?.takeIf { it.isNotEmpty() }?.let { loadImage(picture, it) }
+            val words = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(
+                    TextView(context).apply {
+                        text = item.title
+                        setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14f * scale)
+                        typeface = Typeface.DEFAULT_BOLD
+                        setTextColor(Color.WHITE)
+                        maxLines = 2
+                    },
+                )
+                item.subtitle?.takeIf { it.isNotEmpty() }?.let { subtitle ->
+                    addView(
+                        TextView(context).apply {
+                            text = subtitle
+                            setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12f * scale)
+                            setTextColor(0x99FFFFFF.toInt())
+                            maxLines = 2
+                        },
+                    )
+                }
+            }
+            val row = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(px(8f), px(8f), px(8f), px(8f))
+                background = rowBackground(false)
+                addView(picture, LinearLayout.LayoutParams(px(UP_NEXT_PICTURE_DP), px(UP_NEXT_PICTURE_DP * 9f / 16f)))
+                addView(words, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { marginStart = px(12f) })
+                contentDescription = listOfNotNull(item.title, item.subtitle?.takeIf { it.isNotEmpty() }).joinToString(", ")
+                isClickable = true
+                setOnClickListener {
+                    onBrowseSelect?.invoke(item.id)
+                    closeBrowse()
+                }
+            }
+            into.addView(row, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = px(2f) })
+        }
+    }
+
+    private fun loadImage(into: ImageView, url: String) {
+        val loader = images ?: return
+        val future = runCatching { loader.loadBitmap(Uri.parse(url)) }.getOrNull() ?: return
+        loadingImages += future
+        Futures.addCallback(
+            future,
+            object : FutureCallback<Bitmap> {
+                override fun onSuccess(result: Bitmap?) {
+                    if (result != null && !future.isCancelled && into.isAttachedToWindow) into.setImageBitmap(result)
+                }
+
+                // A tile without its picture still names the video.
+                override fun onFailure(t: Throwable) {}
+            },
+            ContextCompat.getMainExecutor(context),
+        )
+    }
+
+    private fun cancelImages() {
+        loadingImages.forEach { it.cancel(true) }
+        loadingImages.clear()
+    }
+
     // Layout.
 
     /**
@@ -645,7 +994,7 @@ internal class SkinControls(
                 gravity = Gravity.CENTER_VERTICAL
             }
         }
-        listOf(muteButton, audioButton, rateButton, subtitlesButton, castButton, pipButton, exitButton).forEach {
+        listOf(muteButton, audioButton, rateButton, subtitlesButton, browseButton, castButton, pipButton, exitButton).forEach {
             it.iconDp = 22f * s
             it.lp(px(40f), px(40f), margin = 1)
         }
@@ -715,6 +1064,8 @@ internal class SkinControls(
         if (panel.paddingLeft != left || panel.paddingTop != top || panel.paddingRight != right || panel.paddingBottom != bottom) {
             panel.setPadding(left, top, right, bottom)
         }
+        inset = Insets.of(left, top, right, bottom)
+        browseSheet?.setPadding(0, top, right, bottom)
     }
 
     /** Tapping a control closes an open menu, as the skin's menus close when they lose focus. */
@@ -748,6 +1099,10 @@ internal class SkinControls(
         const val FADE_OUT_MS = 500L
         private const val TICK_MS = 250L
         private const val MENU_WIDTH_DP = 168
+        private const val BROWSE_SHEET = 0xF2121216.toInt()
+        private const val BROWSE_FRACTION = 0.4f
+        private const val BROWSE_MIN_DP = 320f
+        private const val UP_NEXT_PICTURE_DP = 128f
         private const val CARD = 0xF718181B.toInt()
 
         /** The slider is taller than the track it draws, so the track sits this far (per unit of scale) above its bottom. */

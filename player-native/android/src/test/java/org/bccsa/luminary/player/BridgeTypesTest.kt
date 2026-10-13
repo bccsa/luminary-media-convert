@@ -111,4 +111,47 @@ class BridgeTypesTest {
         val warm = BridgeCall.decode("warmChunks", warm(JsonPrimitive(65536))) as BridgeCall.WarmChunks
         assertEquals(65536, warm.warmBytes)
     }
+
+    private fun enter(browse: kotlinx.serialization.json.JsonElement?) = buildJsonObject {
+        put("playerId", "player-1")
+        if (browse != null) put("browse", browse)
+    }
+
+    @Test
+    fun `enterFullscreen carries the lists the panel shows, and they are optional`() {
+        val browse = buildJsonObject {
+            put("chapters", buildJsonArray { add(buildJsonObject { put("title", "Intro"); put("startTime", 0); put("endTime", 30) }) })
+            put(
+                "upNext",
+                buildJsonArray {
+                    add(buildJsonObject { put("id", "p2"); put("title", "Next"); put("subtitle", "Part 2"); put("section", "Related") })
+                },
+            )
+        }
+
+        val call = BridgeCall.decode("enterFullscreen", enter(browse)) as BridgeCall.EnterFullscreen
+
+        assertEquals(listOf(BrowseChapter("Intro", 0.0, 30.0)), call.browse!!.chapters)
+        assertEquals(listOf(BrowseItem("p2", "Next", "Part 2", null, "Related")), call.browse!!.upNext)
+        assertEquals(null, (BridgeCall.decode("enterFullscreen", enter(null)) as BridgeCall.EnterFullscreen).browse)
+    }
+
+    @Test
+    fun `lists of the wrong shape are refused whole`() {
+        fun chapters(vararg entries: kotlinx.serialization.json.JsonElement) = buildJsonObject {
+            put("chapters", buildJsonArray { entries.forEach { add(it) } })
+            put("upNext", buildJsonArray { })
+        }
+        assertInvalid("enterFullscreen", enter(JsonPrimitive("lists")))
+        assertInvalid("enterFullscreen", enter(buildJsonObject { put("chapters", buildJsonArray { }) }))
+        assertInvalid("enterFullscreen", enter(chapters(buildJsonObject { put("title", "x") })))
+        assertInvalid("enterFullscreen", enter(chapters(buildJsonObject { put("title", "x"); put("startTime", "0"); put("endTime", 1) })))
+        assertInvalid(
+            "enterFullscreen",
+            enter(buildJsonObject {
+                put("chapters", buildJsonArray { })
+                put("upNext", buildJsonArray { add(buildJsonObject { put("id", 3); put("title", "x") }) })
+            }),
+        )
+    }
 }

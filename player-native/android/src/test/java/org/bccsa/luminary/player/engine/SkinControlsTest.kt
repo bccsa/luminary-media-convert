@@ -1,16 +1,25 @@
 package org.bccsa.luminary.player.engine
 
+import android.graphics.Bitmap
+import android.net.Uri
 import android.os.Looper
 import android.os.SystemClock
 import android.view.View
+import android.widget.ImageView
 import androidx.activity.ComponentActivity
 import androidx.media3.common.Player
+import androidx.media3.common.util.BitmapLoader
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.test.utils.FakeMediaSource
 import androidx.media3.test.utils.FakeTimeline
 import androidx.media3.test.utils.TestExoPlayerBuilder
 import androidx.media3.test.utils.robolectric.TestPlayerRunHelper
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
 import java.time.Duration
+import org.bccsa.luminary.player.Browse
+import org.bccsa.luminary.player.BrowseChapter
+import org.bccsa.luminary.player.BrowseItem
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -365,5 +374,225 @@ class SkinControlsTest {
 
         idle(10_000)
         assertTrue(controls.controlsShown)
+    }
+
+    // The chapters / up-next panel.
+
+    private val lists = Browse(
+        chapters = listOf(BrowseChapter("Intro", 0.0, 10.0), BrowseChapter("Middle", 10.0, 20.0), BrowseChapter("End", 20.0, 30.0)),
+        upNext = listOf(
+            BrowseItem("p2", "Part 2", "Season 1", "https://cdn/p2.jpg", "Next in series"),
+            BrowseItem("p3", "Part 3", null, null, "Next in series"),
+            BrowseItem("r1", "Something else", "Related one", null, "Related"),
+        ),
+    )
+
+    private fun browseControls(
+        browse: Browse? = lists,
+        picked: MutableList<String> = mutableListOf(),
+        images: BitmapLoader? = null,
+        texts: FullscreenTexts = FullscreenTexts(),
+    ): SkinControls =
+        SkinControls(activity, player, SkinOptions(), texts, browse = browse, onBrowseSelect = { picked += it }, images = images) { left++ }
+            .also { activity.setContentView(it) }
+
+    private val opener = "Chapters and up next"
+
+    @Test
+    fun `the panel button is there only while there is something to list`() {
+        assertNull(browseControls(browse = null).find(opener))
+        assertNull(browseControls(browse = Browse(emptyList(), emptyList())).find(opener))
+        assertNotNull(browseControls().find(opener))
+    }
+
+    @Test
+    fun `the panel opens on chapters, with a tab for each list that has entries`() {
+        val controls = browseControls()
+        controls.find(opener)!!.performClick()
+
+        assertTrue(controls.hasBrowseOpen)
+        assertTrue(controls.anyView("Chapters").isSelected)
+        assertFalse(controls.anyView("Up next").isSelected)
+        assertNotNull(controls.find("Intro, 0:00"))
+        assertNotNull(controls.find("Middle, 0:10"))
+        assertNull("the other tab's list is not drawn", controls.find("Part 2, Season 1"))
+
+        controls.anyView("Up next").performClick()
+        assertTrue(controls.anyView("Up next").isSelected)
+        assertNotNull(controls.find("Part 2, Season 1"))
+        assertNull(controls.find("Intro, 0:00"))
+    }
+
+    @Test
+    fun `a list with no entries has no tab, and the panel opens on the other`() {
+        val controls = browseControls(browse = Browse(emptyList(), lists.upNext))
+        controls.find(opener)!!.performClick()
+
+        assertNull(controls.find("Chapters"))
+        assertTrue(controls.anyView("Up next").isSelected)
+        assertNotNull(controls.find("Part 3"))
+    }
+
+    @Test
+    fun `a chapter marks the one the playhead is in, follows playback, and seeks and closes when tapped`() {
+        val controls = browseControls()
+        player.seekTo(12_000)
+        idle(300)
+        controls.find(opener)!!.performClick()
+
+        assertTrue(controls.find("Middle, 0:10")!!.isSelected)
+        assertFalse(controls.find("Intro, 0:00")!!.isSelected)
+
+        player.seekTo(25_000)
+        idle(300)
+        assertTrue(controls.find("End, 0:20")!!.isSelected)
+        assertFalse(controls.find("Middle, 0:10")!!.isSelected)
+
+        controls.find("Intro, 0:00")!!.performClick()
+        idle(10)
+        assertEquals(0, player.currentPosition)
+        assertFalse(controls.hasBrowseOpen)
+    }
+
+    @Test
+    fun `an up-next row hands its id out and closes the panel`() {
+        val picked = mutableListOf<String>()
+        val controls = browseControls(picked = picked)
+        controls.find(opener)!!.performClick()
+        controls.anyView("Up next").performClick()
+
+        controls.find("Something else, Related one")!!.performClick()
+
+        assertEquals(listOf("r1"), picked)
+        assertFalse(controls.hasBrowseOpen)
+    }
+
+    @Test
+    fun `a section heading shows once over each run of items that share it`() {
+        val controls = browseControls()
+        controls.find(opener)!!.performClick()
+        controls.anyView("Up next").performClick()
+
+        val texts = controls.texts()
+        assertEquals(1, texts.count { it == "NEXT IN SERIES" })
+        assertEquals(1, texts.count { it == "RELATED" })
+        assertTrue(texts.indexOf("NEXT IN SERIES") < texts.indexOf("Part 2"))
+        assertTrue(texts.indexOf("Part 3") < texts.indexOf("RELATED"))
+    }
+
+    @Test
+    fun `an up-next picture is loaded through the loader, for the items that have one`() {
+        val asked = mutableListOf<String>()
+        val loader = object : BitmapLoader {
+            override fun supportsMimeType(mimeType: String) = true
+            override fun decodeBitmap(data: ByteArray) = Futures.immediateFuture(Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888))
+            override fun loadBitmap(uri: Uri): ListenableFuture<Bitmap> {
+                asked += uri.toString()
+                return Futures.immediateFuture(Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888))
+            }
+        }
+        val controls = browseControls(images = loader)
+        controls.find(opener)!!.performClick()
+        controls.anyView("Up next").performClick()
+        idle(10)
+
+        assertEquals(listOf("https://cdn/p2.jpg"), asked.distinct())
+        val pictures = ArrayList<View>().also { collect(controls, it) }.filterIsInstance<ImageView>()
+        assertEquals(3, pictures.size)
+        assertEquals(1, pictures.count { it.drawable != null })
+    }
+
+    @Test
+    fun `the panel closes from its close button, from outside the sheet, and from back, and back reports whether it did`() {
+        val controls = browseControls()
+        assertFalse("nothing to close yet", controls.closeBrowse())
+
+        controls.find(opener)!!.performClick()
+        controls.find("Close")!!.performClick()
+        assertFalse(controls.hasBrowseOpen)
+
+        controls.find(opener)!!.performClick()
+        // The scrim is the first thing in the panel's layer, behind the sheet.
+        val layer = controls.getChildAt(controls.childCount - 1) as android.view.ViewGroup
+        layer.getChildAt(0).performClick()
+        assertFalse(controls.hasBrowseOpen)
+
+        controls.find(opener)!!.performClick()
+        assertTrue(controls.closeBrowse())
+        assertFalse(controls.hasBrowseOpen)
+        assertEquals("closing the panel does not leave full-screen", 0, left)
+    }
+
+    @Test
+    fun `an open panel keeps the controls up`() {
+        val controls = browseControls()
+        player.play()
+        controls.find(opener)!!.performClick()
+
+        idle(10_000)
+        assertTrue(controls.controlsShown)
+
+        controls.closeBrowse()
+        idle(3_100)
+        assertFalse(controls.controlsShown)
+    }
+
+    @Test
+    fun `lists that arrive while the panel is open replace the ones on screen, and none takes the button and panel away`() {
+        val controls = browseControls(browse = Browse(lists.chapters, emptyList()))
+        controls.find(opener)!!.performClick()
+        assertNull(controls.find("Up next"))
+
+        controls.setBrowse(lists)
+        assertNotNull(controls.find("Up next"))
+        assertNotNull("still on chapters", controls.find("Intro, 0:00"))
+
+        controls.setBrowse(null)
+        assertFalse(controls.hasBrowseOpen)
+        assertNull(controls.find(opener))
+    }
+
+    @Test
+    fun `a button that appears with late lists`() {
+        val controls = browseControls(browse = null)
+        assertNull(controls.find(opener))
+
+        controls.setBrowse(lists)
+
+        assertNotNull(controls.find(opener))
+    }
+
+    @Test
+    fun `the panel says what the host sent`() {
+        val texts = FullscreenTexts.from(mapOf("chapters" to "Chapitres", "upNext" to "À suivre", "browse" to "Chapitres et suite", "closeBrowse" to "Fermer"))
+        val controls = browseControls(texts = texts)
+        controls.find("Chapitres et suite")!!.performClick()
+
+        assertNotNull(controls.find("Chapitres"))
+        assertNotNull(controls.find("À suivre"))
+        assertNotNull(controls.find("Fermer"))
+    }
+
+    @Test
+    fun `the panel is one wide sheet on a portrait phone and about 40 percent of a landscape screen`() {
+        val density = activity.resources.displayMetrics.density
+        fun sheetWidthDp(widthDp: Int): Float {
+            val controls = browseControls()
+            val width = (widthDp * density).toInt()
+            val height = (400 * density).toInt()
+            controls.measure(
+                View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY),
+            )
+            controls.layout(0, 0, width, height)
+            controls.find(opener)!!.performClick()
+            val layer = controls.getChildAt(controls.childCount - 1) as android.view.ViewGroup
+            return layer.getChildAt(1).layoutParams.width / density
+        }
+
+        assertEquals(800 * 0.4f, sheetWidthDp(800), 1f)
+        // 40% of a phone held upright is too narrow to read: a readable minimum, and never the whole screen.
+        assertEquals(320f, sheetWidthDp(360), 1f)
+        assertEquals(300 * 0.92f, sheetWidthDp(300), 1f)
     }
 }

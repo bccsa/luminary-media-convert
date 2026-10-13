@@ -1,0 +1,167 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mount, flushPromises, type VueWrapper } from '@vue/test-utils';
+import { createInitialState, type PlayerControllerApi, type PlayerState } from '@luminary-media-converter/player-core';
+import LuminaryPlayer from '../src/components/LuminaryPlayer.vue';
+import type { PlayerUpNextItem } from '../src/upNext';
+
+// The Video.js elements need a real browser; as inert tags the panel, which is plain Vue, is what is tested.
+vi.mock('../src/ui/register', () => ({}));
+
+const CHAPTERS = [
+    { startTime: 0, endTime: 60, title: 'Intro' },
+    { startTime: 60, endTime: 200, title: 'Main' },
+];
+const UP_NEXT: PlayerUpNextItem[] = [
+    { id: 'n1', title: 'Day 2', subtitle: '3 Oct 2026', imageUrl: 'https://img/n1.jpg', section: 'Next in series' },
+    { id: 'r1', title: 'Other', section: 'Related' },
+];
+
+function fakeController(state: Partial<PlayerState>): PlayerControllerApi {
+    const current = { ...createInitialState(), ...state };
+    return {
+        load: vi.fn().mockResolvedValue(undefined),
+        destroy: vi.fn(),
+        getState: () => current,
+        subscribe: () => () => {},
+    } as unknown as PlayerControllerApi;
+}
+
+// jsdom has no media playback; the keep-alive audio pauses on unmount.
+HTMLMediaElement.prototype.pause = () => {};
+HTMLMediaElement.prototype.play = () => Promise.resolve();
+
+let wrapper: VueWrapper | undefined;
+
+async function mountPlayer(props: Record<string, unknown>, state: Partial<PlayerState> = { chapters: CHAPTERS, currentTime: 70 }) {
+    wrapper = mount(LuminaryPlayer, {
+        attachTo: document.body,
+        props: { source: { masterUrl: 'https://x/master.m3u8' }, createController: () => fakeController(state), ...props },
+    });
+    await flushPromises();
+    return wrapper;
+}
+
+async function setFullscreen(on: boolean) {
+    Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => (on ? document.body : null) });
+    document.dispatchEvent(new Event('fullscreenchange'));
+    await flushPromises();
+}
+
+const toggle = () => document.querySelector<HTMLElement>('[data-browse-toggle]')!;
+const panel = () => document.querySelector<HTMLElement>('.lmpl-browse');
+
+afterEach(async () => {
+    await setFullscreen(false);
+    wrapper?.unmount();
+    wrapper = undefined;
+});
+
+describe('LuminaryPlayer browse panel', () => {
+    it('offers the button only when there are chapters or up-next items', async () => {
+        const w = await mountPlayer({}, {});
+        expect(w.find('.lmpl-root').classes()).not.toContain('lmpl-has-browse');
+        await w.setProps({ upNext: UP_NEXT });
+        expect(w.find('.lmpl-root').classes()).toContain('lmpl-has-browse');
+    });
+
+    it('opens in fullscreen with both tabs, the current chapter marked', async () => {
+        const w = await mountPlayer({ upNext: UP_NEXT });
+        await setFullscreen(true);
+        toggle().click();
+        await flushPromises();
+        expect(panel()).not.toBeNull();
+        expect(toggle().getAttribute('aria-expanded')).toBe('true');
+        expect([...document.querySelectorAll('[role="tab"]')].map((t) => t.textContent!.trim())).toEqual(['Chapters', 'Up next']);
+        const rows = [...document.querySelectorAll('.lmpl-chapter')];
+        expect(rows.map((r) => r.getAttribute('aria-current'))).toEqual([null, 'true']);
+        expect(rows[1]!.textContent).toContain('1:00');
+        expect(w.exists()).toBe(true);
+    });
+
+    it('does not open while windowed', async () => {
+        await mountPlayer({ upNext: UP_NEXT });
+        toggle().click();
+        await flushPromises();
+        expect(panel()).toBeNull();
+    });
+
+    it('hides a tab with no entries', async () => {
+        await mountPlayer({ upNext: UP_NEXT }, {});
+        await setFullscreen(true);
+        toggle().click();
+        await flushPromises();
+        expect([...document.querySelectorAll('[role="tab"]')].map((t) => t.textContent!.trim())).toEqual(['Up next']);
+    });
+
+    it('seeks to a tapped chapter and closes', async () => {
+        const w = await mountPlayer({});
+        const media = w.find('hlsjs-video').element as unknown as { currentTime: number };
+        await setFullscreen(true);
+        toggle().click();
+        await flushPromises();
+        document.querySelectorAll<HTMLElement>('.lmpl-chapter')[1]!.click();
+        await flushPromises();
+        expect(media.currentTime).toBe(60);
+        expect(panel()).toBeNull();
+    });
+
+    it('lists up-next rows under their section headings and raises upnextselect', async () => {
+        const w = await mountPlayer({ upNext: UP_NEXT }, {});
+        await setFullscreen(true);
+        toggle().click();
+        await flushPromises();
+        expect([...document.querySelectorAll('.lmpl-browse-heading')].map((h) => h.textContent)).toEqual(['Next in series', 'Related']);
+        expect(document.querySelector('.lmpl-upnext-thumb img')!.getAttribute('src')).toBe('https://img/n1.jpg');
+        document.querySelectorAll<HTMLElement>('.lmpl-upnext')[0]!.click();
+        await flushPromises();
+        expect(w.emitted('upnextselect')).toEqual([['n1']]);
+        expect(panel()).toBeNull();
+    });
+
+    it('closes on Escape, on the close button and on a tap outside', async () => {
+        await mountPlayer({ upNext: UP_NEXT });
+        await setFullscreen(true);
+        const open = async () => {
+            toggle().click();
+            await flushPromises();
+            expect(panel()).not.toBeNull();
+        };
+
+        await open();
+        panel()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        await flushPromises();
+        expect(panel()).toBeNull();
+
+        await open();
+        document.querySelector<HTMLElement>('.lmpl-browse-close')!.click();
+        await flushPromises();
+        expect(panel()).toBeNull();
+
+        await open();
+        document.querySelector<HTMLElement>('.lmpl-browse-scrim')!.click();
+        await flushPromises();
+        expect(panel()).toBeNull();
+    });
+
+    it('closes on leaving fullscreen', async () => {
+        await mountPlayer({ upNext: UP_NEXT });
+        await setFullscreen(true);
+        toggle().click();
+        await flushPromises();
+        await setFullscreen(false);
+        expect(panel()).toBeNull();
+    });
+
+    it('moves between tabs with the arrow keys', async () => {
+        await mountPlayer({ upNext: UP_NEXT });
+        await setFullscreen(true);
+        toggle().click();
+        await flushPromises();
+        const tabs = document.querySelectorAll<HTMLElement>('[role="tab"]');
+        expect(tabs[0]!.getAttribute('aria-selected')).toBe('true');
+        tabs[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+        await flushPromises();
+        expect(tabs[1]!.getAttribute('aria-selected')).toBe('true');
+        expect(document.activeElement).toBe(tabs[1]);
+    });
+});

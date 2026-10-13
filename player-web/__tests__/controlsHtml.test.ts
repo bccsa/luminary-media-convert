@@ -187,3 +187,20 @@ describe('buildControlsHtml', () => {
         expect(new Set(a).size).toBe(a.length);
     });
 });
+
+describe('browse button', () => {
+    it('sits with the settings, named for a screen reader, and starts collapsed', () => {
+        const button = render().querySelector('.lmpl-options [data-browse-toggle]')!;
+        expect(button.localName).toBe('button');
+        expect(button.getAttribute('aria-expanded')).toBe('false');
+        expect(button.getAttribute('aria-haspopup')).toBe('dialog');
+        expect(button.getAttribute('aria-controls')).toBe('p1-browse');
+        expect(button.textContent).toBe('Chapters and up next');
+    });
+
+    it('takes its name from the labels given, escaped', () => {
+        const doc = document.implementation.createHTMLDocument('');
+        doc.body.innerHTML = buildControlsHtml(ALL, 'p1', { browse: 'Kapittels <&> volgende' });
+        expect(doc.querySelector('[data-browse-toggle]')!.textContent).toBe('Kapittels <&> volgende');
+    });
+});

@@ -87,7 +87,7 @@ class PlayerRegistry(
             is BridgeCall.StartPictureInPicture -> engine.startPictureInPicture()
             is BridgeCall.ShowAirPlayPicker -> engine.showAirPlayPicker()
             is BridgeCall.SetCastMenu -> engine.setCastMenu(call.menu)
-            is BridgeCall.EnterFullscreen -> engine.enterFullscreen(call.texts)
+            is BridgeCall.EnterFullscreen -> engine.enterFullscreen(call.texts, call.browse)
             is BridgeCall.ExitFullscreen -> player.exitFullscreen()
             is BridgeCall.Resumed -> return player.resumed().toJson()
             is BridgeCall.PutLive -> player.putLive(call.generation, call.uri, call.spec)

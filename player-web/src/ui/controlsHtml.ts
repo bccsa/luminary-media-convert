@@ -132,14 +132,41 @@ function volume(id: string): string {
     );
 }
 
+/** Text for an HTML attribute or text node. */
+const escapeHtml = (text: string): string =>
+    text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+/** heroicons 24/outline "list-bullet": the Video.js icon set has no list glyph. */
+const LIST_ICON =
+    '<svg class="lmpl-browse-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M8.25 6.75h12M8.25 12h12M8.25 17.25h12M3.75 6.75h.007v.008H3.75V6.75Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0ZM3.75 12h.007v.008H3.75V12Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm-.375 5.25h.007v.008H3.75v-.008Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z"/>' +
+    '</svg>';
+
+/**
+ * Opens the chapters / up next panel. The component owns its state: it shows the button only in fullscreen
+ * and when there is something to browse, and keeps `aria-expanded` current.
+ */
+function browseButton(id: string, label: string): string {
+    return (
+        `<button type="button" class="media-button lmpl-icon-btn lmpl-opt-browse" data-browse-toggle ` +
+        `aria-haspopup="dialog" aria-expanded="false" aria-controls="${id}-browse">` +
+        LIST_ICON +
+        // Visually hidden: the button is an icon, and this is its name for a screen reader.
+        `<span class="media-settings-menu-trigger-label">${escapeHtml(label)}</span>` +
+        '</button>'
+    );
+}
+
 /** The settings. Language and captions are left out when the host asks; the two always offered are quality and speed. */
-function settings(options: ControlsHtmlOptions, id: string): string {
+function settings(options: ControlsHtmlOptions, id: string, labels: ControlsHtmlLabels): string {
     return (
         '<div class="lmpl-group lmpl-options">' +
         setting('quality', id) +
         (options.audioMenu ? setting('audio', id) : '') +
         setting('speed', id) +
         (options.subtitlesMenu ? setting('captions', id) : '') +
+        browseButton(id, labels.browse) +
         '</div>'
     );
 }
@@ -178,7 +205,7 @@ function centreCluster(options: ControlsHtmlOptions): string {
  * seek or trip a system gesture. The pointer preview stays: a bar with no readout of where a click
  * lands is a guess.
  */
-function bottomBar(options: ControlsHtmlOptions, id: string): string {
+function bottomBar(options: ControlsHtmlOptions, id: string, labels: ControlsHtmlLabels): string {
     return (
         '<div class="lmpl-bottom">' +
         '<div class="lmpl-chapter-now" hidden></div>' +
@@ -197,7 +224,7 @@ function bottomBar(options: ControlsHtmlOptions, id: string): string {
         '</div>' +
         '<div class="lmpl-actions-row">' +
         volume(id) +
-        settings(options, id) +
+        settings(options, id, labels) +
         '<span class="lmpl-spacer"></span>' +
         remote() +
         '</div>' +
@@ -205,13 +232,25 @@ function bottomBar(options: ControlsHtmlOptions, id: string): string {
     );
 }
 
+/** Names the markup writes for a screen reader, which the host may have translated. */
+export interface ControlsHtmlLabels {
+    /** Name of the button that opens the chapters / up next panel. */
+    browse: string;
+}
+
+const DEFAULT_LABELS: ControlsHtmlLabels = { browse: 'Chapters and up next' };
+
 /** Everything that sits inside `<media-controls>`, ids made unique with `id`. */
-export function buildControlsHtml(options: ControlsHtmlOptions, id: string): string {
+export function buildControlsHtml(
+    options: ControlsHtmlOptions,
+    id: string,
+    labels: ControlsHtmlLabels = DEFAULT_LABELS
+): string {
     return (
         '<media-controls-backdrop class="video-controls-backdrop"></media-controls-backdrop>' +
         '<media-controls-content class="lmpl-controls-content">' +
         centreCluster(options) +
-        bottomBar(options, id) +
+        bottomBar(options, id, labels) +
         '</media-controls-content>'
     );
 }

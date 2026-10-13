@@ -9,6 +9,9 @@ export { default as LuminaryPlayer } from './components/LuminaryPlayer.vue';
 // What `poster` takes: an image described in plain terms, so the shape outlives the engine.
 export type { PlayerImage, PlayerImageInput } from './image';
 
+// What `upNext` takes: the videos offered after this one.
+export { withSectionHeadings, type PlayerUpNextItem } from './upNext';
+
 // The web's serving layer. `player-core` requires one and defaults to nothing, so a host building its
 // own controller needs this — and a native shell implements `ServeStrategy` in its place.
 export { BlobServeStrategy, type BlobServeStrategyOptions } from './serve/BlobServeStrategy';
@@ -59,7 +62,7 @@ export {
 export { default as ScrubThumbnail } from './components/ScrubThumbnail.vue';
 export { default as ScrubRoster } from './components/ScrubRoster.vue';
 export { installAutoHide, AUTO_HIDE_MS, type ControlsStore } from './ui/autoHide';
-export { buildControlsHtml, type ControlsHtmlOptions } from './ui/controlsHtml';
+export { buildControlsHtml, type ControlsHtmlLabels, type ControlsHtmlOptions } from './ui/controlsHtml';
 export { isVideoJsElement } from './elements';
 export { isYouTubeUrl, extractYouTubeId, toVideoJsYouTubeUrl } from './youtube';
 export { singleFlight } from './singleFlight';

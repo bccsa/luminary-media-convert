@@ -158,19 +158,23 @@
  */
 .lmpl-root .lmpl-controls-content,
 .lmpl-root .lmpl-scrub-preview,
-.lmpl-root .lmpl-tooltip {
+.lmpl-root .lmpl-tooltip,
+.lmpl-root .lmpl-nextup,
+.lmpl-root .lmpl-browse {
     --lmpl-s: 1;
     --media-spacing: calc(4px * var(--lmpl-s));
 }
 
-.lmpl-root .lmpl-controls-content {
+.lmpl-root .lmpl-controls-content,
+.lmpl-root .lmpl-nextup {
     --lmpl-edge: clamp(20px, 5%, 64px);
 }
 
 @container media-root (min-width: 900px) {
     .lmpl-root .lmpl-controls-content,
     .lmpl-root .lmpl-scrub-preview,
-    .lmpl-root .lmpl-tooltip {
+    .lmpl-root .lmpl-tooltip,
+    .lmpl-root .lmpl-browse {
         --lmpl-s: 1.25;
     }
 }
@@ -178,7 +182,8 @@
 @container media-root (min-width: 1400px) {
     .lmpl-root .lmpl-controls-content,
     .lmpl-root .lmpl-scrub-preview,
-    .lmpl-root .lmpl-tooltip {
+    .lmpl-root .lmpl-tooltip,
+    .lmpl-root .lmpl-browse {
         --lmpl-s: 1.6;
     }
 }
@@ -190,13 +195,15 @@
  * margin of a phone.
  */
 @container media-root (min-width: 900px) {
-    .lmpl-root .lmpl-controls-content {
+    .lmpl-root .lmpl-controls-content,
+    .lmpl-root .lmpl-nextup {
         --lmpl-edge: clamp(32px, 5%, 110px);
     }
 }
 
 @container media-root (min-width: 1400px) {
-    .lmpl-root .lmpl-controls-content {
+    .lmpl-root .lmpl-controls-content,
+    .lmpl-root .lmpl-nextup {
         --lmpl-edge: clamp(56px, 6%, 200px);
     }
 }
@@ -503,6 +510,18 @@
 .lmpl-root:not(.lmpl-has-audio-choice) .lmpl-opt-audio,
 .lmpl-root:not(.lmpl-has-subtitles) .lmpl-opt-captions {
     display: none !important;
+}
+
+/* Chapters and up next are browsed in fullscreen, and only when there is something to browse. */
+.lmpl-root:not(.lmpl-has-browse) .lmpl-opt-browse,
+.lmpl-root:not(.lmpl-is-fullscreen) .lmpl-opt-browse {
+    display: none !important;
+}
+
+.lmpl-browse-icon {
+    display: block;
+    width: var(--media-icon-size);
+    height: var(--media-icon-size);
 }
 
 /* The volume card: plus, a thick vertical slider, minus. No thumb — the fill is the level. */
@@ -864,8 +883,330 @@
     }
 }
 
+/* --- Chapters and up next -------------------------------------------------- */
+
+/* Transparent: it only catches the tap that closes the panel. */
+.lmpl-root .lmpl-browse-scrim {
+    position: absolute;
+    inset: 0;
+    z-index: 40;
+}
+
+.lmpl-root .lmpl-browse {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 41;
+    display: flex;
+    flex-direction: column;
+    width: 40%;
+    min-width: min(100%, 18rem);
+    max-width: 28rem;
+    /* Clear of notches and system gesture areas, as the controls are. */
+    padding-top: env(safe-area-inset-top);
+    padding-right: env(safe-area-inset-right);
+    padding-bottom: env(safe-area-inset-bottom);
+    background: rgb(12 12 14 / 0.88);
+    backdrop-filter: blur(8px);
+    color: #fff;
+    font-size: calc(14px * var(--lmpl-s));
+    box-shadow: -8px 0 24px rgb(0 0 0 / 0.4);
+}
+
+.lmpl-browse-head {
+    display: flex;
+    align-items: center;
+    gap: calc(8px * var(--lmpl-s));
+    padding: calc(8px * var(--lmpl-s)) calc(8px * var(--lmpl-s)) 0 calc(14px * var(--lmpl-s));
+    border-bottom: 1px solid rgb(255 255 255 / 0.12);
+}
+
+.lmpl-browse-tabs {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    gap: calc(4px * var(--lmpl-s));
+}
+
+.lmpl-root .lmpl-browse-tab {
+    padding: calc(10px * var(--lmpl-s)) calc(12px * var(--lmpl-s));
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: rgb(255 255 255 / 0.65);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.lmpl-root .lmpl-browse-tab[aria-selected='true'] {
+    border-bottom-color: #fff;
+    color: #fff;
+}
+
+.lmpl-root .lmpl-browse-tab:focus-visible,
+.lmpl-root .lmpl-browse-row:focus-visible {
+    outline: 2px solid #fff;
+    outline-offset: -2px;
+}
+
+.lmpl-root .lmpl-browse-close {
+    flex: none;
+    margin-bottom: calc(4px * var(--lmpl-s));
+}
+
+.lmpl-browse-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.lmpl-browse-list {
+    margin: 0;
+    padding: calc(6px * var(--lmpl-s)) 0 calc(16px * var(--lmpl-s));
+    list-style: none;
+}
+
+.lmpl-browse-heading {
+    padding: calc(12px * var(--lmpl-s)) calc(14px * var(--lmpl-s)) calc(4px * var(--lmpl-s));
+    font-size: calc(11px * var(--lmpl-s));
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: rgb(255 255 255 / 0.6);
+}
+
+.lmpl-root .lmpl-browse-row {
+    display: flex;
+    align-items: center;
+    gap: calc(12px * var(--lmpl-s));
+    width: 100%;
+    padding: calc(10px * var(--lmpl-s)) calc(14px * var(--lmpl-s));
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+}
+
+.lmpl-root .lmpl-browse-row:hover {
+    background: rgb(255 255 255 / 0.1);
+}
+
+.lmpl-chapter[aria-current='true'] {
+    background: rgb(255 255 255 / 0.14);
+    font-weight: 700;
+}
+
+.lmpl-chapter-title {
+    flex: 1;
+    min-width: 0;
+}
+
+.lmpl-chapter-time {
+    flex: none;
+    font-variant-numeric: tabular-nums;
+    color: rgb(255 255 255 / 0.65);
+}
+
+.lmpl-upnext-thumb {
+    flex: none;
+    width: calc(120px * var(--lmpl-s));
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    border-radius: calc(6px * var(--lmpl-s));
+    background: rgb(255 255 255 / 0.1);
+}
+
+.lmpl-upnext-thumb img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.lmpl-upnext-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.lmpl-upnext-title {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    font-weight: 600;
+}
+
+.lmpl-upnext-subtitle {
+    font-size: calc(12px * var(--lmpl-s));
+    color: rgb(255 255 255 / 0.65);
+}
+
+/* --- Up next strip ----------------------------------------------------------- */
+
+/* Above the controls (30) and under the browse panel (40); the panel hides the strip anyway. */
+.lmpl-root .lmpl-nextup {
+    position: absolute;
+    z-index: 35;
+    /* The control bar's own inset, so the strip's edges meet the timeline's. */
+    left: max(var(--lmpl-edge), env(safe-area-inset-left));
+    right: max(var(--lmpl-edge), env(safe-area-inset-right));
+    bottom: max(calc(16px * var(--lmpl-s)), env(safe-area-inset-bottom));
+    box-sizing: border-box;
+    color: #fff;
+    font-size: calc(14px * var(--lmpl-s));
+    text-shadow: 0 1px 2px rgb(0 0 0 / 0.5);
+    transition: transform 0.25s ease;
+    animation: lmpl-nextup-in 0.25s ease;
+}
+
+/* Clear of the control bar (timeline and buttons) while it is up. */
+.lmpl-root .lmpl-nextup.lmpl-nextup-raised {
+    transform: translateY(calc(-112px * var(--lmpl-s)));
+}
+
+@keyframes lmpl-nextup-in {
+    from {
+        opacity: 0;
+    }
+}
+
 @media (prefers-reduced-motion: reduce) {
     .lmpl-tooltip {
         animation: none;
     }
+    .lmpl-root .lmpl-nextup {
+        transition: none;
+        animation: none;
+    }
+}
+
+.lmpl-nextup-head {
+    display: flex;
+    align-items: center;
+    /* Over the cards, which sit at the end; the close button stays last. */
+    justify-content: flex-end;
+    gap: calc(12px * var(--lmpl-s));
+    padding-bottom: calc(4px * var(--lmpl-s));
+}
+
+.lmpl-nextup-label {
+    font-size: calc(18px * var(--lmpl-s));
+    font-weight: 700;
+    text-transform: none;
+}
+
+.lmpl-nextup-strip {
+    display: flex;
+    gap: calc(12px * var(--lmpl-s));
+    margin: 0;
+    /* Room for a focus ring, taken back by the margin so the cards themselves meet the strip's edges. */
+    padding: calc(4px * var(--lmpl-s));
+    margin-inline: calc(-4px * var(--lmpl-s));
+    list-style: none;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
+}
+
+.lmpl-nextup-item {
+    flex: none;
+    /* Wide enough to read, never more than a third of the screen. */
+    width: min(calc(17.5rem * var(--lmpl-s)), 34vw);
+    scroll-snap-align: start;
+}
+
+/* The auto margin right-aligns the cards only while they all fit; justify-content would break scrolling. */
+.lmpl-nextup-item:first-child {
+    margin-inline-start: auto;
+}
+
+/* A short landscape phone: the strip and the control bar must both fit. */
+@media (max-height: 500px) {
+    .lmpl-nextup-item {
+        width: min(calc(12rem * var(--lmpl-s)), 34vw);
+    }
+}
+
+.lmpl-root .lmpl-nextup-card {
+    display: flex;
+    flex-direction: column;
+    gap: calc(4px * var(--lmpl-s));
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: start;
+    text-shadow: inherit;
+    cursor: pointer;
+}
+
+.lmpl-nextup-thumb {
+    display: block;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    border-radius: calc(6px * var(--lmpl-s));
+    background: rgb(255 255 255 / 0.15);
+    box-shadow: 0 4px 12px rgb(0 0 0 / 0.4);
+}
+
+.lmpl-nextup-thumb img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.lmpl-root .lmpl-nextup-card:hover .lmpl-nextup-thumb {
+    outline: 2px solid rgb(255 255 255 / 0.7);
+}
+
+.lmpl-root .lmpl-nextup-card:focus-visible {
+    outline: none;
+}
+
+.lmpl-root .lmpl-nextup-card:focus-visible .lmpl-nextup-thumb {
+    outline: 3px solid #fff;
+    outline-offset: 2px;
+}
+
+.lmpl-nextup-section {
+    font-size: calc(11px * var(--lmpl-s));
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: rgb(255 255 255 / 0.75);
+}
+
+.lmpl-nextup-title {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    font-size: calc(16px * var(--lmpl-s));
+    line-height: 1.25;
+    font-weight: 600;
+}
+
+.lmpl-root .lmpl-nextup-close:focus-visible {
+    outline: 2px solid #fff;
+    outline-offset: 2px;
+}
+
+.lmpl-root .lmpl-nextup-close {
+    flex: none;
+    --media-icon-size: calc(24px * var(--lmpl-s));
+    width: calc(40px * var(--lmpl-s));
+    height: calc(40px * var(--lmpl-s));
 }

@@ -46,6 +46,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import org.bccsa.luminary.player.AudioTrack
+import org.bccsa.luminary.player.Browse
 import org.bccsa.luminary.player.CastMenu
 import org.bccsa.luminary.player.CastServer
 import org.bccsa.luminary.player.Cancellable
@@ -480,17 +481,29 @@ class ExoEngine(
 
     override fun setThumbnails(url: String?, key: ByteArray?) = thumbnails.load(url, key)
 
-    override fun enterFullscreen(texts: Map<String, String>?) {
+    /** What the full-screen panel lists; the page's latest, kept for a full-screen the engine opens itself. */
+    private var browse: Browse? = null
+
+    override fun enterFullscreen(texts: Map<String, String>?, browse: Browse?) {
         // A call with no texts keeps the last, or English.
         if (texts != null) this.texts = FullscreenTexts.from(texts)
+        // The lists may arrive after full-screen opened (up next loads late): they replace what is on screen.
+        if (browse != null) {
+            this.browse = browse
+            presenter.setBrowse(browse)
+        }
         // The picture is on the TV: there is nothing to show full-screen here.
         if (castPlayer != null) return
         // Audio-only has no view. Until the tracks are known the item is presumed to have one, and
         // the view is taken down again if it turns out not to (see `onTracksChanged`).
         if (knownAudioOnly(player.currentTracks)) return
-        if (presenter.present(player, ::leaveFullscreenByViewer, skin, this.texts, ::presentationDidChange, thumbnails, cast?.let { { showAirPlayPicker() } })) {
+        if (presenter.present(player, ::leaveFullscreenByViewer, skin, this.texts, ::presentationDidChange, thumbnails, cast?.let { { showAirPlayPicker() } }, this.browse, ::browseSelected, artworkLoader)) {
             presentationDidChange("fullscreen")
         }
+    }
+
+    private fun browseSelected(id: String) {
+        if (::events.isInitialized) events.browseSelect(id)
     }
 
     private fun knownAudioOnly(tracks: Tracks) = !tracks.isEmpty && !tracks.containsType(C.TRACK_TYPE_VIDEO)

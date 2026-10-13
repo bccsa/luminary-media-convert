@@ -238,6 +238,96 @@ describe('NativeLuminaryPlayer', () => {
         });
     });
 
+    describe('the chapters and up next native full-screen lists', () => {
+        const upNext = [
+            { id: 'post-2', title: 'Next', subtitle: 'Part 2', imageUrl: 'https://cdn/x.jpg', section: 'Next in series' },
+            { id: 'post-3', title: 'Related' },
+        ];
+        const chapters = [{ title: 'Intro', startTime: 0, endTime: 30 }];
+
+        type EnterArgs = { browse?: { chapters: unknown[]; upNext: unknown[] } };
+
+        it('go to native when full-screen opens, and are empty when the host gave none', async () => {
+            const { plugin, exposed } = await mountPlayer({ upNext, chapters });
+            await ready(plugin);
+            await exposed.enterFullscreen();
+            expect(plugin.argsOf<EnterArgs>('enterFullscreen').at(-1)!.browse).toEqual({ chapters, upNext });
+
+            const bare = await mountPlayer();
+            await ready(bare.plugin);
+            await bare.exposed.enterFullscreen();
+            expect(bare.plugin.argsOf<EnterArgs>('enterFullscreen').at(-1)!.browse).toEqual({ chapters: [], upNext: [] });
+        });
+
+        it('reach a full-screen native opened itself, once, when they differ from what it was sent', async () => {
+            const { plugin, wrapper } = await mountPlayer({ upNext });
+            await ready(plugin);
+            const load = plugin.argsOf<LoadArgs>('load').at(-1)!;
+            const ids = { playerId: load.playerId, loadId: load.loadId };
+
+            plugin.emit('presentationchange', ids, { state: 'fullscreen' });
+            await flush();
+            expect(plugin.argsOf<EnterArgs>('enterFullscreen')).toHaveLength(1);
+            expect(plugin.argsOf<EnterArgs>('enterFullscreen')[0]!.browse!.upNext).toEqual(upNext);
+
+            plugin.emit('presentationchange', ids, { state: 'inline' });
+            plugin.emit('presentationchange', ids, { state: 'fullscreen' });
+            await flush();
+            expect(plugin.argsOf('enterFullscreen')).toHaveLength(1);
+
+            await wrapper.setProps({ upNext: [] });
+            await flush();
+            expect(plugin.argsOf<EnterArgs>('enterFullscreen')).toHaveLength(2);
+        });
+
+        it('are replaced on screen when they change while full-screen is up', async () => {
+            const { plugin, wrapper, exposed } = await mountPlayer({ upNext: [], chapters });
+            await ready(plugin);
+            const load = plugin.argsOf<LoadArgs>('load').at(-1)!;
+            await exposed.enterFullscreen();
+            plugin.emit('presentationchange', { playerId: load.playerId, loadId: load.loadId }, { state: 'fullscreen' });
+            await flush();
+            const before = plugin.argsOf('enterFullscreen').length;
+
+            await wrapper.setProps({ upNext });
+            await flush();
+
+            expect(plugin.argsOf('enterFullscreen')).toHaveLength(before + 1);
+            expect(plugin.argsOf<EnterArgs>('enterFullscreen').at(-1)!.browse!.upNext).toEqual(upNext);
+        });
+
+        it('are not sent while the page shows the player, where they would open nothing', async () => {
+            const { plugin, wrapper } = await mountPlayer({ upNext: [] });
+            await ready(plugin);
+
+            await wrapper.setProps({ upNext });
+            await flush();
+
+            expect(plugin.methods()).not.toContain('enterFullscreen');
+        });
+
+        it('say upnextselect with the id the viewer picked, and only for this player', async () => {
+            const { plugin, wrapper } = await mountPlayer({ upNext });
+            await ready(plugin);
+            const load = plugin.argsOf<LoadArgs>('load').at(-1)!;
+
+            plugin.emit('browseselect', { playerId: 'someone-else', loadId: 'x' }, { kind: 'upnext', id: 'post-9' });
+            plugin.emit('browseselect', { playerId: load.playerId, loadId: load.loadId }, { kind: 'upnext', id: 'post-3' });
+            await flush();
+
+            expect(wrapper.emitted('upnextselect')).toEqual([['post-3']]);
+        });
+
+        it('use the host\'s messages for the panel\'s words', async () => {
+            const { plugin, exposed } = await mountPlayer({ messages: { chapters: 'Chapitres', upNext: 'À suivre' } });
+            await ready(plugin);
+            await exposed.enterFullscreen();
+
+            const texts = plugin.argsOf<{ texts: Record<string, string> }>('enterFullscreen').at(-1)!.texts;
+            expect(texts).toMatchObject({ chapters: 'Chapitres', upNext: 'À suivre', browse: 'Chapters and up next', closeBrowse: 'Close' });
+        });
+    });
+
     describe('muting and picture in picture, for a host that draws its own controls', () => {
         it('follows what native says about muting, and passes the host\'s choice on', async () => {
             const { plugin, exposed } = await mountPlayer({ plugin: new FakePlugin({ muting: true, pictureInPicture: true }) });

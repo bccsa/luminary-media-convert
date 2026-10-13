@@ -29,7 +29,8 @@ import {
     type PlayerState,
     type Unsubscribe,
 } from '@luminary-media-converter/player-core';
-import type { LuminaryPlayerPlugin, NowPlaying } from '../bridge.js';
+import type { Chapter } from '@luminary-media-converter/player-core';
+import type { FullscreenBrowse, LuminaryPlayerPlugin, NowPlaying, PlayerUpNextItem } from '../bridge.js';
 import { createNativePlayer, type NativePlayer } from '../createNativePlayer.js';
 import { LuminaryPlayer } from '../plugin.js';
 import { DEFAULT_NATIVE_MESSAGES, errorMessage, fullscreenTexts, type NativePlayerMessages } from './messages.js';
@@ -112,6 +113,10 @@ export const NativeLuminaryPlayer = defineComponent({
         preferredLanguage: { type: String, default: undefined },
         /** What the lock screen and Control Center show. The poster is the artwork when it has none. */
         nowPlaying: { type: Object as PropType<NowPlaying>, default: undefined },
+        /** Videos offered after this one, listed in native full-screen's panel; as `player-web`'s `upNext` prop. */
+        upNext: { type: Array as PropType<PlayerUpNextItem[]>, default: undefined },
+        /** Chapters of what plays, listed in native full-screen's panel; tapping one seeks there. */
+        chapters: { type: Array as PropType<Chapter[]>, default: undefined },
         /** Strings to override, as `player-web`'s `messages` prop. */
         messages: { type: Object as PropType<Partial<NativePlayerMessages>>, default: undefined },
         /** What the controller is given, as `player-web`'s `controllerOptions`: `fetchImpl`, prefetch. */
@@ -138,6 +143,8 @@ export const NativeLuminaryPlayer = defineComponent({
         timeupdate: (_currentTime: number, _duration: number) => true,
         loadedmetadata: () => true,
         ended: () => true,
+        /** The viewer picked an up-next item in native full-screen; the id is the item's. */
+        upnextselect: (_id: string) => true,
     },
     setup(props, { emit, expose, slots }) {
         const native = shallowRef<NativePlayer | null>(null);
@@ -211,6 +218,9 @@ export const NativeLuminaryPlayer = defineComponent({
                 props.plugin.addListener('loadedmetadata', (payload) => mine(payload) && emit('loadedmetadata')),
                 props.plugin.addListener('presentationchange', (payload) => {
                     if (mine(payload)) presentation.value = payload.state;
+                }),
+                props.plugin.addListener('browseselect', (payload) => {
+                    if (mine(payload) && payload.kind === 'upnext') emit('upnextselect', payload.id);
                 }),
                 // Muting is the player's, not a load's, and the viewer changes it in native UI too.
                 props.plugin.addListener('mutedchange', (payload) => {
@@ -408,9 +418,34 @@ export const NativeLuminaryPlayer = defineComponent({
             if (native.value) {
                 // The texts as they are now, so a language change shows the next time full-screen opens.
                 const texts = fullscreenTexts(messages.value);
-                await report('enterFullscreen', props.plugin.enterFullscreen({ playerId: native.value.playerId, texts }));
+                const browse = browseLists();
+                sentBrowse = JSON.stringify(browse);
+                await report('enterFullscreen', props.plugin.enterFullscreen({ playerId: native.value.playerId, texts, browse }));
             }
         }
+        /** The panel's lists as the bridge carries them; empty when the host gave none. */
+        function browseLists(): FullscreenBrowse {
+            return {
+                chapters: (props.chapters ?? []).map(({ title, startTime, endTime }) => ({ title, startTime, endTime })),
+                upNext: (props.upNext ?? []).map(({ id, title, subtitle, imageUrl, section }) => ({
+                    id,
+                    title,
+                    ...(subtitle ? { subtitle } : {}),
+                    ...(imageUrl ? { imageUrl } : {}),
+                    ...(section ? { section } : {}),
+                })),
+            };
+        }
+        /** The lists native last was sent; it keeps them for a full-screen it opens itself. */
+        let sentBrowse = '';
+        // Up next often arrives after full-screen opened: native replaces the lists on screen.
+        watch([() => props.chapters, () => props.upNext], () => {
+            if (presentation.value === 'fullscreen') void enterFullscreen();
+        });
+        // Full-screen that native opened itself (turning to landscape) shows the lists as they are now.
+        watch(presentation, (next) => {
+            if (next === 'fullscreen' && JSON.stringify(browseLists()) !== sentBrowse) void enterFullscreen();
+        });
         async function exitFullscreen() {
             if (native.value) await report('exitFullscreen', props.plugin.exitFullscreen({ playerId: native.value.playerId }));
         }

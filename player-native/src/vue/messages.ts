@@ -37,6 +37,14 @@ export interface NativePlayerMessages {
     mute: string;
     unmute: string;
     loading: string;
+    /** The chapters tab of the full-screen panel. */
+    chapters: string;
+    /** The up-next tab of the full-screen panel. */
+    upNext: string;
+    /** The button that opens the full-screen panel, and the panel itself. */
+    browse: string;
+    /** The panel's close button. */
+    closeBrowse: string;
 }
 
 export const DEFAULT_NATIVE_MESSAGES: NativePlayerMessages = {
@@ -63,6 +71,10 @@ export const DEFAULT_NATIVE_MESSAGES: NativePlayerMessages = {
     mute: 'Mute',
     unmute: 'Unmute',
     loading: 'Loading',
+    chapters: 'Chapters',
+    upNext: 'Up next',
+    browse: 'Chapters and up next',
+    closeBrowse: 'Close',
 };
 
 /** What native full-screen is told to say, from the messages the host gave. */
@@ -82,6 +94,10 @@ export function fullscreenTexts(messages: NativePlayerMessages): FullscreenTexts
         mute: messages.mute,
         unmute: messages.unmute,
         loading: messages.loading,
+        chapters: messages.chapters,
+        upNext: messages.upNext,
+        browse: messages.browse,
+        closeBrowse: messages.closeBrowse,
     };
 }
 

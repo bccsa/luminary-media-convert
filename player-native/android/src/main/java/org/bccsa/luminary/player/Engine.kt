@@ -77,8 +77,11 @@ interface Engine {
     /** Shows the video in the page, in this frame of the web view, or hides it (null). */
     fun setInlineFrame(frame: InlineFrame?)
 
-    /** [texts] are what the controls say, in the host's language; null keeps the last, or English. */
-    fun enterFullscreen(texts: Map<String, String>?)
+    /**
+     * [texts] are what the controls say, in the host's language; null keeps the last, or English.
+     * [browse] fills the chapters / up-next panel, and replaces the lists of one already on screen.
+     */
+    fun enterFullscreen(texts: Map<String, String>?, browse: Browse? = null)
 
     fun exitFullscreen()
 

@@ -23,6 +23,11 @@ data class FullscreenTexts(
     val mute: String = "Mute",
     val unmute: String = "Unmute",
     val loading: String = "Loading",
+    val chapters: String = "Chapters",
+    val upNext: String = "Up next",
+    /** The button that opens the chapters / up-next panel, and the panel itself. */
+    val browse: String = "Chapters and up next",
+    val closeBrowse: String = "Close",
 ) {
     fun skipBack(seconds: Int) = skipBack.replace("{seconds}", seconds.toString())
 
@@ -48,6 +53,10 @@ data class FullscreenTexts(
                 mute = sent["mute"] ?: base.mute,
                 unmute = sent["unmute"] ?: base.unmute,
                 loading = sent["loading"] ?: base.loading,
+                chapters = sent["chapters"] ?: base.chapters,
+                upNext = sent["upNext"] ?: base.upNext,
+                browse = sent["browse"] ?: base.browse,
+                closeBrowse = sent["closeBrowse"] ?: base.closeBrowse,
             )
         }
     }

@@ -42,3 +42,33 @@ describe('conformance (native side, reference implementation)', () => {
         });
     }
 });
+
+describe('the reference native side, full-screen browse lists', () => {
+    const browse = {
+        chapters: [{ title: 'Intro', startTime: 0, endTime: 30 }],
+        upNext: [{ id: 'post-2', title: 'Next', subtitle: 'Part 2', imageUrl: 'https://cdn/x.jpg', section: 'Next in series' }],
+    };
+
+    function started() {
+        const harness = new ReferenceHarness();
+        harness.start({ maxPlayers: 1 });
+        const created = harness.call('create', { protocolVersion: 1, skipBackSeconds: 10, skipForwardSeconds: 10 });
+        const playerId = (created as { resolved: { playerId: string } }).resolved.playerId;
+        return { harness, playerId };
+    }
+
+    it('hands the lists to the engine along with the texts', () => {
+        const { harness, playerId } = started();
+
+        expect(harness.call('enterFullscreen', { playerId, browse })).toEqual({ resolved: {} });
+        expect(harness.drainEngineCalls()).toEqual([{ method: 'enterFullscreen', browse }]);
+    });
+
+    it('refuses lists of the wrong shape', () => {
+        const { harness, playerId } = started();
+
+        const bad = harness.call('enterFullscreen', { playerId, browse: { chapters: [{ title: 'x' }], upNext: [] } });
+
+        expect(bad).toMatchObject({ rejected: { code: 'invalid-argument' } });
+    });
+});

@@ -170,7 +170,42 @@ export interface FullscreenTexts {
     mute?: string;
     unmute?: string;
     loading?: string;
+    /** The panel's chapters tab. */
+    chapters?: string;
+    /** The panel's up-next tab. */
+    upNext?: string;
+    /** The button that opens the panel, and the panel itself. */
+    browse?: string;
+    /** The panel's close button. */
+    closeBrowse?: string;
 }
+
+/** A chapter of what plays: tapping it in the panel seeks to `startTime`. */
+export interface BridgeChapter {
+    title: string;
+    startTime: number;
+    endTime: number;
+}
+
+/** One video offered after this one. `section` is the heading shown above each run of items that share it. */
+export interface BridgeUpNextItem {
+    /** Handed back by `browseselect`. */
+    id: string;
+    title: string;
+    subtitle?: string;
+    /** A 16:9 picture. */
+    imageUrl?: string;
+    section?: string;
+}
+
+/** What the page offers in full-screen's chapters / up-next panel. Either list may be empty. */
+export interface FullscreenBrowse {
+    chapters: BridgeChapter[];
+    upNext: BridgeUpNextItem[];
+}
+
+/** The videos offered after this one, as the web player's `upNext` prop takes them. */
+export type PlayerUpNextItem = BridgeUpNextItem;
 
 /** A rectangle in the web view's coordinates, in CSS pixels. */
 export interface InlineFrame {
@@ -363,8 +398,13 @@ export interface LuminaryPlayerPlugin {
      * `texts` are what the full-screen controls say (VoiceOver labels, menu entries), in the
      * language the host speaks: native keeps its English default for any it is not given, and
      * for all of them when there are none. `{seconds}` in the skip texts is the interval.
+     *
+     * `browse` fills the panel the full-screen controls open (chapters, up next); with no entries in
+     * either list the controls have no button for it. Calling again while full-screen is up replaces
+     * the lists on screen, since up next may load after the player opens. A platform that has no
+     * panel ignores it.
      */
-    enterFullscreen(args: { playerId: string; texts?: FullscreenTexts }): Promise<void>;
+    enterFullscreen(args: { playerId: string; texts?: FullscreenTexts; browse?: FullscreenBrowse }): Promise<void>;
     /**
      * Pauses, unless the current item has no video track (audio-only), or its video is shown in
      * the page (`setInlineFrame` set a frame): leaving full-screen goes back to a picture that plays.
@@ -444,6 +484,8 @@ export interface BridgeEventMap {
     airplaychange: { available: boolean; active: boolean };
     /** The viewer picked an angle or a quality in the TV's menu; the page applies it as its own pick. */
     castselect: { kind: 'angle' | 'quality'; id: string };
+    /** The viewer picked an up-next item in full-screen's panel; the page plays it. Chapters seek natively. */
+    browseselect: { kind: 'upnext'; id: string };
     /** Once per load, when the duration and seekable range are known. Whole milliseconds, as `durationchange`. */
     loadedmetadata: { duration: number | null };
     /** On a presentation change. `inline` means not presented. */
@@ -476,6 +518,7 @@ export const BRIDGE_EVENT_NAMES: readonly BridgeEventName[] = [
     'mutedchange',
     'airplaychange',
     'castselect',
+    'browseselect',
     'loadedmetadata',
     'presentationchange',
 ];

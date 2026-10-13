@@ -73,6 +73,22 @@ export interface PlayerMessages {
      * the wording is about bandwidth as much as about listening.
      */
     audioModeLabel: string;
+
+    // --- Browse panel (fullscreen) -----------------------------------------
+    /** Tab title, and heading of the chapter list. */
+    chapters: string;
+    /** Tab title of the list of videos on offer after this one. */
+    upNext: string;
+    /** Accessible name of the button that opens the panel, and of the panel itself. */
+    browse: string;
+    /** Accessible name of the panel's close button. */
+    closeBrowse: string;
+
+    // --- Up next card (fullscreen) -------------------------------------------
+    /** Heading of the strip that offers the next videos near the end, and its accessible name. */
+    nextUp: string;
+    /** Accessible name of the strip's close button, which stops the automatic advance. */
+    dismiss: string;
 }
 
 /** Built-in English strings. Merged under any partial the host supplies. */
@@ -103,6 +119,14 @@ export const DEFAULT_MESSAGES: PlayerMessages = {
 
     videoModeLabel: 'Play video',
     audioModeLabel: 'Play audio only',
+
+    chapters: 'Chapters',
+    upNext: 'Up next',
+    browse: 'Chapters and up next',
+    closeBrowse: 'Close',
+
+    nextUp: 'Up next',
+    dismiss: 'Dismiss',
 };
 
 /**

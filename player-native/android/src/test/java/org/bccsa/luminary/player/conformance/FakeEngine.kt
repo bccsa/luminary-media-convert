@@ -5,12 +5,14 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import org.bccsa.luminary.player.AudioTrack
+import org.bccsa.luminary.player.Browse
 import org.bccsa.luminary.player.Clock
 import org.bccsa.luminary.player.Engine
 import org.bccsa.luminary.player.EventSink
@@ -85,8 +87,37 @@ class FakeEngine(
             put("height", frame.height)
         }
     }
-    override fun enterFullscreen(texts: Map<String, String>?) = record("enterFullscreen") {
+    override fun enterFullscreen(texts: Map<String, String>?, browse: Browse?) = record("enterFullscreen") {
         if (texts != null) put("texts", buildJsonObject { texts.forEach { (key, value) -> put(key, value) } })
+        if (browse != null) {
+            put(
+                "browse",
+                buildJsonObject {
+                    put(
+                        "chapters",
+                        buildJsonArray {
+                            browse.chapters.forEach { add(buildJsonObject { put("title", it.title); put("startTime", it.start); put("endTime", it.end) }) }
+                        },
+                    )
+                    put(
+                        "upNext",
+                        buildJsonArray {
+                            browse.upNext.forEach {
+                                add(
+                                    buildJsonObject {
+                                        put("id", it.id)
+                                        put("title", it.title)
+                                        it.subtitle?.let { value -> put("subtitle", value) }
+                                        it.imageUrl?.let { value -> put("imageUrl", value) }
+                                        it.section?.let { value -> put("section", value) }
+                                    },
+                                )
+                            }
+                        },
+                    )
+                },
+            )
+        }
     }
     override fun exitFullscreen() = record("exitFullscreen")
     override fun destroy() = record("destroy")
