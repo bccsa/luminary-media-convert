@@ -277,7 +277,11 @@ function onEngineTextTrackChange(): void {
     let showing: string | null = null;
     for (const track of tracks) {
         if (track.kind === 'subtitles' && track.mode === 'showing') {
-            showing = track.id || null;
+            // A track of the master is named as the controller names it, so a host's menu marks the same one.
+            const named = state.value.subtitleTracks.find(
+                (t) => t.source === 'master' && (t.label === track.label || (!!t.lang && t.lang === track.language))
+            );
+            showing = named?.id ?? (track.id || null);
             break;
         }
     }

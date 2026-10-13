@@ -411,6 +411,23 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
             // `track` is absent in non-browser environments (jsdom).
             if (trackEl.track) trackEl.track.mode = id === this.activeTextTrackId ? 'showing' : 'disabled';
         }
+        this.applyMasterSubtitle();
+    }
+
+    /**
+     * The master's own subtitles are hls.js's text tracks, not ours: the page's choice (`m:<group>:<name>`) turns the
+     * one with that name on and the rest off, and none turns them all off, so a host's menu drives what is shown.
+     */
+    private applyMasterSubtitle(): void {
+        const id = this.activeTextTrackId;
+        if (id !== null && !id.startsWith('m:')) return;
+        const label = id === null ? null : id.split(':').slice(2).join(':');
+        for (const track of Array.from(this.mediaTarget()?.textTracks ?? [])) {
+            if (track.kind !== 'subtitles' || this.textTracks.has(track.id)) continue;
+            const wanted = label !== null && (track.label === label || track.language === label);
+            const mode = wanted ? 'showing' : 'disabled';
+            if (track.mode !== mode) track.mode = mode;
+        }
     }
 
     private removeTextTracks(): void {
