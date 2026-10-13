@@ -66,9 +66,9 @@ import {
     volumeOffIcon,
 } from '@videojs/html/icons';
 
-/** A globe, the shape the fullscreen audio screen already uses for language: a person-and-bubble reads as chat. */
-const GLOBE_ICON =
-    '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg>';
+/** The Heroicons "language" glyph, which the rest of Luminary uses for choosing a language. */
+const LANGUAGE_ICON =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m10.5 21 5.25-11.25L21 21m-9-3h7.5M3 5.621a48.474 48.474 0 0 1 6-.371m0 0c1.12 0 2.233.038 3.334.114M9 5.25V3m3.334 2.364C11.176 10.658 7.69 15.08 3 17.502m9.334-12.138c.896.061 1.785.147 2.666.257m-4.589 8.495a18.023 18.023 0 0 1-3.827-5.802"/></svg>';
 
 /** The icon names `controlsHtml.ts` writes as `<media-icon name="…">`. */
 registerIcons('default', {
@@ -85,7 +85,7 @@ registerIcons('default', {
     'pip-exit': pipExitIcon,
     play: playIcon,
     restart: restartIcon,
-    globe: GLOBE_ICON,
+    language: LANGUAGE_ICON,
     speed: speedIcon,
     switches: switchesIcon,
     'volume-high': volumeHighIcon,

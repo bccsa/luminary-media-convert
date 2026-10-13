@@ -72,7 +72,7 @@ type Setting = keyof typeof GROUPS;
 
 const SETTING_ICONS: Record<Setting, string> = {
     quality: 'switches',
-    audio: 'globe',
+    audio: 'language',
     speed: 'speed',
     captions: 'captions-off',
 };
