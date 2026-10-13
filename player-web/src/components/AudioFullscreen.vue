@@ -241,9 +241,9 @@ const cover = computed(() => {
         @keydown="onKeydown"
         @pointerdown="onPointerdown"
     >
-        <!-- The picture, blurred, as the screen's colour (light) or its glow (dark). -->
+        <!-- The picture, blurred, as the screen's colour: lighter in `light`, darker in `dark`. -->
         <div class="lmpl-afs-bg" aria-hidden="true">
-            <img v-if="cover?.src && appearance === 'light'" class="lmpl-afs-wash" :src="cover.src" alt="" draggable="false" />
+            <img v-if="cover?.src" class="lmpl-afs-wash" :src="cover.src" alt="" draggable="false" />
         </div>
 
         <div class="lmpl-afs-top">
@@ -262,9 +262,6 @@ const cover = computed(() => {
 
         <div class="lmpl-afs-main">
             <div class="lmpl-afs-art">
-                <div v-if="cover?.src" class="lmpl-afs-halo" aria-hidden="true">
-                    <img :src="cover.src" alt="" draggable="false" />
-                </div>
                 <img
                     v-if="cover?.src"
                     class="lmpl-afs-cover"

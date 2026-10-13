@@ -74,13 +74,13 @@ describe('AudioFullscreen — what it shows', () => {
         expect(wrapper.find('[aria-current=true] .lmpl-afs-chapter-title').text()).toBe('Chapter 3');
     });
 
-    it('wears the cover as a colour over the whole screen in light, and as a glow behind it in dark', () => {
+    it('wears the cover as a colour over the whole screen, in light and in dark', () => {
         const light = mountScreen({ appearance: 'light' });
         expect(light.find('.lmpl-afs-wash').exists()).toBe(true);
         expect(light.classes()).toContain('lmpl-afs-light');
         const dark = mountScreen({ appearance: 'dark' });
-        expect(dark.find('.lmpl-afs-wash').exists()).toBe(false);
-        expect(dark.find('.lmpl-afs-halo').exists()).toBe(true);
+        expect(dark.find('.lmpl-afs-wash').exists()).toBe(true);
+        expect(dark.classes()).not.toContain('lmpl-afs-light');
     });
 
     it('offers the language menu only when there is more than one language', () => {
