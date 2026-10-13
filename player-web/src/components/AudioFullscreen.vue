@@ -4,7 +4,6 @@ import type { Chapter, SleepTimerOption, SleepTimerState } from '@luminary-media
 import { formatSeconds, type PlayerMessages } from '../messages';
 import { skipIcon } from '../ui/controlsHtml';
 import { SLEEP_MINUTES, SPEED_OPTIONS, chapterWindow, formatMinutes, sleepMinutesLeft } from '../ui/audioFullscreen';
-import { formatChapterOf } from '../ui/chapterBar';
 
 /**
  * The screen fullscreen becomes when only sound is playing: a now-playing screen, not a picture with controls.
@@ -45,7 +44,10 @@ const props = defineProps<{
     /** Mask that cuts the timeline at the chapters; empty for one plain bar. */
     chapterMask: string;
     messages: PlayerMessages;
-    /** Open the chapters in a sheet on this screen, instead of asking the host (`open-browse`) to show them. */
+    /**
+     * Open the chapters in a sheet on this screen, instead of asking the host (`open-browse`) to show them. The
+     * host may fill the sheet with its own content through the `sheet` slot; without one it lists the chapters.
+     */
     chaptersSheet?: boolean;
 }>();
 
@@ -162,11 +164,6 @@ function pickChapter(chapter: Chapter): void {
 
 const showChapterList = computed(() => props.chapters.length > 1);
 const windowRows = computed(() => chapterWindow(props.chapters, props.chapterIndex));
-const chapterText = computed(() => {
-    if (props.chapters.length < 2 || props.chapterIndex < 0) return '';
-    const title = props.chapters[props.chapterIndex]?.title ?? '';
-    return `${formatChapterOf(props.messages.chapterOf, props.chapterIndex + 1, props.chapters.length)}${title ? ` · ${title}` : ''}`;
-});
 
 function clock(seconds: number): string {
     const whole = Math.max(0, Math.floor(seconds));
@@ -270,18 +267,6 @@ const artworkSizes = computed(() => props.artwork?.sizes ?? '(min-aspect-ratio: 
                     <h2 class="lmpl-afs-title" data-test="afsTitle">{{ title }}</h2>
                     <p v-if="subtitle" class="lmpl-afs-subtitle">{{ subtitle }}</p>
                 </div>
-
-                <!-- Narrow: where the playhead is, and the way to the chapters. -->
-                <button
-                    v-if="chapterText && hasBrowse"
-                    type="button"
-                    class="lmpl-afs-chip"
-                    data-test="afsChip"
-                    @click="openChapters"
-                >
-                    <span class="lmpl-afs-chip-text">{{ chapterText }}</span>
-                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 15l6-6 6 6" /></svg>
-                </button>
 
                 <!-- Wide: the chapters, a list that follows the audio. -->
                 <ol v-if="showChapterList" class="lmpl-afs-chapters" data-test="afsChapters">
@@ -422,8 +407,7 @@ const artworkSizes = computed(() => props.artwork?.sizes ?? '(min-aspect-ratio: 
                                 v-if="hasBrowse"
                                 type="button"
                                 class="lmpl-afs-iconbtn"
-                                :class="{ 'lmpl-afs-dup': chapterText }"
-                                :aria-label="messages.browse"
+                                                                :aria-label="messages.browse"
                                 data-test="afsBrowse"
                                 @click="openChapters"
                             >
@@ -438,7 +422,9 @@ const artworkSizes = computed(() => props.artwork?.sizes ?? '(min-aspect-ratio: 
         <!-- The chapters, over this screen: a pick goes there and the sheet closes; the screen stays full. -->
         <div v-if="sheetOpen" class="lmpl-afs-sheetwrap" data-test="afsSheet">
             <div class="lmpl-afs-backdrop" @click="sheetOpen = false"></div>
-            <div class="lmpl-afs-sheet" role="dialog" :aria-label="messages.chapters">
+            <div class="lmpl-afs-sheet" :class="{ 'lmpl-afs-sheet-host': $slots.sheet }" role="dialog" :aria-label="messages.chapters">
+                <slot v-if="$slots.sheet" name="sheet" :close="() => (sheetOpen = false)"></slot>
+                <template v-else>
                 <div class="lmpl-afs-sheet-head">
                     <span class="lmpl-afs-sheet-title">{{ messages.chapters }}</span>
                     <button type="button" class="lmpl-afs-iconbtn" :aria-label="messages.closeBrowse" data-test="afsSheetClose" @click="sheetOpen = false">
@@ -453,6 +439,7 @@ const artworkSizes = computed(() => props.artwork?.sizes ?? '(min-aspect-ratio: 
                         </button>
                     </li>
                 </ol>
+                </template>
             </div>
         </div>
     </div>

@@ -51,14 +51,8 @@ describe('AudioFullscreen — what it shows', () => {
         expect(bare.find('.lmpl-afs-cover-empty').exists()).toBe(true);
     });
 
-    it('says where the playhead is among the chapters, on a chip that opens them', () => {
-        const chip = find(mountScreen(), 'afsChip');
-        expect(chip.text()).toBe('Chapter 3 of 8 · Chapter 3');
-    });
-
-    it('has no chip, and no chapter list, without chapters', () => {
+    it('has no chapter list without chapters', () => {
         const wrapper = mountScreen({ chapters: [], chapterIndex: -1 });
-        expect(find(wrapper, 'afsChip').exists()).toBe(false);
         expect(find(wrapper, 'afsChapters').exists()).toBe(false);
     });
 
@@ -93,7 +87,6 @@ describe('AudioFullscreen — what it shows', () => {
     it('has no way to the chapters panel when there is nothing to browse', () => {
         const wrapper = mountScreen({ hasBrowse: false });
         expect(find(wrapper, 'afsBrowse').exists()).toBe(false);
-        expect(find(wrapper, 'afsChip').exists()).toBe(false);
     });
 });
 
@@ -144,13 +137,12 @@ describe('AudioFullscreen — the transport', () => {
 });
 
 describe('AudioFullscreen — what it asks for', () => {
-    it('asks to leave fullscreen, and to open the chapters from the chip and the button', async () => {
+    it('asks to leave fullscreen, and the host to open the chapters, from the button', async () => {
         const wrapper = mountScreen();
         await find(wrapper, 'afsExit').trigger('click');
-        await find(wrapper, 'afsChip').trigger('click');
         await find(wrapper, 'afsBrowse').trigger('click');
         expect(wrapper.emitted('exit')).toHaveLength(1);
-        expect(wrapper.emitted('open-browse')).toHaveLength(2);
+        expect(wrapper.emitted('open-browse')).toHaveLength(1);
     });
 
     it('asks to go to the chapter that is chosen', async () => {
@@ -211,23 +203,11 @@ describe('AudioFullscreen — the sleep timer on show', () => {
     });
 });
 
-describe('AudioFullscreen — one way to the chapters in portrait', () => {
-    it('marks the chapters button as the chip\'s duplicate when the chip shows, so portrait can hide it', () => {
-        expect(find(mountScreen(), 'afsBrowse').classes()).toContain('lmpl-afs-dup');
-    });
-
-    it('keeps the button the only way when there is no chip, as for an up-next list without chapters', () => {
-        const wrapper = mountScreen({ chapters: [], chapterIndex: -1 });
-        expect(find(wrapper, 'afsChip').exists()).toBe(false);
-        expect(find(wrapper, 'afsBrowse').classes()).not.toContain('lmpl-afs-dup');
-    });
-});
-
 describe('AudioFullscreen — the chapters sheet', () => {
-    it('opens over the screen from the chip and the button, and lists every chapter with the playing one marked', async () => {
+    it('opens over the screen from the chapters button, and lists every chapter with the playing one marked', async () => {
         const wrapper = mountScreen({ chaptersSheet: true });
         expect(find(wrapper, 'afsSheet').exists()).toBe(false);
-        await find(wrapper, 'afsChip').trigger('click');
+        await find(wrapper, 'afsBrowse').trigger('click');
         expect(find(wrapper, 'afsSheet').exists()).toBe(true);
         expect(wrapper.findAll('[data-test=afsSheetRow]')).toHaveLength(8);
         expect(wrapper.find('[data-test=afsSheetRow][aria-current=true]').text()).toContain('Chapter 3');
@@ -237,6 +217,20 @@ describe('AudioFullscreen — the chapters sheet', () => {
         expect(find(wrapper, 'afsSheet').exists()).toBe(false);
         await find(wrapper, 'afsBrowse').trigger('click');
         expect(find(wrapper, 'afsSheet').exists()).toBe(true);
+    });
+
+    it('is filled by the host when it brings its own, and closes from inside', async () => {
+        const wrapper = mount(AudioFullscreen, {
+            props: { ...(mountScreen().props() as object), chaptersSheet: true } as never,
+            slots: { sheet: `<template #sheet="{ close }"><button data-test="hostBody" @click="close">host</button></template>` },
+            global: { config: { compilerOptions: { isCustomElement: (tag: string) => tag.startsWith('media-') } } },
+            attachTo: document.body,
+        });
+        await find(wrapper, 'afsBrowse').trigger('click');
+        expect(find(wrapper, 'hostBody').exists()).toBe(true);
+        expect(wrapper.findAll('[data-test=afsSheetRow]')).toHaveLength(0);
+        await find(wrapper, 'hostBody').trigger('click');
+        expect(find(wrapper, 'afsSheet').exists()).toBe(false);
     });
 
     it('goes to the chapter that is picked and closes, staying on this screen', async () => {

@@ -1409,33 +1409,9 @@
     opacity: 0.75;
 }
 
-.lmpl-afs-chip {
-    display: inline-flex;
-    align-items: center;
-    align-self: flex-start;
-    gap: 8px;
-    max-width: 100%;
-    padding: 4px 11px;
-    border: 0;
-    border-radius: 9999px;
-    background: rgb(255 255 255 / 0.16);
-    color: #fff;
-    font: inherit;
-    font-size: calc(12px * var(--lmpl-s));
-    font-weight: 600;
-    cursor: pointer;
-}
-
-.lmpl-afs-chip:focus-visible,
 .lmpl-afs-chapter:focus-visible {
     outline: 2px solid #fff;
     outline-offset: 2px;
-}
-
-.lmpl-afs-chip-text {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
 .lmpl-afs-chapters {
@@ -1699,11 +1675,6 @@
         -webkit-mask-image: none;
         mask-image: none;
     }
-
-    /* The chip under the title opens the chapters; the button beside the tools would be a second way to the same. */
-    .lmpl-root .lmpl-afs .lmpl-afs-dup {
-        display: none;
-    }
 }
 
 /* Wide: the picture on the left, the chapters, the timeline and the controls on the right. */
@@ -1721,10 +1692,6 @@
     .lmpl-afs-info {
         align-self: stretch;
         justify-content: center;
-    }
-
-    .lmpl-afs-chip {
-        display: none;
     }
 
     .lmpl-afs-chapters {
@@ -1849,4 +1816,11 @@
     .lmpl-afs-menuitem {
         min-height: 34px;
     }
+}
+
+/* The host fills the sheet: it brings its own surface, so this one only places it. */
+.lmpl-afs-sheet.lmpl-afs-sheet-host {
+    background: transparent;
+    padding-bottom: 0;
+    color: inherit;
 }
