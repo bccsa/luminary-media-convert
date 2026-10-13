@@ -34,6 +34,8 @@ import {
     type ThumbnailSpriteCue,
 } from '@luminary-media-converter/hls-core';
 import { StateStore, createInitialState } from './store.js';
+import { SleepTimer } from './sleepTimer.js';
+import { chapterIndexAt } from './chapters.js';
 import {
     AUDIO_ONLY_ANGLE_ID,
     DATA_SAVER_START_BPS,
@@ -51,6 +53,7 @@ import {
     type Quality,
     type RecoveryPolicy,
     resolveRecoveryPolicy,
+    type SleepTimerOption,
     type ServeStrategy,
     type Unsubscribe,
 } from './types.js';
@@ -111,6 +114,12 @@ export class PlayerController implements PlayerControllerApi {
     private sidecarLoader: SidecarLoader | null = null;
     /** Parsed scrub-preview cues for the current source; empty when there are none. */
     private thumbnailCues: ThumbnailSpriteCue[] = [];
+
+    /** The sleep timer; a minutes timer outlives a source, so it is not torn down with one. */
+    private readonly sleep = new SleepTimer(
+        () => this.adapter.pause(),
+        (sleepTimer) => this.store.setState({ sleepTimer })
+    );
 
     /** Bumped by every load(); stale async work checks it and bails. */
     private generation = 0;
@@ -184,6 +193,7 @@ export class PlayerController implements PlayerControllerApi {
         const resume = source.preservePosition ? this.state.playing : false;
 
         this.teardownSource();
+        this.sleep.onNewSource();
         this.source = source;
         this.policy = resolveRecoveryPolicy(source.recovery);
         this.startPosition = preserved;
@@ -206,6 +216,7 @@ export class PlayerController implements PlayerControllerApi {
         this.store.reset({
             ...createInitialState(),
             lifecycle: 'loading',
+            sleepTimer: this.sleep.state,
             playbackRate: this.state.playbackRate,
             maxHeight: source.maxHeight,
         });
@@ -487,6 +498,20 @@ export class PlayerController implements PlayerControllerApi {
         this.store.setState({ currentTime: seconds });
     }
 
+    setSleepTimer(option: SleepTimerOption | null): void {
+        if (this.state.lifecycle === 'destroyed') return;
+        let chapterEnd: number | undefined;
+        if (option?.kind === 'chapter') {
+            const { chapters, currentTime, duration } = this.state;
+            const index = chapterIndexAt(chapters, currentTime);
+            if (index < 0) return;
+            chapterEnd = chapters[index + 1]?.startTime ?? (Number.isFinite(duration) && duration > 0 ? duration : undefined);
+        }
+        this.sleep.set(option, chapterEnd);
+        // A shell may keep the minutes timer beside the engine, where a suspended web view cannot stop it.
+        this.adapter.setSleepTimer?.(this.sleep.state?.kind === 'minutes' ? this.sleep.state.endsAt : null);
+    }
+
     setPlaybackRate(rate: number): void {
         this.adapter.setPlaybackRate(rate);
         this.store.setState({ playbackRate: rate });
@@ -606,6 +631,7 @@ export class PlayerController implements PlayerControllerApi {
         if (this.state.lifecycle === 'destroyed') return;
         this.generation += 1;
         this.teardownSource();
+        this.sleep.clear();
         for (const unsubscribe of this.adapterSubscriptions) unsubscribe();
         this.adapterSubscriptions.length = 0;
         this.adapter.destroy();
@@ -810,6 +836,7 @@ export class PlayerController implements PlayerControllerApi {
         this.adapterSubscriptions.push(
             this.adapter.on('timeupdate', ({ currentTime }) => {
                 this.store.setState({ currentTime });
+                this.sleep.onTime(currentTime);
             }),
             this.adapter.on('durationchange', ({ duration }) => {
                 this.store.setState({ duration });

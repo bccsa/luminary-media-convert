@@ -1301,3 +1301,101 @@ describe('PlayerController — scrub thumbnails', () => {
         expect(controller.thumbnailAt(3)).toBeNull();
     });
 });
+
+describe('PlayerController — sleep timer', () => {
+    const chaptered = { ...simpleRoutes, [EN_CHAPTERS]: CHAPTERS_VTT };
+    const withChapters = { masterUrl: MASTER_URL, sidecars: { chapters: [{ lang: 'en', url: EN_CHAPTERS }] } };
+
+    afterEach(() => vi.useRealTimers());
+
+    it('pauses the engine when the minutes are up, and the state is clear again', async () => {
+        vi.useFakeTimers();
+        const { adapter, controller } = setup(simpleRoutes);
+        await controller.load({ masterUrl: MASTER_URL });
+
+        controller.setSleepTimer({ kind: 'minutes', minutes: 10 });
+        expect(controller.state.sleepTimer?.kind).toBe('minutes');
+        expect(adapter.pauseCount).toBe(0);
+
+        vi.advanceTimersByTime(10 * 60_000);
+        expect(adapter.pauseCount).toBe(1);
+        expect(controller.state.sleepTimer).toBeNull();
+    });
+
+    it('is cleared by null, and nothing pauses', async () => {
+        vi.useFakeTimers();
+        const { adapter, controller } = setup(simpleRoutes);
+        await controller.load({ masterUrl: MASTER_URL });
+        controller.setSleepTimer({ kind: 'minutes', minutes: 10 });
+        controller.setSleepTimer(null);
+        vi.advanceTimersByTime(60 * 60_000);
+        expect(adapter.pauseCount).toBe(0);
+        expect(controller.state.sleepTimer).toBeNull();
+    });
+
+    it('stops at the end of the chapter playing, which is where the next one starts', async () => {
+        const { adapter, controller } = setup(chaptered);
+        await controller.load(withChapters);
+        await flush();
+
+        adapter.advanceTo(30);
+        controller.setSleepTimer({ kind: 'chapter' });
+        expect(controller.state.sleepTimer).toEqual({ kind: 'chapter', endTime: 90.5 });
+
+        adapter.advanceTo(90);
+        expect(adapter.pauseCount).toBe(0);
+        adapter.advanceTo(90.5);
+        expect(adapter.pauseCount).toBe(1);
+        expect(controller.state.sleepTimer).toBeNull();
+    });
+
+    it('ignores a chapter timer when the video has no chapters', async () => {
+        const { controller } = setup(simpleRoutes);
+        await controller.load({ masterUrl: MASTER_URL });
+        controller.setSleepTimer({ kind: 'chapter' });
+        expect(controller.state.sleepTimer).toBeNull();
+    });
+
+    it('keeps a minutes timer across a new source, and drops a chapter timer', async () => {
+        vi.useFakeTimers();
+        const { adapter, controller } = setup(chaptered);
+        await controller.load(withChapters);
+        await flush();
+        controller.setSleepTimer({ kind: 'minutes', minutes: 10 });
+        await controller.load(withChapters);
+        await flush();
+        expect(controller.state.sleepTimer?.kind).toBe('minutes');
+        vi.advanceTimersByTime(10 * 60_000);
+        expect(adapter.pauseCount).toBe(1);
+
+        adapter.advanceTo(10);
+        controller.setSleepTimer({ kind: 'chapter' });
+        await controller.load(withChapters);
+        await flush();
+        expect(controller.state.sleepTimer).toBeNull();
+    });
+
+    it('hands a minutes timer to an engine that can keep it beside itself', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-10-13T10:00:00Z'));
+        const { adapter, controller } = setup(simpleRoutes);
+        const handed: (number | null)[] = [];
+        adapter.setSleepTimer = (endsAt) => void handed.push(endsAt);
+        await controller.load({ masterUrl: MASTER_URL });
+
+        controller.setSleepTimer({ kind: 'minutes', minutes: 5 });
+        controller.setSleepTimer(null);
+        expect(handed).toEqual([Date.now() + 5 * 60_000, null]);
+    });
+
+    it('is stopped when the controller is destroyed', async () => {
+        vi.useFakeTimers();
+        const { adapter, controller } = setup(simpleRoutes);
+        await controller.load({ masterUrl: MASTER_URL });
+        controller.setSleepTimer({ kind: 'minutes', minutes: 5 });
+        controller.destroy();
+        const pauses = adapter.pauseCount;
+        vi.advanceTimersByTime(10 * 60_000);
+        expect(adapter.pauseCount).toBe(pauses);
+    });
+});

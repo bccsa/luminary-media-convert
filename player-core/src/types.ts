@@ -239,6 +239,16 @@ export interface Chapter {
     title: string;
 }
 
+/** What a viewer can ask of the sleep timer: playback stops after some minutes, or at the end of the chapter playing. */
+export type SleepTimerOption = { kind: 'minutes'; minutes: number } | { kind: 'chapter' };
+
+/** A running sleep timer. */
+export type SleepTimerState =
+    /** `endsAt` is a `Date.now()` time in ms, so a countdown can be drawn from it. */
+    | { kind: 'minutes'; endsAt: number }
+    /** `endTime` is the media time, in seconds, at which the chapter ends. */
+    | { kind: 'chapter'; endTime: number };
+
 /** Typed, user-presentable failure. */
 export interface PlayerError {
     code: /** AES-128/LMCENC content encountered and no keyHex was supplied. */
@@ -316,6 +326,8 @@ export interface PlayerState {
     activeChapterTrackId: string | null;
     /** Cues of the active chapter track (loaded lazily per language). */
     chapters: Chapter[];
+    /** The sleep timer that is running, or null. */
+    sleepTimer: SleepTimerState | null;
 
     /** True when the active rendering carries no video (audio-only master or pseudo-angle). */
     isAudioOnly: boolean;
@@ -686,6 +698,13 @@ export interface PlayerAdapter {
      * `docs/suspension-safe-playback.md` for the rule it is one case of.
      */
     warmChunks?(schedules: ChunkBoundary[][], options: ChunkWarmOptions): void;
+    /**
+     * Stops playback at a `Date.now()` time (ms), or clears it with `null`; the sleep timer done beside the
+     * engine, for a shell whose JavaScript is suspended while the screen is locked. Absent: the controller keeps
+     * the timer in JavaScript, which is enough for the web. Only the minutes timer is delegated: the chapter
+     * timer follows the playhead, which the controller already watches.
+     */
+    setSleepTimer?(endsAt: number | null): void;
 
     on<E extends AdapterEventName>(
         event: E,
@@ -746,6 +765,12 @@ export interface PlayerControllerApi {
     togglePlay(): void;
     seek(seconds: number): void;
     setPlaybackRate(rate: number): void;
+    /**
+     * Starts, replaces or (with `null`) clears the sleep timer. A chapter timer needs chapters and a playhead
+     * inside one; without either it is ignored. Playback pauses when the timer fires, and the state's
+     * `sleepTimer` is null again. A minutes timer survives a new source; a chapter timer does not.
+     */
+    setSleepTimer(option: SleepTimerOption | null): void;
 
     /** Re-munges and reloads, preserving position and play state. */
     setAngle(id: string): Promise<void>;
