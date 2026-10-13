@@ -322,7 +322,7 @@ const artworkSizes = computed(() => props.artwork?.sizes ?? '(min-aspect-ratio: 
                                     data-test="afsSpeed"
                                     @click="toggleMenu('speed')"
                                 >
-                                    <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M12 4a9 9 0 0 0-9 9c0 1.6.4 3.1 1.1 4.4h15.8A9 9 0 0 0 12 4Zm1 9.4-3.6-3.6 1.1-1.1 3.6 3.6a1.6 1.6 0 1 1-1.1 1.1Z" /></svg>
+                                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.3 17.5a8.5 8.5 0 1 1 15.4 0" /><path d="m12 14 3.6-4.6" /><circle cx="12" cy="14.2" r="1.1" fill="currentColor" /></svg>
                                     <span v-if="playbackRate !== 1" class="lmpl-afs-badge">{{ speedText(playbackRate) }}</span>
                                 </button>
                                 <div v-if="menu === 'speed'" class="lmpl-afs-menu" role="menu" :aria-label="messages.speedLabel">

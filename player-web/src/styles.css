@@ -1617,6 +1617,18 @@
     position: relative;
 }
 
+/* The row under the transport is thumb-sized: a larger target, and a larger glyph in it. */
+.lmpl-root .lmpl-afs-tools .lmpl-afs-iconbtn {
+    width: calc(52px * var(--lmpl-s));
+    height: calc(52px * var(--lmpl-s));
+}
+
+.lmpl-root .lmpl-afs-tools .lmpl-afs-iconbtn svg,
+.lmpl-root .lmpl-afs-tools .lmpl-afs-iconbtn .media-button-icon {
+    width: calc(28px * var(--lmpl-s));
+    height: calc(28px * var(--lmpl-s));
+}
+
 .lmpl-afs-menu {
     position: absolute;
     bottom: calc(100% + 8px);
