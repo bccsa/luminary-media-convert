@@ -101,7 +101,7 @@ internal class SkinControls(
     private val spinner = Spinner(context)
     private val back: Icon?
     private val forward: Icon?
-    private val audioButton = Icon(context, V10Icons.speech)
+    private val audioButton = Icon(context, SettingIcons.language)
     private val pipButton = Icon(context, V10Icons.pip)
     private val castButton = Icon(context, V10Icons.cast)
     private val subtitlesButton = Icon(context, V10Icons.captions)
