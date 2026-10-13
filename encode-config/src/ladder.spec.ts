@@ -181,7 +181,9 @@ describe('ladderFor', () => {
     });
 
     it('still caps an oversized source at 4K', () => {
-        expect(rungs(track({ width: 7680, height: 4320 }))[0]).toBe('3840x2160');
+        expect(rungs(track({ width: 7680, height: 4320 }))[0]).toBe(
+            '3840x2160'
+        );
     });
 
     it('falls back to the source itself when it is below every rung', () => {
@@ -223,8 +225,18 @@ describe('ladderFor', () => {
         // Measured against the table's own 16:9 width instead, a 4:3 720x540
         // top rung came out cheaper than the 640x480 under it.
         for (const t of [
-            track({ width: 720, height: 576, displayWidth: 1024, displayHeight: 576 }),
-            track({ width: 720, height: 480, displayWidth: 720, displayHeight: 540 }),
+            track({
+                width: 720,
+                height: 576,
+                displayWidth: 1024,
+                displayHeight: 576,
+            }),
+            track({
+                width: 720,
+                height: 480,
+                displayWidth: 720,
+                displayHeight: 540,
+            }),
         ]) {
             const budgets = ladderFor(t).map((r) => r.bitrateKbps);
             expect(budgets[0]).toBeGreaterThan(budgets[1]);
@@ -340,6 +352,18 @@ describe('ABR_LADDER', () => {
 });
 
 describe('sourceCapKbps', () => {
+    it('restates the source bitrate in H.264 terms before capping', () => {
+        // 1800 kbps of HEVC is worth 2880 kbps of H.264.
+        expect(sourceCapKbps(1920, 1080, 1800, 1920, 1080, 'hevc')).toBe(2880);
+        expect(sourceCapKbps(1920, 1080, 1800, 1920, 1080, 'h264')).toBe(1800);
+        expect(sourceCapKbps(1920, 1080, 1800, 1920, 1080, 'mpeg2video')).toBe(
+            900
+        );
+        expect(sourceCapKbps(1920, 1080, 1800, 1920, 1080, 'unknown')).toBe(
+            1800
+        );
+    });
+
     it('is the source bitrate itself at the source size', () => {
         // Re-encoding past what the file carries recovers nothing. This 1805
         // kbps 1080p service was being offered 5500 kbps at 1080p.
@@ -513,7 +537,12 @@ describe('suggestLadder', () => {
         // 8000 kbps is more than a 1080p picture needs at 30 fps, on end or
         // not. By height, the top rung was handed all 8000.
         const ladder = suggestLadder(
-            track({ width: 1080, height: 1920, frameRate: 30, bitrateKbps: 8000 })
+            track({
+                width: 1080,
+                height: 1920,
+                frameRate: 30,
+                bitrateKbps: 8000,
+            })
         );
         expect(ladder[0]).toMatchObject({
             width: 1080,
@@ -545,11 +574,21 @@ describe('suggestLadder', () => {
                 for (const frameRate of [25, 30, 50]) {
                     for (const factor of [0.6, 1, 1.3]) {
                         const landscape = suggestLadder(
-                            track({ width: w, height: h, bitrateKbps, frameRate }),
+                            track({
+                                width: w,
+                                height: h,
+                                bitrateKbps,
+                                frameRate,
+                            }),
                             factor
                         );
                         const portrait = suggestLadder(
-                            track({ width: h, height: w, bitrateKbps, frameRate }),
+                            track({
+                                width: h,
+                                height: w,
+                                bitrateKbps,
+                                frameRate,
+                            }),
                             factor
                         );
                         expect(portrait).toEqual(

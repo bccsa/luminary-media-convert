@@ -326,10 +326,7 @@ function angleBudgetKbps(track: VideoTrackInfo, copied: boolean): number {
     if (!measured)
         return suggestLadder(track, contentFactor.value)[0].bitrateKbps;
     if (copied) return measured;
-    return Math.max(
-        1,
-        Math.round(measured * Math.min(contentFactor.value, 1))
-    );
+    return Math.max(1, Math.round(measured * Math.min(contentFactor.value, 1)));
 }
 
 function reanalyzeVideo() {
@@ -629,9 +626,7 @@ function priceRow(base: number): number {
 function syncLadderDials(): void {
     ladderMax.value = Math.max(
         1,
-        Math.round(
-            (suggestedLadderMax.value * ladderScaleNum) / ladderScaleDen
-        )
+        Math.round((suggestedLadderMax.value * ladderScaleNum) / ladderScaleDen)
     );
     lastGoodLadderMax = ladderMax.value;
     if (ladderMin.value != null && ladderMin.value > ladderMax.value) {
@@ -851,7 +846,8 @@ function overCapKbps(rendition: VideoRendition): number | null {
         rendition.height,
         track.bitrateKbps ?? 0,
         display.width,
-        display.height
+        display.height,
+        track.codec
     );
     return Number.isFinite(cap) && rendition.videoBitrateKbps > cap
         ? cap
@@ -1015,9 +1011,10 @@ function channelLabel(ch: number): string {
     return `${ch}ch`;
 }
 
-const CHANNEL_OPTIONS: readonly SelectMenuOption[] = [1, 2, 6, 8].map(
-    (ch) => ({ value: ch, label: channelLabel(ch) }),
-);
+const CHANNEL_OPTIONS: readonly SelectMenuOption[] = [1, 2, 6, 8].map((ch) => ({
+    value: ch,
+    label: channelLabel(ch),
+}));
 
 const videoSourceOptions = computed<SelectMenuOption[]>(() =>
     editableVideoTracks.map((t) => ({
@@ -1029,7 +1026,7 @@ const videoSourceOptions = computed<SelectMenuOption[]>(() =>
                     ? `${t.bitrateKbps} kbps`
                     : 'bitrate n/a'
             })`,
-    })),
+    }))
 );
 
 const audioSourceOptions = computed<SelectMenuOption[]>(() =>
@@ -1043,7 +1040,7 @@ const audioSourceOptions = computed<SelectMenuOption[]>(() =>
         ]
             .filter(Boolean)
             .join(' '),
-    })),
+    }))
 );
 
 const contentPresetOptions: SelectMenuOption[] = [
@@ -1052,7 +1049,7 @@ const contentPresetOptions: SelectMenuOption[] = [
 ];
 
 const audioGroupSelectOptions = computed<SelectMenuOption[]>(() =>
-    uniqueAudioGroupOptions.value.map((o) => ({ value: o.id, label: o.label })),
+    uniqueAudioGroupOptions.value.map((o) => ({ value: o.id, label: o.label }))
 );
 
 const canSubmit = computed(() => {
@@ -1536,11 +1533,9 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                         >
                             Reset to suggested
                         </button>
-                        <span
-                            v-if="ladderSourceSummary"
-                            class="ecf-box-hint"
-                            >{{ ladderSourceSummary }}</span
-                        >
+                        <span v-if="ladderSourceSummary" class="ecf-box-hint">{{
+                            ladderSourceSummary
+                        }}</span>
                     </div>
                     <p v-if="showLadderMax" class="ecf-box-hint">
                         Content and the ladder max/min re-derive the ladder from
@@ -1582,7 +1577,9 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                                                 :options="videoSourceOptions"
                                                 class="ecf-select-src"
                                                 aria-label="Source track"
-                                                @change="onCopySourceChange(r, i)"
+                                                @change="
+                                                    onCopySourceChange(r, i)
+                                                "
                                             />
                                         </td>
                                         <td class="ecf-lt-td">
@@ -1623,7 +1620,9 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                                         <td class="ecf-lt-td">
                                             <SelectMenu
                                                 v-model="r.audioGroupId"
-                                                :options="audioGroupSelectOptions"
+                                                :options="
+                                                    audioGroupSelectOptions
+                                                "
                                                 class="ecf-select-inline"
                                                 aria-label="Audio group"
                                             />
@@ -2000,5 +1999,5 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                 }}
             </button>
         </div>
-</div>
+    </div>
 </template>
