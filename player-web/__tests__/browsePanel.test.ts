@@ -56,6 +56,23 @@ afterEach(async () => {
     wrapper = undefined;
 });
 
+describe('LuminaryPlayer and a host screen', () => {
+    it('is not in full screen when the display is taken by the host\'s own marked screen, and is when it is another element', async () => {
+        const w = await mountPlayer({}, {});
+        const hostScreen = document.createElement('div');
+        hostScreen.setAttribute('data-lmpl-host-screen', '');
+        document.body.appendChild(hostScreen);
+        Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => hostScreen });
+        document.dispatchEvent(new Event('fullscreenchange'));
+        await flushPromises();
+        expect(w.find('.lmpl-root').classes()).not.toContain('lmpl-is-fullscreen');
+
+        await setFullscreen(true);
+        expect(w.find('.lmpl-root').classes()).toContain('lmpl-is-fullscreen');
+        hostScreen.remove();
+    });
+});
+
 describe('LuminaryPlayer browse panel', () => {
     it('offers the button only when there are chapters or up-next items', async () => {
         const w = await mountPlayer({}, {});

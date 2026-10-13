@@ -463,7 +463,12 @@ watch([isFullscreen, () => props.windowedFit], applyFit);
 
 function onFullscreenChange(): void {
     const doc = document as Document & { webkitFullscreenElement?: Element | null };
-    isFullscreen.value = (doc.fullscreenElement ?? doc.webkitFullscreenElement ?? null) !== null;
+    // A host's own full-screen page (its sound screen, say), marked `data-lmpl-host-screen`, is not this player's
+    // full screen: it must not show the player's full-screen controls.
+    const fullscreenElement = doc.fullscreenElement ?? doc.webkitFullscreenElement ?? null;
+    isFullscreen.value =
+        fullscreenElement !== null &&
+        !(fullscreenElement instanceof Element && fullscreenElement.closest('[data-lmpl-host-screen]'));
     // Fullscreen is always landscape: portrait is the host app's own page. A guarded no-op where the
     // browser cannot lock (iOS Safari), and the lock is let go when fullscreen ends.
     const orientation = (screen as Screen & { orientation?: { lock?: (type: string) => Promise<void>; unlock?: () => void } }).orientation;
