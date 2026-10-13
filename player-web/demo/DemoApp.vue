@@ -76,6 +76,12 @@ if (query.has('master')) form.url = query.get('master') ?? '';
 if (query.has('key')) form.keyHex = query.get('key') ?? '';
 if (query.has('thumbs')) form.thumbs = query.get('thumbs') !== '0';
 if (query.has('chapters')) form.chapters = query.get('chapters') !== '0';
+// `?nextup=N` offers N videos near the end of full-screen, for looking at the strip.
+const nextUp = Array.from({ length: Number(query.get('nextup') ?? 0) || 0 }, (_, i) => ({
+    id: `next-${i}`,
+    title: `Up next ${i + 1}: a title long enough to need a second line`,
+    section: i === 0 ? 'Next in this series' : 'Related',
+}));
 // `?embed` drops the form and the notes, for a side-by-side page that only wants the player.
 const embed = query.has('embed');
 onMounted(() => {
@@ -277,6 +283,7 @@ const fmt = (n: number | undefined) => (n ?? 0).toFixed(1);
                 :controller-options="controllerOptions"
                 :now-playing="nowPlaying"
                 :appearance="appearance"
+                :next-up="nextUp.length ? nextUp : undefined"
             />
 
             <p v-if="youtubeMode" class="demo-hint">

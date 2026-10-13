@@ -647,11 +647,11 @@ const SCRUB_GAP_PX = 14;
 const LABEL_GAP_PX = 8;
 
 /**
- * The slider is taller than the track it draws, so the track sits this far, per unit of the controls' scale,
- * above the slider's bottom edge. The timeline lifts by the roster's height less this, so its track rests
- * against the roster's top rather than floating above it.
+ * The slider is taller than the track it draws (30 against 16 while held, per unit of the controls' scale), and the
+ * track is centred in it, so it sits this far above the slider's bottom edge. The timeline lifts by the roster's
+ * height less this, so the track's bottom meets the roster's top: neither floats above it nor is covered by it.
  */
-const TRACK_INSET_PX = 12.5;
+const TRACK_INSET_PX = 7;
 
 /**
  * The roster's height: that of the frame the hover preview shows, so the picture does not change size
@@ -673,9 +673,29 @@ function hideScrub(): void {
  */
 let scrubbing = false;
 
+/**
+ * Whether the video was playing when a scrub began, and so is to play on when it ends. A scrubbed video holds still:
+ * a playhead that keeps moving under the finger makes the strip drift and the landing a guess.
+ */
+let resumeAfterScrub = false;
+
+function pauseForScrub(): void {
+    const media = mediaEl.value;
+    if (!media || media.paused || resumeAfterScrub) return;
+    resumeAfterScrub = true;
+    media.pause();
+}
+
+function resumeFromScrub(): void {
+    if (!resumeAfterScrub) return;
+    resumeAfterScrub = false;
+    void mediaEl.value?.play();
+}
+
 /** The press ended, or was taken from us: nothing is being scrubbed any more. */
 function endScrub(event?: PointerEvent): void {
     scrubbing = false;
+    resumeFromScrub();
     // A press that opened the roster leaves it open: the viewer lifted a finger to look, not to be done.
     const roster = scrub.value?.roster;
     if (roster && event?.type === 'pointerup') {
@@ -711,7 +731,10 @@ function updateScrub(event: PointerEvent): void {
     const onBar = isOnBar(event.clientX, event.clientY, bar);
     // A press anywhere but the roster and the timeline (the fast way, which the roster is there to refine) closes a pinned roster.
     if (event.type === 'pointerdown' && pin.value && !onBar) closePin();
-    if (event.type === 'pointerdown' && onBar) scrubbing = true;
+    if (event.type === 'pointerdown' && onBar) {
+        scrubbing = true;
+        pauseForScrub();
+    }
     if (!scrubbing && !slider.hasAttribute('data-dragging') && !onBar) return hideScrub();
 
     const ratio = pointerRatio(event.clientX, bar);
@@ -845,6 +868,9 @@ function buildRoster(
  */
 const pin = shallowRef<{ bottom: number; labelBottom: number; gap: number } | null>(null);
 
+/** How far a finger may wander and still be tapping a frame rather than dragging the strip: a fingertip is not a pin. */
+const PIN_TAP_SLOP_PX = 10;
+
 interface PinDrag {
     startX: number;
     lastX: number;
@@ -886,6 +912,7 @@ watch(pinNow, (now) => {
 });
 
 function closePin(): void {
+    resumeFromScrub();
     pin.value = null;
     pinDrag.value = null;
     pinAnchor.value = null;
@@ -920,6 +947,7 @@ function onPinDown(event: PointerEvent): void {
     const view = pinnedView.value;
     if (!view) return;
     (event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId);
+    pauseForScrub();
     pinDrag.value = {
         startX: event.clientX,
         lastX: event.clientX,
@@ -940,7 +968,7 @@ function onPinMove(event: PointerEvent): void {
         ...drag,
         lastX: event.clientX,
         time: Math.min(Math.max(0, time), Math.max(0, duration - 0.001)),
-        moved: drag.moved || Math.abs(event.clientX - drag.startX) > 4,
+        moved: drag.moved || Math.abs(event.clientX - drag.startX) > PIN_TAP_SLOP_PX,
     };
 }
 
@@ -948,7 +976,7 @@ function onPinUp(event: PointerEvent): void {
     const drag = pinDrag.value;
     const view = pinnedView.value;
     pinDrag.value = null;
-    if (!drag || !view || event.type !== 'pointerup') return;
+    if (!drag || !view || event.type !== 'pointerup') return resumeFromScrub();
     let target = drag.time;
     if (!drag.moved) {
         // A tap: the frame under the finger, read off the strip's own scale.
@@ -960,6 +988,7 @@ function onPinUp(event: PointerEvent): void {
     pinAnchor.value = target;
     armAnchorTimeout();
     seek(target);
+    resumeFromScrub();
 }
 
 /**
@@ -1064,6 +1093,58 @@ const nextUpVisible = computed(() => {
     if (!Number.isFinite(duration) || !(duration > 0)) return false;
     return duration - currentTime <= NEXT_UP_LEAD_SECONDS;
 });
+
+/** Room between the strip and what it must clear, per unit of the controls' scale. */
+const NEXT_UP_GAP_PX = 8;
+
+/**
+ * Where the strip sits: `bottom` clears the controls (the chapter line, the timeline and the buttons) while they show,
+ * and `max` limits its width only when the strip would otherwise cover the play and skip buttons in the middle of the
+ * picture, which it then keeps to the right of. Measured, not assumed, because what is under it depends on the
+ * player's size and on whether a chapter line is showing.
+ */
+const nextUpLayout = shallowRef<{ bottom: number | null; max: number | null }>({ bottom: null, max: null });
+
+function layoutNextUp(): void {
+    const container = containerEl.value;
+    const strip = nextUpEl.value;
+    if (!container || !strip) return;
+    const frame = container.getBoundingClientRect();
+    const gap = NEXT_UP_GAP_PX * controlsScale(container);
+    const bar = container.querySelector<HTMLElement>('.lmpl-bottom');
+    // Without the controls the strip rests on the bottom edge, where the stylesheet puts it.
+    const bottom = controlsShown.value && bar ? Math.max(0, frame.bottom - bar.getBoundingClientRect().top) + gap : null;
+    const above = bottom ?? 2 * gap;
+    const top = frame.bottom - above - strip.offsetHeight;
+    // The cluster's box spans the picture; what must stay clear is its buttons.
+    const buttons = controlsShown.value
+        ? [...container.querySelectorAll<HTMLElement>('.lmpl-cluster-centre > *')].map((el) => el.getBoundingClientRect()).filter((r) => r.width > 0)
+        : [];
+    const centre = buttons.length ? { bottom: Math.max(...buttons.map((r) => r.bottom)), right: Math.max(...buttons.map((r) => r.right)) } : undefined;
+    // The strip is held to the right edge, so what is left of the buttons' right side is the room it may take.
+    const max = centre && top < centre.bottom + gap ? Math.max(0, strip.getBoundingClientRect().right - (centre.right + gap)) : null;
+    const next = { bottom, max };
+    const now = nextUpLayout.value;
+    if (now.bottom !== next.bottom || now.max !== next.max) nextUpLayout.value = next;
+}
+
+let nextUpObserver: ResizeObserver | null = null;
+watch(
+    [nextUpVisible, controlsShown, frameWidth],
+    async () => {
+        await nextTick();
+        layoutNextUp();
+        nextUpObserver?.disconnect();
+        if (!nextUpEl.value || typeof ResizeObserver === 'undefined') return;
+        nextUpObserver ??= new ResizeObserver(layoutNextUp);
+        nextUpObserver.observe(nextUpEl.value);
+        const bar = containerEl.value?.querySelector('.lmpl-bottom');
+        if (bar) nextUpObserver.observe(bar);
+        if (containerEl.value) nextUpObserver.observe(containerEl.value);
+    },
+    { flush: 'post' }
+);
+onBeforeUnmount(() => nextUpObserver?.disconnect());
 
 /** The card holds the controls up while the viewer is working it by keyboard. */
 function nextUpHasFocus(): boolean {
@@ -1375,6 +1456,10 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
                     ref="nextUpEl"
                     class="lmpl-nextup"
                     :class="{ 'lmpl-nextup-raised': controlsShown }"
+                    :style="{
+                        ...(nextUpLayout.bottom !== null ? { '--lmpl-nextup-bottom': `${nextUpLayout.bottom}px` } : {}),
+                        ...(nextUpLayout.max !== null ? { '--lmpl-nextup-max': `${nextUpLayout.max}px` } : {}),
+                    }"
                     role="region"
                     :aria-label="msg.nextUp"
                     @keydown="onNextUpKeydown"

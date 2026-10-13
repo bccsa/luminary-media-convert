@@ -1061,18 +1061,18 @@
     /* The control bar's own inset, so the strip's edges meet the timeline's. */
     left: max(var(--lmpl-edge), env(safe-area-inset-left));
     right: max(var(--lmpl-edge), env(safe-area-inset-right));
-    bottom: max(calc(16px * var(--lmpl-s)), env(safe-area-inset-bottom));
+    /* Held to the right, and narrowed by the player when the strip would otherwise cover the play and skip buttons. */
+    max-width: var(--lmpl-nextup-max, none);
+    margin-left: auto;
+    /* `--lmpl-nextup-bottom` is the height of the controls while they show: the strip rides above them. */
+    --lmpl-nextup-rest: max(calc(16px * var(--lmpl-s)), env(safe-area-inset-bottom));
+    bottom: var(--lmpl-nextup-bottom, var(--lmpl-nextup-rest));
     box-sizing: border-box;
     color: #fff;
     font-size: calc(14px * var(--lmpl-s));
     text-shadow: 0 1px 2px rgb(0 0 0 / 0.5);
-    transition: transform 0.25s ease;
+    transition: bottom 0.25s ease;
     animation: lmpl-nextup-in 0.25s ease;
-}
-
-/* Clear of the control bar (timeline and buttons) while it is up. */
-.lmpl-root .lmpl-nextup.lmpl-nextup-raised {
-    transform: translateY(calc(-112px * var(--lmpl-s)));
 }
 
 @keyframes lmpl-nextup-in {

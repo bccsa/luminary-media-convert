@@ -152,6 +152,19 @@ function addThumbnails(dir, { encrypt = false } = {}) {
     writeFileSync(join(dir, 'thumbnails.vtt'), encrypt ? lmcenc(text) : text);
 }
 
+/** A `chapters/en.vtt` beside the master, as the encoder writes it: four stretches of the clip, each titled. */
+function addChapters(dir) {
+    const folder = join(dir, 'chapters');
+    mkdirSync(folder, { recursive: true });
+    const titles = ['Beginning', 'Middle', 'Later', 'End'];
+    const lines = ['WEBVTT', ''];
+    titles.forEach((title, i) => {
+        const start = (i * DURATION) / titles.length;
+        lines.push(`${vttTime(start)} --> ${vttTime(((i + 1) * DURATION) / titles.length)}`, title, '');
+    });
+    writeFileSync(join(folder, 'en.vtt'), lines.join('\n'));
+}
+
 /** Two audio languages in one group, so the player has a language to choose. */
 function buildMultiAudio() {
     encodeLadder(join(OUT, 'multiaudio'), {
@@ -168,6 +181,7 @@ buildEncrypted();
 buildByteRange();
 buildMultiAudio();
 addThumbnails(join(OUT, 'clear'));
+addChapters(join(OUT, 'clear'));
 addThumbnails(join(OUT, 'encrypted'), { encrypt: true });
 addThumbnails(join(OUT, 'byterange'));
 addThumbnails(join(OUT, 'multiaudio'));
