@@ -44,6 +44,17 @@ describe('AudioFullscreen — what it shows', () => {
         expect(wrapper.text()).toContain('Sunday messages');
     });
 
+    it('shows the fallback in place of a cover that does not load, and the placeholder when there is none', async () => {
+        const wrapper = mountScreen({ artwork: { src: 'https://cdn.example.com/broken.jpg', fallback: '/fallback.jpg' } });
+        await find(wrapper, 'afsCover').trigger('error');
+        expect(find(wrapper, 'afsCover').attributes('src')).toBe('/fallback.jpg');
+
+        const bare = mountScreen({ artwork: { src: 'https://cdn.example.com/broken.jpg' } });
+        await find(bare, 'afsCover').trigger('error');
+        expect(find(bare, 'afsCover').exists()).toBe(false);
+        expect(bare.find('.lmpl-afs-cover-empty').exists()).toBe(true);
+    });
+
     it('leads with the cover, and with a placeholder when there is none', () => {
         expect(find(mountScreen(), 'afsCover').attributes('src')).toBe('https://cdn.example.com/cover.jpg');
         const bare = mountScreen({ artwork: null });

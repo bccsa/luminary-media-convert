@@ -27,7 +27,8 @@ const props = defineProps<{
     eyebrow?: string;
     /** Who it is by. */
     subtitle?: string;
-    artwork: { src?: string; srcset?: string; sizes?: string } | null;
+    /** `fallback` is shown in its place if the picture does not load. */
+    artwork: { src?: string; srcset?: string; sizes?: string; fallback?: string } | null;
     appearance: 'light' | 'dark';
     chapters: readonly Chapter[];
     currentTime: number;
@@ -215,6 +216,19 @@ function chooseTrack(id: string): void {
 
 const speedText = (rate: number): string => `${Number.isInteger(rate) ? rate : rate}×`;
 const artworkSizes = computed(() => props.artwork?.sizes ?? '(min-aspect-ratio: 6/5) 40vh, 80vw');
+
+// A picture that does not load gives way to its fallback, and to the placeholder when there is none.
+const coverFailed = ref(false);
+watch(
+    () => props.artwork?.src,
+    () => (coverFailed.value = false)
+);
+const cover = computed(() => {
+    const art = props.artwork;
+    if (!art) return null;
+    if (!coverFailed.value) return art;
+    return art.fallback ? { src: art.fallback } : null;
+});
 </script>
 
 <template>
@@ -229,7 +243,7 @@ const artworkSizes = computed(() => props.artwork?.sizes ?? '(min-aspect-ratio: 
     >
         <!-- The picture, blurred, as the screen's colour (light) or its glow (dark). -->
         <div class="lmpl-afs-bg" aria-hidden="true">
-            <img v-if="artwork?.src && appearance === 'light'" class="lmpl-afs-wash" :src="artwork.src" alt="" draggable="false" />
+            <img v-if="cover?.src && appearance === 'light'" class="lmpl-afs-wash" :src="cover.src" alt="" draggable="false" />
         </div>
 
         <div class="lmpl-afs-top">
@@ -248,18 +262,19 @@ const artworkSizes = computed(() => props.artwork?.sizes ?? '(min-aspect-ratio: 
 
         <div class="lmpl-afs-main">
             <div class="lmpl-afs-art">
-                <div v-if="artwork?.src" class="lmpl-afs-halo" aria-hidden="true">
-                    <img :src="artwork.src" alt="" draggable="false" />
+                <div v-if="cover?.src" class="lmpl-afs-halo" aria-hidden="true">
+                    <img :src="cover.src" alt="" draggable="false" />
                 </div>
                 <img
-                    v-if="artwork?.src"
+                    v-if="cover?.src"
                     class="lmpl-afs-cover"
-                    :src="artwork.src"
-                    :srcset="artwork.srcset"
-                    :sizes="artwork.srcset ? artworkSizes : undefined"
+                    :src="cover.src"
+                    :srcset="'srcset' in cover ? cover.srcset : undefined"
+                    :sizes="'srcset' in cover && cover.srcset ? artworkSizes : undefined"
                     alt=""
                     draggable="false"
                     data-test="afsCover"
+                    @error="coverFailed = true"
                 />
                 <div v-else class="lmpl-afs-cover lmpl-afs-cover-empty" aria-hidden="true">
                     <svg viewBox="0 0 24 24" width="40%" height="40%" fill="currentColor"><path d="M19.952 1.651a.75.75 0 0 1 .298.599V16.303a3 3 0 0 1-2.176 2.884l-1.32.377a2.553 2.553 0 1 1-1.403-4.909l2.311-.66a1.5 1.5 0 0 0 1.088-1.442V6.994l-9 2.572v9.737a3 3 0 0 1-2.176 2.884l-1.32.377a2.553 2.553 0 1 1-1.403-4.909l2.311-.66a1.5 1.5 0 0 0 1.088-1.442V5.25a.75.75 0 0 1 .544-.721l10.5-3a.75.75 0 0 1 .658.122Z" /></svg>
