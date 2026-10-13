@@ -12,6 +12,8 @@ import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.Region
+import android.text.TextUtils
 import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
@@ -119,6 +121,7 @@ internal class SkinControls(
     private val centre = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
     private val roster = RosterView(context)
     private val label = TextView(context)
+    private val chapterNow = TextView(context)
     private val fade = FadeDrawable()
 
     private var volumeBeforeMute = 1f
@@ -199,6 +202,15 @@ internal class SkinControls(
         timelineRow.addView(elapsed)
         timelineRow.addView(timeline)
         timelineRow.addView(remaining)
+        chapterNow.apply {
+            setTextColor(Color.WHITE)
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            setShadowLayer(dpf(2f), 0f, dpf(1f), 0xB3000000.toInt())
+            visibility = GONE
+        }
+        column.addView(chapterNow)
         column.addView(timelineRow)
         actionsRow.addView(muteButton.tap { toggleMute() })
         actionsRow.addView(audioButton.tap { openAudioMenu() })
@@ -397,9 +409,26 @@ internal class SkinControls(
             val at = sliding?.let { it * 1000 } ?: player.currentPosition.toDouble()
             timeline.show(at / duration, player.bufferedPosition.toDouble() / duration)
         }
+        showChapterNow(position, duration?.div(1000.0) ?: 0.0)
         if (browseOpen && browseTab == BrowseTab.CHAPTERS) markCurrentChapter()
         // Held open after the finger lifts, the roster follows the playhead until it is touched again.
         if (rosterOpen && !timeline.dragging && sliding == null) updateRoster(position)
+    }
+
+    private var cutsFor: Pair<List<BrowseChapter>, Double>? = null
+
+    /** "Chapter 4 of 7" above the timeline, and the timeline cut at the chapter starts, as the web player does. */
+    private fun showChapterNow(position: Double, duration: Double) {
+        val chapters = browse?.chapters.orEmpty()
+        if (cutsFor?.first !== chapters || cutsFor?.second != duration) {
+            cutsFor = chapters to duration
+            timeline.cuts = ChapterCuts.starts(chapters, duration)
+        }
+        val text = ChapterCuts.nowText(texts.chapterOf, chapters, chapterIndex(chapters, position))
+        if (chapterNow.text.toString() != text) chapterNow.text = text
+        chapterNow.visibility = if (text.isEmpty()) GONE else VISIBLE
+        // Held, the strip of frames carries the moment; the line would stack on it.
+        chapterNow.alpha = if (timeline.dragging || rosterOpen) 0f else 1f
     }
 
     // Actions.
@@ -1006,6 +1035,8 @@ internal class SkinControls(
         }
         elapsed.layoutParams = LinearLayout.LayoutParams(WRAP_CONTENT, px(30f)).apply { marginEnd = px(12f) }
         remaining.layoutParams = LinearLayout.LayoutParams(WRAP_CONTENT, px(30f)).apply { marginStart = px(12f) }
+        chapterNow.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13f * s)
+        chapterNow.layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = px(2f) }
         timelineRow.layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, px(30f))
         actionsRow.layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {
             // The buttons' own padding keeps their glyphs on the line of the timeline's ends.
@@ -1156,6 +1187,14 @@ private class Timeline(
     private var played = 0.0
     private var buffered = 0.0
     var scale = 1f
+
+    /** Where the bar is cut, as fractions of its length (a chapter starts there). */
+    var cuts: List<Float> = emptyList()
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
     var dragging = false
         private set
     var dragAt = 0.0
@@ -1196,9 +1235,15 @@ private class Timeline(
             paint.color = color
             canvas.drawRoundRect(RectF(0f, top, max((width * fraction).toFloat(), 0f), top + thickness), radius, radius, paint)
         }
+        // The gaps go through the track, its buffer and its fill alike, so no gap colour has to match the picture.
+        canvas.save()
+        val half = ChapterCuts.halfGapDp(cuts.size + 1) * density * scale
+        @Suppress("DEPRECATION")
+        for (cut in cuts) canvas.clipRect(width * cut - half, 0f, width * cut + half, height.toFloat(), Region.Op.DIFFERENCE)
         bar(1.0, 0x42FFFFFF)
         bar(buffered, 0x66FFFFFF)
         bar(if (dragging) dragAt else played, Color.WHITE)
+        canvas.restore()
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {

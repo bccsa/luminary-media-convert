@@ -178,6 +178,8 @@ export interface FullscreenTexts {
     browse?: string;
     /** The panel's close button. */
     closeBrowse?: string;
+    /** The line above the timeline; `{index}` and `{count}` are filled in. */
+    chapterOf?: string;
 }
 
 /** A chapter of what plays: tapping it in the panel seeks to `startTime`. */

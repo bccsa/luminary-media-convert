@@ -28,6 +28,8 @@ data class FullscreenTexts(
     /** The button that opens the chapters / up-next panel, and the panel itself. */
     val browse: String = "Chapters and up next",
     val closeBrowse: String = "Close",
+    /** The line above the timeline; `{index}` and `{count}` are the chapter the playhead is in and how many there are. */
+    val chapterOf: String = "Chapter {index} of {count}",
 ) {
     fun skipBack(seconds: Int) = skipBack.replace("{seconds}", seconds.toString())
 
@@ -57,6 +59,7 @@ data class FullscreenTexts(
                 upNext = sent["upNext"] ?: base.upNext,
                 browse = sent["browse"] ?: base.browse,
                 closeBrowse = sent["closeBrowse"] ?: base.closeBrowse,
+                chapterOf = sent["chapterOf"] ?: base.chapterOf,
             )
         }
     }

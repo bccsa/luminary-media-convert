@@ -45,6 +45,8 @@ export interface NativePlayerMessages {
     browse: string;
     /** The panel's close button. */
     closeBrowse: string;
+    /** The line above the full-screen timeline; `{index}` and `{count}` are filled in. */
+    chapterOf: string;
 }
 
 export const DEFAULT_NATIVE_MESSAGES: NativePlayerMessages = {
@@ -75,6 +77,7 @@ export const DEFAULT_NATIVE_MESSAGES: NativePlayerMessages = {
     upNext: 'Up next',
     browse: 'Chapters and up next',
     closeBrowse: 'Close',
+    chapterOf: 'Chapter {index} of {count}',
 };
 
 /** What native full-screen is told to say, from the messages the host gave. */
@@ -98,6 +101,7 @@ export function fullscreenTexts(messages: NativePlayerMessages): FullscreenTexts
         upNext: messages.upNext,
         browse: messages.browse,
         closeBrowse: messages.closeBrowse,
+        chapterOf: messages.chapterOf,
     };
 }
 
