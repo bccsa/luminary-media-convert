@@ -285,6 +285,7 @@ internal class SkinControls(
             if (rosterOpen) updateRoster(rosterTime)
         }
         roster.onSlide = { time ->
+            pauseForScrub()
             sliding = time
             updateRoster(time)
             refresh()
@@ -292,6 +293,7 @@ internal class SkinControls(
         roster.onSlideEnd = { commit ->
             sliding?.let { if (commit) player.seekTo((it * 1000).roundToLong()) }
             sliding = null
+            resumeFromScrub()
             refresh()
             scheduleHide()
         }
@@ -459,7 +461,11 @@ internal class SkinControls(
         nextUpLayer.removeAllViews()
     }
 
-    /** Directly above the timeline (and the chapter line over it) while the controls show, on the bottom edge when they do not. */
+    /**
+     * Directly above the timeline (and the chapter line over it) while the controls show, on the bottom edge when they do
+     * not. When that would put it over the play and skip buttons it is held to the right of them instead, which is as
+     * far as it need give way: the cards scroll.
+     */
     private fun raiseNextUp() {
         val strip = nextUpStrip ?: return
         val raise = if (shown) {
@@ -469,6 +475,29 @@ internal class SkinControls(
             0f
         }
         strip.animate().translationY(-raise).setDuration(NEXT_UP_MS).start()
+
+        val lp = strip.layoutParams as? LayoutParams ?: return
+        val base = edgePx() + inset.left
+        var start = base
+        val buttons = if (shown && centre.alpha > 0f) (0 until centre.childCount).map { centre.getChildAt(it) }.filter { it.visibility == VISIBLE && it.width > 0 } else emptyList()
+        if (buttons.isNotEmpty()) {
+            val layer = IntArray(2).also { nextUpLayer.getLocationInWindow(it) }
+            val where = IntArray(2)
+            var bottom = 0
+            var right = 0
+            for (button in buttons) {
+                button.getLocationInWindow(where)
+                bottom = max(bottom, where[1] + button.height)
+                right = max(right, where[0] + button.width)
+            }
+            val stripTop = layer[1] + strip.top - raise
+            val gap = dpf(8f * scale)
+            if (stripTop < bottom + gap) start = max(base, (right + gap - layer[0]).roundToInt())
+        }
+        if (lp.marginStart != start) {
+            lp.marginStart = start
+            strip.layoutParams = lp
+        }
     }
 
     private fun closeNextUp() {
@@ -642,8 +671,27 @@ internal class SkinControls(
 
     // The timeline, held: a roster of frames takes its place and the timeline lifts onto it.
 
+    /**
+     * Whether the video was playing when a scrub began, and so plays on when it ends. A scrubbed video holds still: a
+     * playhead that keeps moving under the finger makes the strip drift and the landing a guess.
+     */
+    private var resumeAfterScrub = false
+
+    private fun pauseForScrub() {
+        if (resumeAfterScrub || !player.playWhenReady) return
+        resumeAfterScrub = true
+        player.pause()
+    }
+
+    private fun resumeFromScrub() {
+        if (!resumeAfterScrub) return
+        resumeAfterScrub = false
+        player.play()
+    }
+
     /** The finger is on the timeline at [fraction] of the way along it. */
     private fun scrubbed(fraction: Double, x: Float) {
+        pauseForScrub()
         if (rosterWanted() && !rosterOpen) openRoster()
         if (rosterOpen) updateRoster(fraction * (player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0L) / 1000.0, x)
         refresh()
@@ -655,6 +703,7 @@ internal class SkinControls(
             val duration = player.duration.takeIf { it != C.TIME_UNSET }
             if (duration != null) player.seekTo((duration * fraction).roundToLong())
         }
+        resumeFromScrub()
         // The roster stays until a press lands outside it and the timeline.
         refresh()
         scheduleHide()
@@ -1347,8 +1396,11 @@ internal class SkinControls(
         private const val NEXT_UP_MS = 250L
         private const val CARD = 0xF718181B.toInt()
 
-        /** The slider is taller than the track it draws, so the track sits this far (per unit of scale) above its bottom. */
-        private const val TRACK_INSET_DP = 12.5f
+        /**
+         * The slider is taller than the track it draws (30 against 16 while held) and the track is centred in it, so it
+         * sits this far (per unit of scale) above the slider's bottom: the timeline lifts so its track meets the roster.
+         */
+        private const val TRACK_INSET_DP = 7f
         private const val LABEL_GAP_DP = 8f
     }
 }
@@ -1476,8 +1528,9 @@ private class Timeline(
             }
             MotionEvent.ACTION_UP -> {
                 dragging = false
-                played = fraction
-                onEnd(fraction, true)
+                // Where the finger last was, not where it lifted: a lift drifts, and the strip showed the former.
+                played = dragAt
+                onEnd(dragAt, true)
             }
             MotionEvent.ACTION_CANCEL -> {
                 dragging = false
