@@ -1693,6 +1693,50 @@
     }
 }
 
+/* A desktop window: the picture and the rest are one composition in the middle, not pinned to the two edges, with the
+   controls under the chapters instead of at the foot of the screen. */
+@container lmpl-afs (min-aspect-ratio: 6/5) and (min-width: 900px) {
+    .lmpl-afs-main {
+        align-self: center;
+        width: 100%;
+        max-width: max(1240px, 70cqw);
+        gap: clamp(36px, 5cqw, 96px);
+        padding-inline: clamp(32px, 5cqw, 96px);
+    }
+
+    .lmpl-afs-art {
+        width: min(32cqw, 66cqh, 520px);
+    }
+
+    .lmpl-afs-bottomrow {
+        flex-wrap: wrap;
+        gap: 8px 24px;
+    }
+
+    /* The tools are a fixed, thumb-and-pointer size here: scaled with the window they would not fit beside the transport. */
+    .lmpl-root .lmpl-afs-tools .lmpl-afs-iconbtn {
+        width: 56px;
+        height: 56px;
+    }
+
+    .lmpl-root .lmpl-afs-tools .lmpl-afs-iconbtn svg,
+    .lmpl-root .lmpl-afs-tools .lmpl-afs-iconbtn .media-button-icon {
+        width: 34px;
+        height: 34px;
+    }
+
+    .lmpl-afs-info {
+        align-self: center;
+        flex: 1 1 0;
+        min-width: 0;
+        gap: clamp(14px, 2.4cqh, 28px);
+    }
+
+    .lmpl-afs-controls {
+        margin-top: clamp(16px, 4cqh, 44px);
+    }
+}
+
 @media (prefers-reduced-motion: reduce) {
     .lmpl-afs * {
         transition: none !important;
