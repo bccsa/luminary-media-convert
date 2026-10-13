@@ -22,7 +22,7 @@ export type ControlsHtmlOptions = Pick<
 const icon = (name: string, cls: string): string => `<media-icon name="${name}" class="media-button-icon ${cls}"></media-icon>`;
 
 /** A circular arrow with the interval written in it; `forward` mirrors the arrow, never the number. */
-function skipIcon(seconds: number, forward: boolean): string {
+export function skipIcon(seconds: number, forward: boolean): string {
     const arc = forward ? 'M20.5 12a8.5 8.5 0 1 1-2.9-6.4' : 'M3.5 12a8.5 8.5 0 1 0 2.9-6.4';
     const head = forward ? 'M20.8 4.2v4.4h-4.4' : 'M3.2 4.2v4.4h4.4';
     const size = seconds >= 100 ? 6 : 7.5;

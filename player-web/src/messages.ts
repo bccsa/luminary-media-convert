@@ -89,6 +89,20 @@ export interface PlayerMessages {
     nextUp: string;
     /** Accessible name of the strip's close button, which stops the automatic advance. */
     dismiss: string;
+
+    // --- Fullscreen audio screen ---------------------------------------------
+    /** Name of the playback speed button and its menu. */
+    speedLabel: string;
+    /** Name of the sleep timer button and its menu. */
+    sleepTimer: string;
+    /** The sleep timer menu's entry that turns it off. */
+    sleepOff: string;
+    /** A sleep timer entry; `{minutes}` is replaced with the number. */
+    sleepMinutes: string;
+    /** The sleep timer entry that stops playback when the chapter playing ends. */
+    sleepEndOfChapter: string;
+    /** What the sleep timer button says while one runs; `{minutes}` is the minutes left. */
+    sleepLeft: string;
 }
 
 /** Built-in English strings. Merged under any partial the host supplies. */
@@ -127,6 +141,13 @@ export const DEFAULT_MESSAGES: PlayerMessages = {
 
     nextUp: 'Up next',
     dismiss: 'Dismiss',
+
+    speedLabel: 'Speed',
+    sleepTimer: 'Sleep timer',
+    sleepOff: 'Off',
+    sleepMinutes: '{minutes} minutes',
+    sleepEndOfChapter: 'End of chapter',
+    sleepLeft: '{minutes} min left',
 };
 
 /**

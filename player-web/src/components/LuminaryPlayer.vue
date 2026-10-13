@@ -24,6 +24,7 @@ import type {
     PlayerControllerOptions,
     PlayerError,
     PlayerSource,
+    SleepTimerOption,
     ThumbnailSpriteCue,
 } from '@luminary-media-converter/player-core';
 import { HlsJsVideoAdapter } from '../adapter/HlsJsVideoAdapter';
@@ -52,6 +53,7 @@ import {
 import ScrubThumbnail from './ScrubThumbnail.vue';
 import ScrubRoster from './ScrubRoster.vue';
 import NextUpThumb from './NextUpThumb.vue';
+import AudioFullscreen from './AudioFullscreen.vue';
 import { imageAttempts, toPlayerImage, type PlayerImageInput } from '../image';
 import { isYouTubeUrl } from '../youtube';
 import { withSectionHeadings, type PlayerUpNextItem } from '../upNext';
@@ -81,6 +83,13 @@ interface Props {
      * left, a strip of cards offers them; unless dismissed the first is raised as `nextupselect` when this video ends.
      */
     nextUp?: PlayerUpNextItem[];
+    /**
+     * What is playing, for the fullscreen audio screen: the title, who it is by, and the series it belongs to. The
+     * picture is the `poster`. Without a title the screen is left to the player's own controls.
+     */
+    nowPlaying?: { title: string; subtitle?: string; eyebrow?: string };
+    /** The host's theme, for the fullscreen audio screen: `light` takes the picture's colour over the whole screen, `dark` stays plain with a glow behind the picture. */
+    appearance?: 'light' | 'dark';
     /** Audio language to select automatically; a viewer's own choice outranks it. */
     preferredLanguage?: string;
     /** Options handed to the default `PlayerController`. */
@@ -136,7 +145,7 @@ const controlsHtml = computed(() =>
  * answers neither: the host's own interface is the transport, and a frame that also answered clicks
  * would be a second one. Fullscreen has no other transport, so it answers both.
  */
-const gesturesOn = computed(() => mergedControls.value.windowedControls || isFullscreen.value);
+const gesturesOn = computed(() => (mergedControls.value.windowedControls || isFullscreen.value) && !audioFullscreen.value);
 
 const UNSUPPORTED_YOUTUBE: PlayerError = {
     code: 'media',
@@ -442,8 +451,9 @@ function onFullscreenChange(): void {
     // Fullscreen is always landscape: portrait is the host app's own page. A guarded no-op where the
     // browser cannot lock (iOS Safari), and the lock is let go when fullscreen ends.
     const orientation = (screen as Screen & { orientation?: { lock?: (type: string) => Promise<void>; unlock?: () => void } }).orientation;
-    if (isFullscreen.value) void orientation?.lock?.('landscape')?.catch(() => {});
-    else orientation?.unlock?.();
+    // Sound alone has no picture to turn: the fullscreen audio screen has a portrait layout of its own.
+    if (isFullscreen.value && !isAudioOnly.value) void orientation?.lock?.('landscape')?.catch(() => {});
+    else if (!isFullscreen.value) orientation?.unlock?.();
     // A control clicked in fullscreen keeps focus once the bare frame hides it again, and a focused
     // control swallows every key but Tab: the host's shortcuts would stay dead until something else
     // took focus.
@@ -495,6 +505,17 @@ async function enterFullscreen(): Promise<void> {
     }
 }
 
+/** The fullscreen audio screen's asks of the engine. */
+function setRate(rate: number): void {
+    controller.value?.setPlaybackRate(rate);
+}
+function setSleep(option: SleepTimerOption | null): void {
+    controller.value?.setSleepTimer(option);
+}
+function setAudioTrack(id: string): void {
+    controller.value?.setAudioTrack(id);
+}
+
 function exitFullscreen(): void {
     // Rejected when nothing is fullscreen, and nobody would catch it.
     if (isFullscreen.value) void store()?.exitFullscreen();
@@ -528,6 +549,9 @@ const isAudioOnly = computed(
         controller.value !== null &&
         (state.value.isAudioOnly || state.value.activeAngleId === AUDIO_ONLY_ANGLE_ID)
 );
+
+/** Fullscreen with only sound playing, and something to say about it: the now-playing screen takes over. */
+const audioFullscreen = computed(() => isFullscreen.value && isAudioOnly.value && !!props.nowPlaying?.title);
 
 // --- scrub preview ----------------------------------------------------------
 
@@ -1171,6 +1195,10 @@ const artworkSizes = computed(() => {
 
 const showArtworkLayer = computed(() => isAudioOnly.value || artworkAttempt.value !== null);
 
+/** What the fullscreen audio screen draws as the cover: the picture that is showing now, fallbacks included. */
+const audioArtwork = computed(() => (artworkAttempt.value ? { src: artworkAttempt.value.src, srcset: artworkAttempt.value.srcset } : null));
+const audioChapterIndex = computed(() => chapterIndexAt(state.value.chapters, state.value.currentTime));
+
 defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, pause });
 </script>
 
@@ -1185,6 +1213,7 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
             'lmpl-has-subtitles': state.subtitleTracks.length > 0,
             'lmpl-has-thumbs': state.thumbnailsReady,
             'lmpl-has-browse': hasBrowse,
+            'lmpl-audio-fs': audioFullscreen,
             'lmpl-scrubbing': rosterShown,
             'lmpl-previewing': scrub !== null,
         }"
@@ -1248,6 +1277,34 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
                 <media-gesture v-if="gesturesOn" type="tap" action="toggleControls" pointer="touch"></media-gesture>
 
                 <media-controls class="lmpl-controls" v-html="controlsHtml"></media-controls>
+
+                <!-- Fullscreen with sound alone: a now-playing screen, over the controls it hides. -->
+                <AudioFullscreen
+                    v-if="audioFullscreen && nowPlaying"
+                    :title="nowPlaying.title"
+                    :subtitle="nowPlaying.subtitle"
+                    :eyebrow="nowPlaying.eyebrow"
+                    :artwork="audioArtwork"
+                    :appearance="appearance ?? 'dark'"
+                    :chapters="state.chapters"
+                    :current-time="state.currentTime"
+                    :chapter-index="audioChapterIndex"
+                    :playback-rate="state.playbackRate"
+                    :audio-tracks="state.audioTracks"
+                    :active-audio-track-id="state.activeAudioTrackId"
+                    :sleep-timer="state.sleepTimer"
+                    :has-browse="hasBrowse"
+                    :skip-back-seconds="mergedControls.skipBackSeconds"
+                    :skip-forward-seconds="mergedControls.skipForwardSeconds"
+                    :chapter-mask="chapterBarMask"
+                    :messages="msg"
+                    @exit="exitFullscreen"
+                    @open-browse="openBrowse"
+                    @seek-chapter="(chapter) => seek(chapter.startTime)"
+                    @rate="setRate"
+                    @audio-track="setAudioTrack"
+                    @sleep="setSleep"
+                />
 
                 <!-- While held, the frame being scrubbed over the picture: a fast-forward, VHS style. -->
                 <div v-if="pictureCue" class="lmpl-scrub-picture" aria-hidden="true">

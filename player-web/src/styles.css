@@ -1210,3 +1210,473 @@
     width: calc(40px * var(--lmpl-s));
     height: calc(40px * var(--lmpl-s));
 }
+
+/* --- Fullscreen audio screen ---------------------------------------------------- */
+
+/* Sound alone has no picture to put controls over: the screen has its own, and the video controls give way. */
+.lmpl-root.lmpl-audio-fs .lmpl-controls {
+    display: none;
+}
+
+.lmpl-afs {
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    color: #fff;
+    background: #0e1013;
+    container: lmpl-afs / size;
+}
+
+.lmpl-afs-bg {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+}
+
+/* Light: the picture's colour over the whole screen, darkened so white text reads on any cover. */
+.lmpl-afs-wash {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform: scale(1.5);
+    filter: blur(60px) saturate(1.5);
+    opacity: 0.85;
+}
+
+.lmpl-afs-light .lmpl-afs-bg::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to bottom, rgb(0 0 0 / 0.18), rgb(0 0 0 / 0.55));
+}
+
+.lmpl-afs-top {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: max(12px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
+    flex: none;
+}
+
+.lmpl-afs-eyebrow {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: calc(12px * var(--lmpl-s));
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    opacity: 0.9;
+}
+
+.lmpl-afs-iconbtn {
+    position: relative;
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 0;
+    border-radius: 9999px;
+    background: transparent;
+    color: rgb(255 255 255 / 0.88);
+    cursor: pointer;
+}
+
+.lmpl-afs-iconbtn:hover,
+.lmpl-afs-iconbtn[aria-expanded='true'] {
+    background: rgb(255 255 255 / 0.14);
+}
+
+.lmpl-afs-iconbtn:focus-visible {
+    outline: 2px solid #fff;
+    outline-offset: -2px;
+}
+
+.lmpl-afs-spacer {
+    pointer-events: none;
+}
+
+.lmpl-afs-on {
+    color: #fff;
+    background: rgb(255 255 255 / 0.14);
+}
+
+.lmpl-afs-badge {
+    position: absolute;
+    right: -2px;
+    bottom: 2px;
+    max-width: 90px;
+    padding: 0 5px;
+    border-radius: 6px;
+    background: #fff;
+    color: #111;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 14px;
+    white-space: nowrap;
+}
+
+.lmpl-afs-main {
+    position: relative;
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 14px;
+    min-height: 0;
+    padding: 8px max(24px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
+}
+
+.lmpl-afs-art {
+    position: relative;
+    flex: none;
+    align-self: center;
+    width: min(78cqw, 42cqh);
+    aspect-ratio: 1;
+}
+
+.lmpl-afs-cover {
+    position: relative;
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: 16px;
+    object-fit: cover;
+    box-shadow: 0 22px 50px -14px rgb(0 0 0 / 0.65);
+}
+
+.lmpl-afs-cover-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #475569, #1e293b);
+    color: rgb(255 255 255 / 0.7);
+}
+
+/* Dark: a glow behind the picture, a blurred copy of it that fades out a little past its edges. */
+.lmpl-afs-halo {
+    position: absolute;
+    inset: -34px;
+    overflow: hidden;
+    border-radius: 40px;
+    pointer-events: none;
+    -webkit-mask-image: radial-gradient(closest-side, #000 55%, transparent 100%);
+    mask-image: radial-gradient(closest-side, #000 55%, transparent 100%);
+}
+
+.lmpl-afs-halo img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform: scale(1.05);
+    filter: blur(20px) saturate(1.7);
+    opacity: 0.8;
+}
+
+.lmpl-afs-light .lmpl-afs-halo {
+    display: none;
+}
+
+.lmpl-afs-info {
+    position: relative;
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 0;
+}
+
+.lmpl-afs-title {
+    margin: 0;
+    font-size: calc(19px * var(--lmpl-s));
+    font-weight: 700;
+    line-height: 1.25;
+}
+
+.lmpl-afs-subtitle {
+    margin: 2px 0 0;
+    font-size: calc(13px * var(--lmpl-s));
+    opacity: 0.75;
+}
+
+.lmpl-afs-chip {
+    display: inline-flex;
+    align-items: center;
+    align-self: flex-start;
+    gap: 8px;
+    max-width: 100%;
+    padding: 4px 11px;
+    border: 0;
+    border-radius: 9999px;
+    background: rgb(255 255 255 / 0.16);
+    color: #fff;
+    font: inherit;
+    font-size: calc(12px * var(--lmpl-s));
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.lmpl-afs-chip:focus-visible,
+.lmpl-afs-chapter:focus-visible {
+    outline: 2px solid #fff;
+    outline-offset: 2px;
+}
+
+.lmpl-afs-chip-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.lmpl-afs-chapters {
+    display: none;
+    flex: 1;
+    flex-direction: column;
+    gap: 2px;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    list-style: none;
+    /* Fades out at the foot, where the list goes on; the head stays clear, since the playing chapter may be its first. */
+    -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 78%, transparent);
+    mask-image: linear-gradient(to bottom, #000 0, #000 78%, transparent);
+}
+
+.lmpl-afs-chapter {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    padding: 7px 4px;
+    border: 0;
+    border-radius: 8px;
+    background: none;
+    color: rgb(255 255 255 / 0.55);
+    font: inherit;
+    font-size: calc(17px * var(--lmpl-s));
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+}
+
+.lmpl-afs-chapter:hover {
+    color: #fff;
+}
+
+.lmpl-afs-chapter[aria-current='true'] {
+    color: #fff;
+    font-size: calc(23px * var(--lmpl-s));
+}
+
+.lmpl-afs-chapter-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.lmpl-afs-chapter-time {
+    align-self: center;
+    flex: none;
+    font-size: 0.7em;
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.75;
+}
+
+.lmpl-afs-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: auto;
+}
+
+.lmpl-afs-timeline {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.lmpl-afs .lmpl-time {
+    min-width: 3.2ch;
+    font-size: calc(13px * var(--lmpl-s));
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    color: rgb(255 255 255 / 0.8);
+}
+
+.lmpl-afs-bottomrow {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.lmpl-afs-transport {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 22px;
+}
+
+/* The play button is white on this screen, whatever the controls it replaces draw. */
+.lmpl-root .lmpl-afs .lmpl-afs-play {
+    position: static;
+    width: calc(64px * var(--lmpl-s));
+    height: calc(64px * var(--lmpl-s));
+    transform: none;
+    background: #fff;
+    color: #111;
+    box-shadow: none;
+}
+
+.lmpl-root .lmpl-afs .lmpl-afs-seek {
+    position: static;
+    transform: none;
+}
+
+.lmpl-afs-tools {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.lmpl-afs-tool {
+    position: relative;
+}
+
+.lmpl-afs-menu {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    min-width: 150px;
+    padding: 6px;
+    border-radius: 12px;
+    background: rgb(24 24 27 / 0.97);
+    box-shadow:
+        inset 0 0 0 1px rgb(255 255 255 / 0.14),
+        0 8px 24px rgb(0 0 0 / 0.45);
+    transform: translateX(-50%);
+}
+
+.lmpl-afs-tool:first-child .lmpl-afs-menu {
+    left: 0;
+    transform: none;
+}
+
+.lmpl-afs-menuitem {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    min-height: 40px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 8px;
+    background: none;
+    color: #fff;
+    font: inherit;
+    font-size: 14px;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.lmpl-afs-menuitem:hover,
+.lmpl-afs-menuitem:focus-visible {
+    background: rgb(255 255 255 / 0.12);
+    outline: none;
+}
+
+.lmpl-afs-menuitem[aria-checked='true']::after {
+    content: '✓';
+    font-weight: 700;
+}
+
+/* Narrow and tall: the seek bar is one plain bar, and the picture and what plays share the room above the controls. */
+@container lmpl-afs (max-aspect-ratio: 6/5) {
+    .lmpl-afs-main {
+        justify-content: space-evenly;
+    }
+
+    .lmpl-afs-info {
+        flex: none;
+    }
+
+    .lmpl-root .lmpl-afs .lmpl-track {
+        -webkit-mask-image: none;
+        mask-image: none;
+    }
+}
+
+/* Wide: the picture on the left, the chapters, the timeline and the controls on the right. */
+@container lmpl-afs (min-aspect-ratio: 6/5) {
+    .lmpl-afs-main {
+        flex-direction: row;
+        align-items: center;
+        gap: 28px;
+    }
+
+    .lmpl-afs-art {
+        width: min(34cqw, 62cqh);
+    }
+
+    .lmpl-afs-info {
+        align-self: stretch;
+        justify-content: center;
+    }
+
+    .lmpl-afs-chip {
+        display: none;
+    }
+
+    .lmpl-afs-chapters {
+        display: flex;
+    }
+
+    .lmpl-afs-bottomrow {
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    .lmpl-afs-tools {
+        gap: 2px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .lmpl-afs * {
+        transition: none !important;
+        animation: none !important;
+    }
+}
+
+/* The scale every control here is sized by (see the controls' own definition above), steps up on a large screen. */
+.lmpl-root .lmpl-afs {
+    --lmpl-s: 1;
+}
+
+@container media-root (min-width: 900px) {
+    .lmpl-root .lmpl-afs {
+        --lmpl-s: 1.25;
+    }
+}
+
+@container media-root (min-width: 1400px) {
+    .lmpl-root .lmpl-afs {
+        --lmpl-s: 1.6;
+    }
+}

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { AUDIO_ONLY_ANGLE_ID } from '@luminary-media-converter/player-core';
 /**
  * Dev-only harness for the player (Video.js).
  *
@@ -60,6 +61,13 @@ const form = reactive({
 });
 
 const source = shallowRef<PlayerSource | null>(null);
+
+// `?afs=light|dark` opens in audio mode with something to say about it, for the fullscreen audio screen; `?cover=URL` is its picture.
+const afs = new URLSearchParams(location.search).get('afs');
+const nowPlaying = afs
+    ? { title: 'Why we get thirsty', subtitle: 'Pastor Daniel', eyebrow: 'Sunday messages' }
+    : undefined;
+const appearance = afs === 'light' ? 'light' : 'dark';
 
 // `?master=…&key=…` fills the form and loads on open, so a link can point straight at a source.
 // Not `?url`: Vite reserves that query for asset imports and refuses the page request outright.
@@ -141,10 +149,11 @@ function load() {
         controls.value = { windowedControls };
         playerKey.value++;
     }
-    poster.value = toImage(form.poster, form.posterFallback);
+    poster.value = toImage(form.poster || new URLSearchParams(location.search).get('cover') || '', form.posterFallback);
     preferredLanguage.value = form.preferredLanguage.trim();
     source.value = {
         masterUrl: url,
+        ...(afs ? { startAngleId: AUDIO_ONLY_ANGLE_ID } : {}),
         ...(keyHex ? { keyHex } : {}),
         ...(form.thumbs || form.chapters
             ? {
@@ -266,6 +275,8 @@ const fmt = (n: number | undefined) => (n ?? 0).toFixed(1);
                 :controls="controls"
                 :preferred-language="preferredLanguage || undefined"
                 :controller-options="controllerOptions"
+                :now-playing="nowPlaying"
+                :appearance="appearance"
             />
 
             <p v-if="youtubeMode" class="demo-hint">
