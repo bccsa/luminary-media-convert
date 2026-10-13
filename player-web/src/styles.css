@@ -1697,32 +1697,16 @@
    controls under the chapters instead of at the foot of the screen. */
 @container lmpl-afs (min-aspect-ratio: 6/5) and (min-width: 900px) {
     .lmpl-afs-main {
+        box-sizing: border-box;
         align-self: center;
         width: 100%;
-        max-width: max(1240px, 70cqw);
+        max-width: max(1240px, 90cqw);
         gap: clamp(36px, 5cqw, 96px);
         padding-inline: clamp(32px, 5cqw, 96px);
     }
 
     .lmpl-afs-art {
-        width: min(32cqw, 66cqh, 520px);
-    }
-
-    .lmpl-afs-bottomrow {
-        flex-wrap: wrap;
-        gap: 8px 24px;
-    }
-
-    /* The tools are a fixed, thumb-and-pointer size here: scaled with the window they would not fit beside the transport. */
-    .lmpl-root .lmpl-afs-tools .lmpl-afs-iconbtn {
-        width: 56px;
-        height: 56px;
-    }
-
-    .lmpl-root .lmpl-afs-tools .lmpl-afs-iconbtn svg,
-    .lmpl-root .lmpl-afs-tools .lmpl-afs-iconbtn .media-button-icon {
-        width: 34px;
-        height: 34px;
+        width: min(38cqw, 74cqh, 960px);
     }
 
     .lmpl-afs-info {
@@ -1734,6 +1718,23 @@
 
     .lmpl-afs-controls {
         margin-top: clamp(16px, 4cqh, 44px);
+    }
+
+    .lmpl-afs-bottomrow {
+        flex-wrap: wrap;
+        gap: 8px 24px;
+    }
+
+    /* The tools grow with the window, more slowly than the transport, so they still fit beside it. */
+    .lmpl-root .lmpl-afs-tools .lmpl-afs-iconbtn {
+        width: calc(40px + 10px * var(--lmpl-s));
+        height: calc(40px + 10px * var(--lmpl-s));
+    }
+
+    .lmpl-root .lmpl-afs-tools .lmpl-afs-iconbtn svg,
+    .lmpl-root .lmpl-afs-tools .lmpl-afs-iconbtn .media-button-icon {
+        width: calc(22px + 8px * var(--lmpl-s));
+        height: calc(22px + 8px * var(--lmpl-s));
     }
 }
 
@@ -1758,6 +1759,35 @@
 @container media-root (min-width: 1400px) {
     .lmpl-root .lmpl-afs {
         --lmpl-s: 1.6;
+    }
+}
+
+/*
+ * The same steps, read from the screen's own width: the screen is also hosted without the web player around it (the
+ * app's), where the container above does not exist. The scale is set on the screen's children because a container
+ * cannot query its own width.
+ */
+@container lmpl-afs (min-width: 900px) {
+    .lmpl-root .lmpl-afs > * {
+        --lmpl-s: 1.25;
+    }
+}
+
+@container lmpl-afs (min-width: 1400px) {
+    .lmpl-root .lmpl-afs > * {
+        --lmpl-s: 1.6;
+    }
+}
+
+@container lmpl-afs (min-width: 1800px) {
+    .lmpl-root .lmpl-afs > * {
+        --lmpl-s: 2;
+    }
+}
+
+@container lmpl-afs (min-width: 2400px) {
+    .lmpl-root .lmpl-afs > * {
+        --lmpl-s: 2.6;
     }
 }
 
