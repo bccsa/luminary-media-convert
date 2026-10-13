@@ -35,6 +35,8 @@ const props = defineProps<{
     duration: number;
     bufferedEnd?: number;
     playing: boolean;
+    /** A live stream: nothing to skip and no time left to show. */
+    live?: boolean;
     /** The chapter the playhead is in; -1 for none. */
     chapterIndex: number;
     playbackRate: number;
@@ -121,6 +123,7 @@ const dragTime = ref<number | null>(null);
 const barEl = ref<HTMLElement | null>(null);
 const shownTime = computed(() => dragTime.value ?? props.currentTime);
 const knownDuration = computed(() => (Number.isFinite(props.duration) && props.duration > 0 ? props.duration : 0));
+const isLive = computed(() => props.live === true || props.duration === Infinity);
 const pct = (seconds: number): string => `${knownDuration.value ? Math.min(100, Math.max(0, (seconds / knownDuration.value) * 100)) : 0}%`;
 function timeAt(clientX: number): number {
     const rect = barEl.value?.getBoundingClientRect();
@@ -325,13 +328,14 @@ const cover = computed(() => {
                                 <div class="lmpl-afs-bar-fill" :style="{ width: pct(shownTime) }"></div>
                             </div>
                         </div>
-                        <span class="lmpl-time" data-test="afsRemaining">-{{ clock(Math.max(0, knownDuration - shownTime)) }}</span>
+                        <span v-if="isLive" class="lmpl-time lmpl-afs-live" data-test="afsLive">{{ messages.live }}</span>
+                        <span v-else class="lmpl-time" data-test="afsRemaining">-{{ clock(Math.max(0, knownDuration - shownTime)) }}</span>
                     </div>
 
                     <div class="lmpl-afs-bottomrow">
                         <div class="lmpl-afs-transport">
                             <button
-                                v-if="skipBackSeconds > 0"
+                                v-if="skipBackSeconds > 0 && !isLive"
                                 type="button"
                                 class="lmpl-afs-skip"
                                 :aria-label="formatSeconds(messages.skipBack, skipBackSeconds)"
@@ -350,7 +354,7 @@ const cover = computed(() => {
                                 <svg v-else viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l11-6.5a1 1 0 0 0 0-1.72l-11-6.5A1 1 0 0 0 8 5.5Z" /></svg>
                             </button>
                             <button
-                                v-if="skipForwardSeconds > 0"
+                                v-if="skipForwardSeconds > 0 && !isLive"
                                 type="button"
                                 class="lmpl-afs-skip"
                                 :aria-label="formatSeconds(messages.skipForward, skipForwardSeconds)"

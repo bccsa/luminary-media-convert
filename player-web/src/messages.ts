@@ -102,6 +102,8 @@ export interface PlayerMessages {
     // --- Fullscreen audio screen ---------------------------------------------
     /** Name of the playback speed button and its menu. */
     speedLabel: string;
+    /** The word shown where the time left would be, for a live stream. */
+    live: string;
     /** Name of the sleep timer button and its menu. */
     sleepTimer: string;
     /** The sleep timer menu's entry that turns it off. */
@@ -157,6 +159,7 @@ export const DEFAULT_MESSAGES: PlayerMessages = {
     dismiss: 'Dismiss',
 
     speedLabel: 'Speed',
+    live: 'Live',
     sleepTimer: 'Sleep timer',
     sleepOff: 'Off',
     sleepMinutes: '{minutes} minutes',

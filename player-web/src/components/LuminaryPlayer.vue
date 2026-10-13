@@ -375,6 +375,9 @@ onMounted(() => {
         controlsObserver = new MutationObserver(readControlsShown);
         controlsObserver.observe(containerEl.value, { attributes: true, attributeFilter: [CONTROLS_VISIBLE_ATTR] });
         readControlsShown();
+        castObserver = new MutationObserver(readCastAvailable);
+        castObserver.observe(containerEl.value, { attributes: true, subtree: true, attributeFilter: ['data-availability'] });
+        readCastAvailable();
     }
     void loadSource(props.source);
 });
@@ -406,6 +409,8 @@ onBeforeUnmount(() => {
     removeAutoHide = null;
     controlsObserver?.disconnect();
     controlsObserver = null;
+    castObserver?.disconnect();
+    castObserver = null;
     frameObserver?.disconnect();
     frameObserver = null;
     keepAlive?.dispose();
@@ -1083,6 +1088,19 @@ const CONTROLS_VISIBLE_ATTR = 'data-controls-visible';
 const controlsShown = ref(false);
 let controlsObserver: MutationObserver | null = null;
 
+// Casting, for a host that draws its own control (the app's sound screen): whether a Chromecast or an AirPlay
+// device is around, read from the player's own buttons, and a way to open their picker.
+const castAvailable = ref(false);
+let castObserver: MutationObserver | null = null;
+const castButtons = (): HTMLElement[] =>
+    Array.from(containerEl.value?.querySelectorAll<HTMLElement>('media-cast-button, media-airplay-button') ?? []);
+function readCastAvailable(): void {
+    castAvailable.value = castButtons().some((button) => button.getAttribute('data-availability') === 'available');
+}
+function showCastPicker(): void {
+    castButtons().find((button) => button.getAttribute('data-availability') === 'available')?.click();
+}
+
 function readControlsShown(): void {
     controlsShown.value = containerEl.value?.hasAttribute(CONTROLS_VISIBLE_ATTR) ?? false;
 }
@@ -1256,7 +1274,7 @@ const audioArtwork = computed(() => {
 });
 const audioChapterIndex = computed(() => chapterIndexAt(state.value.chapters, state.value.currentTime));
 
-defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, pause });
+defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, pause, castAvailable, showCastPicker });
 </script>
 
 <template>

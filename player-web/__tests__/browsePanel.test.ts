@@ -56,6 +56,28 @@ afterEach(async () => {
     wrapper = undefined;
 });
 
+describe('LuminaryPlayer casting, for a host that draws its own control', () => {
+    it('says a device is around when the player\'s own cast button does, and opens its picker', async () => {
+        const w = await mountPlayer({}, {});
+        const vm = w.vm as unknown as { castAvailable: boolean; showCastPicker: () => void };
+        expect(vm.castAvailable).toBe(false);
+
+        const button = document.querySelector<HTMLElement>('media-cast-button')!;
+        const clicked = vi.fn();
+        button.addEventListener('click', clicked);
+        button.setAttribute('data-availability', 'available');
+        await flushPromises();
+        expect(vm.castAvailable).toBe(true);
+
+        vm.showCastPicker();
+        expect(clicked).toHaveBeenCalledTimes(1);
+
+        button.setAttribute('data-availability', 'unavailable');
+        await flushPromises();
+        expect(vm.castAvailable).toBe(false);
+    });
+});
+
 describe('LuminaryPlayer and a host screen', () => {
     it('is not in full screen when the display is taken by the host\'s own marked screen, and is when it is another element', async () => {
         const w = await mountPlayer({}, {});

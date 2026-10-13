@@ -147,6 +147,22 @@ describe('AudioFullscreen — the transport', () => {
     });
 });
 
+describe('AudioFullscreen — a live stream', () => {
+    it('has no skip buttons and says Live where the time left would be', () => {
+        const wrapper = mountScreen({ duration: Infinity });
+        expect(find(wrapper, 'afsSkipBack').exists()).toBe(false);
+        expect(find(wrapper, 'afsSkipForward').exists()).toBe(false);
+        expect(find(wrapper, 'afsRemaining').exists()).toBe(false);
+        expect(find(wrapper, 'afsLive').text()).toBe('Live');
+    });
+
+    it('does the same when told it is live, whatever the length says', () => {
+        const wrapper = mountScreen({ live: true });
+        expect(find(wrapper, 'afsLive').exists()).toBe(true);
+        expect(find(wrapper, 'afsSkipBack').exists()).toBe(false);
+    });
+});
+
 describe('AudioFullscreen — what it asks for', () => {
     it('asks to leave fullscreen, and the host to open the chapters, from the button', async () => {
         const wrapper = mountScreen();

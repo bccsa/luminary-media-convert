@@ -1826,3 +1826,27 @@
         min-height: 34px;
     }
 }
+
+/* Captions ride above the control bar while it shows (the skin lifts them by this much, sized for its own, shorter bar). */
+.lmpl-root {
+    --media-caption-controls-y: -132px;
+}
+
+@container media-root (min-width: 900px) {
+    .lmpl-root {
+        --media-caption-controls-y: -170px;
+    }
+}
+
+@container media-root (min-width: 1400px) {
+    .lmpl-root {
+        --media-caption-controls-y: -215px;
+    }
+}
+
+.lmpl-afs-live {
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #ff6b6b;
+}
