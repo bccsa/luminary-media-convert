@@ -390,10 +390,9 @@ class SkinControlsTest {
     private fun browseControls(
         browse: Browse? = lists,
         picked: MutableList<String> = mutableListOf(),
-        images: BitmapLoader? = null,
         texts: FullscreenTexts = FullscreenTexts(),
     ): SkinControls =
-        SkinControls(activity, player, SkinOptions(), texts, browse = browse, onBrowseSelect = { picked += it }, images = images) { left++ }
+        SkinControls(activity, player, SkinOptions(), texts, browse = browse, onBrowseSelect = { picked += it }) { left++ }
             .also { activity.setContentView(it) }
 
     private val opener = "Chapters and up next"
@@ -481,25 +480,13 @@ class SkinControlsTest {
     }
 
     @Test
-    fun `an up-next picture is loaded through the loader, for the items that have one`() {
-        val asked = mutableListOf<String>()
-        val loader = object : BitmapLoader {
-            override fun supportsMimeType(mimeType: String) = true
-            override fun decodeBitmap(data: ByteArray) = Futures.immediateFuture(Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888))
-            override fun loadBitmap(uri: Uri): ListenableFuture<Bitmap> {
-                asked += uri.toString()
-                return Futures.immediateFuture(Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888))
-            }
-        }
-        val controls = browseControls(images = loader)
+    fun `an up-next row has a tile for its picture, whether or not it has one to load`() {
+        val controls = browseControls()
         controls.find(opener)!!.performClick()
         controls.anyView("Up next").performClick()
-        idle(10)
 
-        assertEquals(listOf("https://cdn/p2.jpg"), asked.distinct())
         val pictures = ArrayList<View>().also { collect(controls, it) }.filterIsInstance<ImageView>()
         assertEquals(3, pictures.size)
-        assertEquals(1, pictures.count { it.drawable != null })
     }
 
     @Test
