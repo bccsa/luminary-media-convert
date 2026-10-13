@@ -141,6 +141,8 @@ internal class SkinControls(
     private var chapterRows: List<ChapterRow> = emptyList()
     private var currentChapter = -1
     private var imageEpoch = 0
+    /** Changes whenever the strip is put away, so the pictures of one that is gone are not drawn into the next. */
+    private var nextUpGeneration = 0
     private var inset = Insets.NONE
     private var shown = true
     private var attached = false
@@ -451,6 +453,7 @@ internal class SkinControls(
     }
 
     private fun removeNextUp() {
+        nextUpGeneration++
         nextUpOn = false
         nextUpStrip = null
         nextUpLayer.removeAllViews()
@@ -483,6 +486,7 @@ internal class SkinControls(
     }
 
     private fun showNextUp() {
+        val generation = nextUpGeneration
         fun px(dp: Float) = dpf(dp * scale).roundToInt()
         val edge = edgePx()
         val head = LinearLayout(context).apply {
@@ -521,7 +525,7 @@ internal class SkinControls(
                 scaleType = ImageView.ScaleType.CENTER_CROP
                 importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
             }
-            loadImage(picture, item.imageUrl, item.fallbackImageUrl)
+            loadImage(picture, item.imageUrl, item.fallbackImageUrl) { generation == nextUpGeneration }
             // The name over the foot of the frame, as the scrub strip puts its timecode.
             val caption = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
@@ -1173,21 +1177,29 @@ internal class SkinControls(
         }
     }
 
-    /** Loads [url] into [into]; when it does not load, or there is none, the [fallback] takes its place. */
-    private fun loadImage(into: ImageView, url: String?, fallback: String? = null) {
+    /**
+     * Loads [url] into [into]; when it does not load, or there is none, the [fallback] takes its place. [wanted] says
+     * whether the picture is still needed by the time it is in, since the list it is for may have been put away.
+     */
+    private fun loadImage(into: ImageView, url: String?, fallback: String? = null, wanted: () -> Boolean = panelImages()) {
         val first = url?.takeIf { it.isNotEmpty() }
         val second = fallback?.takeIf { it.isNotEmpty() }
         val address = first ?: second ?: return
-        val epoch = imageEpoch
         // Sharp at the size drawn, not larger.
         val target = (resources.displayMetrics.widthPixels / 3).coerceAtLeast(240)
         FrameImages.load(context, address, target) { bitmap ->
-            if (epoch != imageEpoch) return@load
+            if (!wanted()) return@load
             when {
                 bitmap != null -> into.setImageBitmap(bitmap)
-                first != null && second != null -> loadImage(into, null, second)
+                first != null && second != null -> loadImage(into, null, second, wanted)
             }
         }
+    }
+
+    /** Wanted for as long as the panel's list that asked is the one on screen. */
+    private fun panelImages(): () -> Boolean {
+        val epoch = imageEpoch
+        return { epoch == imageEpoch }
     }
 
     /** Pictures still on their way are no longer wanted: their list was put away. */
