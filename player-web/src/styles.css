@@ -1824,3 +1824,52 @@
     padding-bottom: 0;
     color: inherit;
 }
+
+/* A host's own sheet body brings its surface and takes the sheet's rounding. */
+.lmpl-afs-sheet-host > * {
+    border-radius: inherit;
+}
+
+@keyframes lmpl-afs-sheet-up {
+    from {
+        transform: translateY(100%);
+    }
+}
+
+@keyframes lmpl-afs-sheet-left {
+    from {
+        transform: translateX(100%);
+    }
+}
+
+.lmpl-afs-sheet {
+    animation: lmpl-afs-sheet-up 220ms ease-out;
+}
+
+/* Wide, as on the web's own full screen: the sheet is a panel from the right, the whole height. */
+@container lmpl-afs (min-aspect-ratio: 6/5) {
+    .lmpl-afs-sheetwrap {
+        flex-direction: row;
+        justify-content: flex-end;
+    }
+
+    .lmpl-afs-sheet {
+        width: min(420px, 46cqw);
+        max-width: none;
+        max-height: none;
+        height: 100%;
+        margin: 0;
+        border-radius: 18px 0 0 18px;
+        padding-bottom: 0;
+        animation-name: lmpl-afs-sheet-left;
+    }
+
+    .lmpl-afs-sheet-host > * {
+        padding-right: env(safe-area-inset-right);
+        padding-bottom: env(safe-area-inset-bottom);
+    }
+
+    .lmpl-afs-sheet-list {
+        padding-bottom: max(8px, env(safe-area-inset-bottom));
+    }
+}
