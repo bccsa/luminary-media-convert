@@ -211,6 +211,42 @@ describe('AudioFullscreen — the sleep timer on show', () => {
     });
 });
 
+describe('AudioFullscreen — the chapters sheet', () => {
+    it('opens over the screen from the chip and the button, and lists every chapter with the playing one marked', async () => {
+        const wrapper = mountScreen({ chaptersSheet: true });
+        expect(find(wrapper, 'afsSheet').exists()).toBe(false);
+        await find(wrapper, 'afsChip').trigger('click');
+        expect(find(wrapper, 'afsSheet').exists()).toBe(true);
+        expect(wrapper.findAll('[data-test=afsSheetRow]')).toHaveLength(8);
+        expect(wrapper.find('[data-test=afsSheetRow][aria-current=true]').text()).toContain('Chapter 3');
+        expect(wrapper.emitted('open-browse')).toBeUndefined();
+
+        await find(wrapper, 'afsSheetClose').trigger('click');
+        expect(find(wrapper, 'afsSheet').exists()).toBe(false);
+        await find(wrapper, 'afsBrowse').trigger('click');
+        expect(find(wrapper, 'afsSheet').exists()).toBe(true);
+    });
+
+    it('goes to the chapter that is picked and closes, staying on this screen', async () => {
+        const wrapper = mountScreen({ chaptersSheet: true });
+        await find(wrapper, 'afsBrowse').trigger('click');
+        await wrapper.findAll('[data-test=afsSheetRow]')[5]!.trigger('click');
+        expect(wrapper.emitted('seek-chapter')![0]).toEqual([chapters[5]]);
+        expect(wrapper.emitted('exit')).toBeUndefined();
+        expect(find(wrapper, 'afsSheet').exists()).toBe(false);
+    });
+
+    it('closes on Escape, and on a press on the backdrop', async () => {
+        const wrapper = mountScreen({ chaptersSheet: true });
+        await find(wrapper, 'afsBrowse').trigger('click');
+        await wrapper.trigger('keydown', { key: 'Escape' });
+        expect(find(wrapper, 'afsSheet').exists()).toBe(false);
+        await find(wrapper, 'afsBrowse').trigger('click');
+        await wrapper.find('.lmpl-afs-backdrop').trigger('click');
+        expect(find(wrapper, 'afsSheet').exists()).toBe(false);
+    });
+});
+
 describe('AudioFullscreen — the menus', () => {
     it('close on Escape, and on a press outside them, but not on a press inside the tools', async () => {
         const wrapper = mountScreen();

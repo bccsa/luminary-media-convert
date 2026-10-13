@@ -45,6 +45,8 @@ const props = defineProps<{
     /** Mask that cuts the timeline at the chapters; empty for one plain bar. */
     chapterMask: string;
     messages: PlayerMessages;
+    /** Open the chapters in a sheet on this screen, instead of asking the host (`open-browse`) to show them. */
+    chaptersSheet?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -71,7 +73,10 @@ function closeMenu(): void {
     menu.value = null;
 }
 function onKeydown(event: KeyboardEvent): void {
-    if (event.key === 'Escape' && menu.value) {
+    if (event.key === 'Escape' && sheetOpen.value) {
+        event.stopPropagation();
+        sheetOpen.value = false;
+    } else if (event.key === 'Escape' && menu.value) {
         event.stopPropagation();
         closeMenu();
     }
@@ -111,6 +116,20 @@ function onBarKey(event: KeyboardEvent): void {
     emit('seek', Math.min(knownDuration.value, Math.max(0, props.currentTime + step)));
 }
 const skip = (seconds: number): void => emit('seek', Math.min(knownDuration.value || Infinity, Math.max(0, props.currentTime + seconds)));
+
+const sheetOpen = ref(false);
+function openChapters(): void {
+    if (props.chaptersSheet) {
+        menu.value = null;
+        sheetOpen.value = true;
+    } else {
+        emit('open-browse');
+    }
+}
+function pickChapter(chapter: Chapter): void {
+    emit('seek-chapter', chapter);
+    sheetOpen.value = false;
+}
 
 const showChapterList = computed(() => props.chapters.length > 1);
 const windowRows = computed(() => chapterWindow(props.chapters, props.chapterIndex));
@@ -229,7 +248,7 @@ const artworkSizes = computed(() => props.artwork?.sizes ?? '(min-aspect-ratio: 
                     type="button"
                     class="lmpl-afs-chip"
                     data-test="afsChip"
-                    @click="emit('open-browse')"
+                    @click="openChapters"
                 >
                     <span class="lmpl-afs-chip-text">{{ chapterText }}</span>
                     <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 15l6-6 6 6" /></svg>
@@ -376,13 +395,34 @@ const artworkSizes = computed(() => props.artwork?.sizes ?? '(min-aspect-ratio: 
                                 class="lmpl-afs-iconbtn"
                                 :aria-label="messages.browse"
                                 data-test="afsBrowse"
-                                @click="emit('open-browse')"
+                                @click="openChapters"
                             >
                                 <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" /></svg>
                             </button>
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- The chapters, over this screen: a pick goes there and the sheet closes; the screen stays full. -->
+        <div v-if="sheetOpen" class="lmpl-afs-sheetwrap" data-test="afsSheet">
+            <div class="lmpl-afs-backdrop" @click="sheetOpen = false"></div>
+            <div class="lmpl-afs-sheet" role="dialog" :aria-label="messages.chapters">
+                <div class="lmpl-afs-sheet-head">
+                    <span class="lmpl-afs-sheet-title">{{ messages.chapters }}</span>
+                    <button type="button" class="lmpl-afs-iconbtn" :aria-label="messages.closeBrowse" data-test="afsSheetClose" @click="sheetOpen = false">
+                        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+                    </button>
+                </div>
+                <ol class="lmpl-afs-sheet-list">
+                    <li v-for="(chapter, index) in chapters" :key="index">
+                        <button type="button" class="lmpl-afs-sheet-row" :aria-current="index === chapterIndex ? 'true' : undefined" data-test="afsSheetRow" @click="pickChapter(chapter)">
+                            <span class="lmpl-afs-sheet-name">{{ chapter.title }}</span>
+                            <span class="lmpl-afs-chapter-time">{{ clock(chapter.startTime) }}</span>
+                        </button>
+                    </li>
+                </ol>
             </div>
         </div>
     </div>
