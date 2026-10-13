@@ -662,7 +662,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
             self?.closeMenu()
         }
         return [off] + subtitles.options.map { option in
-            .init(title: option.displayName, selected: option == selected) { [weak self] in
+            .init(title: option.playlistName, selected: option == selected) { [weak self] in
                 item.select(option, in: subtitles.group)
                 self?.closeMenu()
             }

@@ -62,13 +62,6 @@ import {
 /** Angle id used when the master declares no `TYPE=VIDEO` rendition groups. */
 export const DEFAULT_ANGLE_ID = 'default';
 
-import { relabelGeneratedSubtitleNames } from './relabel.js';
-
-/** The browser's language, else English; a native shell passes the app's own. */
-function defaultDisplayLanguage(): string {
-    return (typeof navigator !== 'undefined' && navigator.language) || 'en';
-}
-
 export interface PipelineContext {
     fetchImpl: typeof fetch;
     /** How munged text reaches the engine. */
@@ -85,8 +78,6 @@ export interface PipelineContext {
      * munge serves everything afresh, as a one-off munge should.
      */
     served?: ServeMemo;
-    /** The viewer's language, for naming a stream's generated subtitle names; defaults to the browser's. */
-    displayLanguage?: string;
 }
 
 /**
@@ -205,9 +196,8 @@ export async function loadMaster(
         signal: ctx.signal,
         subtle: ctx.subtle,
     });
-    const text = relabelGeneratedSubtitleNames(asset.text, ctx.displayLanguage ?? defaultDisplayLanguage());
-    ctx.cache.set(absolute, text);
-    return describeMaster(absolute, text, asset.wasEncrypted);
+    ctx.cache.set(absolute, asset.text);
+    return describeMaster(absolute, asset.text, asset.wasEncrypted);
 }
 
 /** Pure derivation half of {@link loadMaster}; exported for fixture specs. */

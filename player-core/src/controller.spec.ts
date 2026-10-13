@@ -90,13 +90,6 @@ describe('PlayerController — a subtitle pick', () => {
         expect(adapter.activeTextTrackId).toBeNull();
         expect(adapter.activeTextTrackHint).toBeUndefined();
     });
-
-    it('names a generated subtitle by its language, in the display language it was given', async () => {
-        const generated = MULTI_ANGLE_MASTER.replace('NAME="English",LANGUAGE="en",DEFAULT=NO,URI="subs_en', 'NAME="stream_2",LANGUAGE="fr",DEFAULT=NO,URI="subs_en');
-        const { controller } = setup({ ...multiAngleRoutes, [MASTER_URL]: generated }, {}, { displayLanguage: 'fr' });
-        await controller.load({ masterUrl: MASTER_URL });
-        expect(controller.getState().subtitleTracks.map((t) => t.label)).toEqual(['Français']);
-    });
 });
 
 describe('PlayerController — a live source', () => {

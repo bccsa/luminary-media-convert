@@ -437,13 +437,12 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
             DispatchQueue.main.async {
                 guard let self, let item = self.item, ObjectIdentifier(item) == expected, let group else { return }
                 guard let label else { return item.select(nil, in: group) }
-                // By name first; failing that by language, since AVFoundation names an option by its language, whatever
-                // the master calls it.
+                // By the playlist's name first; failing that by language, for a page that only knows the language.
                 func speaks(_ option: AVMediaSelectionOption, _ code: String) -> Bool {
                     option.extendedLanguageTag == code || option.locale?.languageCode == code
                 }
                 let option = group.options.first { option in
-                    option.displayName == label || speaks(option, label)
+                    option.playlistName == label || option.displayName == label || speaks(option, label)
                 } ?? language.flatMap { code in group.options.first { speaks($0, code) } }
                 if let option { item.select(option, in: group) }
             }
@@ -746,7 +745,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
 
     private func reportSubtitle() {
         guard let item, let group = legibleGroup else { return }
-        events?.subtitleChanged(item.currentMediaSelection.selectedMediaOption(in: group)?.displayName)
+        events?.subtitleChanged(item.currentMediaSelection.selectedMediaOption(in: group)?.playlistName)
     }
 
     private func audioGroupLoaded(_ group: AVMediaSelectionGroup?, in item: AVPlayerItem) {

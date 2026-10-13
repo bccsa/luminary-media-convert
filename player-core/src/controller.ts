@@ -75,8 +75,6 @@ export interface PlayerControllerOptions {
     serveStrategy: ServeStrategy;
     /** Injectable WebCrypto; defaults to `globalThis.crypto.subtle`. */
     subtle?: SubtleLike;
-    /** The viewer's language, for naming a stream's generated subtitle names; defaults to the browser's. */
-    displayLanguage?: string;
     /**
      * Chunk warming for byte-range output. The schedules are built here (see
      * `prefetch.ts`) and the loop that acts on them runs in the adapter
@@ -662,7 +660,6 @@ export class PlayerController implements PlayerControllerApi {
             subtle: this.subtle,
             cache: this.cache,
             served: this.served,
-            displayLanguage: this.options.displayLanguage,
         };
     }
 
