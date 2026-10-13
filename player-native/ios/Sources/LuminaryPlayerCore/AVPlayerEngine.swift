@@ -56,6 +56,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     /// of the item, which is what the viewer asked for; but not a failure, which stops the player
     /// without the viewer asking. A re-attach resumes from it.
     private var intendedPlaying = false
+    private var sleepTimer: Cancellable?
     private var interruptionObserver: NSObjectProtocol?
     private var mediaServicesObserver: NSObjectProtocol?
     /// Playing when an interruption began, so it resumes when the system says it may.
@@ -322,6 +323,19 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         player.pause()
     }
 
+    /// Pauses when the time comes, on the main queue the app keeps running while it plays in the background.
+    /// A new time replaces the one before; nil, or a destroyed engine, clears it.
+    public func setSleepTimer(endsAt: Double?) {
+        sleepTimer?.cancel()
+        sleepTimer = nil
+        guard let endsAt else { return }
+        let delay = max(0, endsAt / 1000 - Date().timeIntervalSince1970)
+        sleepTimer = clock.schedule(delay) { [weak self] in
+            self?.sleepTimer = nil
+            self?.pause()
+        }
+    }
+
     public func seek(position: Double, exact: Bool) {
         ended = false
         let tolerance: CMTime = exact ? .zero : .positiveInfinity
@@ -499,6 +513,8 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     }
 
     public func destroy() {
+        sleepTimer?.cancel()
+        sleepTimer = nil
         thumbnails.release()
         ladder?.destroy()
         ladder = nil

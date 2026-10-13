@@ -47,6 +47,8 @@ data class BridgeCapabilities(
     val subtitleSelection: Boolean = false,
     val airPlay: Boolean = false,
     val castMenu: Boolean = false,
+    /** A sleep timer kept beside the engine; outside the parity matrix. */
+    val sleepTimer: Boolean = false,
     val maxPlayers: Int = 1,
 ) {
     fun toJson(): JsonObject = buildJsonObject {
@@ -61,6 +63,7 @@ data class BridgeCapabilities(
         put("subtitleSelection", subtitleSelection)
         put("airPlay", airPlay)
         put("castMenu", castMenu)
+        put("sleepTimer", sleepTimer)
         put("maxPlayers", maxPlayers)
     }
 
@@ -79,6 +82,7 @@ data class BridgeCapabilities(
                 subtitleSelection = flag("subtitleSelection"),
                 airPlay = flag("airPlay"),
                 castMenu = flag("castMenu"),
+                sleepTimer = flag("sleepTimer"),
                 maxPlayers = (json["maxPlayers"] as? JsonPrimitive)?.doubleOrNull?.toInt() ?: 1,
             )
         }
@@ -223,6 +227,7 @@ sealed interface BridgeCall {
     data class SetSubtitleTrack(override val playerId: String, val label: String?) : BridgeCall
     data class StartPictureInPicture(override val playerId: String) : BridgeCall
     data class ShowAirPlayPicker(override val playerId: String) : BridgeCall
+    data class SetSleepTimer(override val playerId: String, val endsAt: Double?) : BridgeCall
 
     data class SetCastMenu(override val playerId: String, val menu: CastMenu) : BridgeCall
 
@@ -244,6 +249,7 @@ sealed interface BridgeCall {
             "startPictureInPicture" -> BridgeCapabilities::pictureInPicture
             "showAirPlayPicker" -> BridgeCapabilities::airPlay
             "setCastMenu" -> BridgeCapabilities::castMenu
+            "setSleepTimer" -> BridgeCapabilities::sleepTimer
             else -> null
         }
 
@@ -329,6 +335,7 @@ sealed interface BridgeCall {
                 "setSubtitleTrack" -> SetSubtitleTrack(args.string("playerId"), args.optString("label"))
                 "startPictureInPicture" -> StartPictureInPicture(args.string("playerId"))
                 "showAirPlayPicker" -> ShowAirPlayPicker(args.string("playerId"))
+                "setSleepTimer" -> SetSleepTimer(args.string("playerId"), args.optNumber("endsAt"))
                 "setCastMenu" -> {
                     val playerId = args.string("playerId")
                     val menu = args.obj("menu")

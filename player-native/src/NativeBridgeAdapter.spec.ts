@@ -519,6 +519,41 @@ describe('NativeBridgeAdapter — resume', () => {
     });
 });
 
+describe('NativeBridgeAdapter — the sleep timer beside the engine', () => {
+    it('hands a minutes timer to native, and clears it, through the controller', async () => {
+        const { controller, plugin } = await setup(simpleRoutes, { sleepTimer: true });
+        await controller.load({ masterUrl: MASTER_URL });
+
+        const before = Date.now();
+        controller.setSleepTimer({ kind: 'minutes', minutes: 15 });
+        const [set] = plugin.argsOf('setSleepTimer') as { playerId: string; endsAt: number }[];
+        expect(set!.playerId).toBe(PLAYER_ID);
+        expect(set!.endsAt).toBeGreaterThanOrEqual(before + 15 * 60_000);
+        expect(set!.endsAt).toBeLessThan(before + 15 * 60_000 + 5_000);
+
+        controller.setSleepTimer(null);
+        expect(plugin.argsOf('setSleepTimer')[1]).toEqual({ playerId: PLAYER_ID });
+    });
+
+    it('leaves the chapter timer to the page, which watches the playhead', async () => {
+        const { controller, plugin } = await setup(simpleRoutes, { sleepTimer: true });
+        await controller.load({ masterUrl: MASTER_URL });
+
+        controller.setSleepTimer({ kind: 'chapter' });
+
+        expect(plugin.argsOf('setSleepTimer').every((args) => !('endsAt' in (args as object)))).toBe(true);
+    });
+
+    it('asks for nothing native would refuse', async () => {
+        const { controller, plugin } = await setup();
+        await controller.load({ masterUrl: MASTER_URL });
+
+        controller.setSleepTimer({ kind: 'minutes', minutes: 5 });
+
+        expect(plugin.methods()).not.toContain('setSleepTimer');
+    });
+});
+
 describe('NativeBridgeAdapter — muting, subtitles and picture in picture', () => {
     it('sends each call where native supports it', async () => {
         const { controller, adapter, plugin } = await setup(simpleRoutes, {

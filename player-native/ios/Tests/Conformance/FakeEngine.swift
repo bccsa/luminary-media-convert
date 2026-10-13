@@ -52,6 +52,7 @@ final class FakeEngine: Engine {
     }
     func startPictureInPicture() { record("startPictureInPicture") }
     func showAirPlayPicker() { record("showAirPlayPicker") }
+    func setSleepTimer(endsAt: Double?) { record("setSleepTimer", ["endsAt": endsAt.map { .number($0) } ?? .null]) }
     func setInlineFrame(_ frame: InlineFrame?) {
         guard let frame else { return record("setInlineFrame") }
         record("setInlineFrame", [

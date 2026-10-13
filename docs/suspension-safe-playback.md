@@ -57,6 +57,7 @@ playback starts.
 | Stall detection | **Your engine** | It sees its own buffer; a wrapper timer sees a frozen playhead and cannot tell a slow request from a wedged decoder |
 | The recovery ladder | **You** (see below) | It must act during playback, which is when JavaScript may be gone |
 | Chunk warming | **You** | A JS interval is throttled or suspended exactly when a native player keeps buffering. `docs/chunk-warming.md` |
+| The sleep timer's minutes | **You**, when the capability `sleepTimer` is on | It must stop playback on time while JavaScript is gone. `player-core` hands it over as `PlayerAdapter.setSleepTimer(endsAt)` (a `Date.now()` time), and the page's own timer stays as the fallback. The end-of-chapter timer stays in `player-core`: it follows the playhead |
 | Rebuilding a munged source | **`player-core`** | Only it knows the recipe. Needs JavaScript, and is the only thing that does |
 | Live playlist refresh | **Your serving layer** | Every target-duration, forever, while frozen. See *Live* below |
 | Coming-soon polling, the state store | **`player-core`** | Nothing is playing |

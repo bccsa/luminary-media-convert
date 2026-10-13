@@ -135,6 +135,12 @@ export interface BridgeCapabilities {
      * a pick there comes back as `castselect` for the page to apply as its own. Android only.
      */
     castMenu: boolean;
+    /**
+     * Keeps a sleep timer beside the engine through `setSleepTimer`, so playback stops on time with the screen
+     * locked and the web view suspended. Not in the parity matrix: a platform without it leaves the timer to
+     * the page's JavaScript.
+     */
+    sleepTimer: boolean;
     /** 1 in v1: a second `create` destroys the first player. */
     maxPlayers: number;
 }
@@ -401,6 +407,11 @@ export interface LuminaryPlayerPlugin {
      * viewer's choice is the system's, and `airplaychange` says what came of it.
      */
     showAirPlayPicker(args: { playerId: string }): Promise<void>;
+    /**
+     * `unsupported` unless `sleepTimer`. Pauses playback at `endsAt`, a `Date.now()` time in milliseconds; absent
+     * clears the timer. A new call replaces the one before it, and a new item keeps it.
+     */
+    setSleepTimer(args: { playerId: string; endsAt?: number }): Promise<void>;
     /**
      * `unsupported` unless `castMenu`. What the TV's menu offers while casting; sent whenever it
      * changes, and kept by native for the next session.

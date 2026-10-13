@@ -49,6 +49,37 @@ struct BridgeTypesTests {
         }
     }
 
+    @Test("a sleep timer carries the time it stops at, or none to clear it, and refuses a time that is not a number")
+    func sleepTimerDecodes() throws {
+        guard case .setSleepTimer(let id, let endsAt) = try BridgeCall.decode("setSleepTimer", [
+            "playerId": .string("p"), "endsAt": .number(1_800_000_000_000),
+        ]) else {
+            Issue.record("not a sleep timer")
+            return
+        }
+        #expect(id == "p")
+        #expect(endsAt == 1_800_000_000_000)
+
+        guard case .setSleepTimer(_, let cleared) = try BridgeCall.decode("setSleepTimer", ["playerId": .string("p")]) else {
+            Issue.record("not a sleep timer")
+            return
+        }
+        #expect(cleared == nil)
+        #expect(rejection("setSleepTimer", ["playerId": .string("p"), "endsAt": .string("soon")]) == .invalidArgument)
+    }
+
+    @Test("a sleep timer is refused where the platform has none, and is reported only where it has")
+    func sleepTimerCapability() {
+        let none = BridgeCapabilities()
+        #expect(none[keyPath: BridgeCall.capability(of: "setSleepTimer")!] == false)
+        #expect(none.json.objectValue?["sleepTimer"] == nil)
+
+        var some = BridgeCapabilities()
+        some.sleepTimer = true
+        #expect(some[keyPath: BridgeCall.capability(of: "setSleepTimer")!] == true)
+        #expect(some.json.objectValue?["sleepTimer"] != nil)
+    }
+
     @Test("now playing carries the post's artwork and the host's stand-in for it")
     func nowPlayingDecodes() throws {
         var args = load(maxReloadAttempts: .number(3))

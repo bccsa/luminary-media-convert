@@ -59,6 +59,12 @@ interface Engine {
     /** Mutes or unmutes; reported as `mutedchange` whoever changes it. */
     fun setMuted(muted: Boolean)
 
+    /**
+     * Pauses at a wall-clock time ([endsAt], milliseconds since 1970), or clears the timer with null. The page cannot
+     * do this with the screen locked: its JavaScript is suspended, and this timer is not.
+     */
+    fun setSleepTimer(endsAt: Double?)
+
     /** Selects the subtitle listed under [label] (its name, else its language); null turns them off. */
     fun setSubtitleTrack(label: String?)
 

@@ -15,10 +15,14 @@ final class ManualClock: Clock {
 
     private var current = 0.0
     private var timers: [Timer] = []
+    /// The delay of every timer ever scheduled, for a test that asks what was set.
+    private(set) var delays: [Double] = []
+    var pending: Int { timers.filter { !$0.cancelled }.count }
 
     func now() -> Double { current }
 
     func schedule(_ delaySeconds: Double, _ run: @escaping () -> Void) -> Cancellable {
+        delays.append(delaySeconds)
         let timer = Timer(at: current + delaySeconds, run: run)
         timers.append(timer)
         return timer

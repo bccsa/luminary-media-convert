@@ -179,6 +179,7 @@ class ExoEngine(
     private var reportedVariants: List<Variant>? = null
     private var reportedBufferedEnd = -1.0
     private var poll: Cancellable? = null
+    private var sleepTimer: Cancellable? = null
 
     /** The id `setVariant` pinned; re-applied to a rebuilt ladder that still offers it. */
     private var pinnedVariant: String? = null
@@ -349,6 +350,18 @@ class ExoEngine(
     }
 
     override fun pause() = active.pause()
+
+    /** Pauses when the time comes, on the main looper the service keeps running while it plays in the background. */
+    override fun setSleepTimer(endsAt: Double?) {
+        sleepTimer?.cancel()
+        sleepTimer = null
+        if (endsAt == null) return
+        val delay = ((endsAt - System.currentTimeMillis()) / 1000.0).coerceAtLeast(0.0)
+        sleepTimer = clock.schedule(delay) {
+            sleepTimer = null
+            pause()
+        }
+    }
 
     override fun seek(position: Double, exact: Boolean) {
         if (castPlayer == null) player.setSeekParameters(if (exact) SeekParameters.EXACT else SeekParameters.CLOSEST_SYNC)
@@ -534,6 +547,8 @@ class ExoEngine(
         runCatching { castServer?.close() }
         castServer = null
         ladder.destroy()
+        sleepTimer?.cancel()
+        sleepTimer = null
         poll?.cancel()
         poll = null
         presenter.dismiss()

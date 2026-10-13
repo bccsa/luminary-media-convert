@@ -32,6 +32,10 @@ public protocol Engine: AnyObject {
     /// Mutes or unmutes; reported as `mutedchange` whoever changes it.
     func setMuted(_ muted: Bool)
 
+    /// Pauses at a `Date()` time in milliseconds since 1970, or clears the timer with nil. The page cannot do this
+    /// with the screen locked: its JavaScript is suspended, and this timer is not.
+    func setSleepTimer(endsAt: Double?)
+
     /// Selects the subtitle listed under `label` (its name, else its language); nil turns them off.
     func setSubtitleTrack(_ label: String?)
 

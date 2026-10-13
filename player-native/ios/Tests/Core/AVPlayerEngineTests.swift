@@ -46,6 +46,39 @@ struct AVPlayerEngineTests {
         return (engine, presenter)
     }
 
+    @Test("a sleep timer is kept on the clock until its time, replaced by a new one, and cleared by none")
+    func sleepTimer() {
+        let clock = ManualClock()
+        let engine = AVPlayerEngine(
+            router: UriRouter(assets: AssetStore(), key: KeyHolder()),
+            clock: clock,
+            options: CreateOptions(protocolVersion: 1, skipBackSeconds: 10, skipForwardSeconds: 10),
+            presenter: RecordingPresenter()
+        )
+        let now = Date().timeIntervalSince1970 * 1000
+
+        engine.setSleepTimer(endsAt: now + 90_000)
+        #expect(clock.pending == 1)
+        #expect(abs(clock.delays.last! - 90) < 2)
+
+        engine.setSleepTimer(endsAt: now + 600_000)
+        #expect(clock.pending == 1)
+        #expect(abs(clock.delays.last! - 600) < 2)
+
+        engine.setSleepTimer(endsAt: nil)
+        #expect(clock.pending == 0)
+
+        // A time already past fires at once; the engine has nothing playing, so it stays quiet, and the timer is spent.
+        engine.setSleepTimer(endsAt: now - 5_000)
+        #expect(clock.delays.last! == 0)
+        clock.advance(1)
+        #expect(clock.pending == 0)
+
+        engine.setSleepTimer(endsAt: now + 60_000)
+        engine.destroy()
+        #expect(clock.pending == 0)
+    }
+
     @Test("a media services reset gives the engine a new player that carries on as the old one was")
     func mediaServicesReset() throws {
         let (engine, presenter) = make()

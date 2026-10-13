@@ -19,6 +19,7 @@ val ANDROID_CAPABILITIES = BridgeCapabilities(
     muting = true,
     subtitleSelection = true,
     inlineVideo = true,
+    sleepTimer = true,
 )
 
 /** One per app, shared by every player's `UriRouter`. */

@@ -89,6 +89,8 @@ export class NativeBridgeAdapter implements PlayerAdapter {
     readonly airPlay: boolean;
     /** Native shows our own receiver's menu on the TV while casting. */
     readonly castMenu: boolean;
+    /** Native stops playback at a time of its own, beside the engine. */
+    readonly sleepTimer: boolean;
     /**
      * Present only when native runs the warming loop: the controller calls it
      * through `?.`, so leaving it undefined is how the capability is declined.
@@ -144,6 +146,7 @@ export class NativeBridgeAdapter implements PlayerAdapter {
         this.pictureInPicture = capabilities.pictureInPicture === true;
         this.airPlay = capabilities.airPlay === true;
         this.castMenu = capabilities.castMenu === true;
+        this.sleepTimer = capabilities.sleepTimer === true;
         this.capabilities = {
             nativeHls: false,
             keyDelivery: 'memory',
@@ -381,6 +384,18 @@ export class NativeBridgeAdapter implements PlayerAdapter {
     showAirPlayPicker(): void {
         if (!this.airPlay || this.destroyed) return;
         this.send('showAirPlayPicker', this.plugin.showAirPlayPicker({ playerId: this.playerId }));
+    }
+
+    /**
+     * Stops playback at a `Date.now()` time, or clears the timer with `null`. Native keeps it, so a locked screen
+     * that suspends the page does not stop it firing. A no-op where native cannot: the page's own timer remains.
+     */
+    setSleepTimer(endsAt: number | null): void {
+        if (!this.sleepTimer || this.destroyed) return;
+        this.send(
+            'setSleepTimer',
+            this.plugin.setSleepTimer({ playerId: this.playerId, ...(endsAt === null ? {} : { endsAt }) }),
+        );
     }
 
     /** What the TV's menu offers while casting. A no-op where native has no menu. */

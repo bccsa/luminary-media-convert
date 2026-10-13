@@ -45,7 +45,7 @@ class ExoEngineTest {
     private var engine: ExoEngine? = null
     private val clock = VirtualClock()
     private val registry = PlayerRegistry(
-        BridgeCapabilities(variantSwitching = true, muting = true, subtitleSelection = true),
+        BridgeCapabilities(variantSwitching = true, muting = true, subtitleSelection = true, sleepTimer = true),
         clock,
         HttpUpstream(OkHttpClient()),
         EngineFactory { router, clock, options ->
@@ -259,6 +259,32 @@ class ExoEngineTest {
             listOf(JsonPrimitive(true), JsonPrimitive(false), JsonPrimitive(true)),
             named("mutedchange").map { it["muted"] },
         )
+    }
+
+    @Test
+    fun `a sleep timer pauses at its time, is replaced by a new one, and is cleared by none`() {
+        load("load1", KEY_HEX)
+        call("play")
+        assertEquals(true, player.playWhenReady)
+        val now = System.currentTimeMillis().toDouble()
+
+        call("setSleepTimer", "endsAt" to now + 90_000)
+        clock.advance(60.0)
+        assertEquals(true, player.playWhenReady)
+        clock.advance(40.0)
+        assertEquals(false, player.playWhenReady)
+
+        call("play")
+        call("setSleepTimer", "endsAt" to now + 10_000_000)
+        call("setSleepTimer", "endsAt" to now + 20_000)
+        clock.advance(3_600.0)
+        assertEquals(false, player.playWhenReady)
+
+        call("play")
+        call("setSleepTimer", "endsAt" to now + 20_000)
+        call("setSleepTimer")
+        clock.advance(3_600.0)
+        assertEquals(true, player.playWhenReady)
     }
 
     @Test

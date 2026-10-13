@@ -20,7 +20,7 @@ public class LuminaryPlayerPlugin: CAPPlugin, CAPBridgedPlugin {
     public let pluginMethods: [CAPPluginMethod] = [
         "getInfo", "reset", "create", "load", "putAssets", "putLive", "releaseAssets", "reattach",
         "play", "pause", "seek", "setRate", "setVariant", "setAudioTrack", "warmChunks",
-        "setInlineFrame", "setMuted", "setSubtitleTrack", "startPictureInPicture", "showAirPlayPicker", "enterFullscreen", "exitFullscreen", "resumed", "destroy",
+        "setInlineFrame", "setMuted", "setSubtitleTrack", "startPictureInPicture", "showAirPlayPicker", "setSleepTimer", "enterFullscreen", "exitFullscreen", "resumed", "destroy",
     ].map { CAPPluginMethod(name: $0, returnType: CAPPluginReturnPromise) }
 
     /// AVPlayer cannot pin a rendition; it does picture in picture, and plays on with the screen locked.
@@ -35,6 +35,8 @@ public class LuminaryPlayerPlugin: CAPPlugin, CAPBridgedPlugin {
         capabilities.muting = true
         capabilities.subtitleSelection = true
         capabilities.airPlay = true
+        // Stops playback on time with the screen locked: the app keeps running while it plays in the background.
+        capabilities.sleepTimer = true
         // The warming loop runs beside the engine, as on Android; it skips a constrained network
         // (Low Data Mode), and the host's Data Saver turns it off through the prefetch policy.
         capabilities.chunkWarming = true
@@ -94,6 +96,7 @@ public class LuminaryPlayerPlugin: CAPPlugin, CAPBridgedPlugin {
     @objc func setSubtitleTrack(_ call: CAPPluginCall) { dispatch("setSubtitleTrack", call) }
     @objc func startPictureInPicture(_ call: CAPPluginCall) { dispatch("startPictureInPicture", call) }
     @objc func showAirPlayPicker(_ call: CAPPluginCall) { dispatch("showAirPlayPicker", call) }
+    @objc func setSleepTimer(_ call: CAPPluginCall) { dispatch("setSleepTimer", call) }
     @objc func enterFullscreen(_ call: CAPPluginCall) { dispatch("enterFullscreen", call) }
     @objc func exitFullscreen(_ call: CAPPluginCall) { dispatch("exitFullscreen", call) }
     @objc func resumed(_ call: CAPPluginCall) { dispatch("resumed", call) }
