@@ -36,7 +36,6 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.annotation.OptIn
-import androidx.core.content.ContextCompat
 import androidx.core.graphics.Insets
 import androidx.core.graphics.PathParser
 import androidx.core.view.ViewCompat
@@ -44,12 +43,8 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
-import androidx.media3.common.util.BitmapLoader
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.util.Util
-import com.google.common.util.concurrent.FutureCallback
-import com.google.common.util.concurrent.Futures
-import com.google.common.util.concurrent.ListenableFuture
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -94,8 +89,6 @@ internal class SkinControls(
     private val onBrowseSelect: ((String) -> Unit)? = null,
     /** The strip near the end: the id of the video picked, or null when the viewer closes it. */
     private val onNextUp: ((String?) -> Unit)? = null,
-    /** Loads the up-next pictures; the rows keep a plain tile without it. */
-    private val images: BitmapLoader? = null,
     private val onLeave: () -> Unit,
 ) : FrameLayout(context), Player.Listener {
     private val main = Handler(Looper.getMainLooper())
@@ -147,7 +140,7 @@ internal class SkinControls(
     private var browseScroll: ScrollView? = null
     private var chapterRows: List<ChapterRow> = emptyList()
     private var currentChapter = -1
-    private val loadingImages = mutableListOf<ListenableFuture<Bitmap>>()
+    private var imageEpoch = 0
     private var inset = Insets.NONE
     private var shown = true
     private var attached = false
@@ -1182,31 +1175,24 @@ internal class SkinControls(
 
     /** Loads [url] into [into]; when it does not load, or there is none, the [fallback] takes its place. */
     private fun loadImage(into: ImageView, url: String?, fallback: String? = null) {
-        val loader = images ?: return
         val first = url?.takeIf { it.isNotEmpty() }
         val second = fallback?.takeIf { it.isNotEmpty() }
         val address = first ?: second ?: return
-        val future = runCatching { loader.loadBitmap(Uri.parse(address)) }.getOrNull() ?: return
-        loadingImages += future
-        Futures.addCallback(
-            future,
-            object : FutureCallback<Bitmap> {
-                override fun onSuccess(result: Bitmap?) {
-                    if (result != null && !future.isCancelled && into.isAttachedToWindow) into.setImageBitmap(result)
-                }
-
-                // A tile without its picture still names the video.
-                override fun onFailure(t: Throwable) {
-                    if (first != null && second != null && !future.isCancelled && into.isAttachedToWindow) loadImage(into, null, second)
-                }
-            },
-            ContextCompat.getMainExecutor(context),
-        )
+        val epoch = imageEpoch
+        // Sharp at the size drawn, not larger.
+        val target = (resources.displayMetrics.widthPixels / 3).coerceAtLeast(240)
+        FrameImages.load(address, target) { bitmap ->
+            if (epoch != imageEpoch) return@load
+            when {
+                bitmap != null -> into.setImageBitmap(bitmap)
+                first != null && second != null -> loadImage(into, null, second)
+            }
+        }
     }
 
+    /** Pictures still on their way are no longer wanted: their list was put away. */
     private fun cancelImages() {
-        loadingImages.forEach { it.cancel(true) }
-        loadingImages.clear()
+        imageEpoch++
     }
 
     // Layout.
