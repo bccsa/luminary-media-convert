@@ -37,6 +37,7 @@ export class QueueService implements OnModuleDestroy {
             return -1;
         }
 
+        this.encodeService.prepareDelivery(sessionId);
         this.queue.push(sessionId);
         const position = this.queue.length;
 

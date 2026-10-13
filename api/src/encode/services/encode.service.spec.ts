@@ -642,6 +642,63 @@ describe('EncodeService', () => {
         expect(statuses).toContain('uploading_to_s3');
     });
 
+    describe('prepareDelivery', () => {
+        const encrypted = (): CreateSessionDto => ({
+            ...makeConfig(),
+            encryption: { enabled: true },
+        });
+
+        it('publishes the URL and key before the session has started encoding', () => {
+            const session = sessionService.create(encrypted(), {
+                publicBaseUrl: 'https://cdn.example.com/media/',
+            } as any);
+
+            service.prepareDelivery(session.id);
+
+            const queued = sessionService.get(session.id)!;
+            expect(queued.hlsUrl).toBe(
+                'https://cdn.example.com/media/master.m3u8'
+            );
+            expect(queued.encryptionKeyHex).toBe('cd'.repeat(16));
+            expect(queued.status).not.toBe('encoding');
+        });
+
+        it('keeps a key it already issued, so a retry stays playable', () => {
+            const session = sessionService.create(encrypted());
+
+            service.prepareDelivery(session.id);
+            service.prepareDelivery(session.id);
+
+            expect(encryptionService.generateKey).toHaveBeenCalledTimes(1);
+        });
+
+        it('encodes with the key that was issued while queued', async () => {
+            const session = sessionService.create(encrypted());
+            sessionService.setFilePath(session.id, '/tmp/input.mp4');
+            sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+            service.prepareDelivery(session.id);
+
+            await service.processSession(session.id);
+
+            expect(encryptionService.generateKey).toHaveBeenCalledTimes(1);
+            expect(segmentPipelineService.createPipeline).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    encryptionKey: Buffer.alloc(16, 0xcd),
+                })
+            );
+        });
+
+        it('has nothing to publish for an unencrypted session without a base URL', () => {
+            const session = sessionService.create(makeConfig());
+
+            service.prepareDelivery(session.id);
+
+            const prepared = sessionService.get(session.id)!;
+            expect(prepared.encryptionKeyHex).toBeUndefined();
+            expect(prepared.hlsUrl).toBeUndefined();
+        });
+    });
+
     it('should pre-compute encryption materials and pass to pipeline when encryption is enabled', async () => {
         const config: CreateSessionDto = {
             ...makeConfig(),
