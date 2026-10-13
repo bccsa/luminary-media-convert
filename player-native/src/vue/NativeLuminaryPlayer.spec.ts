@@ -329,6 +329,15 @@ describe('NativeLuminaryPlayer', () => {
             expect(browse.upNext).toEqual(upNext);
         });
 
+        it('lists the chapters the video carries when the host gives none', async () => {
+            const { plugin, exposed } = await mountPlayer({});
+            await ready(plugin);
+            await exposed.enterFullscreen();
+
+            // Nothing in the fixture's video: the lists are empty rather than missing.
+            expect(plugin.argsOf<EnterArgs>('enterFullscreen').at(-1)!.browse!.chapters).toEqual([]);
+        });
+
         it('say nextupselect once for a pick in the strip, and nextupdismiss when it is closed', async () => {
             const { plugin, wrapper } = await mountPlayer({ nextUp: upNext });
             await ready(plugin);

@@ -123,7 +123,7 @@ export const NativeLuminaryPlayer = defineComponent({
          * closed the first is raised as `nextupselect` when this video ends in full-screen.
          */
         nextUp: { type: Array as PropType<PlayerUpNextItem[]>, default: undefined },
-        /** Chapters of what plays, listed in native full-screen's panel; tapping one seeks there. */
+        /** Chapters of what plays, listed in native full-screen's panel; tapping one seeks there. Those the video carries when not given. */
         chapters: { type: Array as PropType<Chapter[]>, default: undefined },
         /** Strings to override, as `player-web`'s `messages` prop. */
         messages: { type: Object as PropType<Partial<NativePlayerMessages>>, default: undefined },
@@ -442,6 +442,8 @@ export const NativeLuminaryPlayer = defineComponent({
                 await report('enterFullscreen', props.plugin.enterFullscreen({ playerId: native.value.playerId, texts, browse }));
             }
         }
+        /** The host's chapters, else the ones the controller read from the video's own file. */
+        const chapterList = computed<readonly Chapter[]>(() => props.chapters ?? live.value.chapters);
         /** Chosen or closed: either way the strip has done its job for this video. */
         let nextUpClosed = false;
         function chooseNextUp(id: string) {
@@ -472,7 +474,7 @@ export const NativeLuminaryPlayer = defineComponent({
             });
             return {
                 ...(props.nextUp?.length ? { nextUp: props.nextUp.slice(0, NEXT_UP_MAX).map(card) } : {}),
-                chapters: (props.chapters ?? []).map(({ title, startTime, endTime }) => ({ title, startTime, endTime })),
+                chapters: chapterList.value.map(({ title, startTime, endTime }) => ({ title, startTime, endTime })),
                 upNext: (props.upNext ?? []).map(({ id, title, subtitle, imageUrl, section }) => ({
                     id,
                     title,
@@ -485,7 +487,7 @@ export const NativeLuminaryPlayer = defineComponent({
         /** The lists native last was sent; it keeps them for a full-screen it opens itself. */
         let sentBrowse = '';
         // Up next often arrives after full-screen opened: native replaces the lists on screen.
-        watch([() => props.chapters, () => props.upNext, () => props.nextUp], () => {
+        watch([chapterList, () => props.upNext, () => props.nextUp], () => {
             if (presentation.value === 'fullscreen') void enterFullscreen();
         });
         // Full-screen that native opened itself (turning to landscape) shows the lists as they are now.
