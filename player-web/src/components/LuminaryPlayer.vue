@@ -87,7 +87,7 @@ interface Props {
      * What is playing, for the fullscreen audio screen: the title, who it is by, and the series it belongs to. The
      * picture is the `poster`. Without a title the screen is left to the player's own controls.
      */
-    nowPlaying?: { title: string; subtitle?: string; eyebrow?: string };
+    nowPlaying?: { title: string; subtitle?: string; eyebrow?: string; artwork?: PlayerImageInput };
     /** The host's theme, for the fullscreen audio screen: `light` takes the picture's colour over the whole screen, `dark` stays plain with a glow behind the picture. */
     appearance?: 'light' | 'dark';
     /** Audio language to select automatically; a viewer's own choice outranks it. */
@@ -1196,7 +1196,11 @@ const artworkSizes = computed(() => {
 const showArtworkLayer = computed(() => isAudioOnly.value || artworkAttempt.value !== null);
 
 /** What the fullscreen audio screen draws as the cover: the picture that is showing now, fallbacks included. */
-const audioArtwork = computed(() => (artworkAttempt.value ? { src: artworkAttempt.value.src, srcset: artworkAttempt.value.srcset } : null));
+const nowPlayingAttempt = computed(() => imageAttempts(toPlayerImage(props.nowPlaying?.artwork))[0] ?? null);
+const audioArtwork = computed(() => {
+    const shown = artworkAttempt.value ?? nowPlayingAttempt.value;
+    return shown ? { src: shown.src, srcset: shown.srcset } : null;
+});
 const audioChapterIndex = computed(() => chapterIndexAt(state.value.chapters, state.value.currentTime));
 
 defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, pause });
