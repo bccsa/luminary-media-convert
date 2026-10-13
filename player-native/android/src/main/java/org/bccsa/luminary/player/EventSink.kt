@@ -167,15 +167,20 @@ class EventSink(
         )
     }
 
-    /** The viewer picked an up-next item in full-screen's panel; the page plays it. */
-    fun browseSelect(id: String) {
+    /** The viewer picked an up-next item in full-screen's panel (`upnext`) or its strip near the end (`nextup`); the page plays it. */
+    fun browseSelect(id: String, kind: String = "upnext") {
         send(
             "browseselect",
             buildJsonObject {
-                put("kind", "upnext")
+                put("kind", kind)
                 put("id", id)
             },
         )
+    }
+
+    /** The viewer closed full-screen's strip of next videos. */
+    fun nextUpDismissed() {
+        send("browseselect", buildJsonObject { put("kind", "nextupdismiss") })
     }
 
     private var muted = false

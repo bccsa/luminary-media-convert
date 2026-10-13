@@ -100,6 +100,9 @@ const FILM_ICON =
 const NOTE_ICON =
     'M19.952 1.651a.75.75 0 0 1 .298.599V16.303a3 3 0 0 1-2.176 2.884l-1.32.377a2.553 2.553 0 1 1-1.403-4.909l2.311-.66a1.5 1.5 0 0 0 1.088-1.442V6.994l-9 2.572v9.737a3 3 0 0 1-2.176 2.884l-1.32.377a2.553 2.553 0 1 1-1.402-4.909l2.31-.66a1.5 1.5 0 0 0 1.088-1.442V5.25a.75.75 0 0 1 .544-.721l10.5-3a.75.75 0 0 1 .658.122Z';
 
+/** Room for this many cards in the strip. */
+const NEXT_UP_MAX = 5;
+
 export const NativeLuminaryPlayer = defineComponent({
     name: 'NativeLuminaryPlayer',
     props: {
@@ -115,6 +118,11 @@ export const NativeLuminaryPlayer = defineComponent({
         nowPlaying: { type: Object as PropType<NowPlaying>, default: undefined },
         /** Videos offered after this one, listed in native full-screen's panel; as `player-web`'s `upNext` prop. */
         upNext: { type: Array as PropType<PlayerUpNextItem[]>, default: undefined },
+        /**
+         * The videos that may follow, best first. Native full-screen offers them in a strip near the end; unless it is
+         * closed the first is raised as `nextupselect` when this video ends in full-screen.
+         */
+        nextUp: { type: Array as PropType<PlayerUpNextItem[]>, default: undefined },
         /** Chapters of what plays, listed in native full-screen's panel; tapping one seeks there. */
         chapters: { type: Array as PropType<Chapter[]>, default: undefined },
         /** Strings to override, as `player-web`'s `messages` prop. */
@@ -145,6 +153,10 @@ export const NativeLuminaryPlayer = defineComponent({
         ended: () => true,
         /** The viewer picked an up-next item in native full-screen; the id is the item's. */
         upnextselect: (_id: string) => true,
+        /** A next video was chosen, from the strip or by this one ending; the id is the item's. */
+        nextupselect: (_id: string) => true,
+        /** The viewer closed the strip, so the end of this video is not an advance. */
+        nextupdismiss: () => true,
     },
     setup(props, { emit, expose, slots }) {
         const native = shallowRef<NativePlayer | null>(null);
@@ -208,7 +220,11 @@ export const NativeLuminaryPlayer = defineComponent({
                         lastTime = next.currentTime;
                         emit('timeupdate', next.currentTime, next.duration);
                     }
-                    if (next.ended && !ended) emit('ended');
+                    if (next.ended && !ended) {
+                        // First, so a host sees the advance coming before it reacts to the end (e.g. leaving full-screen).
+                        if (presentation.value === 'fullscreen' && props.nextUp?.length) chooseNextUp(props.nextUp[0]!.id);
+                        emit('ended');
+                    }
                     ended = next.ended;
                 }),
             );
@@ -220,7 +236,10 @@ export const NativeLuminaryPlayer = defineComponent({
                     if (mine(payload)) presentation.value = payload.state;
                 }),
                 props.plugin.addListener('browseselect', (payload) => {
-                    if (mine(payload) && payload.kind === 'upnext') emit('upnextselect', payload.id);
+                    if (!mine(payload)) return;
+                    if (payload.kind === 'upnext') emit('upnextselect', payload.id);
+                    else if (payload.kind === 'nextup') chooseNextUp(payload.id);
+                    else closeNextUp(true);
                 }),
                 // Muting is the player's, not a load's, and the viewer changes it in native UI too.
                 props.plugin.addListener('mutedchange', (payload) => {
@@ -423,9 +442,36 @@ export const NativeLuminaryPlayer = defineComponent({
                 await report('enterFullscreen', props.plugin.enterFullscreen({ playerId: native.value.playerId, texts, browse }));
             }
         }
+        /** Chosen or closed: either way the strip has done its job for this video. */
+        let nextUpClosed = false;
+        function chooseNextUp(id: string) {
+            if (nextUpClosed) return;
+            nextUpClosed = true;
+            emit('nextupselect', id);
+        }
+        function closeNextUp(announce: boolean) {
+            if (nextUpClosed) return;
+            nextUpClosed = true;
+            if (announce) emit('nextupdismiss');
+        }
+        // A new video is a new offer; full-screen itself is kept across the change.
+        watch(
+            () => props.source,
+            () => {
+                nextUpClosed = false;
+            },
+        );
         /** The panel's lists as the bridge carries them; empty when the host gave none. */
         function browseLists(): FullscreenBrowse {
+            const card = ({ id, title, subtitle, imageUrl, section }: PlayerUpNextItem) => ({
+                id,
+                title,
+                ...(subtitle ? { subtitle } : {}),
+                ...(imageUrl ? { imageUrl } : {}),
+                ...(section ? { section } : {}),
+            });
             return {
+                ...(props.nextUp?.length ? { nextUp: props.nextUp.slice(0, NEXT_UP_MAX).map(card) } : {}),
                 chapters: (props.chapters ?? []).map(({ title, startTime, endTime }) => ({ title, startTime, endTime })),
                 upNext: (props.upNext ?? []).map(({ id, title, subtitle, imageUrl, section }) => ({
                     id,
@@ -439,7 +485,7 @@ export const NativeLuminaryPlayer = defineComponent({
         /** The lists native last was sent; it keeps them for a full-screen it opens itself. */
         let sentBrowse = '';
         // Up next often arrives after full-screen opened: native replaces the lists on screen.
-        watch([() => props.chapters, () => props.upNext], () => {
+        watch([() => props.chapters, () => props.upNext, () => props.nextUp], () => {
             if (presentation.value === 'fullscreen') void enterFullscreen();
         });
         // Full-screen that native opened itself (turning to landscape) shows the lists as they are now.

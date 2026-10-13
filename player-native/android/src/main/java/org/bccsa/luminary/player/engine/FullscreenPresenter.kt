@@ -222,6 +222,8 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         onBrowseSelect: ((String) -> Unit)? = null,
         /** Loads the up-next pictures. */
         images: BitmapLoader? = null,
+        /** The strip near the end: the id of the video picked, or null when the viewer closes it. */
+        onNextUp: ((String?) -> Unit)? = null,
     ): Boolean {
         if (view != null) return false
         val activity = activity() ?: return false
@@ -241,6 +243,7 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
             thumbnails = thumbnails,
             browse = browse,
             onBrowseSelect = onBrowseSelect,
+            onNextUp = onNextUp,
             images = images,
             onLeave = onLeave,
         )

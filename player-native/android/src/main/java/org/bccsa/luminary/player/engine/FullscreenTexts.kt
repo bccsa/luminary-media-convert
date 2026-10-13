@@ -30,6 +30,11 @@ data class FullscreenTexts(
     val closeBrowse: String = "Close",
     /** The line above the timeline; `{index}` and `{count}` are the chapter the playhead is in and how many there are. */
     val chapterOf: String = "Chapter {index} of {count}",
+    /** The up-next strip's close button. */
+    val dismiss: String = "Dismiss",
+    /** The video quality setting's card title and button, and its entry that leaves the choice to the player. */
+    val qualityMenu: String = "Quality",
+    val qualityAuto: String = "Auto",
 ) {
     fun skipBack(seconds: Int) = skipBack.replace("{seconds}", seconds.toString())
 
@@ -60,6 +65,9 @@ data class FullscreenTexts(
                 browse = sent["browse"] ?: base.browse,
                 closeBrowse = sent["closeBrowse"] ?: base.closeBrowse,
                 chapterOf = sent["chapterOf"] ?: base.chapterOf,
+                dismiss = sent["dismiss"] ?: base.dismiss,
+                qualityMenu = sent["qualityMenu"] ?: base.qualityMenu,
+                qualityAuto = sent["qualityAuto"] ?: base.qualityAuto,
             )
         }
     }

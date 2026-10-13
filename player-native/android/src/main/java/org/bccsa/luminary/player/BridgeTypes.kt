@@ -453,18 +453,21 @@ private class Args(private val json: JsonObject, private val path: String) {
         primitive.content
     }
 
-    /** `{ chapters, upNext }`: each entry's required fields are strings (numbers for a chapter's times); refused whole when one is not. */
+    private fun browseItem(element: kotlinx.serialization.json.JsonElement, where: String): BrowseItem {
+        val item = Args(element as? JsonObject ?: invalid("$where is not an object"), "$path.$where")
+        return BrowseItem(
+            item.string("id"), item.string("title"), item.optString("subtitle"), item.optString("imageUrl"), item.optString("section"),
+        )
+    }
+
+    /** `{ chapters, upNext, nextUp? }`: each entry's required fields are strings (numbers for a chapter's times); refused whole when one is not. */
     fun browse(): Browse = Browse(
         chapters = array("chapters").mapIndexed { i, element ->
             val chapter = Args(element as? JsonObject ?: invalid("chapters[$i] is not an object"), "$path.chapters[$i]")
             BrowseChapter(chapter.string("title"), chapter.number("startTime"), chapter.number("endTime"))
         },
-        upNext = array("upNext").mapIndexed { i, element ->
-            val item = Args(element as? JsonObject ?: invalid("upNext[$i] is not an object"), "$path.upNext[$i]")
-            BrowseItem(
-                item.string("id"), item.string("title"), item.optString("subtitle"), item.optString("imageUrl"), item.optString("section"),
-            )
-        },
+        upNext = array("upNext").mapIndexed { i, element -> browseItem(element, "upNext[$i]") },
+        nextUp = if (present("nextUp") == null) emptyList() else array("nextUp").mapIndexed { i, element -> browseItem(element, "nextUp[$i]") },
     )
 
     fun array(key: String): JsonArray = present(key) as? JsonArray ?: invalid("$key is not an array")
@@ -509,7 +512,8 @@ data class BrowseChapter(val title: String, val start: Double, val end: Double)
 /** A video offered after this one; [section] is the heading above each run of items that share it. */
 data class BrowseItem(val id: String, val title: String, val subtitle: String?, val imageUrl: String?, val section: String?)
 
-/** What full-screen's chapters / up-next panel lists. */
-data class Browse(val chapters: List<BrowseChapter>, val upNext: List<BrowseItem>) {
+/** What full-screen's chapters / up-next panel lists, and the videos its strip offers near the end. */
+data class Browse(val chapters: List<BrowseChapter>, val upNext: List<BrowseItem>, val nextUp: List<BrowseItem> = emptyList()) {
+    /** Of the panel: the strip has no button of its own. */
     val isEmpty: Boolean get() = chapters.isEmpty() && upNext.isEmpty()
 }

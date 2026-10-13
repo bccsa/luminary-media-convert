@@ -30,6 +30,7 @@ import android.view.ViewOutlineProvider
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -55,6 +56,7 @@ import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 import org.bccsa.luminary.player.Browse
 import org.bccsa.luminary.player.BrowseChapter
+import org.bccsa.luminary.player.BrowseItem
 import org.bccsa.luminary.player.Roster
 import org.bccsa.luminary.player.Thumbnails
 
@@ -90,6 +92,8 @@ internal class SkinControls(
     browse: Browse? = null,
     /** Called with the id of the up-next item the viewer picked. */
     private val onBrowseSelect: ((String) -> Unit)? = null,
+    /** The strip near the end: the id of the video picked, or null when the viewer closes it. */
+    private val onNextUp: ((String?) -> Unit)? = null,
     /** Loads the up-next pictures; the rows keep a plain tile without it. */
     private val images: BitmapLoader? = null,
     private val onLeave: () -> Unit,
@@ -98,11 +102,13 @@ internal class SkinControls(
     private val panel = FrameLayout(context)
     private val menuLayer = FrameLayout(context)
     private val browseLayer = FrameLayout(context)
+    private val nextUpLayer = FrameLayout(context)
 
     private val play = Icon(context, V10Icons.play, circle = true)
     private val spinner = Spinner(context)
     private val back: Icon?
     private val forward: Icon?
+    private val qualityButton = Icon(context, V10Icons.quality)
     private val audioButton = Icon(context, SettingIcons.language)
     private val pipButton = Icon(context, V10Icons.pip)
     private val castButton = Icon(context, V10Icons.cast)
@@ -125,10 +131,17 @@ internal class SkinControls(
     private val fade = FadeDrawable()
 
     private var volumeBeforeMute = 1f
+    /** The right-hand time shows the whole length instead of what is left, as the web's does when pressed. */
+    private var showTotal = false
     private var inPictureInPicture = false
     private var menuOpen = false
     private var browse: Browse? = browse?.takeUnless { it.isEmpty }
     private var browseOpen = false
+    private var nextUp: List<BrowseItem> = browse?.nextUp.orEmpty().take(NextUp.MAX)
+    /** Chosen or closed: either way the strip has done its job for this video. */
+    private var nextUpClosed = false
+    private var nextUpOn = false
+    private var nextUpStrip: LinearLayout? = null
     private var browseTab = BrowseTab.CHAPTERS
     private var browseSheet: LinearLayout? = null
     private var browseScroll: ScrollView? = null
@@ -202,6 +215,12 @@ internal class SkinControls(
         timelineRow.addView(elapsed)
         timelineRow.addView(timeline)
         timelineRow.addView(remaining)
+        remaining.isClickable = true
+        remaining.setOnClickListener {
+            showTotal = !showTotal
+            refresh()
+            scheduleHide()
+        }
         chapterNow.apply {
             setTextColor(Color.WHITE)
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
@@ -213,6 +232,7 @@ internal class SkinControls(
         column.addView(chapterNow)
         column.addView(timelineRow)
         actionsRow.addView(muteButton.tap { toggleMute() })
+        actionsRow.addView(qualityButton.tap { openQualityMenu() })
         actionsRow.addView(audioButton.tap { openAudioMenu() })
         actionsRow.addView(rateButton.tap { openRateMenu() })
         actionsRow.addView(subtitlesButton.tap { openSubtitlesMenu() })
@@ -240,6 +260,7 @@ internal class SkinControls(
         roster.visibility = GONE
 
         play.contentDescription = texts.play
+        qualityButton.contentDescription = texts.qualityMenu
         audioButton.contentDescription = texts.audioMenu
         rateButton.contentDescription = texts.playbackRate
         muteButton.contentDescription = texts.mute
@@ -254,6 +275,8 @@ internal class SkinControls(
         exitButton.contentDescription = texts.exitFullscreen
         timeline.contentDescription = texts.seek
         addView(menuLayer, LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        // Under the panel, over the controls, which it rides above while they show.
+        addView(nextUpLayer, LayoutParams(MATCH_PARENT, MATCH_PARENT))
         addView(browseLayer, LayoutParams(MATCH_PARENT, MATCH_PARENT))
         // The controls stay clear of the system's own edges.
         ViewCompat.setOnApplyWindowInsetsListener(this) { _, insets ->
@@ -384,6 +407,8 @@ internal class SkinControls(
         // Invisible, not gone: the bar is what keeps the buttons where they are.
         timeline.visibility = if (isLive) INVISIBLE else VISIBLE
         audioButton.visibility = if (audioTracks().size > 1) VISIBLE else GONE
+        // With one tier there is nothing to choose.
+        qualityButton.visibility = if (qualityChoicesOf(player.currentTracks, heldQuality(player)).size > 1) VISIBLE else GONE
         // The skin shows its captions button only when the source has subtitles.
         subtitlesButton.visibility = if (subtitleChoicesOf(player.currentTracks).isNotEmpty()) VISIBLE else GONE
 
@@ -401,7 +426,11 @@ internal class SkinControls(
         // While held the times follow the finger. Whole seconds, so the two always add up to the length.
         val shownAt = sliding ?: if (timeline.dragging) timeline.dragAt * total else position
         val left = if (isLive) "LIVE" else formatTime(shownAt, total)
-        val right = if (isLive) "" else "-" + formatTime(max(Math.floor(total) - Math.floor(shownAt), 0.0), total)
+        val right = when {
+            isLive -> ""
+            showTotal -> formatTime(total, total)
+            else -> "-" + formatTime(max(Math.floor(total) - Math.floor(shownAt), 0.0), total)
+        }
         if (elapsed.text.toString() != left) elapsed.text = left
         if (remaining.text.toString() != right) remaining.text = right
 
@@ -410,9 +439,159 @@ internal class SkinControls(
             timeline.show(at / duration, player.bufferedPosition.toDouble() / duration)
         }
         showChapterNow(position, duration?.div(1000.0) ?: 0.0)
+        updateNextUp()
         if (browseOpen && browseTab == BrowseTab.CHAPTERS) markCurrentChapter()
         // Held open after the finger lifts, the roster follows the playhead until it is touched again.
         if (rosterOpen && !timeline.dragging && sliding == null) updateRoster(position)
+    }
+
+    // The strip of next videos, offered near the end.
+
+    /** Opens or puts away the strip as the playhead and the panel say; called as the state changes. */
+    private fun updateNextUp() {
+        val duration = player.duration.takeIf { it != C.TIME_UNSET && it > 0 }?.div(1000.0)
+        val due = !browseOpen && !inPictureInPicture &&
+            NextUp.due(nextUp.isNotEmpty(), nextUpClosed, player.isCurrentMediaItemLive, duration, player.currentPosition / 1000.0)
+        if (due == nextUpOn) return
+        nextUpOn = due
+        if (due) showNextUp() else removeNextUp()
+    }
+
+    private fun removeNextUp() {
+        nextUpOn = false
+        nextUpStrip = null
+        nextUpLayer.removeAllViews()
+    }
+
+    /** Clear of the control bar (timeline and buttons) while it is up, on the bottom edge when it is not. */
+    private fun raiseNextUp() {
+        val strip = nextUpStrip ?: return
+        val raise = if (shown) {
+            val chapter = if (chapterNow.visibility == VISIBLE) chapterNow.height else 0
+            (column.height - column.paddingTop - chapterNow.height + chapter + dpf(8f * scale)).coerceAtLeast(0f)
+        } else {
+            0f
+        }
+        strip.animate().translationY(-raise).setDuration(NEXT_UP_MS).start()
+    }
+
+    private fun closeNextUp() {
+        if (nextUpClosed) return
+        nextUpClosed = true
+        removeNextUp()
+        onNextUp?.invoke(null)
+    }
+
+    private fun chooseNextUp(id: String) {
+        if (nextUpClosed) return
+        nextUpClosed = true
+        removeNextUp()
+        onNextUp?.invoke(id)
+    }
+
+    private fun showNextUp() {
+        fun px(dp: Float) = dpf(dp * scale).roundToInt()
+        val edge = edgePx()
+        val head = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL or Gravity.END
+            addView(
+                TextView(context).apply {
+                    text = texts.upNext
+                    setTextSize(TypedValue.COMPLEX_UNIT_DIP, 18f * scale)
+                    typeface = Typeface.DEFAULT_BOLD
+                    setTextColor(Color.WHITE)
+                    setShadowLayer(dpf(2f), 0f, dpf(1f), 0x80000000.toInt())
+                },
+            )
+            addView(
+                Icon(context, BrowseIcons.close).apply {
+                    iconDp = 24f * scale
+                    contentDescription = texts.dismiss
+                    isClickable = true
+                    setOnClickListener { closeNextUp() }
+                    lp(px(40f), px(40f), margin = 0)
+                },
+                LinearLayout.LayoutParams(px(40f), px(40f)).apply { marginStart = px(8f) },
+            )
+        }
+        val cardWidth = min(px(NEXT_UP_CARD_DP), (width * 0.34f).roundToInt())
+        val cards = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            // Right-aligned while they all fit; the scroll view takes over when they do not.
+            gravity = Gravity.END
+        }
+        nextUp.forEach { item ->
+            val picture = ImageView(context).apply {
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                background = GradientDrawable().apply { setColor(0x26FFFFFF) }
+                clipToOutline = true
+                outlineProvider = object : ViewOutlineProvider() {
+                    override fun getOutline(view: View, outline: android.graphics.Outline) =
+                        outline.setRoundRect(0, 0, view.width, view.height, dpf(6f * scale))
+                }
+                importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+            }
+            item.imageUrl?.takeIf { it.isNotEmpty() }?.let { loadImage(picture, it) }
+            val card = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                isClickable = true
+                contentDescription = listOfNotNull(item.section?.takeIf { it.isNotEmpty() }, item.title).joinToString(", ")
+                setOnClickListener { chooseNextUp(item.id) }
+                addView(picture, LinearLayout.LayoutParams(cardWidth, cardWidth * 9 / 16))
+                item.section?.takeIf { it.isNotEmpty() }?.let { section ->
+                    addView(
+                        TextView(context).apply {
+                            text = section.uppercase()
+                            setTextSize(TypedValue.COMPLEX_UNIT_DIP, 11f * scale)
+                            typeface = Typeface.DEFAULT_BOLD
+                            letterSpacing = 0.06f
+                            setTextColor(0xBFFFFFFF.toInt())
+                            setShadowLayer(dpf(2f), 0f, dpf(1f), 0x80000000.toInt())
+                        },
+                        LinearLayout.LayoutParams(cardWidth, WRAP_CONTENT).apply { topMargin = px(4f) },
+                    )
+                }
+                addView(
+                    TextView(context).apply {
+                        text = item.title
+                        setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16f * scale)
+                        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                        setTextColor(Color.WHITE)
+                        maxLines = 2
+                        ellipsize = TextUtils.TruncateAt.END
+                        setShadowLayer(dpf(2f), 0f, dpf(1f), 0x80000000.toInt())
+                    },
+                    LinearLayout.LayoutParams(cardWidth, WRAP_CONTENT).apply { topMargin = px(4f) },
+                )
+            }
+            cards.addView(card, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { marginStart = px(12f) })
+        }
+        val scroller = HorizontalScrollView(context).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = OVER_SCROLL_NEVER
+            isFillViewport = true
+            addView(cards, LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        }
+        val strip = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(head, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+            addView(scroller, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+            alpha = 0f
+        }
+        val bottom = inset.bottom + px(16f)
+        nextUpLayer.addView(
+            strip,
+            LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.BOTTOM).apply {
+                marginStart = edge + inset.left
+                marginEnd = edge + inset.right
+                bottomMargin = bottom
+            },
+        )
+        nextUpStrip = strip
+        strip.animate().alpha(1f).setDuration(NEXT_UP_MS).start()
+        // Measured before it can be raised over the bar.
+        strip.post { raiseNextUp() }
     }
 
     private var cutsFor: Pair<List<BrowseChapter>, Double>? = null
@@ -563,6 +742,7 @@ internal class SkinControls(
 
     private fun setShown(show: Boolean) {
         shown = show
+        raiseNextUp()
         // In its small window the picture has no controls; they come back with full-screen.
         if (inPictureInPicture) return
         main.removeCallbacks(hide)
@@ -594,6 +774,13 @@ internal class SkinControls(
         val off = C.TRACK_TYPE_TEXT in player.trackSelectionParameters.disabledTrackTypes || choices.none { it.selected }
         val rows = listOf(texts.subtitlesOff to off) + choices.map { it.label to (!off && it.selected) }
         openMenu(subtitlesButton, texts.subtitlesMenu, rows) { index -> selectSubtitle(player, if (index == 0) null as SubtitleChoice? else choices[index - 1]) }
+    }
+
+    private fun openQualityMenu() {
+        val held = heldQuality(player)
+        val choices = qualityChoicesOf(player.currentTracks, held)
+        val names = listOf(texts.qualityAuto to (held == null)) + choices.map { "${it.height}p" to it.selected }
+        openMenu(qualityButton, texts.qualityMenu, names) { index -> selectQuality(player, choices.getOrNull(index - 1)?.height) }
     }
 
     private fun openRateMenu() {
@@ -701,6 +888,13 @@ internal class SkinControls(
 
     /** Replaces what the panel lists, also while it is open; with nothing to list the button goes and the panel closes. */
     fun setBrowse(next: Browse?) {
+        // A different offer is a different video's: its strip opens again.
+        val offer = next?.nextUp.orEmpty().take(NextUp.MAX)
+        if (offer.map { it.id } != nextUp.map { it.id }) {
+            nextUpClosed = false
+            removeNextUp()
+        }
+        nextUp = offer
         browse = next?.takeUnless { it.isEmpty }
         browseButton.visibility = if (browse != null) VISIBLE else GONE
         if (!browseOpen) return
@@ -712,6 +906,7 @@ internal class SkinControls(
         closeMenu()
         closeRoster()
         browseOpen = true
+        updateNextUp()
         browseTab = if (lists.chapters.isNotEmpty()) BrowseTab.CHAPTERS else BrowseTab.UP_NEXT
         main.removeCallbacks(hide)
         renderBrowse(keepScroll = false)
@@ -721,6 +916,7 @@ internal class SkinControls(
     fun closeBrowse(): Boolean {
         if (!browseOpen) return false
         browseOpen = false
+        updateNextUp()
         cancelImages()
         browseLayer.removeAllViews()
         browseSheet = null
@@ -1023,7 +1219,7 @@ internal class SkinControls(
                 gravity = Gravity.CENTER_VERTICAL
             }
         }
-        listOf(muteButton, audioButton, rateButton, subtitlesButton, browseButton, castButton, pipButton, exitButton).forEach {
+        listOf(muteButton, qualityButton, audioButton, rateButton, subtitlesButton, browseButton, castButton, pipButton, exitButton).forEach {
             it.iconDp = 22f * s
             it.lp(px(40f), px(40f), margin = 1)
         }
@@ -1134,6 +1330,8 @@ internal class SkinControls(
         private const val BROWSE_FRACTION = 0.4f
         private const val BROWSE_MIN_DP = 320f
         private const val UP_NEXT_PICTURE_DP = 128f
+        private const val NEXT_UP_CARD_DP = 280f
+        private const val NEXT_UP_MS = 250L
         private const val CARD = 0xF718181B.toInt()
 
         /** The slider is taller than the track it draws, so the track sits this far (per unit of scale) above its bottom. */

@@ -497,13 +497,19 @@ class ExoEngine(
         // Audio-only has no view. Until the tracks are known the item is presumed to have one, and
         // the view is taken down again if it turns out not to (see `onTracksChanged`).
         if (knownAudioOnly(player.currentTracks)) return
-        if (presenter.present(player, ::leaveFullscreenByViewer, skin, this.texts, ::presentationDidChange, thumbnails, cast?.let { { showAirPlayPicker() } }, this.browse, ::browseSelected, artworkLoader)) {
+        if (presenter.present(player, ::leaveFullscreenByViewer, skin, this.texts, ::presentationDidChange, thumbnails, cast?.let { { showAirPlayPicker() } }, this.browse, ::browseSelected, artworkLoader, ::nextUpChosen)) {
             presentationDidChange("fullscreen")
         }
     }
 
     private fun browseSelected(id: String) {
         if (::events.isInitialized) events.browseSelect(id)
+    }
+
+    /** The strip near the end: [id] is the video picked, null that the viewer closed it. */
+    private fun nextUpChosen(id: String?) {
+        if (!::events.isInitialized) return
+        if (id == null) events.nextUpDismissed() else events.browseSelect(id, "nextup")
     }
 
     private fun knownAudioOnly(tracks: Tracks) = !tracks.isEmpty && !tracks.containsType(C.TRACK_TYPE_VIDEO)

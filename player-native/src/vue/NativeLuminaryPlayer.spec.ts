@@ -318,6 +318,43 @@ describe('NativeLuminaryPlayer', () => {
             expect(wrapper.emitted('upnextselect')).toEqual([['post-3']]);
         });
 
+        it('send the strip\'s videos, at most five, apart from the panel\'s', async () => {
+            const many = Array.from({ length: 7 }, (_, i) => ({ id: `n${i}`, title: `Next ${i}` }));
+            const { plugin, exposed } = await mountPlayer({ upNext, nextUp: many });
+            await ready(plugin);
+            await exposed.enterFullscreen();
+
+            const browse = plugin.argsOf<EnterArgs>('enterFullscreen').at(-1)!.browse!;
+            expect(browse.nextUp!.map((item) => item.id)).toEqual(['n0', 'n1', 'n2', 'n3', 'n4']);
+            expect(browse.upNext).toEqual(upNext);
+        });
+
+        it('say nextupselect once for a pick in the strip, and nextupdismiss when it is closed', async () => {
+            const { plugin, wrapper } = await mountPlayer({ nextUp: upNext });
+            await ready(plugin);
+            const load = plugin.argsOf<LoadArgs>('load').at(-1)!;
+            const from = { playerId: load.playerId, loadId: load.loadId };
+
+            plugin.emit('browseselect', from, { kind: 'nextup', id: 'post-3' });
+            plugin.emit('browseselect', from, { kind: 'nextup', id: 'post-4' });
+            plugin.emit('browseselect', from, { kind: 'nextupdismiss' });
+            await flush();
+
+            expect(wrapper.emitted('nextupselect')).toEqual([['post-3']]);
+            expect(wrapper.emitted('nextupdismiss')).toBeUndefined();
+        });
+
+        it('say nextupdismiss when the viewer closes the strip', async () => {
+            const { plugin, wrapper } = await mountPlayer({ nextUp: upNext });
+            await ready(plugin);
+            const load = plugin.argsOf<LoadArgs>('load').at(-1)!;
+
+            plugin.emit('browseselect', { playerId: load.playerId, loadId: load.loadId }, { kind: 'nextupdismiss' });
+            await flush();
+
+            expect(wrapper.emitted('nextupdismiss')).toHaveLength(1);
+        });
+
         it('use the host\'s messages for the panel\'s words', async () => {
             const { plugin, exposed } = await mountPlayer({ messages: { chapters: 'Chapitres', upNext: 'À suivre' } });
             await ready(plugin);

@@ -180,6 +180,12 @@ export interface FullscreenTexts {
     closeBrowse?: string;
     /** The line above the timeline; `{index}` and `{count}` are filled in. */
     chapterOf?: string;
+    /** The up-next strip's close button. */
+    dismiss?: string;
+    /** The video quality setting's button and card title. */
+    qualityMenu?: string;
+    /** Its entry that leaves the choice to the player. */
+    qualityAuto?: string;
 }
 
 /** A chapter of what plays: tapping it in the panel seeks to `startTime`. */
@@ -204,6 +210,8 @@ export interface BridgeUpNextItem {
 export interface FullscreenBrowse {
     chapters: BridgeChapter[];
     upNext: BridgeUpNextItem[];
+    /** The videos the strip offers near the end of full-screen, best first; none leaves the strip out. */
+    nextUp?: BridgeUpNextItem[];
 }
 
 /** The videos offered after this one, as the web player's `upNext` prop takes them. */
@@ -486,8 +494,11 @@ export interface BridgeEventMap {
     airplaychange: { available: boolean; active: boolean };
     /** The viewer picked an angle or a quality in the TV's menu; the page applies it as its own pick. */
     castselect: { kind: 'angle' | 'quality'; id: string };
-    /** The viewer picked an up-next item in full-screen's panel; the page plays it. Chapters seek natively. */
-    browseselect: { kind: 'upnext'; id: string };
+    /**
+     * The viewer picked an up-next item in full-screen's panel (`upnext`) or in the strip near the end (`nextup`); the
+     * page plays it. Closing the strip is `nextupdismiss`, which has no item. Chapters seek natively.
+     */
+    browseselect: { kind: 'upnext' | 'nextup'; id: string } | { kind: 'nextupdismiss' };
     /** Once per load, when the duration and seekable range are known. Whole milliseconds, as `durationchange`. */
     loadedmetadata: { duration: number | null };
     /** On a presentation change. `inline` means not presented. */
