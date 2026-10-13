@@ -463,12 +463,12 @@ internal class SkinControls(
         nextUpLayer.removeAllViews()
     }
 
-    /** Clear of the control bar (timeline and buttons) while it is up, on the bottom edge when it is not. */
+    /** Directly above the timeline (and the chapter line over it) while the controls show, on the bottom edge when they do not. */
     private fun raiseNextUp() {
         val strip = nextUpStrip ?: return
         val raise = if (shown) {
-            val chapter = if (chapterNow.visibility == VISIBLE) chapterNow.height else 0
-            (column.height - column.paddingTop - chapterNow.height + chapter + dpf(8f * scale)).coerceAtLeast(0f)
+            val chapter = if (chapterNow.visibility == VISIBLE) chapterNow.height + (chapterNow.layoutParams as? MarginLayoutParams)?.bottomMargin.let { it ?: 0 } else 0
+            (column.paddingBottom + actionsRow.height + timelineRow.height + chapter + dpf(8f * scale) - dpf(16f * scale)).coerceAtLeast(0f)
         } else {
             0f
         }
@@ -498,7 +498,7 @@ internal class SkinControls(
             addView(
                 TextView(context).apply {
                     text = texts.upNext
-                    setTextSize(TypedValue.COMPLEX_UNIT_DIP, 18f * scale)
+                    setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16f * scale)
                     typeface = Typeface.DEFAULT_BOLD
                     setTextColor(Color.WHITE)
                     setShadowLayer(dpf(2f), 0f, dpf(1f), 0x80000000.toInt())
@@ -506,17 +506,19 @@ internal class SkinControls(
             )
             addView(
                 Icon(context, BrowseIcons.close).apply {
-                    iconDp = 24f * scale
+                    iconDp = 20f * scale
                     contentDescription = texts.dismiss
                     isClickable = true
                     setOnClickListener { closeNextUp() }
-                    lp(px(40f), px(40f), margin = 0)
+                    lp(px(36f), px(36f), margin = 0)
                 },
-                LinearLayout.LayoutParams(px(40f), px(40f)).apply { marginStart = px(8f) },
+                LinearLayout.LayoutParams(px(36f), px(36f)).apply { marginStart = px(4f) },
             )
         }
-        val cardWidth = min(px(NEXT_UP_CARD_DP), (width * 0.34f).roundToInt())
-        val cards = LinearLayout(context).apply {
+        // The frames of the scrub strip, in size and shape: a sixth of the width, 16:9.
+        val frameHeight = rosterHeight().roundToInt()
+        val frameWidth = frameHeight * 16 / 9
+        val frames = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             // Right-aligned while they all fit; the scroll view takes over when they do not.
             gravity = Gravity.END
@@ -524,54 +526,63 @@ internal class SkinControls(
         nextUp.forEach { item ->
             val picture = ImageView(context).apply {
                 scaleType = ImageView.ScaleType.CENTER_CROP
-                background = GradientDrawable().apply { setColor(0x26FFFFFF) }
-                clipToOutline = true
-                outlineProvider = object : ViewOutlineProvider() {
-                    override fun getOutline(view: View, outline: android.graphics.Outline) =
-                        outline.setRoundRect(0, 0, view.width, view.height, dpf(6f * scale))
-                }
                 importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
             }
             item.imageUrl?.takeIf { it.isNotEmpty() }?.let { loadImage(picture, it) }
-            val card = LinearLayout(context).apply {
+            // The name over the foot of the frame, as the scrub strip puts its timecode.
+            val caption = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
-                isClickable = true
-                contentDescription = listOfNotNull(item.section?.takeIf { it.isNotEmpty() }, item.title).joinToString(", ")
-                setOnClickListener { chooseNextUp(item.id) }
-                addView(picture, LinearLayout.LayoutParams(cardWidth, cardWidth * 9 / 16))
+                gravity = Gravity.BOTTOM
+                setPadding(px(8f), px(16f), px(8f), px(6f))
+                background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0xD9000000.toInt(), Color.TRANSPARENT))
                 item.section?.takeIf { it.isNotEmpty() }?.let { section ->
                     addView(
                         TextView(context).apply {
                             text = section.uppercase()
-                            setTextSize(TypedValue.COMPLEX_UNIT_DIP, 11f * scale)
+                            setTextSize(TypedValue.COMPLEX_UNIT_DIP, 10f * scale)
                             typeface = Typeface.DEFAULT_BOLD
                             letterSpacing = 0.06f
                             setTextColor(0xBFFFFFFF.toInt())
-                            setShadowLayer(dpf(2f), 0f, dpf(1f), 0x80000000.toInt())
+                            maxLines = 1
+                            ellipsize = TextUtils.TruncateAt.END
                         },
-                        LinearLayout.LayoutParams(cardWidth, WRAP_CONTENT).apply { topMargin = px(4f) },
                     )
                 }
                 addView(
                     TextView(context).apply {
                         text = item.title
-                        setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16f * scale)
+                        setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13f * scale)
                         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                         setTextColor(Color.WHITE)
                         maxLines = 2
                         ellipsize = TextUtils.TruncateAt.END
-                        setShadowLayer(dpf(2f), 0f, dpf(1f), 0x80000000.toInt())
                     },
-                    LinearLayout.LayoutParams(cardWidth, WRAP_CONTENT).apply { topMargin = px(4f) },
                 )
             }
-            cards.addView(card, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { marginStart = px(12f) })
+            val frame = FrameLayout(context).apply {
+                background = GradientDrawable().apply {
+                    setColor(0xFF151518.toInt())
+                    cornerRadius = dpf(6f * scale)
+                    setStroke(1.dp, 0x29FFFFFF)
+                }
+                clipToOutline = true
+                outlineProvider = object : ViewOutlineProvider() {
+                    override fun getOutline(view: View, outline: android.graphics.Outline) =
+                        outline.setRoundRect(0, 0, view.width, view.height, dpf(6f * scale))
+                }
+                isClickable = true
+                contentDescription = listOfNotNull(item.section?.takeIf { it.isNotEmpty() }, item.title).joinToString(", ")
+                setOnClickListener { chooseNextUp(item.id) }
+                addView(picture, LayoutParams(MATCH_PARENT, MATCH_PARENT))
+                addView(caption, LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.BOTTOM))
+            }
+            frames.addView(frame, LinearLayout.LayoutParams(frameWidth, frameHeight).apply { marginStart = px(8f) })
         }
         val scroller = HorizontalScrollView(context).apply {
             isHorizontalScrollBarEnabled = false
             overScrollMode = OVER_SCROLL_NEVER
             isFillViewport = true
-            addView(cards, LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+            addView(frames, LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         }
         val strip = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -579,18 +590,17 @@ internal class SkinControls(
             addView(scroller, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
             alpha = 0f
         }
-        val bottom = inset.bottom + px(16f)
         nextUpLayer.addView(
             strip,
             LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.BOTTOM).apply {
                 marginStart = edge + inset.left
                 marginEnd = edge + inset.right
-                bottomMargin = bottom
+                bottomMargin = inset.bottom + px(16f)
             },
         )
         nextUpStrip = strip
         strip.animate().alpha(1f).setDuration(NEXT_UP_MS).start()
-        // Measured before it can be raised over the bar.
+        // Measured before it can be raised onto the timeline.
         strip.post { raiseNextUp() }
     }
 
@@ -1330,7 +1340,6 @@ internal class SkinControls(
         private const val BROWSE_FRACTION = 0.4f
         private const val BROWSE_MIN_DP = 320f
         private const val UP_NEXT_PICTURE_DP = 128f
-        private const val NEXT_UP_CARD_DP = 280f
         private const val NEXT_UP_MS = 250L
         private const val CARD = 0xF718181B.toInt()
 
