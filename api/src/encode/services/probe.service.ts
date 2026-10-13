@@ -454,13 +454,13 @@ export class ProbeService {
             // what the stream actually needs.
             const sampleDuration = Math.min(10, duration);
             const starts = this.packetSampleStarts(duration, sampleDuration);
-            const { stdout: csv } = await execFileAsync(
+            const { stdout: packets } = await execFileAsync(
                 ffprobeBin(),
                 [
                     '-v',
                     'quiet',
                     '-print_format',
-                    'csv=p=0',
+                    'compact=p=0',
                     '-read_intervals',
                     this.readIntervalsArg(starts, sampleDuration),
                     '-show_entries',
@@ -473,12 +473,21 @@ export class ProbeService {
             // Kept per sample so a quiet stretch cannot drag down a loud one.
             // Each packet carries the timestamp that places it in its sample.
             const bytesPerSample = new Map<number, number[]>();
-            for (const line of csv.split('\n')) {
+            for (const line of packets.split('\n')) {
                 if (!line) continue;
-                const parts = line.split(',');
-                if (parts.length < 2) continue;
-                const streamIndex = parseInt(parts[0], 10);
-                const size = parseInt(parts[1], 10);
+                // Keyed, because ffprobe prints packet fields in its own order
+                // (stream_index, pts_time, size), not the order requested.
+                const fields = new Map<string, string>();
+                for (const pair of line.split('|')) {
+                    const eq = pair.indexOf('=');
+                    if (eq > 0)
+                        fields.set(pair.slice(0, eq), pair.slice(eq + 1));
+                }
+                const streamIndex = parseInt(
+                    fields.get('stream_index') ?? '',
+                    10
+                );
+                const size = parseInt(fields.get('size') ?? '', 10);
                 if (isNaN(streamIndex) || isNaN(size)) continue;
                 if (!bytesPerSample.has(streamIndex)) {
                     bytesPerSample.set(
@@ -487,7 +496,7 @@ export class ProbeService {
                     );
                 }
                 const sample = this.sampleIndexFor(
-                    parseFloat(parts[2]),
+                    parseFloat(fields.get('pts_time') ?? ''),
                     starts
                 );
                 bytesPerSample.get(streamIndex)![sample] += size;
