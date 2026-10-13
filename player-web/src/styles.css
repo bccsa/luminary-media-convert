@@ -859,8 +859,11 @@
 
 /* The name of the control the pointer rests on: a dark pill above it. Placed by the player (see ui/controlTooltip.ts). */
 .lmpl-tooltip {
-    position: absolute;
-    z-index: 45;
+    position: fixed;
+    inset: auto;
+    margin: 0;
+    border: 0;
+    overflow: visible;
     padding: calc(6px * var(--lmpl-s)) calc(12px * var(--lmpl-s));
     border-radius: calc(10px * var(--lmpl-s));
     background: rgb(34 32 30 / 0.94);

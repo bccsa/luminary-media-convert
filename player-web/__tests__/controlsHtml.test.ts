@@ -19,6 +19,26 @@ describe('buildControlsHtml', () => {
         }
     });
 
+    it('uses the globe for language, and names every setting and volume step from the labels it is given', () => {
+        const doc = document.implementation.createHTMLDocument('');
+        doc.body.innerHTML = buildControlsHtml(ALL, 'p1', {
+            browse: 'B',
+            quality: 'Qualité',
+            audio: 'Langue',
+            speed: 'Vitesse',
+            captions: 'Sous-titres',
+            volumeUp: 'Plus fort',
+            volumeDown: 'Moins fort',
+        });
+        expect(doc.querySelector('.lmpl-opt-audio media-icon')!.getAttribute('name')).toBe('globe');
+        expect(doc.querySelector('.lmpl-opt-audio .media-settings-menu-trigger-label')!.textContent).toBe('Langue');
+        expect(doc.querySelector('.lmpl-card-captions .lmpl-card-title')!.textContent).toBe('Sous-titres');
+        expect([...doc.querySelectorAll('.lmpl-vstep')].map((b) => b.getAttribute('aria-label'))).toEqual([
+            'Plus fort',
+            'Moins fort',
+        ]);
+    });
+
     it('opens each setting as its own card, a menu holding its radio group directly under a title', () => {
         const doc = render();
         const expected: Record<string, [string, string]> = {

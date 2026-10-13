@@ -58,6 +58,15 @@ export interface PlayerMessages {
 
     // --- Track menus -------------------------------------------------------
     audioMenuLabel: string;
+    /** Name of the video quality setting: its button, its tooltip and its card's title. */
+    qualityLabel: string;
+    /** Name of the audio language setting, as above. */
+    languageLabel: string;
+    /** Name of the captions setting, as above. */
+    captionsLabel: string;
+    /** Names of the volume card's plus and minus buttons. */
+    volumeUp: string;
+    volumeDown: string;
     subtitlesMenuLabel: string;
     /** The "no subtitles" entry of the subtitles menu. */
     subtitlesOff: string;
@@ -128,6 +137,11 @@ export const DEFAULT_MESSAGES: PlayerMessages = {
     exitFullscreen: 'Exit full screen',
 
     audioMenuLabel: 'Audio',
+    qualityLabel: 'Quality',
+    languageLabel: 'Language',
+    captionsLabel: 'Captions',
+    volumeUp: 'Volume up',
+    volumeDown: 'Volume down',
     subtitlesMenuLabel: 'Subtitles',
     subtitlesOff: 'Off',
 

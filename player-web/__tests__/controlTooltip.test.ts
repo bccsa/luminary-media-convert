@@ -118,6 +118,25 @@ describe('attachControlTooltips', () => {
         expect(tips.at(-1)?.text).toBe('Speed');
     });
 
+    it('names the next control without the pause when it follows straight on from a name', () => {
+        pointer('pointerover', el('a'));
+        vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
+        pointer('pointerout', el('a'));
+        pointer('pointerover', el('b'));
+        vi.advanceTimersByTime(0);
+        expect(tips.at(-1)?.text).toBe('Speed');
+    });
+
+    it('goes back to the pause once the pointer has rested elsewhere', () => {
+        pointer('pointerover', el('a'));
+        vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
+        pointer('pointerout', el('a'));
+        vi.advanceTimersByTime(1000);
+        pointer('pointerover', el('b'));
+        vi.advanceTimersByTime(TOOLTIP_DELAY_MS - 1);
+        expect(tips.at(-1)).toBeNull();
+    });
+
     it('stays while the pointer moves between the parts of one control', () => {
         pointer('pointerover', el('a'));
         vi.advanceTimersByTime(TOOLTIP_DELAY_MS);

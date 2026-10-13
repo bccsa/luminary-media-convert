@@ -59,13 +59,16 @@ import {
     playIcon,
     registerIcons,
     restartIcon,
-    speechIcon,
     speedIcon,
     switchesIcon,
     volumeHighIcon,
     volumeLowIcon,
     volumeOffIcon,
 } from '@videojs/html/icons';
+
+/** A globe, the shape the fullscreen audio screen already uses for language: a person-and-bubble reads as chat. */
+const GLOBE_ICON =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg>';
 
 /** The icon names `controlsHtml.ts` writes as `<media-icon name="…">`. */
 registerIcons('default', {
@@ -82,7 +85,7 @@ registerIcons('default', {
     'pip-exit': pipExitIcon,
     play: playIcon,
     restart: restartIcon,
-    speech: speechIcon,
+    globe: GLOBE_ICON,
     speed: speedIcon,
     switches: switchesIcon,
     'volume-high': volumeHighIcon,

@@ -38,7 +38,7 @@ import { buildControlsHtml } from '../ui/controlsHtml';
 import { installAutoHide, type ControlsStore } from '../ui/autoHide';
 import { stepVolume } from '../ui/volume';
 import { chapterMask, formatChapterOf } from '../ui/chapterBar';
-import { attachControlTooltips, clampTooltipLeft, type Tooltip } from '../ui/controlTooltip';
+import { attachControlTooltips, clampTooltipLeft, showOnTop, type Tooltip } from '../ui/controlTooltip';
 import {
     SCRUB_EDGE_PX,
     clampPreviewCentre,
@@ -63,6 +63,8 @@ interface Props {
     source: PlayerSource;
     /** UI strings merged over the English defaults. */
     messages?: Partial<PlayerMessages>;
+    /** Language of the skin's own control names (play, mute, fullscreen, cast…), e.g. `fr`; the page's `lang` when omitted. */
+    lang?: string;
     /** Which controls to offer, and how far the skip buttons move. Anything omitted keeps the default. */
     controls?: Partial<PlayerControlsOptions>;
     /**
@@ -137,7 +139,15 @@ const isYouTube = computed(() => isYouTubeUrl(props.source.masterUrl));
 /** Element ids in the controls (menu triggers point at their menus by id) must not collide between players. */
 const instanceId = `lmpl-${Math.random().toString(36).slice(2, 9)}`;
 const controlsHtml = computed(() =>
-    buildControlsHtml(mergedControls.value, instanceId, { browse: msg.value.browse })
+    buildControlsHtml(mergedControls.value, instanceId, {
+        browse: msg.value.browse,
+        quality: msg.value.qualityLabel,
+        audio: msg.value.languageLabel,
+        speed: msg.value.speedLabel,
+        captions: msg.value.captionsLabel,
+        volumeUp: msg.value.volumeUp,
+        volumeDown: msg.value.volumeDown,
+    })
 );
 
 /**
@@ -306,7 +316,12 @@ watch(
         const el = tooltipEl.value;
         const container = containerEl.value;
         if (!tip || !el || !container) return;
-        el.style.left = `${clampTooltipLeft(tip.centre, el.offsetWidth, container.clientWidth)}px`;
+        // In the top layer, so it stays over the volume and settings cards, which are there too; that layer is
+        // placed against the viewport, not the player.
+        showOnTop(el);
+        const frame = container.getBoundingClientRect();
+        el.style.left = `${frame.left + clampTooltipLeft(tip.centre, el.offsetWidth, container.clientWidth)}px`;
+        el.style.bottom = `${document.documentElement.clientHeight - frame.bottom + tip.bottom}px`;
     },
     { flush: 'post' }
 );
@@ -1227,7 +1242,7 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
             '--lmpl-chapter-mask': chapterBarMask || undefined,
         }"
     >
-        <video-player ref="playerEl" class="lmpl-video-player">
+        <video-player ref="playerEl" class="lmpl-video-player" :lang="lang">
             <media-container
                 ref="containerEl"
                 class="media-skin media-container lmpl-container"
@@ -1384,7 +1399,7 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
                     ref="tooltipEl"
                     class="lmpl-tooltip"
                     role="tooltip"
-                    :style="{ left: `${tooltip.centre}px`, bottom: `${tooltip.bottom}px` }"
+                    popover="manual"
                 >
                     {{ tooltip.text }}
                 </div>

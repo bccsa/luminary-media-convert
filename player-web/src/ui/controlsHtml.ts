@@ -70,29 +70,29 @@ const GROUPS = {
 
 type Setting = keyof typeof GROUPS;
 
-const SETTINGS: Record<Setting, { icon: string; title: string }> = {
-    quality: { icon: 'switches', title: 'Quality' },
-    audio: { icon: 'speech', title: 'Language' },
-    speed: { icon: 'speed', title: 'Speed' },
-    captions: { icon: 'captions-off', title: 'Captions' },
+const SETTING_ICONS: Record<Setting, string> = {
+    quality: 'switches',
+    audio: 'globe',
+    speed: 'speed',
+    captions: 'captions-off',
 };
 
 /**
  * One setting: a round button, and the card it opens above the bar. The card is a menu holding its radio
  * group directly, under a title, so nothing is nested a level deep behind a cogwheel.
  */
-function setting(kind: Setting, id: string): string {
-    const { icon: iconName, title } = SETTINGS[kind];
+function setting(kind: Setting, id: string, title: string): string {
+    const iconName = SETTING_ICONS[kind];
     const menuId = `${id}-${kind}`;
     return (
         `<button commandfor="${menuId}" class="media-button lmpl-icon-btn lmpl-opt lmpl-opt-${kind}" type="button">` +
         `<media-icon name="${iconName}" class="media-button-icon-base media-settings-menu-trigger-icon"></media-icon>` +
         // Visually hidden: the button is an icon, and this is its name for a screen reader.
-        `<span class="media-settings-menu-trigger-label">${title}</span>` +
+        `<span class="media-settings-menu-trigger-label">${escapeHtml(title)}</span>` +
         '</button>' +
         `<media-menu side="top" align="center" class="media-popup media-popup-surface media-menu-popup media-menu-resizable-popup lmpl-menu lmpl-card lmpl-card-${kind}" id="${menuId}">` +
         '<media-menu-content class="media-menu-content">' +
-        `<span class="lmpl-card-title">${title}</span>` +
+        `<span class="lmpl-card-title">${escapeHtml(title)}</span>` +
         GROUPS[kind] +
         '</media-menu-content></media-menu>'
     );
@@ -108,9 +108,9 @@ const minus =
  * at the bottom. The slider has no thumb, like the timeline. The plus and minus buttons carry
  * `data-volume-step`, which the component turns into a volume change; v10 has no element of its own for it.
  */
-function volume(id: string): string {
+function volume(id: string, labels: ControlsHtmlLabels): string {
     const step = (direction: 1 | -1, label: string, glyph: string): string =>
-        `<button type="button" class="media-button lmpl-icon-btn lmpl-vstep" data-volume-step="${direction}" aria-label="${label}">${glyph}</button>`;
+        `<button type="button" class="media-button lmpl-icon-btn lmpl-vstep" data-volume-step="${direction}" aria-label="${escapeHtml(label)}">${glyph}</button>`;
     return (
         '<div class="lmpl-group lmpl-volume">' +
         `<media-mute-button commandfor="${id}-volume" class="media-button lmpl-icon-btn media-mute-button lmpl-mute">` +
@@ -121,12 +121,12 @@ function volume(id: string): string {
         `<media-volume-popover open-on-hover delay="150" close-delay="250" side="top" align="center" class="media-popup media-popup-safe-area media-popup-transition media-popup-surface lmpl-volume-card" id="${id}-volume">` +
         // A wrapper, because a popover's own `display` is what closes it.
         '<div class="lmpl-volume-card-inner">' +
-        step(1, 'Volume up', plus) +
+        step(1, labels.volumeUp, plus) +
         '<media-volume-slider class="media-slider media-volume-slider lmpl-volume-slider" orientation="vertical">' +
         '<media-slider-track class="media-slider-track lmpl-vtrack">' +
         '<media-slider-fill class="media-slider-fill lmpl-vfill"></media-slider-fill>' +
         '</media-slider-track></media-volume-slider>' +
-        step(-1, 'Volume down', minus) +
+        step(-1, labels.volumeDown, minus) +
         '</div></media-volume-popover>' +
         '</div>'
     );
@@ -162,10 +162,10 @@ function browseButton(id: string, label: string): string {
 function settings(options: ControlsHtmlOptions, id: string, labels: ControlsHtmlLabels): string {
     return (
         '<div class="lmpl-group lmpl-options">' +
-        setting('quality', id) +
-        (options.audioMenu ? setting('audio', id) : '') +
-        setting('speed', id) +
-        (options.subtitlesMenu ? setting('captions', id) : '') +
+        setting('quality', id, labels.quality) +
+        (options.audioMenu ? setting('audio', id, labels.audio) : '') +
+        setting('speed', id, labels.speed) +
+        (options.subtitlesMenu ? setting('captions', id, labels.captions) : '') +
         browseButton(id, labels.browse) +
         '</div>'
     );
@@ -223,7 +223,7 @@ function bottomBar(options: ControlsHtmlOptions, id: string, labels: ControlsHtm
         '<media-time class="lmpl-time" type="remaining" toggle></media-time>' +
         '</div>' +
         '<div class="lmpl-actions-row">' +
-        volume(id) +
+        volume(id, labels) +
         settings(options, id, labels) +
         '<span class="lmpl-spacer"></span>' +
         remote() +
@@ -236,16 +236,33 @@ function bottomBar(options: ControlsHtmlOptions, id: string, labels: ControlsHtm
 export interface ControlsHtmlLabels {
     /** Name of the button that opens the chapters / up next panel. */
     browse: string;
+    /** Names of the four settings, each shown on its button's tooltip and as its card's title. */
+    quality: string;
+    audio: string;
+    speed: string;
+    captions: string;
+    /** Names of the volume card's plus and minus buttons. */
+    volumeUp: string;
+    volumeDown: string;
 }
 
-const DEFAULT_LABELS: ControlsHtmlLabels = { browse: 'Chapters and up next' };
+const DEFAULT_LABELS: ControlsHtmlLabels = {
+    browse: 'Chapters and up next',
+    quality: 'Quality',
+    audio: 'Language',
+    speed: 'Speed',
+    captions: 'Captions',
+    volumeUp: 'Volume up',
+    volumeDown: 'Volume down',
+};
 
 /** Everything that sits inside `<media-controls>`, ids made unique with `id`. */
 export function buildControlsHtml(
     options: ControlsHtmlOptions,
     id: string,
-    labels: ControlsHtmlLabels = DEFAULT_LABELS
+    given: Partial<ControlsHtmlLabels> = {}
 ): string {
+    const labels = { ...DEFAULT_LABELS, ...given };
     return (
         '<media-controls-backdrop class="video-controls-backdrop"></media-controls-backdrop>' +
         '<media-controls-content class="lmpl-controls-content">' +
