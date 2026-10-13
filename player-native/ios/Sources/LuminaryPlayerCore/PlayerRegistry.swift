@@ -94,7 +94,7 @@ public final class PlayerRegistry {
         case .setAudioTrack(_, let id): engine.setAudioTrack(id)
         case .setInlineFrame(_, let frame): player.setInlineFrame(frame)
         case .setMuted(_, let muted): engine.setMuted(muted)
-        case .setSubtitleTrack(_, let label): engine.setSubtitleTrack(label)
+        case .setSubtitleTrack(_, let label, let language): engine.setSubtitleTrack(label, language: language)
         case .startPictureInPicture: engine.startPictureInPicture()
         case .showAirPlayPicker: engine.showAirPlayPicker()
         case .setSleepTimer(_, let endsAt): engine.setSleepTimer(endsAt: endsAt)

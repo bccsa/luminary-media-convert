@@ -631,7 +631,11 @@ export interface PlayerAdapter {
     setAudioTrack(id: string): void;
 
     setTextTracks(tracks: AdapterTextTrack[]): void;
-    setActiveTextTrack(id: string | null): void;
+    /**
+     * `track` is what the controller knows of the one chosen: its name and language, so an engine that names its
+     * tracks its own way can still find it.
+     */
+    setActiveTextTrack(id: string | null, track?: { label: string; lang?: string }): void;
 
     /**
      * Attempt an in-place recovery for the given error category

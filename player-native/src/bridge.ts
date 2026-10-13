@@ -392,10 +392,11 @@ export interface LuminaryPlayerPlugin {
     setMuted(args: { playerId: string; muted: boolean }): Promise<void>;
     /**
      * `unsupported` unless `subtitleSelection`. Selects the subtitle the master lists under
-     * `label` (its NAME, else its LANGUAGE), matched against a native option's name or language;
-     * absent turns subtitles off.
+     * `label` (its NAME, else its LANGUAGE), matched against a native option's name or language, and
+     * failing that by `language`, for a native player that names its options its own way; absent turns
+     * subtitles off.
      */
-    setSubtitleTrack(args: { playerId: string; label?: string }): Promise<void>;
+    setSubtitleTrack(args: { playerId: string; label?: string; language?: string }): Promise<void>;
     /**
      * `unsupported` unless `pictureInPicture`. Starts picture in picture from the picture that is
      * showing (inline, or full-screen); a no-op where there is none or one is already up.

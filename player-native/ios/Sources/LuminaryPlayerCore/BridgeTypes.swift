@@ -268,7 +268,7 @@ public enum BridgeCall: Sendable {
     case warmChunks(playerId: String, loadId: String, schedules: [JSON], leadSeconds: Double, warmBytes: Int)
     case setInlineFrame(playerId: String, frame: InlineFrame?)
     case setMuted(playerId: String, muted: Bool)
-    case setSubtitleTrack(playerId: String, label: String?)
+    case setSubtitleTrack(playerId: String, label: String?, language: String?)
     case startPictureInPicture(playerId: String)
     case showAirPlayPicker(playerId: String)
     case setSleepTimer(playerId: String, endsAt: Double?)
@@ -286,7 +286,7 @@ public enum BridgeCall: Sendable {
              .reattach(let id, _), .play(let id), .pause(let id), .seek(let id, _, _),
              .setRate(let id, _), .setVariant(let id, _), .setAudioTrack(let id, _),
              .warmChunks(let id, _, _, _, _), .setInlineFrame(let id, _), .setMuted(let id, _),
-             .setSubtitleTrack(let id, _), .startPictureInPicture(let id), .showAirPlayPicker(let id), .setSleepTimer(let id, _), .enterFullscreen(let id, _), .exitFullscreen(let id),
+             .setSubtitleTrack(let id, _, _), .startPictureInPicture(let id), .showAirPlayPicker(let id), .setSleepTimer(let id, _), .enterFullscreen(let id, _), .exitFullscreen(let id),
              .resumed(let id), .destroy(let id):
             return id
         }
@@ -401,7 +401,9 @@ public enum BridgeCall: Sendable {
             guard let muted = try args.optionalBool("muted") else { throw args.invalid("muted is required") }
             return .setMuted(playerId: try args.string("playerId"), muted: muted)
         case "setSubtitleTrack":
-            return .setSubtitleTrack(playerId: try args.string("playerId"), label: try args.optionalString("label"))
+            return .setSubtitleTrack(
+                playerId: try args.string("playerId"), label: try args.optionalString("label"),
+                language: try args.optionalString("language"))
         case "startPictureInPicture": return .startPictureInPicture(playerId: try args.string("playerId"))
         case "showAirPlayPicker": return .showAirPlayPicker(playerId: try args.string("playerId"))
         case "setSleepTimer":

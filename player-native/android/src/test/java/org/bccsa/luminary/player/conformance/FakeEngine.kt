@@ -77,7 +77,10 @@ class FakeEngine(
     override fun takeHeldReload(): PendingReload? = null
     override fun setMuted(muted: Boolean) = record("setMuted") { put("muted", muted) }
     override fun setSleepTimer(endsAt: Double?) = record("setSleepTimer") { if (endsAt != null) put("endsAt", endsAt) }
-    override fun setSubtitleTrack(label: String?) = record("setSubtitleTrack") { if (label != null) put("label", label) }
+    override fun setSubtitleTrack(label: String?, language: String?) = record("setSubtitleTrack") {
+        if (label != null) put("label", label)
+        if (language != null) put("language", language)
+    }
     override fun startPictureInPicture() = record("startPictureInPicture")
     override fun showAirPlayPicker() = record("showAirPlayPicker")
     override fun setInlineFrame(frame: InlineFrame?) = record("setInlineFrame") {

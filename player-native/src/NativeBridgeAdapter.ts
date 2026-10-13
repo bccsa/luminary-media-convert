@@ -358,13 +358,17 @@ export class NativeBridgeAdapter implements PlayerAdapter {
      * are not rendered natively. The id is the master's `m:<group>:<name or language>`, and what
      * native matches is that last part, the label the menu shows.
      */
-    setActiveTextTrack(id: string | null): void {
+    setActiveTextTrack(id: string | null, track?: { label: string; lang?: string }): void {
         if (!this.subtitleSelection || this.destroyed) return;
         const label = id === null ? null : id.split(':').slice(2).join(':');
         if (id !== null && !id.startsWith('m:')) return;
         this.send(
             'setSubtitleTrack',
-            this.plugin.setSubtitleTrack({ playerId: this.playerId, ...(label ? { label } : {}) }),
+            this.plugin.setSubtitleTrack({
+                playerId: this.playerId,
+                ...(label ? { label } : {}),
+                ...(track?.lang ? { language: track.lang } : {}),
+            }),
         );
     }
 

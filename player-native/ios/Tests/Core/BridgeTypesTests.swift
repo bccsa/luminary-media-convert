@@ -49,6 +49,24 @@ struct BridgeTypesTests {
         }
     }
 
+    @Test("a subtitle choice carries the name and the language, either of which may be missing")
+    func subtitleChoiceDecodes() throws {
+        guard case .setSubtitleTrack(_, let label, let language) = try BridgeCall.decode("setSubtitleTrack", [
+            "playerId": .string("p"), "label": .string("English"), "language": .string("en"),
+        ]) else {
+            Issue.record("not a subtitle choice")
+            return
+        }
+        #expect(label == "English")
+        #expect(language == "en")
+        guard case .setSubtitleTrack(_, let off, let none) = try BridgeCall.decode("setSubtitleTrack", ["playerId": .string("p")]) else {
+            Issue.record("not a subtitle choice")
+            return
+        }
+        #expect(off == nil)
+        #expect(none == nil)
+    }
+
     @Test("a sleep timer carries the time it stops at, or none to clear it, and refuses a time that is not a number")
     func sleepTimerDecodes() throws {
         guard case .setSleepTimer(let id, let endsAt) = try BridgeCall.decode("setSleepTimer", [

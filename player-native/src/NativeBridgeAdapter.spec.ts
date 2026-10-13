@@ -576,6 +576,16 @@ describe('NativeBridgeAdapter — muting, subtitles and picture in picture', () 
         ]);
     });
 
+    it('sends the track\'s language with its name, so native can find it by either', async () => {
+        const { controller, plugin } = await setup(multiAngleRoutes, { subtitleSelection: true });
+        await controller.load({ masterUrl: MASTER_URL });
+        const track = controller.getState().subtitleTracks[0]!;
+
+        controller.setSubtitleTrack(track.id);
+
+        expect(plugin.argsOf('setSubtitleTrack').at(-1)).toEqual({ playerId: PLAYER_ID, label: 'English', language: 'en' });
+    });
+
     it('keeps a label that has a colon of its own, and ignores a side-loaded track', async () => {
         const { controller, plugin } = await setup(simpleRoutes, { subtitleSelection: true });
         await controller.load({ masterUrl: MASTER_URL });

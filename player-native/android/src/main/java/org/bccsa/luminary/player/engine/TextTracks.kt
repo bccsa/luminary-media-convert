@@ -40,9 +40,10 @@ fun selectSubtitle(player: Player, choice: SubtitleChoice?) {
  * The page's `setSubtitleTrack`: the subtitle listed under [label] (its name, else its language),
  * or none for null. A label no subtitle carries changes nothing.
  */
-fun selectSubtitle(player: Player, label: String?) {
+fun selectSubtitle(player: Player, label: String?, language: String? = null) {
     if (label == null) return selectSubtitle(player, null as SubtitleChoice?)
     val options = subtitleChoicesOf(player.currentTracks)
-    val match = options.firstOrNull { it.label == label } ?: options.firstOrNull { it.language == label } ?: return
+    val match = options.firstOrNull { it.label == label } ?: options.firstOrNull { it.language == label }
+        ?: language?.let { code -> options.firstOrNull { it.language == code } } ?: return
     selectSubtitle(player, match)
 }

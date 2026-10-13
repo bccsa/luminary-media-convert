@@ -37,7 +37,7 @@ public protocol Engine: AnyObject {
     func setSleepTimer(endsAt: Double?)
 
     /// Selects the subtitle listed under `label` (its name, else its language); nil turns them off.
-    func setSubtitleTrack(_ label: String?)
+    func setSubtitleTrack(_ label: String?, language: String?)
 
     /// Starts picture in picture from the picture that is showing; nothing when none is.
     func startPictureInPicture()

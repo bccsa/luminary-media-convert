@@ -366,6 +366,7 @@ export class FakeAdapter implements PlayerAdapter {
     }> = [];
     textTracks: AdapterTextTrack[] = [];
     activeTextTrackId: string | null = null;
+    activeTextTrackHint: { label: string; lang?: string } | undefined;
     playCount = 0;
     pauseCount = 0;
     destroyed = false;
@@ -464,8 +465,9 @@ export class FakeAdapter implements PlayerAdapter {
         this.textTracks = tracks;
     }
 
-    setActiveTextTrack(id: string | null): void {
+    setActiveTextTrack(id: string | null, track?: { label: string; lang?: string }): void {
         this.activeTextTrackId = id;
+        this.activeTextTrackHint = track;
     }
 
     recover(category: 'network' | 'media' | 'other'): boolean {

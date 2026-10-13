@@ -66,7 +66,7 @@ interface Engine {
     fun setSleepTimer(endsAt: Double?)
 
     /** Selects the subtitle listed under [label] (its name, else its language); null turns them off. */
-    fun setSubtitleTrack(label: String?)
+    fun setSubtitleTrack(label: String?, language: String?)
 
     /** Opens the system's AirPlay device list. Android has none, and does not report the capability. */
     fun showAirPlayPicker()

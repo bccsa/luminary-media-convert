@@ -46,9 +46,11 @@ final class FakeEngine: Engine {
     func setAppSuspended(_ suspended: Bool) {}
     func takeHeldReload() -> PendingReload? { nil }
     func setMuted(_ muted: Bool) { record("setMuted", ["muted": .bool(muted)]) }
-    func setSubtitleTrack(_ label: String?) {
+    func setSubtitleTrack(_ label: String?, language: String?) {
         guard let label else { return record("setSubtitleTrack") }
-        record("setSubtitleTrack", ["label": .string(label)])
+        var args: [String: JSON] = ["label": .string(label)]
+        if let language { args["language"] = .string(language) }
+        record("setSubtitleTrack", args)
     }
     func startPictureInPicture() { record("startPictureInPicture") }
     func showAirPlayPicker() { record("showAirPlayPicker") }

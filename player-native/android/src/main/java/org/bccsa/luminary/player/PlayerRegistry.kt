@@ -83,7 +83,7 @@ class PlayerRegistry(
             is BridgeCall.SetAudioTrack -> engine.setAudioTrack(call.id)
             is BridgeCall.SetInlineFrame -> player.setInlineFrame(call.frame)
             is BridgeCall.SetMuted -> engine.setMuted(call.muted)
-            is BridgeCall.SetSubtitleTrack -> engine.setSubtitleTrack(call.label)
+            is BridgeCall.SetSubtitleTrack -> engine.setSubtitleTrack(call.label, call.language)
             is BridgeCall.StartPictureInPicture -> engine.startPictureInPicture()
             is BridgeCall.ShowAirPlayPicker -> engine.showAirPlayPicker()
             is BridgeCall.SetSleepTimer -> engine.setSleepTimer(call.endsAt)

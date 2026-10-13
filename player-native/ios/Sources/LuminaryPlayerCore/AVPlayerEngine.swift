@@ -280,7 +280,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         player.replaceCurrentItem(with: item)
         // The page's subtitle choice is the truth: off until it picks one, whatever the master's default says
         // (AVPlayer would select it itself, and the page would not know), as on Android.
-        setSubtitleTrack(nil)
+        setSubtitleTrack(nil, language: nil)
         if let position, position > 0 {
             player.seek(to: Self.time(position), toleranceBefore: .zero, toleranceAfter: .zero)
         }
@@ -429,7 +429,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     }
 
     /// The subtitle the master lists under `label`: matched against an option's name or language.
-    public func setSubtitleTrack(_ label: String?) {
+    public func setSubtitleTrack(_ label: String?, language: String?) {
         guard let item else { return }
         let expected = ObjectIdentifier(item)
         let loaded: @Sendable (AVMediaSelectionGroup?, (any Error)?) -> Void = { [weak self] group, _ in
@@ -437,10 +437,14 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
             DispatchQueue.main.async {
                 guard let self, let item = self.item, ObjectIdentifier(item) == expected, let group else { return }
                 guard let label else { return item.select(nil, in: group) }
-                let option = group.options.first { option in
-                    option.displayName == label || option.extendedLanguageTag == label
-                        || option.locale?.languageCode == label
+                // By name first; failing that by language, since AVFoundation names an option by its language, whatever
+                // the master calls it.
+                func speaks(_ option: AVMediaSelectionOption, _ code: String) -> Bool {
+                    option.extendedLanguageTag == code || option.locale?.languageCode == code
                 }
+                let option = group.options.first { option in
+                    option.displayName == label || speaks(option, label)
+                } ?? language.flatMap { code in group.options.first { speaks($0, code) } }
                 if let option { item.select(option, in: group) }
             }
         }

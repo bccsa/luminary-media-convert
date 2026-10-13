@@ -224,7 +224,7 @@ sealed interface BridgeCall {
     ) : BridgeCall
     data class SetInlineFrame(override val playerId: String, val frame: InlineFrame?) : BridgeCall
     data class SetMuted(override val playerId: String, val muted: Boolean) : BridgeCall
-    data class SetSubtitleTrack(override val playerId: String, val label: String?) : BridgeCall
+    data class SetSubtitleTrack(override val playerId: String, val label: String?, val language: String?) : BridgeCall
     data class StartPictureInPicture(override val playerId: String) : BridgeCall
     data class ShowAirPlayPicker(override val playerId: String) : BridgeCall
     data class SetSleepTimer(override val playerId: String, val endsAt: Double?) : BridgeCall
@@ -332,7 +332,7 @@ sealed interface BridgeCall {
                     SetInlineFrame(args.string("playerId"), frame)
                 }
                 "setMuted" -> SetMuted(args.string("playerId"), args.optBoolean("muted") ?: args.invalid("muted is required"))
-                "setSubtitleTrack" -> SetSubtitleTrack(args.string("playerId"), args.optString("label"))
+                "setSubtitleTrack" -> SetSubtitleTrack(args.string("playerId"), args.optString("label"), args.optString("language"))
                 "startPictureInPicture" -> StartPictureInPicture(args.string("playerId"))
                 "showAirPlayPicker" -> ShowAirPlayPicker(args.string("playerId"))
                 "setSleepTimer" -> SetSleepTimer(args.string("playerId"), args.optNumber("endsAt"))

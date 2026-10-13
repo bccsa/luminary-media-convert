@@ -418,7 +418,7 @@ class ExoEngine(
         }
     }
 
-    override fun setSubtitleTrack(label: String?) = selectSubtitle(player, label)
+    override fun setSubtitleTrack(label: String?, language: String?) = selectSubtitle(player, label, language)
 
     /** Needs the system's picture in picture and an activity that allows it; the registry refuses the call otherwise. */
     /** The system's list of Cast devices (or, when connected, its controller). The capability is off where there is no Cast. */
