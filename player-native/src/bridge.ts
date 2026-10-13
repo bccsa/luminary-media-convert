@@ -203,6 +203,8 @@ export interface BridgeUpNextItem {
     subtitle?: string;
     /** A 16:9 picture. */
     imageUrl?: string;
+    /** Drawn when there is no picture, or it does not load, so a card is never an empty tile. */
+    fallbackImageUrl?: string;
     section?: string;
 }
 

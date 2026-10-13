@@ -457,6 +457,7 @@ private class Args(private val json: JsonObject, private val path: String) {
         val item = Args(element as? JsonObject ?: invalid("$where is not an object"), "$path.$where")
         return BrowseItem(
             item.string("id"), item.string("title"), item.optString("subtitle"), item.optString("imageUrl"), item.optString("section"),
+            item.optString("fallbackImageUrl"),
         )
     }
 
@@ -510,7 +511,15 @@ data class CastMenu(
 data class BrowseChapter(val title: String, val start: Double, val end: Double)
 
 /** A video offered after this one; [section] is the heading above each run of items that share it. */
-data class BrowseItem(val id: String, val title: String, val subtitle: String?, val imageUrl: String?, val section: String?)
+data class BrowseItem(
+    val id: String,
+    val title: String,
+    val subtitle: String?,
+    val imageUrl: String?,
+    val section: String?,
+    /** Drawn when there is no picture, or it does not load. */
+    val fallbackImageUrl: String? = null,
+)
 
 /** What full-screen's chapters / up-next panel lists, and the videos its strip offers near the end. */
 data class Browse(val chapters: List<BrowseChapter>, val upNext: List<BrowseItem>, val nextUp: List<BrowseItem> = emptyList()) {

@@ -528,7 +528,7 @@ internal class SkinControls(
                 scaleType = ImageView.ScaleType.CENTER_CROP
                 importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
             }
-            item.imageUrl?.takeIf { it.isNotEmpty() }?.let { loadImage(picture, it) }
+            loadImage(picture, item.imageUrl, item.fallbackImageUrl)
             // The name over the foot of the frame, as the scrub strip puts its timecode.
             val caption = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
@@ -1139,7 +1139,7 @@ internal class SkinControls(
                 }
                 importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
             }
-            item.imageUrl?.takeIf { it.isNotEmpty() }?.let { loadImage(picture, it) }
+            loadImage(picture, item.imageUrl, item.fallbackImageUrl)
             val words = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 addView(
@@ -1180,9 +1180,13 @@ internal class SkinControls(
         }
     }
 
-    private fun loadImage(into: ImageView, url: String) {
+    /** Loads [url] into [into]; when it does not load, or there is none, the [fallback] takes its place. */
+    private fun loadImage(into: ImageView, url: String?, fallback: String? = null) {
         val loader = images ?: return
-        val future = runCatching { loader.loadBitmap(Uri.parse(url)) }.getOrNull() ?: return
+        val first = url?.takeIf { it.isNotEmpty() }
+        val second = fallback?.takeIf { it.isNotEmpty() }
+        val address = first ?: second ?: return
+        val future = runCatching { loader.loadBitmap(Uri.parse(address)) }.getOrNull() ?: return
         loadingImages += future
         Futures.addCallback(
             future,
@@ -1192,7 +1196,9 @@ internal class SkinControls(
                 }
 
                 // A tile without its picture still names the video.
-                override fun onFailure(t: Throwable) {}
+                override fun onFailure(t: Throwable) {
+                    if (first != null && second != null && !future.isCancelled && into.isAttachedToWindow) loadImage(into, null, second)
+                }
             },
             ContextCompat.getMainExecutor(context),
         )

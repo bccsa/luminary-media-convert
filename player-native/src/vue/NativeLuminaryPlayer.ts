@@ -465,23 +465,18 @@ export const NativeLuminaryPlayer = defineComponent({
         );
         /** The panel's lists as the bridge carries them; empty when the host gave none. */
         function browseLists(): FullscreenBrowse {
-            const card = ({ id, title, subtitle, imageUrl, section }: PlayerUpNextItem) => ({
+            const card = ({ id, title, subtitle, imageUrl, fallbackImageUrl, section }: PlayerUpNextItem) => ({
                 id,
                 title,
                 ...(subtitle ? { subtitle } : {}),
                 ...(imageUrl ? { imageUrl } : {}),
+                ...(fallbackImageUrl ? { fallbackImageUrl } : {}),
                 ...(section ? { section } : {}),
             });
             return {
                 ...(props.nextUp?.length ? { nextUp: props.nextUp.slice(0, NEXT_UP_MAX).map(card) } : {}),
                 chapters: chapterList.value.map(({ title, startTime, endTime }) => ({ title, startTime, endTime })),
-                upNext: (props.upNext ?? []).map(({ id, title, subtitle, imageUrl, section }) => ({
-                    id,
-                    title,
-                    ...(subtitle ? { subtitle } : {}),
-                    ...(imageUrl ? { imageUrl } : {}),
-                    ...(section ? { section } : {}),
-                })),
+                upNext: (props.upNext ?? []).map(card),
             };
         }
         /** The lists native last was sent; it keeps them for a full-screen it opens itself. */
