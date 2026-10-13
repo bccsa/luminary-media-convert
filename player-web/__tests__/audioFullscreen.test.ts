@@ -15,6 +15,9 @@ function mountScreen(props: Record<string, unknown> = {}) {
             appearance: 'dark',
             chapters,
             currentTime: 150,
+            duration: 480,
+            bufferedEnd: 200,
+            playing: false,
             chapterIndex: 2,
             playbackRate: 1,
             audioTracks: [{ id: 'en', label: 'English' }],
@@ -83,13 +86,60 @@ describe('AudioFullscreen — what it shows', () => {
 
     it('has no skip button when skipping is switched off', () => {
         const wrapper = mountScreen({ skipBackSeconds: 0, skipForwardSeconds: 0 });
-        expect(wrapper.findAll('media-seek-button')).toHaveLength(0);
+        expect(find(wrapper, 'afsSkipBack').exists()).toBe(false);
+        expect(find(wrapper, 'afsSkipForward').exists()).toBe(false);
     });
 
     it('has no way to the chapters panel when there is nothing to browse', () => {
         const wrapper = mountScreen({ hasBrowse: false });
         expect(find(wrapper, 'afsBrowse').exists()).toBe(false);
         expect(find(wrapper, 'afsChip').exists()).toBe(false);
+    });
+});
+
+describe('AudioFullscreen — the transport', () => {
+    it('shows the time played and left, and the fill of the bar', () => {
+        const wrapper = mountScreen();
+        expect(find(wrapper, 'afsElapsed').text()).toBe('2:30');
+        expect(find(wrapper, 'afsRemaining').text()).toBe('-5:30');
+        expect(find(wrapper, 'afsBar').attributes('aria-valuenow')).toBe('150');
+        expect(wrapper.find('.lmpl-afs-bar-fill').attributes('style')).toContain('31.25%');
+    });
+
+    it('asks to play and to pause from the one button', async () => {
+        const wrapper = mountScreen();
+        expect(find(wrapper, 'afsPlay').attributes('aria-label')).toBe('Play');
+        await find(wrapper, 'afsPlay').trigger('click');
+        expect(wrapper.emitted('toggle-play')).toHaveLength(1);
+        await wrapper.setProps({ playing: true });
+        expect(find(wrapper, 'afsPlay').attributes('aria-label')).toBe('Pause');
+    });
+
+    it('skips back and forward from where the playhead is, within the length', async () => {
+        const wrapper = mountScreen({ currentTime: 5 });
+        await find(wrapper, 'afsSkipBack').trigger('click');
+        await find(wrapper, 'afsSkipForward').trigger('click');
+        expect(wrapper.emitted('seek')).toEqual([[0], [15]]);
+    });
+
+    it('seeks with the arrow keys, five seconds at a time', async () => {
+        const wrapper = mountScreen();
+        await find(wrapper, 'afsBar').trigger('keydown', { key: 'ArrowRight' });
+        await find(wrapper, 'afsBar').trigger('keydown', { key: 'ArrowLeft' });
+        expect(wrapper.emitted('seek')).toEqual([[155], [145]]);
+    });
+
+    it('follows the finger along the bar, and asks for the seek once, when it is let go', async () => {
+        const wrapper = mountScreen();
+        const bar = find(wrapper, 'afsBar');
+        bar.element.getBoundingClientRect = () => ({ left: 100, width: 200, top: 0, height: 30, right: 300, bottom: 30, x: 100, y: 0, toJSON: () => ({}) });
+        await bar.trigger('pointerdown', { clientX: 200, pointerId: 1 });
+        await bar.trigger('pointermove', { clientX: 250, pointerId: 1 });
+        expect(find(wrapper, 'afsElapsed').text()).toBe('6:00');
+        expect(wrapper.emitted('seek')).toBeUndefined();
+        await bar.trigger('pointerup', { pointerId: 1 });
+        expect(wrapper.emitted('seek')).toEqual([[360]]);
+        expect(find(wrapper, 'afsElapsed').text()).toBe('2:30');
     });
 });
 

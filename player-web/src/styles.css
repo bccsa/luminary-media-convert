@@ -1529,20 +1529,82 @@
     gap: 22px;
 }
 
-/* The play button is white on this screen, whatever the controls it replaces draw. */
-.lmpl-root .lmpl-afs .lmpl-afs-play {
-    position: static;
-    width: calc(64px * var(--lmpl-s));
-    height: calc(64px * var(--lmpl-s));
-    transform: none;
-    background: #fff;
-    color: #111;
-    box-shadow: none;
+/* The seek bar: thick and round, with no thumb, as the controls' own; cut at the chapters by the mask when wide. */
+.lmpl-afs-bar {
+    position: relative;
+    flex: 1;
+    height: calc(30px * var(--lmpl-s));
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    touch-action: none;
+    outline: none;
 }
 
-.lmpl-root .lmpl-afs .lmpl-afs-seek {
-    position: static;
-    transform: none;
+.lmpl-afs-bar-track {
+    position: relative;
+    width: 100%;
+    height: calc(8px * var(--lmpl-s));
+    border-radius: 999px;
+    overflow: hidden;
+    background: rgb(255 255 255 / 0.28);
+    -webkit-mask-image: var(--lmpl-chapter-mask, none);
+    mask-image: var(--lmpl-chapter-mask, none);
+    transition: height 120ms ease;
+}
+
+.lmpl-afs-bar:hover .lmpl-afs-bar-track,
+.lmpl-afs-bar:focus-visible .lmpl-afs-bar-track,
+.lmpl-afs-bar-dragging .lmpl-afs-bar-track {
+    height: calc(12px * var(--lmpl-s));
+}
+
+.lmpl-afs-bar-buffer,
+.lmpl-afs-bar-fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    border-radius: inherit;
+}
+
+.lmpl-afs-bar-buffer {
+    background: rgb(255 255 255 / 0.25);
+}
+
+.lmpl-afs-bar-fill {
+    background: #fff;
+}
+
+/* The play button is white on this screen. */
+.lmpl-afs-playbtn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: calc(64px * var(--lmpl-s));
+    height: calc(64px * var(--lmpl-s));
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: #fff;
+    color: #111;
+    cursor: pointer;
+}
+
+.lmpl-afs-skip {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: calc(48px * var(--lmpl-s));
+    height: calc(48px * var(--lmpl-s));
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+}
+
+.lmpl-afs-skip svg {
+    width: 100%;
+    height: 100%;
 }
 
 .lmpl-afs-tools {
@@ -1615,7 +1677,7 @@
         flex: none;
     }
 
-    .lmpl-root .lmpl-afs .lmpl-track {
+    .lmpl-root .lmpl-afs .lmpl-afs-bar-track {
         -webkit-mask-image: none;
         mask-image: none;
     }

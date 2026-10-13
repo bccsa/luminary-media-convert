@@ -1292,6 +1292,9 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
                     :appearance="appearance ?? 'dark'"
                     :chapters="state.chapters"
                     :current-time="state.currentTime"
+                    :duration="state.duration"
+                    :buffered-end="state.bufferedEnd"
+                    :playing="state.playing"
                     :chapter-index="audioChapterIndex"
                     :playback-rate="state.playbackRate"
                     :audio-tracks="state.audioTracks"
@@ -1303,12 +1306,25 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
                     :chapter-mask="chapterBarMask"
                     :messages="msg"
                     @exit="exitFullscreen"
+                    @toggle-play="state.playing ? pause() : play()"
+                    @seek="seek"
                     @open-browse="openBrowse"
                     @seek-chapter="(chapter) => seek(chapter.startTime)"
                     @rate="setRate"
                     @audio-track="setAudioTrack"
                     @sleep="setSleep"
-                />
+                >
+                    <template #cast>
+                        <media-cast-button class="media-button lmpl-icon-btn media-cast-button lmpl-afs-iconbtn">
+                            <media-icon name="cast-enter" class="media-button-icon media-cast-button-enter-icon"></media-icon>
+                            <media-icon name="cast-exit" class="media-button-icon media-cast-button-exit-icon"></media-icon>
+                        </media-cast-button>
+                        <media-airplay-button class="media-button lmpl-icon-btn media-airplay-button lmpl-afs-iconbtn">
+                            <media-icon name="airplay-enter" class="media-button-icon media-airplay-button-enter-icon"></media-icon>
+                            <media-icon name="airplay-exit" class="media-button-icon media-airplay-button-exit-icon"></media-icon>
+                        </media-airplay-button>
+                    </template>
+                </AudioFullscreen>
 
                 <!-- While held, the frame being scrubbed over the picture: a fast-forward, VHS style. -->
                 <div v-if="pictureCue" class="lmpl-scrub-picture" aria-hidden="true">

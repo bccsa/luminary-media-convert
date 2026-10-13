@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import type { Chapter, SleepTimerOption, SleepTimerState } from '@luminary-media-converter/player-core';
-import type { PlayerMessages } from '../messages';
+import { formatSeconds, type PlayerMessages } from '../messages';
 import { skipIcon } from '../ui/controlsHtml';
 import { SLEEP_MINUTES, SPEED_OPTIONS, chapterWindow, formatMinutes, sleepMinutesLeft } from '../ui/audioFullscreen';
 import { formatChapterOf } from '../ui/chapterBar';
@@ -17,8 +17,8 @@ import { formatChapterOf } from '../ui/chapterBar';
  * In `dark` the screen is plain with a glow behind the picture; in `light` it takes the picture's colour over the
  * whole screen. Both are the picture itself, blurred, so no colour has to be read from it.
  *
- * It draws the layout and a few menus; the timeline, the play button and the casting buttons are the player's own
- * elements, which find the engine through the player they sit in.
+ * It draws everything from what it is given and says what is asked through events, so it does not care which player
+ * is under it: the web player's, or the app's over a native one. Only casting is the host's own, in the `cast` slot.
  */
 const props = defineProps<{
     title: string;
@@ -30,6 +30,9 @@ const props = defineProps<{
     appearance: 'light' | 'dark';
     chapters: readonly Chapter[];
     currentTime: number;
+    duration: number;
+    bufferedEnd?: number;
+    playing: boolean;
     /** The chapter the playhead is in; -1 for none. */
     chapterIndex: number;
     playbackRate: number;
@@ -46,6 +49,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
     exit: [];
+    'toggle-play': [];
+    seek: [time: number];
     'open-browse': [];
     'seek-chapter': [chapter: Chapter];
     rate: [rate: number];
@@ -74,6 +79,38 @@ function onKeydown(event: KeyboardEvent): void {
 function onPointerdown(event: PointerEvent): void {
     if (menu.value && !(event.target instanceof Element && event.target.closest('[data-afs-tools]'))) closeMenu();
 }
+
+// The bar follows the finger while it is held and asks for the seek once, when it is let go.
+const dragTime = ref<number | null>(null);
+const barEl = ref<HTMLElement | null>(null);
+const shownTime = computed(() => dragTime.value ?? props.currentTime);
+const knownDuration = computed(() => (Number.isFinite(props.duration) && props.duration > 0 ? props.duration : 0));
+const pct = (seconds: number): string => `${knownDuration.value ? Math.min(100, Math.max(0, (seconds / knownDuration.value) * 100)) : 0}%`;
+function timeAt(clientX: number): number {
+    const rect = barEl.value?.getBoundingClientRect();
+    if (!rect || !rect.width) return 0;
+    return Math.min(1, Math.max(0, (clientX - rect.left) / rect.width)) * knownDuration.value;
+}
+function onBarDown(event: PointerEvent): void {
+    if (!knownDuration.value) return;
+    (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
+    dragTime.value = timeAt(event.clientX);
+}
+function onBarMove(event: PointerEvent): void {
+    if (dragTime.value !== null) dragTime.value = timeAt(event.clientX);
+}
+function onBarUp(): void {
+    if (dragTime.value === null) return;
+    emit('seek', dragTime.value);
+    dragTime.value = null;
+}
+function onBarKey(event: KeyboardEvent): void {
+    const step = event.key === 'ArrowLeft' || event.key === 'ArrowDown' ? -5 : event.key === 'ArrowRight' || event.key === 'ArrowUp' ? 5 : 0;
+    if (!step || !knownDuration.value) return;
+    event.preventDefault();
+    emit('seek', Math.min(knownDuration.value, Math.max(0, props.currentTime + step)));
+}
+const skip = (seconds: number): void => emit('seek', Math.min(knownDuration.value || Infinity, Math.max(0, props.currentTime + seconds)));
 
 const showChapterList = computed(() => props.chapters.length > 1);
 const windowRows = computed(() => chapterWindow(props.chapters, props.chapterIndex));
@@ -215,35 +252,63 @@ const artworkSizes = computed(() => props.artwork?.sizes ?? '(min-aspect-ratio: 
 
                 <div class="lmpl-afs-controls">
                     <div class="lmpl-afs-timeline">
-                        <media-time class="lmpl-time" type="current"></media-time>
-                        <media-time-slider class="media-slider media-time-slider lmpl-time-slider lmpl-afs-slider">
-                            <media-slider-track class="media-slider-track lmpl-track">
-                                <media-slider-buffer class="media-slider-buffer lmpl-buffer"></media-slider-buffer>
-                                <media-slider-fill class="media-slider-fill lmpl-fill"></media-slider-fill>
-                            </media-slider-track>
-                        </media-time-slider>
-                        <media-time class="lmpl-time" type="remaining"></media-time>
+                        <span class="lmpl-time" data-test="afsElapsed">{{ clock(shownTime) }}</span>
+                        <div
+                            ref="barEl"
+                            class="lmpl-afs-bar"
+                            role="slider"
+                            tabindex="0"
+                            aria-valuemin="0"
+                            :aria-valuemax="knownDuration"
+                            :aria-valuenow="Math.floor(shownTime)"
+                            :aria-valuetext="clock(shownTime)"
+                            :aria-label="messages.scrubberLabel"
+                            :class="{ 'lmpl-afs-bar-dragging': dragTime !== null }"
+                            data-test="afsBar"
+                            @pointerdown="onBarDown"
+                            @pointermove="onBarMove"
+                            @pointerup="onBarUp"
+                            @pointercancel="onBarUp"
+                            @keydown="onBarKey"
+                        >
+                            <div class="lmpl-afs-bar-track">
+                                <div class="lmpl-afs-bar-buffer" :style="{ width: pct(bufferedEnd ?? 0) }"></div>
+                                <div class="lmpl-afs-bar-fill" :style="{ width: pct(shownTime) }"></div>
+                            </div>
+                        </div>
+                        <span class="lmpl-time" data-test="afsRemaining">-{{ clock(Math.max(0, knownDuration - shownTime)) }}</span>
                     </div>
 
                     <div class="lmpl-afs-bottomrow">
                         <div class="lmpl-afs-transport">
-                            <media-seek-button
+                            <button
                                 v-if="skipBackSeconds > 0"
-                                :seconds="-skipBackSeconds"
-                                class="lmpl-seek lmpl-afs-seek"
+                                type="button"
+                                class="lmpl-afs-skip"
+                                :aria-label="formatSeconds(messages.skipBack, skipBackSeconds)"
+                                data-test="afsSkipBack"
+                                @click="skip(-skipBackSeconds)"
                                 v-html="skipIcon(skipBackSeconds, false)"
-                            ></media-seek-button>
-                            <media-play-button class="media-button lmpl-play lmpl-afs-play media-play-button">
-                                <media-icon name="restart" class="media-button-icon media-play-button-restart-icon"></media-icon>
-                                <media-icon name="play" class="media-button-icon media-play-button-play-icon"></media-icon>
-                                <media-icon name="pause" class="media-button-icon media-play-button-pause-icon"></media-icon>
-                            </media-play-button>
-                            <media-seek-button
+                            ></button>
+                            <button
+                                type="button"
+                                class="lmpl-afs-playbtn"
+                                :aria-label="playing ? messages.pause : messages.play"
+                                data-test="afsPlay"
+                                @click="emit('toggle-play')"
+                            >
+                                <svg v-if="playing" viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden="true"><path d="M7 4h3.5v16H7zM13.5 4H17v16h-3.5z" /></svg>
+                                <svg v-else viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l11-6.5a1 1 0 0 0 0-1.72l-11-6.5A1 1 0 0 0 8 5.5Z" /></svg>
+                            </button>
+                            <button
                                 v-if="skipForwardSeconds > 0"
-                                :seconds="skipForwardSeconds"
-                                class="lmpl-seek lmpl-afs-seek"
+                                type="button"
+                                class="lmpl-afs-skip"
+                                :aria-label="formatSeconds(messages.skipForward, skipForwardSeconds)"
+                                data-test="afsSkipForward"
+                                @click="skip(skipForwardSeconds)"
                                 v-html="skipIcon(skipForwardSeconds, true)"
-                            ></media-seek-button>
+                            ></button>
                         </div>
 
                         <div class="lmpl-afs-tools" data-afs-tools>
@@ -303,14 +368,7 @@ const artworkSizes = computed(() => props.artwork?.sizes ?? '(min-aspect-ratio: 
                                 </div>
                             </div>
 
-                            <media-cast-button class="media-button lmpl-icon-btn media-cast-button lmpl-afs-iconbtn">
-                                <media-icon name="cast-enter" class="media-button-icon media-cast-button-enter-icon"></media-icon>
-                                <media-icon name="cast-exit" class="media-button-icon media-cast-button-exit-icon"></media-icon>
-                            </media-cast-button>
-                            <media-airplay-button class="media-button lmpl-icon-btn media-airplay-button lmpl-afs-iconbtn">
-                                <media-icon name="airplay-enter" class="media-button-icon media-airplay-button-enter-icon"></media-icon>
-                                <media-icon name="airplay-exit" class="media-button-icon media-airplay-button-exit-icon"></media-icon>
-                            </media-airplay-button>
+                            <slot name="cast"></slot>
 
                             <button
                                 v-if="hasBrowse"

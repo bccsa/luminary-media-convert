@@ -5,6 +5,7 @@
 export * from '@luminary-media-converter/player-core';
 
 export { default as LuminaryPlayer } from './components/LuminaryPlayer.vue';
+export { default as AudioFullscreen } from './components/AudioFullscreen.vue';
 
 // What `poster` takes: an image described in plain terms, so the shape outlives the engine.
 export type { PlayerImage, PlayerImageInput } from './image';
