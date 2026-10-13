@@ -276,6 +276,9 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         self.item = item
         observe(item)
         player.replaceCurrentItem(with: item)
+        // The page's subtitle choice is the truth: off until it picks one, whatever the master's default says
+        // (AVPlayer would select it itself, and the page would not know), as on Android.
+        setSubtitleTrack(nil)
         if let position, position > 0 {
             player.seek(to: Self.time(position), toleranceBefore: .zero, toleranceAfter: .zero)
         }

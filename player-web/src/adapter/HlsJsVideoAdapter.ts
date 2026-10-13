@@ -102,6 +102,8 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
     private elementListeners: [string, () => void][] = [];
     private listListeners: (() => void)[] = [];
     private engine: HlsEngine | null = null;
+    /** The master's own subtitle choice has been put aside for this source: see {@link onSubtitleTracks}. */
+    private subtitlesSettled = false;
     private stopPersistingBandwidth: (() => void) | null = null;
     private textTracks = new Map<string, HTMLTrackElement>();
     private activeTextTrackId: string | null = null;
@@ -173,6 +175,7 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
     async loadSource(src: AdapterSource): Promise<void> {
         this.teardownSource();
         this.lastSource = src;
+        this.subtitlesSettled = false;
         this.keyBytes = src.keyHex ? keyBytes(src.keyHex) : null;
         this.lastProgressTime = 0;
         this.ladder.setPolicy(src.recovery);
@@ -541,6 +544,7 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
     private bindEngine(engine: HlsEngine | null): void {
         if (engine === this.engine) return;
         this.engine?.off(Hls.Events.ERROR, this.onEngineError);
+        this.engine?.off(Hls.Events.SUBTITLE_TRACKS_UPDATED, this.onSubtitleTracks);
         this.stopPersistingBandwidth?.();
         this.stopPersistingBandwidth = null;
         this.engine = engine;
@@ -548,8 +552,30 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         this.attachListListeners();
         if (!engine) return;
         engine.on(Hls.Events.ERROR, this.onEngineError);
+        engine.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, this.onSubtitleTracks);
         this.stopPersistingBandwidth = persistBandwidth(engine);
     }
+
+    /**
+     * Subtitles are off until the viewer picks one, whatever the master marks as its default, as on the native
+     * players. hls.js selects the default track when the list arrives, so it is put aside once per source, and
+     * again after the tracks have settled; a pick the viewer makes later is left alone.
+     */
+    private readonly onSubtitleTracks = (): void => {
+        if (this.subtitlesSettled || !this.engine) return;
+        this.subtitlesSettled = true;
+        const engine = this.engine;
+        const off = (): void => {
+            if (this.engine !== engine || this.destroyed) return;
+            engine.subtitleTrack = -1;
+            for (const track of Array.from(this.mediaTarget()?.textTracks ?? [])) {
+                if (track.kind === 'subtitles' && track.mode === 'showing' && !this.textTracks.has(track.id)) track.mode = 'disabled';
+            }
+        };
+        off();
+        setTimeout(off, 0);
+        setTimeout(off, 400);
+    };
 
     private readonly onEngineError = (_event: string, data: HlsErrorData): void => {
         if (!data.fatal) return;
