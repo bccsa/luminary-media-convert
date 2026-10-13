@@ -1181,7 +1181,7 @@ internal class SkinControls(
         val epoch = imageEpoch
         // Sharp at the size drawn, not larger.
         val target = (resources.displayMetrics.widthPixels / 3).coerceAtLeast(240)
-        FrameImages.load(address, target) { bitmap ->
+        FrameImages.load(context, address, target) { bitmap ->
             if (epoch != imageEpoch) return@load
             when {
                 bitmap != null -> into.setImageBitmap(bitmap)
