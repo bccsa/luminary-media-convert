@@ -1699,6 +1699,11 @@
         -webkit-mask-image: none;
         mask-image: none;
     }
+
+    /* The chip under the title opens the chapters; the button beside the tools would be a second way to the same. */
+    .lmpl-root .lmpl-afs .lmpl-afs-dup {
+        display: none;
+    }
 }
 
 /* Wide: the picture on the left, the chapters, the timeline and the controls on the right. */

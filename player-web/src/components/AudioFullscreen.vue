@@ -422,6 +422,7 @@ const artworkSizes = computed(() => props.artwork?.sizes ?? '(min-aspect-ratio: 
                                 v-if="hasBrowse"
                                 type="button"
                                 class="lmpl-afs-iconbtn"
+                                :class="{ 'lmpl-afs-dup': chapterText }"
                                 :aria-label="messages.browse"
                                 data-test="afsBrowse"
                                 @click="openChapters"

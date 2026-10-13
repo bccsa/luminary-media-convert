@@ -211,6 +211,18 @@ describe('AudioFullscreen — the sleep timer on show', () => {
     });
 });
 
+describe('AudioFullscreen — one way to the chapters in portrait', () => {
+    it('marks the chapters button as the chip\'s duplicate when the chip shows, so portrait can hide it', () => {
+        expect(find(mountScreen(), 'afsBrowse').classes()).toContain('lmpl-afs-dup');
+    });
+
+    it('keeps the button the only way when there is no chip, as for an up-next list without chapters', () => {
+        const wrapper = mountScreen({ chapters: [], chapterIndex: -1 });
+        expect(find(wrapper, 'afsChip').exists()).toBe(false);
+        expect(find(wrapper, 'afsBrowse').classes()).not.toContain('lmpl-afs-dup');
+    });
+});
+
 describe('AudioFullscreen — the chapters sheet', () => {
     it('opens over the screen from the chip and the button, and lists every chapter with the playing one marked', async () => {
         const wrapper = mountScreen({ chaptersSheet: true });
