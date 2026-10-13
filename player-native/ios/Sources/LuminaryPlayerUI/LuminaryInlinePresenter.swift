@@ -133,12 +133,19 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
     /// Apple's own device list. Its button is a view that has to be in the window to answer, so a
     /// 1pt picker sits in the web view's container and is pressed on the viewer's behalf.
     public func showRoutePicker() -> Bool {
-        guard let container = webView()?.superview else { return false }
-        let picker = routePicker ?? AVRoutePickerView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
+        guard let webView = webView(), let container = webView.superview else { return false }
+        let picker = routePicker ?? AVRoutePickerView(frame: .zero)
         picker.prioritizesVideoDevices = true
         picker.alpha = 0.011
+        picker.isUserInteractionEnabled = false
         if picker.superview !== container { container.addSubview(picker) }
+        container.bringSubviewToFront(picker)
         routePicker = picker
+        // The device list opens from this view: a corner under the notch, as a landscape screen has,
+        // leaves it nowhere to appear. It sits inside the safe area, at the lower right where the
+        // page keeps its cast button, and is placed again on every press, since a turn moves it.
+        let safe = container.bounds.inset(by: container.safeAreaInsets)
+        picker.frame = CGRect(x: safe.maxX - 56, y: safe.maxY - 56, width: 44, height: 44)
         // The picker makes its button when it is first laid out: a press before that finds none, which is
         // why the first press after it was added, or after the screen turned, could show nothing.
         picker.layoutIfNeeded()
