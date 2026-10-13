@@ -389,7 +389,7 @@ const cover = computed(() => {
                                     data-test="afsLanguage"
                                     @click="toggleMenu('language')"
                                 >
-                                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18" /></svg>
+                                    <svg viewBox="0 0 18 18" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.125" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7.875 15.75 3.938-8.438L15.75 15.75m-6.75-2.25h5.625M2.25 4.216a36.355 36.355 0 0 1 4.5-.278m0 0c.84 0 1.675.028 2.501.086M6.75 3.938V2.25m2.501 1.773C8.382 7.993 5.768 11.31 2.25 13.127m7-9.104c.672.046 1.339.11 1.999.193m-3.442 6.371a13.517 13.517 0 0 1-2.87-4.351" /></svg>
                                 </button>
                                 <div v-if="menu === 'language'" class="lmpl-afs-menu" role="menu" :aria-label="messages.audioMenuLabel">
                                     <button v-for="track in audioTracks" :key="track.id" type="button" role="menuitemradio" :aria-checked="track.id === activeAudioTrackId" class="lmpl-afs-menuitem" @click="chooseTrack(track.id)">{{ track.label }}</button>

@@ -1567,6 +1567,12 @@
     height: 100%;
 }
 
+/* The play and pause glyph is a share of its disc, so it grows with it. */
+.lmpl-afs-playbtn svg {
+    width: 46%;
+    height: 46%;
+}
+
 .lmpl-afs-tools {
     display: flex;
     align-items: center;
@@ -1676,6 +1682,7 @@
     .lmpl-afs-info {
         align-self: stretch;
         justify-content: center;
+        min-width: 0;
     }
 
     .lmpl-afs-chapters {
