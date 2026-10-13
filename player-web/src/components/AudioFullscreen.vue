@@ -2,6 +2,8 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import type { Chapter, SleepTimerOption, SleepTimerState } from '@luminary-media-converter/player-core';
 import { formatSeconds, type PlayerMessages } from '../messages';
+import type { PlayerUpNextItem } from '../upNext';
+import BrowsePanel from './BrowsePanel.vue';
 import { skipIcon } from '../ui/controlsHtml';
 import { SLEEP_MINUTES, SPEED_OPTIONS, chapterWindow, formatMinutes, sleepMinutesLeft } from '../ui/audioFullscreen';
 
@@ -44,10 +46,9 @@ const props = defineProps<{
     /** Mask that cuts the timeline at the chapters; empty for one plain bar. */
     chapterMask: string;
     messages: PlayerMessages;
-    /**
-     * Open the chapters in a sheet on this screen, instead of asking the host (`open-browse`) to show them. The
-     * host may fill the sheet with its own content through the `sheet` slot; without one it lists the chapters.
-     */
+    /** Videos that may follow, for the panel's Up next tab. */
+    upNext?: readonly PlayerUpNextItem[];
+    /** Open the panel for chapters and up next on this screen, instead of asking the host (`open-browse`) to show them. */
     chaptersSheet?: boolean;
 }>();
 
@@ -57,6 +58,7 @@ const emit = defineEmits<{
     seek: [time: number];
     'open-browse': [];
     'seek-chapter': [chapter: Chapter];
+    upnextselect: [id: string];
     rate: [rate: number];
     'audio-track': [id: string];
     sleep: [option: SleepTimerOption | null];
@@ -104,10 +106,7 @@ function closeMenu(): void {
     menu.value = null;
 }
 function onKeydown(event: KeyboardEvent): void {
-    if (event.key === 'Escape' && sheetOpen.value) {
-        event.stopPropagation();
-        sheetOpen.value = false;
-    } else if (event.key === 'Escape' && menu.value) {
+    if (event.key === 'Escape' && menu.value) {
         event.stopPropagation();
         closeMenu();
     }
@@ -148,18 +147,23 @@ function onBarKey(event: KeyboardEvent): void {
 }
 const skip = (seconds: number): void => emit('seek', Math.min(knownDuration.value || Infinity, Math.max(0, props.currentTime + seconds)));
 
-const sheetOpen = ref(false);
+const browseOpen = ref(false);
+const uid = `lmpl-afs-${Math.random().toString(36).slice(2, 9)}`;
 function openChapters(): void {
     if (props.chaptersSheet) {
         menu.value = null;
-        sheetOpen.value = true;
+        browseOpen.value = true;
     } else {
         emit('open-browse');
     }
 }
 function pickChapter(chapter: Chapter): void {
     emit('seek-chapter', chapter);
-    sheetOpen.value = false;
+    browseOpen.value = false;
+}
+function pickUpNext(id: string): void {
+    emit('upnextselect', id);
+    browseOpen.value = false;
 }
 
 const showChapterList = computed(() => props.chapters.length > 1);
@@ -419,28 +423,18 @@ const artworkSizes = computed(() => props.artwork?.sizes ?? '(min-aspect-ratio: 
             </div>
         </div>
 
-        <!-- The chapters, over this screen: a pick goes there and the sheet closes; the screen stays full. -->
-        <div v-if="sheetOpen" class="lmpl-afs-sheetwrap" data-test="afsSheet">
-            <div class="lmpl-afs-backdrop" @click="sheetOpen = false"></div>
-            <div class="lmpl-afs-sheet" :class="{ 'lmpl-afs-sheet-host': $slots.sheet }" role="dialog" :aria-label="messages.chapters">
-                <slot v-if="$slots.sheet" name="sheet" :close="() => (sheetOpen = false)"></slot>
-                <template v-else>
-                <div class="lmpl-afs-sheet-head">
-                    <span class="lmpl-afs-sheet-title">{{ messages.chapters }}</span>
-                    <button type="button" class="lmpl-afs-iconbtn" :aria-label="messages.closeBrowse" data-test="afsSheetClose" @click="sheetOpen = false">
-                        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
-                    </button>
-                </div>
-                <ol class="lmpl-afs-sheet-list">
-                    <li v-for="(chapter, index) in chapters" :key="index">
-                        <button type="button" class="lmpl-afs-sheet-row" :aria-current="index === chapterIndex ? 'true' : undefined" data-test="afsSheetRow" @click="pickChapter(chapter)">
-                            <span class="lmpl-afs-sheet-name">{{ chapter.title }}</span>
-                            <span class="lmpl-afs-chapter-time">{{ clock(chapter.startTime) }}</span>
-                        </button>
-                    </li>
-                </ol>
-                </template>
-            </div>
-        </div>
+        <!-- Chapters and up next, over this screen: the web player's own panel. A pick goes there and it closes. -->
+        <BrowsePanel
+            v-if="browseOpen"
+            :chapters="chapters"
+            :current-chapter="chapterIndex"
+            :up-next="upNext"
+            :messages="messages"
+            :id-prefix="uid"
+            data-test="afsSheet"
+            @close="browseOpen = false"
+            @pick-chapter="pickChapter"
+            @pick-upnext="pickUpNext"
+        />
     </div>
 </template>

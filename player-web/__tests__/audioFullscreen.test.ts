@@ -203,53 +203,63 @@ describe('AudioFullscreen — the sleep timer on show', () => {
     });
 });
 
-describe('AudioFullscreen — the chapters sheet', () => {
-    it('opens over the screen from the chapters button, and lists every chapter with the playing one marked', async () => {
-        const wrapper = mountScreen({ chaptersSheet: true });
-        expect(find(wrapper, 'afsSheet').exists()).toBe(false);
-        await find(wrapper, 'afsBrowse').trigger('click');
-        expect(find(wrapper, 'afsSheet').exists()).toBe(true);
-        expect(wrapper.findAll('[data-test=afsSheetRow]')).toHaveLength(8);
-        expect(wrapper.find('[data-test=afsSheetRow][aria-current=true]').text()).toContain('Chapter 3');
-        expect(wrapper.emitted('open-browse')).toBeUndefined();
+describe('AudioFullscreen — chapters and up next', () => {
+    const upNext = [
+        { id: 'a', title: 'Next one', section: 'Next in series' },
+        { id: 'b', title: 'Other', section: 'Related' },
+    ];
+    const rows = (wrapper: ReturnType<typeof mountScreen>) => wrapper.findAll('.lmpl-chapter');
 
-        await find(wrapper, 'afsSheetClose').trigger('click');
-        expect(find(wrapper, 'afsSheet').exists()).toBe(false);
+    it('opens the web player\'s own panel over the screen from the button, with every chapter and the playing one marked', async () => {
+        const wrapper = mountScreen({ chaptersSheet: true });
+        expect(find(wrapper, 'browsePanel').exists()).toBe(false);
         await find(wrapper, 'afsBrowse').trigger('click');
-        expect(find(wrapper, 'afsSheet').exists()).toBe(true);
+        expect(find(wrapper, 'browsePanel').exists()).toBe(true);
+        expect(rows(wrapper)).toHaveLength(8);
+        expect(wrapper.find('.lmpl-chapter[aria-current=true]').text()).toContain('Chapter 3');
+        expect(wrapper.emitted('open-browse')).toBeUndefined();
     });
 
-    it('is filled by the host when it brings its own, and closes from inside', async () => {
-        const wrapper = mount(AudioFullscreen, {
-            props: { ...(mountScreen().props() as object), chaptersSheet: true } as never,
-            slots: { sheet: `<template #sheet="{ close }"><button data-test="hostBody" @click="close">host</button></template>` },
-            global: { config: { compilerOptions: { isCustomElement: (tag: string) => tag.startsWith('media-') } } },
-            attachTo: document.body,
-        });
+    it('asks the host to show them when it is not given a panel of its own', async () => {
+        const wrapper = mountScreen();
         await find(wrapper, 'afsBrowse').trigger('click');
-        expect(find(wrapper, 'hostBody').exists()).toBe(true);
-        expect(wrapper.findAll('[data-test=afsSheetRow]')).toHaveLength(0);
-        await find(wrapper, 'hostBody').trigger('click');
-        expect(find(wrapper, 'afsSheet').exists()).toBe(false);
+        expect(wrapper.emitted('open-browse')).toHaveLength(1);
+        expect(find(wrapper, 'browsePanel').exists()).toBe(false);
+    });
+
+    it('offers Up next as a second tab, and says which one is picked', async () => {
+        const wrapper = mountScreen({ chaptersSheet: true, upNext });
+        await find(wrapper, 'afsBrowse').trigger('click');
+        const tabs = wrapper.findAll('[role=tab]');
+        expect(tabs.map((tab) => tab.text())).toEqual(['Chapters', 'Up next']);
+        await tabs[1]!.trigger('click');
+        const items = wrapper.findAll('.lmpl-upnext');
+        expect(items).toHaveLength(2);
+        await items[1]!.trigger('click');
+        expect(wrapper.emitted('upnextselect')![0]).toEqual(['b']);
+        expect(find(wrapper, 'browsePanel').exists()).toBe(false);
     });
 
     it('goes to the chapter that is picked and closes, staying on this screen', async () => {
         const wrapper = mountScreen({ chaptersSheet: true });
         await find(wrapper, 'afsBrowse').trigger('click');
-        await wrapper.findAll('[data-test=afsSheetRow]')[5]!.trigger('click');
+        await rows(wrapper)[5]!.trigger('click');
         expect(wrapper.emitted('seek-chapter')![0]).toEqual([chapters[5]]);
         expect(wrapper.emitted('exit')).toBeUndefined();
-        expect(find(wrapper, 'afsSheet').exists()).toBe(false);
+        expect(find(wrapper, 'browsePanel').exists()).toBe(false);
     });
 
-    it('closes on Escape, and on a press on the backdrop', async () => {
+    it('closes on Escape, with the close button, and on a press outside it', async () => {
         const wrapper = mountScreen({ chaptersSheet: true });
         await find(wrapper, 'afsBrowse').trigger('click');
-        await wrapper.trigger('keydown', { key: 'Escape' });
-        expect(find(wrapper, 'afsSheet').exists()).toBe(false);
+        await find(wrapper, 'browsePanel').trigger('keydown', { key: 'Escape' });
+        expect(find(wrapper, 'browsePanel').exists()).toBe(false);
         await find(wrapper, 'afsBrowse').trigger('click');
-        await wrapper.find('.lmpl-afs-backdrop').trigger('click');
-        expect(find(wrapper, 'afsSheet').exists()).toBe(false);
+        await wrapper.find('.lmpl-browse-close').trigger('click');
+        expect(find(wrapper, 'browsePanel').exists()).toBe(false);
+        await find(wrapper, 'afsBrowse').trigger('click');
+        await wrapper.find('.lmpl-browse-scrim').trigger('click');
+        expect(find(wrapper, 'browsePanel').exists()).toBe(false);
     });
 });
 

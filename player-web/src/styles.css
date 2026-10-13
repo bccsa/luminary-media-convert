@@ -1736,143 +1736,25 @@
     }
 }
 
-/* The chapters sheet: over the screen, from the foot, the playing chapter marked. */
-.lmpl-afs-sheetwrap {
-    position: absolute;
-    inset: 0;
-    z-index: 5;
-    display: flex;
-    flex-direction: column;
-    justify-content: flex-end;
-}
-
-.lmpl-afs-backdrop {
-    position: absolute;
-    inset: 0;
-    background: rgb(0 0 0 / 0.45);
-}
-
-.lmpl-afs-sheet {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    max-height: 70%;
-    margin: 0 auto;
-    width: 100%;
-    max-width: 640px;
-    border-radius: 18px 18px 0 0;
-    background: rgb(24 25 29 / 0.97);
-    color: #fff;
-    padding-bottom: max(12px, env(safe-area-inset-bottom));
-}
-
-.lmpl-afs-sheet-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 8px 0 20px;
-}
-
-.lmpl-afs-sheet-title {
-    font-size: 17px;
-    font-weight: 700;
-}
-
-.lmpl-afs-sheet-list {
-    margin: 0;
-    padding: 4px 8px 8px;
-    list-style: none;
-    overflow-y: auto;
-}
-
-.lmpl-afs-sheet-row {
-    display: flex;
-    width: 100%;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    min-height: 52px;
-    padding: 10px 12px;
-    border: 0;
-    border-radius: 12px;
-    background: transparent;
-    color: inherit;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-}
-
-.lmpl-afs-sheet-row[aria-current='true'] {
-    background: rgb(255 255 255 / 0.14);
-    font-weight: 700;
-}
-
-.lmpl-afs-sheet-name {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+/* Chapters and up next on the now-playing screen are the web player's own panel, from the right when wide. Narrow,
+   it comes up from the foot instead, in the same dress. */
+@container lmpl-afs (max-aspect-ratio: 6/5) {
+    .lmpl-root .lmpl-afs .lmpl-browse {
+        top: auto;
+        left: 0;
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+        max-height: 70%;
+        padding-right: 0;
+        border-radius: 18px 18px 0 0;
+        box-shadow: 0 -8px 24px rgb(0 0 0 / 0.4);
+    }
 }
 
 /* A short view, a phone on its side: the rows close up so the sleep timer's eight fit without scrolling. */
 @media (max-height: 480px) {
     .lmpl-afs-menuitem {
         min-height: 34px;
-    }
-}
-
-/* The host fills the sheet: it brings its own surface, so this one only places it. */
-.lmpl-afs-sheet.lmpl-afs-sheet-host {
-    background: transparent;
-    padding-bottom: 0;
-    color: inherit;
-}
-
-/* A host's own sheet body brings its surface and takes the sheet's rounding. */
-.lmpl-afs-sheet-host > * {
-    border-radius: inherit;
-}
-
-@keyframes lmpl-afs-sheet-up {
-    from {
-        transform: translateY(100%);
-    }
-}
-
-@keyframes lmpl-afs-sheet-left {
-    from {
-        transform: translateX(100%);
-    }
-}
-
-.lmpl-afs-sheet {
-    animation: lmpl-afs-sheet-up 220ms ease-out;
-}
-
-/* Wide, as on the web's own full screen: the sheet is a panel from the right, the whole height. */
-@container lmpl-afs (min-aspect-ratio: 6/5) {
-    .lmpl-afs-sheetwrap {
-        flex-direction: row;
-        justify-content: flex-end;
-    }
-
-    .lmpl-afs-sheet {
-        width: min(420px, 46cqw);
-        max-width: none;
-        max-height: none;
-        height: 100%;
-        margin: 0;
-        border-radius: 18px 0 0 18px;
-        padding-bottom: 0;
-        animation-name: lmpl-afs-sheet-left;
-    }
-
-    .lmpl-afs-sheet-host > * {
-        padding-right: env(safe-area-inset-right);
-        padding-bottom: env(safe-area-inset-bottom);
-    }
-
-    .lmpl-afs-sheet-list {
-        padding-bottom: max(8px, env(safe-area-inset-bottom));
     }
 }

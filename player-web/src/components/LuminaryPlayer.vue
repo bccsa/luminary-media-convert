@@ -54,9 +54,10 @@ import ScrubThumbnail from './ScrubThumbnail.vue';
 import ScrubRoster from './ScrubRoster.vue';
 import NextUpThumb from './NextUpThumb.vue';
 import AudioFullscreen from './AudioFullscreen.vue';
+import BrowsePanel from './BrowsePanel.vue';
 import { imageAttempts, toPlayerImage, type PlayerImageInput } from '../image';
 import { isYouTubeUrl } from '../youtube';
-import { withSectionHeadings, type PlayerUpNextItem } from '../upNext';
+import type { PlayerUpNextItem } from '../upNext';
 
 interface Props {
     /** What to play. Assigning a new object reloads the player. */
@@ -981,29 +982,13 @@ watch(
 
 // --- chapters and up next ---------------------------------------------------
 
-type BrowseTab = 'chapters' | 'upnext';
-
 const chapters = computed<Chapter[]>(() => state.value.chapters ?? []);
-const upNextRows = computed(() => withSectionHeadings(props.upNext ?? []));
 
-/** A tab with nothing in it is not offered. */
-const browseTabs = computed<{ id: BrowseTab; label: string }[]>(() => [
-    ...(chapters.value.length ? [{ id: 'chapters' as const, label: msg.value.chapters }] : []),
-    ...(upNextRows.value.length ? [{ id: 'upnext' as const, label: msg.value.upNext }] : []),
-]);
-const hasBrowse = computed(() => browseTabs.value.length > 0);
+/** Something to browse: chapters, or videos that may follow. */
+const hasBrowse = computed(() => chapters.value.length > 0 || (props.upNext?.length ?? 0) > 0);
 
 const browseOpen = ref(false);
-const requestedTab = ref<BrowseTab>('chapters');
-const browseTab = computed<BrowseTab | null>(
-    () => browseTabs.value.find((tab) => tab.id === requestedTab.value)?.id ?? browseTabs.value[0]?.id ?? null
-);
-const browseEl = ref<HTMLElement | null>(null);
-const browseId = `${instanceId}-browse`;
-const tabId = (tab: BrowseTab): string => `${browseId}-tab-${tab}`;
-
-/** Start times share one format, so a long video's list lines up. */
-const chaptersHaveHours = computed(() => chapters.value.some((chapter) => chapter.startTime >= 3600));
+const browsePanel = ref<InstanceType<typeof BrowsePanel> | null>(null);
 
 const currentChapter = computed(() => {
     const now = state.value.currentTime;
@@ -1014,19 +999,15 @@ function toggleButton(): HTMLElement | null {
     return containerEl.value?.querySelector<HTMLElement>('[data-browse-toggle]') ?? null;
 }
 
-async function openBrowse(): Promise<void> {
+function openBrowse(): void {
     if (!hasBrowse.value || !isFullscreen.value) return;
-    requestedTab.value = browseTab.value ?? 'chapters';
     browseOpen.value = true;
-    await nextTick();
-    browseEl.value?.querySelector<HTMLElement>('[aria-current="true"]')?.scrollIntoView?.({ block: 'center' });
-    browseEl.value?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
 }
 
 /** Focus goes back to the button only when it was in the panel: a tap elsewhere has moved it on already. */
 function closeBrowse(): void {
     if (!browseOpen.value) return;
-    const hadFocus = browseEl.value?.contains(document.activeElement) ?? false;
+    const hadFocus = browsePanel.value?.hasFocus() ?? false;
     browseOpen.value = false;
     if (hadFocus) void nextTick(() => toggleButton()?.focus());
 }
@@ -1034,35 +1015,6 @@ function closeBrowse(): void {
 function toggleBrowse(): void {
     if (browseOpen.value) closeBrowse();
     else void openBrowse();
-}
-
-function selectBrowseTab(tab: BrowseTab, focus = false): void {
-    requestedTab.value = tab;
-    if (focus) void nextTick(() => document.getElementById(tabId(tab))?.focus());
-}
-
-function onBrowseKeydown(event: KeyboardEvent): void {
-    if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopPropagation();
-        closeBrowse();
-        return;
-    }
-    const tabs = browseTabs.value;
-    const onTab = event.target instanceof Element && event.target.closest('[role="tab"]') !== null;
-    if (!onTab || tabs.length < 2) return;
-    const index = tabs.findIndex((tab) => tab.id === browseTab.value);
-    const last = tabs.length - 1;
-    const next =
-        event.key === 'ArrowRight' ? (index + 1) % tabs.length
-        : event.key === 'ArrowLeft' ? (index + last) % tabs.length
-        : event.key === 'Home' ? 0
-        : event.key === 'End' ? last
-        : -1;
-    if (next < 0) return;
-    event.preventDefault();
-    event.stopPropagation();
-    selectBrowseTab(tabs[next]!.id, true);
 }
 
 function pickChapter(chapter: Chapter): void {
@@ -1405,96 +1357,18 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
                 </div>
 
                 <!-- Chapters and up next, over the picture so it goes fullscreen with it. -->
-                <template v-if="browseOpen && isFullscreen">
-                    <!-- Taps outside close it; stopped here so they do not also pause the video. -->
-                    <div
-                        class="lmpl-browse-scrim"
-                        aria-hidden="true"
-                        @pointerdown.stop
-                        @pointerup.stop
-                        @dblclick.stop
-                        @click.stop="closeBrowse"
-                    ></div>
-                    <div
-                        :id="browseId"
-                        ref="browseEl"
-                        class="lmpl-browse"
-                        role="dialog"
-                        :aria-label="msg.browse"
-                        @keydown="onBrowseKeydown"
-                        @pointerdown.stop
-                        @pointerup.stop
-                        @dblclick.stop
-                        @click.stop
-                    >
-                        <div class="lmpl-browse-head">
-                            <div class="lmpl-browse-tabs" role="tablist" :aria-label="msg.browse">
-                                <button
-                                    v-for="tab in browseTabs"
-                                    :id="tabId(tab.id)"
-                                    :key="tab.id"
-                                    type="button"
-                                    role="tab"
-                                    class="lmpl-browse-tab"
-                                    :aria-selected="browseTab === tab.id"
-                                    :aria-controls="`${tabId(tab.id)}-panel`"
-                                    :tabindex="browseTab === tab.id ? 0 : -1"
-                                    @click="selectBrowseTab(tab.id)"
-                                >
-                                    {{ tab.label }}
-                                </button>
-                            </div>
-                            <button
-                                type="button"
-                                class="media-button lmpl-icon-btn lmpl-browse-close"
-                                :aria-label="msg.closeBrowse"
-                                @click="closeBrowse"
-                            >
-                                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
-                                    <path d="M6 6l12 12M18 6L6 18" />
-                                </svg>
-                            </button>
-                        </div>
-
-                        <div
-                            v-if="browseTab"
-                            :id="`${tabId(browseTab)}-panel`"
-                            class="lmpl-browse-body"
-                            role="tabpanel"
-                            :aria-labelledby="tabId(browseTab)"
-                        >
-                            <ol v-if="browseTab === 'chapters'" class="lmpl-browse-list">
-                                <li v-for="(chapter, index) in chapters" :key="`${chapter.startTime}-${index}`">
-                                    <button
-                                        type="button"
-                                        class="lmpl-browse-row lmpl-chapter"
-                                        :aria-current="index === currentChapter ? 'true' : undefined"
-                                        @click="pickChapter(chapter)"
-                                    >
-                                        <span class="lmpl-chapter-title">{{ chapter.title }}</span>
-                                        <span class="lmpl-chapter-time">{{ formatClock(chapter.startTime, chaptersHaveHours) }}</span>
-                                    </button>
-                                </li>
-                            </ol>
-                            <ul v-else class="lmpl-browse-list">
-                                <template v-for="row in upNextRows" :key="row.item.id">
-                                    <li v-if="row.heading" class="lmpl-browse-heading" role="presentation">{{ row.heading }}</li>
-                                    <li>
-                                        <button type="button" class="lmpl-browse-row lmpl-upnext" @click="pickUpNext(row.item.id)">
-                                            <span class="lmpl-upnext-thumb">
-                                                <img v-if="row.item.imageUrl" :src="row.item.imageUrl" alt="" loading="lazy" draggable="false" />
-                                            </span>
-                                            <span class="lmpl-upnext-text">
-                                                <span class="lmpl-upnext-title">{{ row.item.title }}</span>
-                                                <span v-if="row.item.subtitle" class="lmpl-upnext-subtitle">{{ row.item.subtitle }}</span>
-                                            </span>
-                                        </button>
-                                    </li>
-                                </template>
-                            </ul>
-                        </div>
-                    </div>
-                </template>
+                <BrowsePanel
+                    v-if="browseOpen && isFullscreen"
+                    ref="browsePanel"
+                    :chapters="chapters"
+                    :current-chapter="currentChapter"
+                    :up-next="upNext"
+                    :messages="msg"
+                    :id-prefix="instanceId"
+                    @close="closeBrowse"
+                    @pick-chapter="pickChapter"
+                    @pick-upnext="pickUpNext"
+                />
                 <!-- The videos that may follow, offered near the end; rides above the controls while they show. -->
                 <div
                     v-if="nextUpItems.length && nextUpVisible"
