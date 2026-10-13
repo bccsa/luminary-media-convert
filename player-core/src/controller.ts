@@ -396,6 +396,7 @@ export class PlayerController implements PlayerControllerApi {
             isAudioOnly:
                 munged?.isAudioOnly ??
                 (info.nativelyAudioOnly || angleId === AUDIO_ONLY_ANGLE_ID),
+            live: munged?.isLive ?? false,
             error: null,
         });
         this.refreshQualities();

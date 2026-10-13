@@ -38,6 +38,7 @@ export function createInitialState(): PlayerState {
         sleepTimer: null,
 
         isAudioOnly: false,
+        live: false,
         thumbnailsReady: false,
         error: null,
     };

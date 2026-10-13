@@ -333,6 +333,13 @@ export interface PlayerState {
     isAudioOnly: boolean;
 
     /**
+     * True for a live source: a media playlist is still being written. Its `duration` is 0, because an engine
+     * reports none for a stream with no end, so this is what tells a live stream from one whose length is not
+     * known yet.
+     */
+    live: boolean;
+
+    /**
      * True once a thumbnail sidecar has been fetched and parsed into at least
      * one cue.
      *

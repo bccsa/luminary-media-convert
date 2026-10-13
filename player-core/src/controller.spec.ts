@@ -15,6 +15,7 @@ import {
     CHAPTERS_VTT,
     CHUNKED_MEDIA_PLAYLIST,
     FakeAdapter,
+    FakeLiveServeStrategy,
     FakeServeStrategy,
     MULTI_ANGLE_MASTER,
     PLAIN_MEDIA_PLAYLIST,
@@ -74,6 +75,31 @@ function setup(
     controller.on('error', (error) => errors.push(error));
     return { adapter, controller, serveStrategy, errors, ...fake };
 }
+
+describe('PlayerController — a live source', () => {
+    const LIVE_PLAYLIST =
+        '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:4\n#EXT-X-MEDIA-SEQUENCE:7\n' +
+        '#EXTINF:4.0,\nseg7.ts\n#EXTINF:4.0,\nseg8.ts\n';
+    const liveRoutes: Record<string, RouteBody> = {
+        ...simpleRoutes,
+        [`${BASE}/stream_1080/playlist.m3u8`]: LIVE_PLAYLIST,
+        [`${BASE}/stream_720/playlist.m3u8`]: LIVE_PLAYLIST,
+        [`${BASE}/stream_480/playlist.m3u8`]: LIVE_PLAYLIST,
+        [`${BASE}/audio_hi_128kbps/playlist.m3u8`]: LIVE_PLAYLIST,
+        [`${BASE}/audio_lo_64kbps/playlist.m3u8`]: LIVE_PLAYLIST,
+    };
+
+    it('says so in its state, while a recorded one does not', async () => {
+        const live = setup(liveRoutes, {}, { serveStrategy: new FakeLiveServeStrategy() });
+        expect(live.controller.getState().live).toBe(false);
+        await live.controller.load({ masterUrl: MASTER_URL });
+        expect(live.controller.getState().live).toBe(true);
+
+        const recorded = setup(simpleRoutes);
+        await recorded.controller.load({ masterUrl: MASTER_URL });
+        expect(recorded.controller.getState().live).toBe(false);
+    });
+});
 
 describe('PlayerController — load', () => {
     it('serves a munged master even for an unencrypted, un-narrowed source', async () => {
