@@ -56,6 +56,7 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
     private var savedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
     private var controls: SkinControls? = null
     private var surface: PlayerView? = null
+    private var keepLastFrame = true
     private var onLeave: (() -> Unit)? = null
     private var onPresentation: ((String) -> Unit)? = null
     private var player: Player? = null
@@ -229,8 +230,7 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
             // The skin draws its own controls, and none of Media3's, spinner included.
             useController = false
             setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
-            // A recovery that rebuilds the source keeps the last frame up, not a black shutter, until the new picture shows.
-            setKeepContentOnPlayerReset(true)
+            setKeepContentOnPlayerReset(keepLastFrame)
             this.player = player
         }
         val controls = SkinControls(
@@ -304,6 +304,12 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         } catch (refused: IllegalArgumentException) {
             false
         }
+    }
+
+    /** As [InlinePresenter.keepLastFrame], for the full-screen picture. */
+    fun keepLastFrame(keep: Boolean) {
+        keepLastFrame = keep
+        surface?.setKeepContentOnPlayerReset(keep)
     }
 
     /** False when nothing was presented. */

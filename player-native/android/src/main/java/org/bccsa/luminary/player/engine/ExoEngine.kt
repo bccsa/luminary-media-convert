@@ -283,6 +283,9 @@ class ExoEngine(
         this.recovery = recovery
         ladder.setPolicy(recovery)
         ladder.noteSourceLoaded()
+        // A recovery loads the same video again; only another video drops the old picture.
+        keepLastFrame(nowPlaying != null && nowPlaying == loadedNowPlaying)
+        loadedNowPlaying = nowPlaying
         artworkLoader.fallback = fallbackOf(nowPlaying)
         val item = MediaItem.Builder()
             .setUri(masterUri)
@@ -325,6 +328,7 @@ class ExoEngine(
     override fun reattach() {
         val item = mediaItem ?: return
         val position = player.currentPosition
+        keepLastFrame(true)
         beginItem()
         player.setMediaSource(mediaSources.createMediaSource(item), position)
         player.prepare()
@@ -334,6 +338,14 @@ class ExoEngine(
     override fun setAppSuspended(suspended: Boolean) = ladder.setAppSuspended(suspended)
 
     override fun takeHeldReload(): PendingReload? = ladder.takeHeldReload()
+
+    /** What the last load said was playing, to tell another video from the same one loaded again. */
+    private var loadedNowPlaying: NowPlaying? = null
+
+    private fun keepLastFrame(keep: Boolean) {
+        inline?.keepLastFrame(keep)
+        presenter.keepLastFrame(keep)
+    }
 
     private fun beginItem() {
         stalled = false

@@ -38,6 +38,7 @@ class InlinePresenter(
     private var restore: Drawable? = null
     private var transparent = false
     private var tracking: View? = null
+    private var keepLastFrame = true
 
     /** Called when the view's surface has been created afresh: whatever was drawn in the last one is gone. */
     var onSurfaceCreated: (() -> Unit)? = null
@@ -83,6 +84,15 @@ class InlinePresenter(
         view.player = if (suspended) null else player
     }
 
+    /**
+     * Whether the last frame stays up while a source loads. A reload of the same video keeps it, so a
+     * recovery shows no black shutter; another video starts from black, not from the previous picture.
+     */
+    fun keepLastFrame(keep: Boolean) {
+        keepLastFrame = keep
+        videoView?.setKeepContentOnPlayerReset(keep)
+    }
+
     /** Full-screen or picture in picture holds the picture: the inline view has none. */
     fun setSuspended(suspended: Boolean) {
         this.suspended = suspended
@@ -122,8 +132,7 @@ class InlinePresenter(
         val view = PlayerView(web.context).apply {
             useController = false
             setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
-            // A recovery that rebuilds the source keeps the last frame up, not a black shutter, until the new picture shows.
-            setKeepContentOnPlayerReset(true)
+            setKeepContentOnPlayerReset(keepLastFrame)
             setBackgroundColor(Color.BLACK)
             isClickable = false
             isFocusable = false

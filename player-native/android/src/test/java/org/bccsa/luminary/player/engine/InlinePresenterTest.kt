@@ -114,4 +114,31 @@ class InlinePresenterTest {
         without.setFrame(InlineFrame(0.0, 0.0, 100.0, 100.0), player)
         assertNull(without.view)
     }
+
+    @Test
+    fun `the last frame stays up for a reload of the same video, and goes for another one`() {
+        presenter.setFrame(InlineFrame(0.0, 0.0, 100.0, 100.0), player)
+        assertTrue(keepsContent(presenter.view!!))
+
+        presenter.keepLastFrame(false)
+        assertEquals(false, keepsContent(presenter.view!!))
+
+        presenter.keepLastFrame(true)
+        assertTrue(keepsContent(presenter.view!!))
+    }
+
+    @Test
+    fun `a view made after the choice starts with it`() {
+        presenter.keepLastFrame(false)
+        presenter.setFrame(InlineFrame(0.0, 0.0, 100.0, 100.0), player)
+
+        assertEquals(false, keepsContent(presenter.view!!))
+    }
+
+    /** PlayerView has no public getter for this flag. */
+    private fun keepsContent(view: androidx.media3.ui.PlayerView): Boolean =
+        androidx.media3.ui.PlayerView::class.java
+            .getDeclaredField("keepContentOnPlayerReset")
+            .apply { isAccessible = true }
+            .getBoolean(view)
 }
