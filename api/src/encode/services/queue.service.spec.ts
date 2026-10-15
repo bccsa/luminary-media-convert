@@ -8,9 +8,13 @@ const updateStatus = vi.fn();
 const setFailed = vi.fn();
 const processSession = vi.fn<(id: string) => Promise<void>>();
 const emit = vi.fn();
+const prepareDelivery = vi.fn();
 
 const sessions = { updateStatus, setFailed } as unknown as SessionService;
-const encoder = { processSession } as unknown as EncodeService;
+const encoder = {
+    processSession,
+    prepareDelivery,
+} as unknown as EncodeService;
 const events = { emit } as unknown as SessionEventsService;
 
 function build(): QueueService {
@@ -33,10 +37,27 @@ beforeEach(() => {
     updateStatus.mockReset();
     setFailed.mockReset();
     emit.mockReset();
+    prepareDelivery.mockReset();
     processSession.mockReset().mockResolvedValue(undefined);
 });
 
 describe('QueueService — enqueueing', () => {
+    it('settles the playback URL and key before the session starts waiting', async () => {
+        const job = deferred();
+        processSession.mockReturnValue(job.promise);
+        const queue = build();
+
+        queue.enqueue('a');
+
+        expect(prepareDelivery).toHaveBeenCalledWith('a');
+        expect(prepareDelivery.mock.invocationCallOrder[0]).toBeLessThan(
+            updateStatus.mock.invocationCallOrder[0]
+        );
+
+        job.release();
+        await settle();
+    });
+
     it('marks the session queued and returns its position', async () => {
         const job = deferred();
         processSession.mockReturnValue(job.promise);

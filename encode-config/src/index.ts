@@ -3,11 +3,14 @@ export * from './types';
 export { computeLayoutKey, getStoredConfig, saveConfig } from './layoutStorage';
 export {
     ABR_LADDER,
+    CONTENT_PRESETS,
     aspectWidthForHeight,
     fpsAdjustedBitrateKbps,
     ladderFor,
+    sourceCapKbps,
+    suggestLadder,
 } from './ladder';
-export type { LadderRung } from './ladder';
+export type { ContentPreset, LadderRung, SuggestedRendition } from './ladder';
 
 /**
  * Language-code validation, for hosts that collect a language outside this form

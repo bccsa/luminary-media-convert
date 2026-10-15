@@ -4,7 +4,7 @@ import { existsSync } from 'fs';
 import { mkdir, readdir, readFile, rm, writeFile } from 'fs/promises';
 import { join, resolve } from 'path';
 import { promisify } from 'util';
-import { ffmpegBin } from './ffbin.js';
+import { ffmpegBin, ffprobeBin } from './ffbin.js';
 import { displayDimensionsOf } from './aspect.js';
 
 const execFileAsync = promisify(execFile);
@@ -341,6 +341,55 @@ export class ThumbnailService {
     }
 
     /**
+     * Whether decoding keyframes alone still yields a frame for every sampling
+     * interval. `fps=1/N` makes ffmpeg decode the whole stream to keep one frame
+     * in N * fps — for HEVC 1080p50 that was measured at 17x slower than
+     * decoding keyframes only. When keyframes are never further apart than the
+     * interval nothing is lost; with sparser ones thumbnails would repeat, so
+     * the full decode stays. Read off the packet flags of the first half minute only — no decoding — and false on
+     * anything unexpected.
+     */
+    private async keyframesDenseEnough(
+        inputPath: string,
+        trackIndex: number
+    ): Promise<boolean> {
+        try {
+            const { stdout } = await execFileAsync(
+                ffprobeBin(),
+                [
+                    '-v',
+                    'quiet',
+                    '-select_streams',
+                    `v:${trackIndex}`,
+                    '-read_intervals',
+                    '%+30',
+                    '-show_entries',
+                    'packet=pts_time,flags',
+                    '-print_format',
+                    'compact=p=0',
+                    inputPath,
+                ],
+                { timeout: 30000 }
+            );
+            const times = stdout
+                .split('\n')
+                .filter((line) => /\|flags=K/.test(line))
+                .map((line) =>
+                    parseFloat(/pts_time=([^|]*)/.exec(line)?.[1] ?? '')
+                )
+                .filter((t) => Number.isFinite(t))
+                .sort((a, b) => a - b);
+            if (times.length < 3) return false;
+            for (let i = 1; i < times.length; i++) {
+                if (times[i] - times[i - 1] > INTERVAL_SECONDS) return false;
+            }
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    /**
      * Sample the source into individual thumbnails, one every INTERVAL_SECONDS.
      *
      * Deliberately software-decoded on every platform. `-hwaccel videotoolbox`
@@ -391,6 +440,12 @@ export class ThumbnailService {
         const thumbPattern = join(thumbnailDir, `thumb_%06d.${format.ext}`);
 
         const args = [
+            ...((await this.keyframesDenseEnough(
+                opts.inputPath,
+                opts.trackIndex
+            ))
+                ? ['-skip_frame', 'nokey']
+                : []),
             '-i',
             opts.inputPath,
             '-map',

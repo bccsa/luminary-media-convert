@@ -58,7 +58,7 @@ The CMS is an ordinary web app on another origin; the encoder listens on loopbac
       masterPlaylist?, thumbnailsVtt?, hlsUrl?, segmentFormat?,
       encoder?, probeResult?, ingestTotalBytes? }
     ```
-    **The event that matters** is the first `status: "encoding"`: it carries `hlsUrl`, published at encode _start_, not at completion — the destination key is settled long before the first segment exists. The decryption key is **no longer part of any status/SSE payload**: the CMS fetches it from `GET /api/sessions/:id/key?token=read_…` → `{ maskedKeyHex }` and unmasks it (XOR with the first 16 bytes of `SHA-256(sessionId)` — self-inverse, formula published; an obscurity measure keeping raw keys out of logs/proxies, not DRM). `hlsUrl` + the unmasked key are what Luminary saves as `MediaDto { hlsUrl, hlsKey }`. `cms-mock/src/store.ts` (`captureHlsKey`) is the reference implementation.
+    **The event that matters** is the first one carrying `hlsUrl`: it is published when the encode is queued (`QueueService.enqueue` → `EncodeService.prepareDelivery`), not when it starts or completes — the destination key and the AES key are both settled long before the first segment exists, so a session waiting behind another encode can be saved straight away. The decryption key is **no longer part of any status/SSE payload**: the CMS fetches it from `GET /api/sessions/:id/key?token=read_…` → `{ maskedKeyHex }` and unmasks it (XOR with the first 16 bytes of `SHA-256(sessionId)` — self-inverse, formula published; an obscurity measure keeping raw keys out of logs/proxies, not DRM). `hlsUrl` + the unmasked key are what Luminary saves as `MediaDto { hlsUrl, hlsKey }`. `cms-mock/src/store.ts` (`captureHlsKey`) is the reference implementation.
 4. **Polling fallback** — `GET /api/sessions/:id?token=read_…` returns the same `hlsUrl`, so a CMS that reconnects mid-encode can ask again; the key comes from the key endpoint as above.
 
 ### Trust model: three token tiers plus an origin allowlist
@@ -119,7 +119,7 @@ Disk is guarded on both ends: `disk-space.ts` refuses an ingest or an encode tha
 - **Copy mode** (`-c:v copy` / `-c:a copy`) and **VBR** (CRF/CQ) per rendition and per audio group
 - **Audio groups** mapped to renditions via HLS `#EXT-X-MEDIA` `GROUP-ID`; multi-track audio with language/name attributes; mono/stereo/5.1/7.1 via `-ac`
 - **Multi-angle video**: multiple source video tracks become `TYPE=VIDEO` rendition groups in the single master (see the player contract above)
-- **HLS encryption**: AES-128 via worker threads; key hex published at encode start
+- **HLS encryption**: AES-128 via worker threads; key and `hlsUrl` published when the session is queued (the key is kept across retries)
 - **Thumbnails**: sprite sheets + WebVTT for the encoded output, plus a separate pre-encode _source storyboard_ served from `/api/sessions/:id/thumbnails/*` so the trim timeline can show frames before anything is encoded (`X-Storyboard-Complete` tells the client when sampling has finished)
 - **Waveform**: peaks computed once per source, cached on disk, served over HTTP for the trim UI and written to S3 as `waveform.json`
 

@@ -254,6 +254,8 @@ describe('ThumbnailService', () => {
             thumbs?: number;
             sprites?: number;
             failPass?: boolean;
+            /** Keyframe timestamps the cadence probe reports, one per line. */
+            keyframes?: string;
             onPass?: (args: string[]) => void;
         } = {}
     ) {
@@ -265,6 +267,10 @@ describe('ThumbnailService', () => {
                     stdout: opts.encoders ?? WEBP_ENCODERS,
                     stderr: '',
                 });
+                return;
+            }
+            if (args.includes('packet=pts_time,flags')) {
+                cb(null, { stdout: opts.keyframes ?? '', stderr: '' });
                 return;
             }
             opts.onPass?.(args);
@@ -450,6 +456,10 @@ describe('ThumbnailService', () => {
                     });
                     return;
                 }
+                if (ffargs.includes('packet=pts_time,flags')) {
+                    cb(null, { stdout: '', stderr: '' });
+                    return;
+                }
                 // Sampling: never completes during the test.
             });
         }
@@ -558,6 +568,50 @@ describe('ThumbnailService', () => {
 
             const args = passArgs(THUMBS);
             expect(args[args.indexOf('-map') + 1]).toBe('0:v:2');
+        });
+    });
+
+    describe('keyframe-only decoding', () => {
+        /** ffprobe's packet listing: the keyframes, with a delta frame between each. */
+        const keyframesAt = (...times: number[]) =>
+            times
+                .flatMap((t) => [
+                    `pts_time=${t.toFixed(6)}|flags=K__`,
+                    `pts_time=${(t + 1).toFixed(6)}|flags=___`,
+                ])
+                .join('\n') + '\n';
+
+        async function pass(keyframes: string): Promise<string[]> {
+            const tmpDir = mkdtempSync(join(tmpdir(), 'thumb-kf-'));
+            try {
+                mockFfmpeg({ thumbs: 1, keyframes });
+                await service.generateIndividualThumbs({
+                    inputPath: '/tmp/test.mkv',
+                    outputDir: tmpDir,
+                    duration: 600,
+                    trackIndex: 1,
+                    sourceWidth: 1920,
+                    sourceHeight: 1080,
+                });
+                return passArgs(THUMBS);
+            } finally {
+                rmSync(tmpDir, { recursive: true, force: true });
+            }
+        }
+
+        it('decodes keyframes only when they are never further apart than the interval', async () => {
+            const args = await pass(keyframesAt(0, 2, 4, 6));
+            expect(args.slice(0, 2)).toEqual(['-skip_frame', 'nokey']);
+        });
+
+        it('decodes every frame when a keyframe gap exceeds the interval', async () => {
+            const args = await pass(keyframesAt(0, 2, 12, 14));
+            expect(args).not.toContain('-skip_frame');
+        });
+
+        it('decodes every frame when the cadence cannot be read', async () => {
+            const args = await pass('');
+            expect(args).not.toContain('-skip_frame');
         });
     });
 
@@ -751,14 +805,14 @@ describe('ThumbnailService', () => {
 
                 await sample(tmpDir);
 
-                // encoder probe + the sampling pass, nothing else
-                expect(mockExecFile).toHaveBeenCalledTimes(2);
+                // encoder probe + keyframe cadence probe + the sampling pass
+                expect(mockExecFile).toHaveBeenCalledTimes(3);
                 const prevCallCount = mockExecFile.mock.calls.length;
 
                 await sample(tmpDir2);
 
-                // Should only have 1 additional call (sampling only, no detection)
-                expect(mockExecFile).toHaveBeenCalledTimes(prevCallCount + 1);
+                // Cadence probe and sampling only, no encoder detection
+                expect(mockExecFile).toHaveBeenCalledTimes(prevCallCount + 2);
                 const lastCall =
                     mockExecFile.mock.calls[mockExecFile.mock.calls.length - 1];
                 expect(lastCall[1]).not.toEqual(['-encoders']);
@@ -987,6 +1041,10 @@ describe('ThumbnailService', () => {
                 const args = call[1] as string[];
                 if (args[0] === '-encoders') {
                     cb(null, { stdout: WEBP_ENCODERS, stderr: '' });
+                    return;
+                }
+                if (args.includes('packet=pts_time,flags')) {
+                    cb(null, { stdout: '', stderr: '' });
                     return;
                 }
                 finish = () => cb(null, { stdout: '', stderr: '' });

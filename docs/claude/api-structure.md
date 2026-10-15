@@ -44,7 +44,7 @@ api/
 │   │       ├── queue.service.ts             # FIFO encoding queue (one at a time, graceful drain)
 │   │       ├── ffmpeg.service.ts            # FFmpeg process management, GPU detection, multi-angle master, stream-alignment probe
 │   │       ├── ffbin.ts                     # ffmpegBin()/ffprobeBin() from FFMPEG_PATH/FFPROBE_PATH, else PATH; shellQuote()
-│   │       ├── encode.service.ts            # Orchestrates the pipeline; generates the key, publishes hlsUrl at encode start
+│   │       ├── encode.service.ts            # Orchestrates the pipeline; prepareDelivery(): generates the key and publishes hlsUrl when the session is queued
 │   │       ├── encryption.service.ts        # AES-128 key/IV generation + #EXT-X-KEY injection
 │   │       ├── encryption.worker.ts         # Worker thread for segment encryption
 │   │       ├── segment-pipeline.service.ts  # Streaming encrypt → upload → byte-range pack with bounded concurrency

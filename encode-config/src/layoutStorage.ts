@@ -4,6 +4,17 @@ import type { ProbeResult, EncodeConfig } from './types';
 const STORAGE_KEY = 'luminary_encode_configs';
 
 /**
+ * Content presets live under their own key, deliberately.
+ *
+ * The saved config is an `EncodeConfig` — the very object `buildEncodeConfig()`
+ * submits — and the API validates it with `forbidNonWhitelisted`, so a preset
+ * field smuggled into that shape would come back as a 400 rather than as a
+ * remembered setting. A separate store also means a corrupt one costs only the
+ * preset, not the track labels.
+ */
+const PRESET_STORAGE_KEY = 'luminary_content_presets';
+
+/**
  * One video track's contribution to the layout fingerprint.
  *
  * The display size is appended only when it differs from the coded size, so
@@ -86,5 +97,58 @@ export function saveConfig(layoutKey: string, config: EncodeConfig): void {
     } catch {
         // A full quota or a browser that refuses to store anything. Losing the
         // suggestion is the whole cost; the form carries on regardless.
+    }
+}
+
+/** What content preset this layout was last encoded with. */
+export interface StoredContentPreset {
+    preset: string;
+    customFactor?: number;
+}
+
+/**
+ * The preset store, read the same way and for the same reasons as the config
+ * one: a store that cannot be parsed is a store with nothing in it, and the
+ * next write is entitled to replace it.
+ */
+function readPresetStore(): Record<string, StoredContentPreset> {
+    try {
+        const raw = localStorage.getItem(PRESET_STORAGE_KEY);
+        if (!raw) return {};
+        const parsed: unknown = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+            return {};
+        return parsed as Record<string, StoredContentPreset>;
+    } catch {
+        return {};
+    }
+}
+
+/**
+ * The preset last chosen for this layout, or null.
+ *
+ * Remembering it is the point of the whole feature for a weekly workflow: the
+ * same camera, the same layout and a service every Sunday should open on the
+ * preset the operator picked last week, not back at Standard for someone to
+ * set again every time. The caller validates the id — this store only promises
+ * that something was written, not that this build still knows the name.
+ */
+export function getStoredContentPreset(
+    layoutKey: string
+): StoredContentPreset | null {
+    return readPresetStore()[layoutKey] ?? null;
+}
+
+export function saveContentPreset(
+    layoutKey: string,
+    value: StoredContentPreset
+): void {
+    const store = readPresetStore();
+    store[layoutKey] = value;
+    try {
+        localStorage.setItem(PRESET_STORAGE_KEY, JSON.stringify(store));
+    } catch {
+        // Same bargain as `saveConfig`: the preset is a convenience, and the
+        // form works identically without it.
     }
 }
