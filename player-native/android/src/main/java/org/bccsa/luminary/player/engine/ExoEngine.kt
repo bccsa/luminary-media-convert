@@ -251,10 +251,10 @@ class ExoEngine(
         }
         // A new surface in the page has nothing drawn in it, and a finished item draws nothing by itself.
         inline?.onSurfaceCreated = { if (presentation == "inline") redrawEndedFrame() }
-        // A phone turned to landscape while the page shows the picture opens it full-screen, when it
-        // is playing or about to (loading): a paused video is left where the viewer put it.
+        // A phone turned to landscape while the page shows the picture opens it full-screen, playing or
+        // paused: turning it is asking for the big picture, and a paused video stays paused there.
         inline?.onRotatedToLandscape = {
-            if (inlineFrame != null && presentation == "inline" && hasVideo && this.player.playWhenReady) enterFullscreen(null)
+            if (inlineFrame != null && presentation == "inline" && hasVideo) enterFullscreen(null)
         }
     }
 

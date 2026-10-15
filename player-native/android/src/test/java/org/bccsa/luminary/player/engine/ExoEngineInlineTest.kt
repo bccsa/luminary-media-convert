@@ -190,13 +190,14 @@ class ExoEngineInlineTest {
     }
 
     @Test
-    fun `turning to landscape leaves a paused picture where the viewer put it`() {
+    fun `turning to landscape opens a paused picture full-screen and leaves it paused`() {
         load()
         call("setInlineFrame", "frame" to frame())
 
         inline.onRotatedToLandscape!!.invoke()
 
-        assertEquals(emptyList<String>(), states())
+        assertEquals(listOf("fullscreen"), states())
+        assertTrue("paused", !player.playWhenReady)
     }
 
     @Test
