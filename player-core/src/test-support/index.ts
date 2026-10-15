@@ -341,10 +341,6 @@ function makeResponse(status: number, body?: string | Uint8Array): Response {
 export interface FakeAdapterOptions {
     keyDelivery?: 'memory' | 'url';
     nativeHls?: boolean;
-    /** Default true, as on the web. */
-    variantSwitching?: boolean;
-    /** Default true, as on the web. */
-    renderText?: boolean;
     variants?: AdapterVariant[];
     audioTracks?: AdapterAudioTrack[];
     recoverResult?: boolean;
@@ -366,7 +362,6 @@ export class FakeAdapter implements PlayerAdapter {
     }> = [];
     textTracks: AdapterTextTrack[] = [];
     activeTextTrackId: string | null = null;
-    activeTextTrackHint: { label: string; lang?: string } | undefined;
     playCount = 0;
     pauseCount = 0;
     destroyed = false;
@@ -386,8 +381,8 @@ export class FakeAdapter implements PlayerAdapter {
         this.capabilities = {
             nativeHls: options.nativeHls ?? false,
             keyDelivery: options.keyDelivery ?? 'memory',
-            variantSwitching: options.variantSwitching ?? true,
-            renderText: options.renderText ?? true,
+            variantSwitching: true,
+            renderText: true,
         };
         this.variants = options.variants ?? [];
         this.audioTracks = options.audioTracks ?? [];
@@ -465,9 +460,8 @@ export class FakeAdapter implements PlayerAdapter {
         this.textTracks = tracks;
     }
 
-    setActiveTextTrack(id: string | null, track?: { label: string; lang?: string }): void {
+    setActiveTextTrack(id: string | null): void {
         this.activeTextTrackId = id;
-        this.activeTextTrackHint = track;
     }
 
     recover(category: 'network' | 'media' | 'other'): boolean {

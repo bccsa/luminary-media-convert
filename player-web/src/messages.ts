@@ -42,11 +42,6 @@ export interface PlayerMessages {
     skipBack: string;
     /** Skip-forward button label. `{seconds}` is replaced as above. */
     skipForward: string;
-    /**
-     * Where the playhead is among the chapters, above the timeline. `{index}` is the chapter it is in and `{count}` how
-     * many there are; a translation may move either.
-     */
-    chapterOf: string;
 
     // --- Fullscreen --------------------------------------------------------
     /**
@@ -58,62 +53,9 @@ export interface PlayerMessages {
 
     // --- Track menus -------------------------------------------------------
     audioMenuLabel: string;
-    /** Name of the video quality setting: its button, its tooltip and its card's title. */
-    qualityLabel: string;
-    /** Name of the audio language setting, as above. */
-    languageLabel: string;
-    /** Name of the captions setting, as above. */
-    captionsLabel: string;
-    /** Names of the volume card's plus and minus buttons. */
-    volumeUp: string;
-    volumeDown: string;
     subtitlesMenuLabel: string;
     /** The "no subtitles" entry of the subtitles menu. */
     subtitlesOff: string;
-
-    // --- Audio / video toggle ----------------------------------------------
-    /**
-     * The half of the top-right toggle that plays the picture. Labels an
-     * action, not a state: pressing it is what returns to video.
-     */
-    videoModeLabel: string;
-    /**
-     * The half that plays sound only — no video data is downloaded at all, so
-     * the wording is about bandwidth as much as about listening.
-     */
-    audioModeLabel: string;
-
-    // --- Browse panel (fullscreen) -----------------------------------------
-    /** Tab title, and heading of the chapter list. */
-    chapters: string;
-    /** Tab title of the list of videos on offer after this one. */
-    upNext: string;
-    /** Accessible name of the button that opens the panel, and of the panel itself. */
-    browse: string;
-    /** Accessible name of the panel's close button. */
-    closeBrowse: string;
-
-    // --- Up next card (fullscreen) -------------------------------------------
-    /** Heading of the strip that offers the next videos near the end, and its accessible name. */
-    nextUp: string;
-    /** Accessible name of the strip's close button, which stops the automatic advance. */
-    dismiss: string;
-
-    // --- Fullscreen audio screen ---------------------------------------------
-    /** Name of the playback speed button and its menu. */
-    speedLabel: string;
-    /** The word shown where the time left would be, for a live stream. */
-    live: string;
-    /** Name of the sleep timer button and its menu. */
-    sleepTimer: string;
-    /** The sleep timer menu's entry that turns it off. */
-    sleepOff: string;
-    /** A sleep timer entry; `{minutes}` is replaced with the number. */
-    sleepMinutes: string;
-    /** The sleep timer entry that stops playback when the chapter playing ends. */
-    sleepEndOfChapter: string;
-    /** What the sleep timer button says while one runs; `{minutes}` is the minutes left. */
-    sleepLeft: string;
 }
 
 /** Built-in English strings. Merged under any partial the host supplies. */
@@ -134,37 +76,12 @@ export const DEFAULT_MESSAGES: PlayerMessages = {
     durationLabel: 'Total time',
     skipBack: 'Skip back {seconds} seconds',
     skipForward: 'Skip forward {seconds} seconds',
-    chapterOf: 'Chapter {index} of {count}',
 
     exitFullscreen: 'Exit full screen',
 
     audioMenuLabel: 'Audio',
-    qualityLabel: 'Quality',
-    languageLabel: 'Language',
-    captionsLabel: 'Captions',
-    volumeUp: 'Volume up',
-    volumeDown: 'Volume down',
     subtitlesMenuLabel: 'Subtitles',
     subtitlesOff: 'Off',
-
-    videoModeLabel: 'Play video',
-    audioModeLabel: 'Play audio only',
-
-    chapters: 'Chapters',
-    upNext: 'Up next',
-    browse: 'Chapters and up next',
-    closeBrowse: 'Close',
-
-    nextUp: 'Up next',
-    dismiss: 'Dismiss',
-
-    speedLabel: 'Speed',
-    live: 'Live',
-    sleepTimer: 'Sleep timer',
-    sleepOff: 'Off',
-    sleepMinutes: '{minutes} minutes',
-    sleepEndOfChapter: 'End of chapter',
-    sleepLeft: '{minutes} min left',
 };
 
 /**
