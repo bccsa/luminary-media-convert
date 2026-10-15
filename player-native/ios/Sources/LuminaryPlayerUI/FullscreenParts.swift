@@ -343,15 +343,9 @@ final class RosterView: UIView {
     private var time: Double = 0
     private var markerX: CGFloat = 0
     private var duration: Double = 0
-    /// Seconds a frame stands for; the held roster's step unless a pinned one asks for its own.
-    private var step: Double?
-    /// The pinned roster is dragged and tapped, and has a button to close it.
+    /// The pinned roster is dragged: the slow scrub.
     var onPan: ((_ translationX: CGFloat, _ state: UIGestureRecognizer.State) -> Void)?
-    var onTap: ((_ x: CGFloat) -> Void)?
-    var onClose: (() -> Void)?
-    private let closeButton = UIButton(type: .system)
     private lazy var pan = UIPanGestureRecognizer(target: self, action: #selector(panned))
-    private lazy var tap = UITapGestureRecognizer(target: self, action: #selector(tapped))
     /// The frames' height, which sets their width; the strip itself reaches further, down over the buttons.
     var tileHeight: CGFloat = 0 {
         didSet { if tileHeight != oldValue { setNeedsDisplay() } }
@@ -367,26 +361,6 @@ final class RosterView: UIView {
         clipsToBounds = true
         contentMode = .redraw
         addGestureRecognizer(pan)
-        addGestureRecognizer(tap)
-        closeButton.setImage(UIImage(systemName: "xmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 14, weight: .bold)), for: .normal)
-        closeButton.tintColor = .white
-        closeButton.backgroundColor = UIColor(white: 0, alpha: 0.55)
-        closeButton.layer.cornerRadius = 16
-        closeButton.isHidden = true
-        closeButton.addAction(UIAction { [weak self] _ in self?.onClose?() }, for: .touchUpInside)
-        addSubview(closeButton)
-    }
-
-    /// Whether the roster takes the finger (pinned) or lets it through to the controls under it.
-    func setInteractive(_ on: Bool, closeLabel: String = "") {
-        isUserInteractionEnabled = on
-        closeButton.isHidden = !on
-        closeButton.accessibilityLabel = closeLabel
-    }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        closeButton.frame = CGRect(x: bounds.maxX - 40, y: 8, width: 32, height: 32)
     }
 
     /// Points to the second at the roster's tile size and `step`, or nil until there are frames.
@@ -402,10 +376,6 @@ final class RosterView: UIView {
         onPan?(pan.translation(in: self).x, pan.state)
     }
 
-    @objc private func tapped(_ tap: UITapGestureRecognizer) {
-        onTap?(tap.location(in: self).x)
-    }
-
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
@@ -414,11 +384,10 @@ final class RosterView: UIView {
         decoded.removeAll()
     }
 
-    func show(time: Double, markerX: CGFloat, duration: Double, step: Double? = nil) {
+    func show(time: Double, markerX: CGFloat, duration: Double) {
         self.time = time
         self.markerX = markerX
         self.duration = duration
-        self.step = step
         setNeedsDisplay()
     }
 
@@ -435,7 +404,7 @@ final class RosterView: UIView {
         let w = bounds.width
         let h = bounds.height
         let tileWidth = max(24, frameHeight * CGFloat(sample.w) / CGFloat(max(sample.h, 1)))
-        let step = self.step ?? Roster.step(duration: duration)
+        let step = Roster.step(duration: duration)
         for tile in Roster.tiles(
             time: time, markerX: Double(markerX), width: Double(w), tileWidth: Double(tileWidth), step: step, duration: duration
         ) {

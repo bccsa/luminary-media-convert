@@ -208,8 +208,6 @@ public struct FullscreenTexts: Equatable {
     public var mute = "Mute"
     public var unmute = "Unmute"
     public var loading = "Loading"
-    /// The button that closes the pinned frame roster.
-    public var closeRoster = "Hide frames"
     /// The panel's chapters tab.
     public var chapters = "Chapters"
     /// The panel's up-next tab, and the heading of the strip near the end.
@@ -246,7 +244,6 @@ public struct FullscreenTexts: Equatable {
         take("mute", into: &mute)
         take("unmute", into: &unmute)
         take("loading", into: &loading)
-        take("closeRoster", into: &closeRoster)
         take("chapters", into: &chapters)
         take("upNext", into: &upNext)
         take("browse", into: &browse)

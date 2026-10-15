@@ -94,26 +94,12 @@ struct ThumbnailsTests {
         #expect(Roster.step(duration: 100_000) == 15)
     }
 
-    @Test("the pinned roster's frames are a quarter of the held ones, and never under half a second")
-    func fineStep() {
-        #expect(Roster.fineStep(duration: 1200) == 2.5)
-        #expect(Roster.fineStep(duration: 100_000) == 3.75)
-        #expect(Roster.fineStep(duration: 30) == 0.5)
-    }
-
     @Test("dragging the pinned roster right goes back in time, within the media")
     func dragTime() {
         #expect(Roster.timeAfterDrag(startTime: 100, dx: 50, pointsPerSecond: 25, duration: 1000) == 98)
         #expect(Roster.timeAfterDrag(startTime: 100, dx: -50, pointsPerSecond: 25, duration: 1000) == 102)
         #expect(Roster.timeAfterDrag(startTime: 1, dx: 500, pointsPerSecond: 25, duration: 1000) == 0)
         #expect(Roster.timeAfterDrag(startTime: 999, dx: -500, pointsPerSecond: 25, duration: 1000) == 999.999)
-    }
-
-    @Test("a tap names the frame it lands on, by its distance from the marker")
-    func tapTime() {
-        #expect(Roster.timeAtTap(time: 100, x: 250, markerX: 200, pointsPerSecond: 25, duration: 1000) == 102)
-        #expect(Roster.timeAtTap(time: 100, x: 150, markerX: 200, pointsPerSecond: 25, duration: 1000) == 98)
-        #expect(Roster.timeAtTap(time: 100, x: 200, markerX: 200, pointsPerSecond: 25, duration: 1000) == 100)
     }
 
     @Test("the loader reads the VTT, then a sheet on the first ask for one of its frames")

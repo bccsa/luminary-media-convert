@@ -70,10 +70,12 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     private let roster = RosterView()
     private let rosterLabel = PillLabel()
     private var rosterFraction: Double?
-    /// The roster is pinned: left open after the finger lifted, centred on the playhead, and dragged or
-    /// tapped on its own for the slow, precise way through the video (the bar is the fast one).
+    /// The roster is pinned: left open after the finger lifted, following the playhead, and dragged on its own
+    /// for the slow, precise way through the video (the bar is the fast one).
     private var rosterPinned = false
     private var pinDrag: (startTime: Double, time: Double, moved: Bool)?
+    /// Where the pinned strip's marker stays: where the finger lifted off the timeline, in the strip's coordinates.
+    private var pinMarkerX: CGFloat = 0
     /// Where the strip rests after a seek, until playback has caught up; else it snaps back to the old time.
     private var pinAnchor: Double?
     private var pinAnchorTimeout: DispatchWorkItem?
@@ -226,8 +228,6 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
             if self.rosterPinned { self.updatePinned() }
         }
         roster.onPan = { [weak self] dx, state in self?.pinPanned(dx, state) }
-        roster.onTap = { [weak self] x in self?.pinTapped(x) }
-        roster.onClose = { [weak self] in self?.closePin() }
 
         exitButton.layers = V10Icons.fullscreenExit
         exitButton.accessibilityLabel = texts.exitFullscreen
@@ -516,7 +516,8 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
             commands.seek(position)
             if held {
                 rosterFraction = nil
-                openPin(at: position)
+                let markerX = progress.frame.minX + CGFloat(min(max(fraction, 0), 1)) * progress.frame.width - roster.frame.minX
+                openPin(at: position, markerX: markerX)
             } else {
                 hideRoster()
             }
@@ -620,12 +621,13 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
 
     // MARK: Pinned roster
 
-    private func openPin(at time: Double) {
+    private func openPin(at time: Double, markerX: CGFloat) {
         guard state.duration > 0, commands.thumbnails?.ready == true else { return }
+        pinMarkerX = markerX
         rosterPinned = true
         rosterChanged()
         visibility.pinned = true
-        roster.setInteractive(true, closeLabel: texts.closeRoster)
+        roster.isUserInteractionEnabled = true
         rest(at: time)
         pinLink?.invalidate()
         let link = CADisplayLink(target: self, selector: #selector(pinTick))
@@ -642,7 +644,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         pinDrag = nil
         pinAnchor = nil
         pinAnchorTimeout?.cancel()
-        roster.setInteractive(false)
+        roster.isUserInteractionEnabled = false
         hideRoster()
         visibility.pinned = false
     }
@@ -671,16 +673,16 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     private func updatePinned() {
         guard rosterPinned, state.duration > 0 else { return }
         placeRoster()
-        let markerX = roster.frame.width / 2
+        let markerX = min(max(pinMarkerX, 0), roster.frame.width)
         let time = min(max(pinTime, 0), state.duration)
-        roster.show(time: time, markerX: markerX, duration: state.duration, step: Roster.fineStep(duration: state.duration))
+        roster.show(time: time, markerX: markerX, duration: state.duration)
         roster.isHidden = false
-        placeRosterLabel(time, at: roster.frame.midX)
+        placeRosterLabel(time, at: roster.frame.minX + markerX)
     }
 
     private func pinPanned(_ dx: CGFloat, _ gesture: UIGestureRecognizer.State) {
         guard rosterPinned, state.duration > 0,
-              let perSecond = roster.pointsPerSecond(step: Roster.fineStep(duration: state.duration)) else { return }
+              let perSecond = roster.pointsPerSecond(step: Roster.step(duration: state.duration)) else { return }
         visibility.touched()
         switch gesture {
         case .began:
@@ -705,19 +707,6 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
             pinDrag = nil
             resumeFromScrub()
         }
-        updatePinned()
-    }
-
-    private func pinTapped(_ x: CGFloat) {
-        guard rosterPinned, state.duration > 0,
-              let perSecond = roster.pointsPerSecond(step: Roster.fineStep(duration: state.duration)) else { return }
-        visibility.touched()
-        let target = Roster.timeAtTap(
-            time: pinTime, x: Double(x), markerX: Double(roster.frame.width / 2),
-            pointsPerSecond: Double(perSecond), duration: state.duration
-        )
-        rest(at: target)
-        commands.seek(target)
         updatePinned()
     }
 
@@ -916,8 +905,8 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     // MARK: Menus
 
     private func rateItems() -> [FullscreenMenu.Item] {
-        // Fastest first, as video.js lists them.
-        fullscreenRates.reversed().map { rate in
+        // Slowest first, as Android lists them.
+        fullscreenRates.map { rate in
             .init(title: rateLabel(rate), selected: rate == state.rate) { [weak self] in
                 self?.rate = rate
                 self?.commands.setRate(rate)
