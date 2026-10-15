@@ -23,8 +23,6 @@ export {
     pickDefaultChapterTrack,
 } from './sidecars.js';
 export { parseVttCues, parseVttTimestamp } from './vtt.js';
-export { chapterIndexAt, chapterSegments } from './chapters.js';
-export type { ChapterSegment } from './chapters.js';
 
 // Liveness, and the plain-data spec a native serving layer refreshes from.
 export { describeLiveness, resolveLivePlaylist } from './policy/live.js';
@@ -100,8 +98,3 @@ export {
     parseMasterText,
     substituteMasterRefs,
 } from './pipeline/playlist-text.js';
-export {
-    findPreferredTrack,
-    matchesPreferredLanguage,
-    type LanguageTaggedTrack,
-} from './audioTrackLanguage.js';

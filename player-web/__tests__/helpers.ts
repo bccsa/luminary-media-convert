@@ -1,96 +1,69 @@
 import { vi } from 'vitest';
-import { DEFAULT_RECOVERY_POLICY, type AdapterSource } from '@luminary-media-converter/player-core';
-import type { HlsJsVideoElement } from '../src/adapter/hlsTypes';
+import { createInitialState } from '@luminary-media-converter/player-core';
+import type {
+    PlayerControllerApi,
+    PlayerState,
+    ThumbnailSpriteCue,
+} from '@luminary-media-converter/player-core';
+import { DEFAULT_MESSAGES, type PlayerMessages } from '../src/messages';
 
-/** A list the element's rendition and track lists stand in for: iterable, indexable, an event target. */
-export class FakeList<T> extends EventTarget {
-    constructor(public items: T[] = []) {
-        super();
-    }
-    get length(): number {
-        return this.items.length;
-    }
-    [Symbol.iterator](): Iterator<T> {
-        return this.items[Symbol.iterator]();
-    }
-    set(items: T[], event?: string): void {
-        this.items = items;
-        if (event) this.dispatchEvent(new Event(event));
-    }
+/** A complete, boring {@link PlayerState} with overrides applied on top. */
+export function createState(partial: Partial<PlayerState> = {}): PlayerState {
+    return { ...createInitialState(), lifecycle: 'ready', ...partial };
 }
 
-export interface FakeEngine {
-    handlers: Map<string, Set<(event: string, data: unknown) => void>>;
-    nextLevel: number;
-    currentLevel: number;
-    recoverMediaError: ReturnType<typeof vi.fn>;
-    startLoad: ReturnType<typeof vi.fn>;
-    bandwidthEstimate: number;
-    on(event: string, fn: (event: string, data: unknown) => void): void;
-    off(event: string, fn: (event: string, data: unknown) => void): void;
-    emit(event: string, data: unknown): void;
+export interface FakeController extends PlayerControllerApi {
+    /** Publishes a state patch to every subscriber. */
+    setState(patch: Partial<PlayerState>): void;
+    /** The cues `thumbnailAt` will answer from. */
+    setThumbnails(cues: ThumbnailSpriteCue[]): void;
 }
 
-export function fakeEngine(): FakeEngine {
-    const handlers = new Map<string, Set<(event: string, data: unknown) => void>>();
+/**
+ * A fake implementing the frozen {@link PlayerControllerApi}. Components are
+ * coded against the interface, so no test ever touches the concrete
+ * `PlayerController` from player-core.
+ */
+export function createFakeController(initial: Partial<PlayerState> = {}): FakeController {
+    let state = createState(initial);
+    let thumbnails: ThumbnailSpriteCue[] = [];
+    const listeners = new Set<(next: Readonly<PlayerState>) => void>();
+
     return {
-        handlers,
-        nextLevel: -1,
-        currentLevel: -1,
-        recoverMediaError: vi.fn(),
-        startLoad: vi.fn(),
-        bandwidthEstimate: 0,
-        on(event, fn) {
-            const set = handlers.get(event) ?? new Set();
-            set.add(fn);
-            handlers.set(event, set);
+        load: vi.fn(async () => {}),
+        destroy: vi.fn(),
+        play: vi.fn(async () => {}),
+        pause: vi.fn(),
+        togglePlay: vi.fn(),
+        seek: vi.fn(),
+        setPlaybackRate: vi.fn(),
+        setAngle: vi.fn(async () => {}),
+        setQuality: vi.fn(),
+        setAudioTrack: vi.fn(),
+        setSubtitleTrack: vi.fn(),
+        setChapterTrack: vi.fn(),
+        thumbnailAt: (seconds) =>
+            thumbnails.find(
+                (cue) => seconds >= cue.startTime && seconds < cue.endTime,
+            ) ?? null,
+        getState: () => state,
+        subscribe: (listener) => {
+            listeners.add(listener);
+            return () => {
+                listeners.delete(listener);
+            };
         },
-        off(event, fn) {
-            handlers.get(event)?.delete(fn);
+        on: vi.fn(() => () => {}) as PlayerControllerApi['on'],
+        setState(patch) {
+            state = { ...state, ...patch };
+            for (const listener of [...listeners]) listener(state);
         },
-        emit(event, data) {
-            for (const fn of [...(handlers.get(event) ?? [])]) fn(event, data);
+        setThumbnails(cues) {
+            thumbnails = cues;
         },
     };
 }
 
-/** What `<hlsjs-video>` exposes that the adapter reads and writes. */
-export class FakeElement extends EventTarget {
-    source: unknown = null;
-    src = '';
-    currentTime = 0;
-    duration = NaN;
-    paused = true;
-    readyState = 0;
-    playbackRate = 1;
-    buffered: { length: number; start(i: number): number; end(i: number): number } = {
-        length: 0,
-        start: () => 0,
-        end: () => 0,
-    };
-    engine: FakeEngine | null = fakeEngine();
-    videoRenditions = new FakeList<{ id: string; height?: number; bitrate?: number }>();
-    audioTracks = new FakeList<{ id: string; label: string; language: string; enabled: boolean }>();
-    textTracks = new FakeList<unknown>();
-    play = vi.fn(async () => {
-        this.paused = false;
-    });
-    pause = vi.fn(() => {
-        this.paused = true;
-    });
-    addTextTrack = vi.fn();
-    shadowRoot = null;
-}
-
-export function fakeElement(): FakeElement & HlsJsVideoElement {
-    return new FakeElement() as unknown as FakeElement & HlsJsVideoElement;
-}
-
-export function adapterSource(overrides: Partial<AdapterSource> = {}): AdapterSource {
-    return {
-        url: 'blob:master',
-        isBlob: true,
-        recovery: DEFAULT_RECOVERY_POLICY,
-        ...overrides,
-    };
+export function messages(overrides: Partial<PlayerMessages> = {}): PlayerMessages {
+    return { ...DEFAULT_MESSAGES, ...overrides };
 }

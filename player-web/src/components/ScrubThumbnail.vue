@@ -3,73 +3,114 @@ import { computed } from 'vue';
 import type { ThumbnailSpriteCue } from '@luminary-media-converter/player-core';
 
 /**
- * One frame out of a sprite sheet, with its timecode under it.
+ * One frame out of a sprite sheet.
  *
- * Drawn as a background offset rather than an `<img>`, because the frame is a crop of a sheet holding
- * many: the element is a window onto the sheet, and moving to an adjacent frame costs no new request
- * since it is the same image. The frame renders at the crop's own pixel size and the whole element is
- * then scaled to `width`; scaling the background instead would need the sheet's total width, which a
- * cue does not carry, and tile sizes differ between encodes.
+ * Drawn as a background offset rather than an `<img>`, because the frame is a
+ * crop of a sheet holding many: the element is a window onto the sheet, and
+ * moving to an adjacent frame costs no new request since it is the same image.
  *
- * The same look as the Video.js 8 player's `ScrubThumbnail`, which is the reference a native player
- * draws from.
+ * The frame renders at the crop's own pixel size and the whole element is then
+ * scaled to `width`. The alternative — scaling the background — needs the
+ * sheet's total width to compute `background-size`, and a cue does not carry it.
+ * Tile sizes differ between encodes, so anything assumed there misaligns on the
+ * first sheet that does not match.
  */
 const props = withDefaults(
     defineProps<{
-        cue: ThumbnailSpriteCue | null;
+        cue: ThumbnailSpriteCue;
         /** Displayed width in pixels. The frame scales to it, keeping its aspect. */
         width?: number;
-        /** Timecode drawn under the frame. */
-        label: string;
-        /** The chapter the frame is in, drawn beside the timecode. */
-        chapter?: string;
+        /** Timecode drawn under the frame. Omitted draws none. */
+        label?: string;
     }>(),
-    { width: 168 }
+    { width: 160 },
 );
 
 /** A cue with no `#xywh=` crop means the whole image is the frame. */
-const isWholeImage = computed(() => !props.cue || !props.cue.w || !props.cue.h);
-const scale = computed(() => (props.cue && !isWholeImage.value ? props.width / props.cue.w : 1));
+const isWholeImage = computed(() => !props.cue.w || !props.cue.h);
+
+const scale = computed(() =>
+    isWholeImage.value ? 1 : props.width / props.cue.w,
+);
 
 const frameStyle = computed(() => {
-    const cue = props.cue;
-    if (!cue) return {};
+    const { spriteUrl, x, y, w, h } = props.cue;
     if (isWholeImage.value) {
         return {
             width: `${props.width}px`,
             aspectRatio: '16 / 9',
-            backgroundImage: `url("${cue.spriteUrl}")`,
+            backgroundImage: `url("${spriteUrl}")`,
             backgroundSize: 'cover',
             backgroundPosition: 'center',
         };
     }
     return {
-        width: `${cue.w}px`,
-        height: `${cue.h}px`,
-        backgroundImage: `url("${cue.spriteUrl}")`,
+        width: `${w}px`,
+        height: `${h}px`,
+        backgroundImage: `url("${spriteUrl}")`,
         backgroundSize: 'auto',
-        backgroundPosition: `-${cue.x}px -${cue.y}px`,
+        backgroundPosition: `-${x}px -${y}px`,
         backgroundRepeat: 'no-repeat',
         transform: `scale(${scale.value})`,
-        transformOrigin: 'top left',
+        transformOrigin: 'bottom center',
     };
 });
 
-/** A transform leaves the layout box at the native crop size, so the box that clips it is sized after the scale. */
+/**
+ * Scaling with a transform leaves the element's *layout* box at the native crop
+ * size, so a parent laying this out would reserve the wrong space. These are the
+ * post-scale dimensions, for the wrapper to reserve instead.
+ */
 const boxStyle = computed(() => {
-    const cue = props.cue;
-    if (!cue) return {};
-    if (isWholeImage.value) return { width: `${props.width}px` };
-    return { width: `${Math.round(cue.w * scale.value)}px`, height: `${Math.round(cue.h * scale.value)}px` };
+    if (isWholeImage.value) return {};
+    return {
+        width: `${Math.round(props.cue.w * scale.value)}px`,
+        height: `${Math.round(props.cue.h * scale.value)}px`,
+    };
 });
 </script>
 
 <template>
-    <div class="lmpl-thumb" aria-hidden="true">
-        <div v-if="cue" class="lmpl-thumb-box" :style="boxStyle">
-            <div class="lmpl-thumb-frame" :style="frameStyle"></div>
+    <div class="lmp-thumb" aria-hidden="true">
+        <div class="lmp-thumb-box" :style="boxStyle">
+            <div class="lmp-thumb-frame" :style="frameStyle"></div>
         </div>
-        <span class="lmpl-thumb-time">{{ label }}</span>
-        <span v-if="chapter" class="lmpl-thumb-chapter">{{ chapter }}</span>
+        <span v-if="label" class="lmp-thumb-time">{{ label }}</span>
     </div>
 </template>
+
+<style>
+.lmp-thumb {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    /* Never a target: it follows a pointer that is dragging something else. */
+    pointer-events: none;
+}
+
+.lmp-thumb-box {
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    overflow: hidden;
+    border-radius: 6px;
+    border: 1px solid rgb(255 255 255 / 0.35);
+    background-color: #000;
+    box-shadow: 0 6px 20px rgb(0 0 0 / 0.55);
+}
+
+.lmp-thumb-frame {
+    flex: none;
+}
+
+.lmp-thumb-time {
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+    line-height: 1;
+    padding: 2px 5px;
+    border-radius: 4px;
+    color: #fff;
+    background: rgb(0 0 0 / 0.66);
+}
+</style>

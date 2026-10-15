@@ -7,7 +7,7 @@ must own, and why the line falls where it does.
 ## The problem in one paragraph
 
 On the web the player is JavaScript all the way down: `player-core` munges
-playlists, `HlsJsVideoAdapter` drives Video.js 10, and hls.js itself is JavaScript. When
+playlists, `VideoJsAdapter` drives Video.js, and VHS itself is JavaScript. When
 the runtime stalls — a backgrounded tab, a locked screen — all three stop
 together, so nothing is ever waiting on a callback that will not come. A native
 engine breaks that symmetry. AVPlayer and ExoPlayer keep pulling segments from
@@ -57,7 +57,6 @@ playback starts.
 | Stall detection | **Your engine** | It sees its own buffer; a wrapper timer sees a frozen playhead and cannot tell a slow request from a wedged decoder |
 | The recovery ladder | **You** (see below) | It must act during playback, which is when JavaScript may be gone |
 | Chunk warming | **You** | A JS interval is throttled or suspended exactly when a native player keeps buffering. `docs/chunk-warming.md` |
-| The sleep timer's minutes | **You**, when the capability `sleepTimer` is on | It must stop playback on time while JavaScript is gone. `player-core` hands it over as `PlayerAdapter.setSleepTimer(endsAt)` (a `Date.now()` time), and the page's own timer stays as the fallback. The end-of-chapter timer stays in `player-core`: it follows the playhead |
 | Rebuilding a munged source | **`player-core`** | Only it knows the recipe. Needs JavaScript, and is the only thing that does |
 | Live playlist refresh | **Your serving layer** | Every target-duration, forever, while frozen. See *Live* below |
 | Coming-soon polling, the state store | **`player-core`** | Nothing is playing |
@@ -85,7 +84,7 @@ Then, and only then, `error`.
 `LoadErrorHandlingPolicy` is precisely a retry-count-plus-backoff policy; wiring
 ours alongside would be two ladders on one engine, fighting. AVPlayer has no
 equivalent, so port the reference:
-`player-web/src/drivers/RecoveryLadder.ts`. It is self-contained for
+`player-web-legacy/src/drivers/RecoveryLadder.ts`. It is self-contained for
 exactly this reason — it imports one *type* from `player-core` and nothing else.
 
 ### `reattach()`
@@ -226,11 +225,11 @@ engine and nothing else, so leave it unanswered until the engine abandons it;
 failing it sends a live engine through its whole error handling - on VHS, one
 excluded rendition after another - in the moments before it is discarded.
 
-**The web implementation** is `player-web`: `BlobServeStrategy.serveLive`
+**The web implementation** is `player-web-legacy`: `BlobServeStrategy.serveLive`
 registers the spec under a synthetic `luminary://live/<n>` (a blob URL cannot
-change), and the playlist loader in `hlsLoaders.ts` answers hls.js's requests for that URI
-through the same loader the in-memory key uses, calling `resolveLivePlaylist`
-each time. It pauses with the page, as hls.js itself does — acceptable on the web,
+change), and `vhsLivePlaylistInterceptor.ts` answers VHS's requests for that URI
+on the same request seam the in-memory key uses, calling `resolveLivePlaylist`
+each time. It pauses with the page, as VHS itself does — acceptable on the web,
 and precisely what a native resolver must not do.
 
 ## A caution from the web implementation
@@ -251,22 +250,22 @@ the edge is still backhauling a cold object — and "switching down" re-requests
 *the same object* at a different offset, one the backhaul may not have reached.
 Nine seconds of progress discarded, quality floored, the wait restarted.
 
-The fix on the web is `loadPolicyConfig` in `player-web/src/adapter/hlsLoaders.ts`:
-segment requests get a time-to-first-byte of `BYTE_RANGE_TTFB_MS` (60 s) instead
-of the engine's default. If your platform has a per-request timeout with a
+The fix on the web is `player-web-legacy/src/adapter/vhsRequestTimeout.ts`:
+requests carrying a `Range` header get a backstop of ten times the target
+duration instead. If your platform has a per-request timeout with a
 bandwidth-flavoured response, check it against a cold chunk before trusting it.
 
 ## Reference implementations
 
-Everything a native adapter ports lives in `player-web/src`:
+Everything a native adapter ports lives in `player-web-legacy/src`:
 
 - **`drivers/RecoveryLadder.ts`** — the ladder, whole. The porting unit.
 - **`drivers/clock.ts`** — the monotonic-clock rule, with a name.
 - **`adapter/chunkWarming.ts`** — the warming loop (`docs/chunk-warming.md`).
-- **`adapter/hlsStallSignals.ts`** — reading an engine's own stall verdicts.
-- **`adapter/hlsLoaders.ts`** — the caution above, implemented, and the in-memory key and live playlists.
+- **`adapter/vhsStallSignals.ts`** — reading an engine's own stall verdicts.
+- **`adapter/vhsRequestTimeout.ts`** — the caution above, implemented.
 - **`serve/BlobServeStrategy.ts`** — the web's serving layer, and the shape yours takes.
-- **`adapter/HlsJsVideoAdapter.ts`** — how it is all wired to one engine.
+- **`adapter/VideoJsAdapter.ts`** — how it is all wired to one engine.
 
 Nothing in that list depends on `player-core` at runtime: they import types from
 it and no more. The contract itself is `player-core/src/types.ts`.

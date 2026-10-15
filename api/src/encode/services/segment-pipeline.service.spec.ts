@@ -582,11 +582,6 @@ describe('SegmentPipeline', () => {
          * `executeUpload` backs off 1s then 2s between its three attempts.
          * Faking only `setTimeout` collapses that wait while leaving the real
          * file I/O this path depends on to complete on its own.
-         *
-         * Bounded by wall-clock time, not by a count of turns: how many turns
-         * that I/O takes depends on the machine, and a loop that stops
-         * advancing before the work settles leaves the backoff on a faked
-         * timer nothing will ever fire.
          */
         async function settle<T>(work: Promise<T>): Promise<T> {
             let done = false;
@@ -601,13 +596,10 @@ describe('SegmentPipeline', () => {
                 }
             );
             tracked.catch(() => {}); // The caller re-awaits and gets the rejection.
-            // `Date` is real: only `setTimeout` is faked.
-            const deadline = Date.now() + 4000;
-            while (!done && Date.now() < deadline) {
+            for (let i = 0; i < 100 && !done; i++) {
                 await new Promise((r) => setImmediate(r));
                 await vi.advanceTimersByTimeAsync(2000);
             }
-            if (!done) throw new Error('upload did not settle within 4s');
             return tracked;
         }
 
