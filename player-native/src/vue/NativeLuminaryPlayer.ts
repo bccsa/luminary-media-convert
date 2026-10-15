@@ -711,9 +711,11 @@ function playGlyph() {
 
 /** `player-web`'s windowed frame, measured at phone width (plan 05): `styles.css` and video.js. */
 const STYLES = {
-    root: { position: 'relative', aspectRatio: '16 / 9', background: '#000', overflow: 'hidden' },
+    // `overflow: hidden` makes this a scroll container, where the browser stops reading its ancestors' `touch-action`:
+    // without its own, a sideways drag on the picture is taken over and cancelled before the host sees it.
+    root: { position: 'relative', aspectRatio: '16 / 9', background: '#000', overflow: 'hidden', touchAction: 'pan-y' },
     /** Transparent: native draws the video behind it. */
-    rootInline: { position: 'relative', aspectRatio: '16 / 9', background: 'transparent', overflow: 'hidden' },
+    rootInline: { position: 'relative', aspectRatio: '16 / 9', background: 'transparent', overflow: 'hidden', touchAction: 'pan-y' },
     poster: { position: 'absolute', inset: '0', width: '100%', height: '100%', objectFit: 'cover' },
     glyph: {
         position: 'absolute',
