@@ -1098,11 +1098,18 @@ const castAvailable = ref(false);
 let castObserver: MutationObserver | null = null;
 const castButtons = (): HTMLElement[] =>
     Array.from(containerEl.value?.querySelectorAll<HTMLElement>('media-cast-button, media-airplay-button') ?? []);
+// Picture in picture, likewise: the skin's button knows whether the browser can do it for this video.
+const canPictureInPicture = ref(false);
+const pipButton = (): HTMLElement | null => containerEl.value?.querySelector<HTMLElement>('media-pip-button') ?? null;
 function readCastAvailable(): void {
     castAvailable.value = castButtons().some((button) => button.getAttribute('data-availability') === 'available');
+    canPictureInPicture.value = pipButton()?.getAttribute('data-availability') === 'available';
 }
 function showCastPicker(): void {
     castButtons().find((button) => button.getAttribute('data-availability') === 'available')?.click();
+}
+function startPictureInPicture(): void {
+    pipButton()?.click();
 }
 
 function readControlsShown(): void {
@@ -1278,7 +1285,7 @@ const audioArtwork = computed(() => {
 });
 const audioChapterIndex = computed(() => chapterIndexAt(state.value.chapters, state.value.currentTime));
 
-defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, pause, castAvailable, showCastPicker });
+defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, pause, castAvailable, showCastPicker, canPictureInPicture, startPictureInPicture });
 </script>
 
 <template>
