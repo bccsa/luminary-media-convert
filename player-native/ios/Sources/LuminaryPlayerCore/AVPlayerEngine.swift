@@ -109,14 +109,15 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
             self?.events?.presentationChanged((active ? Presentation.pip : Presentation.inline).rawValue)
         }
         inline?.onRotatedToLandscape = { [weak self] in
-            // Before the picture's size is known the turn counts: a viewer who turns the phone while
-            // the video loads wants the big picture, and full-screen has its own spinner. A video
-            // that turns out upright is let go of once its size is known (`leaveIfUpright`).
+            // Turning the phone is asking for the big picture, playing or paused: a paused video opens
+            // full-screen and stays paused there. Before the picture's size is known the turn counts too,
+            // and full-screen has its own spinner; a video that turns out upright is let go of once its
+            // size is known (`leaveIfUpright`).
             guard let self, self.hasVideo else { return }
             // Turned before anything plays and before the size is known: the page starts playback
             // a moment later (`play`), and the turn is remembered until then.
             if !self.intendedPlaying && !self.pictureSizeKnown { self.turnedWhileLoading = true; return }
-            guard self.intendedPlaying, self.videoIsLandscape || !self.pictureSizeKnown else { return }
+            guard self.videoIsLandscape || !self.pictureSizeKnown else { return }
             self.fullscreenBeforeSizeKnown = !self.pictureSizeKnown
             self.enterFullscreen(texts: nil, browse: nil)
         }
