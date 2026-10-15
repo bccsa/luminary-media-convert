@@ -13,9 +13,10 @@ final class PlayerLayerView: UIView {
     var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
 }
 
-/// Native full-screen, drawn to `player-web`'s full-screen skin (plan 05): the picture, a 30%
-/// scrim, play/pause and the skips in the middle, a row of menus at the top left, the progress
-/// bar and the time along the bottom, exit at the bottom right. ``FullscreenControlsLayout`` and
+/// Native full-screen, drawn to the Video.js 10 skin as Android's is (plan 05): play/pause and the
+/// skips in the middle; under them the timeline, with the time played before it and the time left
+/// after it; and under that one row of buttons, the settings at the left and AirPlay, picture in
+/// picture and leaving at the right, all on a fade rising from the bottom edge. ``FullscreenControlsLayout`` and
 /// ``FullscreenControlsVisibility`` decide what shows; this draws it. The viewer's actions go to
 /// the engine through ``FullscreenCommands``; the picture is read straight from the player.
 final class FullscreenViewController: UIViewController, UIGestureRecognizerDelegate {
@@ -37,13 +38,13 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     private let spinner = SpinnerView()
     private let skipBack = GlyphButton(size: Skin.skip, iconSize: Skin.skipIcon, circle: true)
     private let skipForward = GlyphButton(size: Skin.skip, iconSize: Skin.skipIcon, circle: true)
-    private let audioButton = GlyphButton(size: Skin.control, iconSize: Skin.icon)
-    private let pipButton = GlyphButton(size: Skin.control, iconSize: Skin.icon)
-    private let subtitlesButton = GlyphButton(size: Skin.control, iconSize: Skin.icon)
-    private let rateButton = GlyphButton(size: Skin.control, iconSize: Skin.icon)
-    private let muteButton = GlyphButton(size: Skin.control, iconSize: Skin.icon)
-    private let exitButton = GlyphButton(size: Skin.control, iconSize: Skin.icon)
-    private let browseButton = GlyphButton(size: Skin.control, iconSize: Skin.icon)
+    private let audioButton = GlyphButton(size: Skin.rowButton, iconSize: Skin.icon)
+    private let pipButton = GlyphButton(size: Skin.rowButton, iconSize: Skin.icon)
+    private let subtitlesButton = GlyphButton(size: Skin.rowButton, iconSize: Skin.icon)
+    private let rateButton = GlyphButton(size: Skin.rowButton, iconSize: Skin.icon)
+    private let muteButton = GlyphButton(size: Skin.rowButton, iconSize: Skin.icon)
+    private let exitButton = GlyphButton(size: Skin.rowButton, iconSize: Skin.icon)
+    private let browseButton = GlyphButton(size: Skin.rowButton, iconSize: Skin.icon)
     /// Apple's own AirPlay control: it draws the glyph, shows casting in its tint, and opens the
     /// system's device list. Hidden unless the detector finds a device to send to.
     private let airPlayButton = AVRoutePickerView()
@@ -77,6 +78,15 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     private var pinAnchor: Double?
     private var pinAnchorTimeout: DispatchWorkItem?
     private var pinLink: CADisplayLink?
+    /// Where the timeline's row ends while the frames are down: they rise from the bottom edge to it.
+    private var rowRest: CGFloat = 0
+    /// The frames last laid out as up or down.
+    private var rosterWasUp = false
+    /// Playback paused for a scrub, to start again when the finger lifts: a playhead that keeps moving under the
+    /// finger makes the frames drift and the landing a guess.
+    private var resumeAfterScrub = false
+    /// The time left reads as the whole length instead, as the web's does when pressed.
+    private var showTotal = false
 
     private var state = FullscreenControlsState()
     private var layout: FullscreenControlsLayout?
@@ -193,6 +203,8 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         remainingLabel.font = Skin.text
         remainingLabel.textColor = .white
         remainingLabel.textAlignment = .right
+        remainingLabel.isUserInteractionEnabled = true
+        remainingLabel.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(toggleTotal)))
         controls.addSubview(remainingLabel)
         chapterLabel.font = .systemFont(ofSize: 13, weight: .medium)
         chapterLabel.textColor = .white
@@ -288,48 +300,58 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         let area = view.bounds.inset(by: view.safeAreaInsets)
         let centre = CGPoint(x: area.midX, y: area.midY)
         let scale = Skin.scale(forWidth: area.width)
-        // The fade covers the foot of the picture: the bottom row and the room the roster lifts into.
-        let fadeHeight = min(view.bounds.height, (Skin.control + 120) * scale)
-        fade.frame = CGRect(x: 0, y: view.bounds.height - fadeHeight, width: view.bounds.width, height: fadeHeight)
+        let edge = Skin.edge(forWidth: view.bounds.width)
 
         playPause.frame = square(Skin.play * scale, at: centre)
         spinner.frame = playPause.frame
         skipBack.frame = square(Skin.skip * scale, at: CGPoint(x: centre.x - Skin.skipOffset * scale, y: centre.y - Skin.skipLift))
         skipForward.frame = square(Skin.skip * scale, at: CGPoint(x: centre.x + Skin.skipOffset * scale, y: centre.y - Skin.skipLift))
 
-        // The top row, in `player-web`'s order, closing up around what is hidden.
-        var x = area.minX
-        for button in [audioButton, pipButton, airPlayButton, subtitlesButton, rateButton, muteButton, browseButton] as [UIView] where !button.isHidden {
-            button.frame = CGRect(x: x, y: area.minY, width: Skin.control, height: Skin.control)
-            x += Skin.control
+        // One row of buttons along the bottom: the settings at the left, AirPlay, picture in picture and leaving at
+        // the right, closing up around what is hidden. Their own padding keeps the glyphs on the line of the
+        // timeline's ends.
+        let side = Skin.rowButton * scale
+        let rowY = area.maxY - Skin.columnBottom * scale - side
+        var left = area.minX + edge - 8 * scale
+        for button in [muteButton, audioButton, rateButton, subtitlesButton, browseButton] as [UIView] where !button.isHidden {
+            button.frame = CGRect(x: left + 1, y: rowY, width: side, height: side)
+            left += side + 2
+        }
+        var right = area.maxX - edge + 8 * scale
+        for button in [exitButton, pipButton, airPlayButton] as [UIView] where !button.isHidden {
+            right -= side + 2
+            button.frame = CGRect(x: right + 1, y: rowY, width: side, height: side)
         }
 
-        exitButton.frame = CGRect(x: area.maxX - Skin.control, y: area.maxY - Skin.control, width: Skin.control, height: Skin.control)
-        // The bottom row: what has played, the bar, what is left, then the exit button's corner.
-        let rowMid = area.maxY - Skin.control / 2
-        timeLabel.sizeToFit()
-        remainingLabel.sizeToFit()
-        let timeWidth = max(timeLabel.bounds.width, remainingLabel.bounds.width, 40 * scale)
-        timeLabel.frame = CGRect(
-            x: area.minX + 8, y: rowMid - timeLabel.bounds.height / 2, width: timeWidth, height: timeLabel.bounds.height
+        // Over the buttons, the timeline between the time played and the time left. It lifts onto the frames
+        // while they are up, the track resting on their top edge.
+        rowRest = rowY
+        let rowHeight = Skin.timelineRow * scale
+        let restingY = rowY - rowHeight
+        let timelineY = restingY - (rosterUp ? rosterHeight(area.width) - Skin.trackInset * scale : 0)
+        for label in [timeLabel, remainingLabel] {
+            label.font = .monospacedDigitSystemFont(ofSize: 13 * scale, weight: .medium)
+            label.sizeToFit()
+        }
+        let elapsedWidth = max(timeLabel.bounds.width, 40 * scale)
+        let remainingWidth = max(remainingLabel.bounds.width, 40 * scale)
+        timeLabel.frame = CGRect(x: area.minX + edge, y: timelineY, width: elapsedWidth, height: rowHeight)
+        remainingLabel.frame = CGRect(x: area.maxX - edge - remainingWidth, y: timelineY, width: remainingWidth, height: rowHeight)
+        let gap = Skin.timeGap * scale
+        progress.frame = CGRect(
+            x: timeLabel.frame.maxX + gap, y: timelineY,
+            width: max(remainingLabel.frame.minX - gap - timeLabel.frame.maxX - gap, 0), height: rowHeight
         )
-        let barEnd = area.maxX - Skin.control
-        let remainingWidth = remainingLabel.text?.isEmpty == false ? timeWidth : 0
-        remainingLabel.frame = CGRect(
-            x: barEnd - remainingWidth, y: rowMid - remainingLabel.bounds.height / 2,
-            width: remainingWidth, height: remainingLabel.bounds.height
-        )
-        let barStart = timeLabel.text?.isEmpty == false ? timeLabel.frame.maxX + Skin.timeGap : area.minX + Skin.progressInset
-        let barStop = remainingWidth > 0 ? remainingLabel.frame.minX - Skin.timeGap : barEnd
-        progress.frame = CGRect(x: barStart, y: area.maxY - Skin.control, width: max(barStop - barStart, 0), height: Skin.control)
         progress.scale = scale
-        // The chapter line sits just over the bar, from the time's edge to the bar's end.
+        // The chapter line sits just over the timeline, the width of the column.
         chapterLabel.font = .systemFont(ofSize: 13 * scale, weight: .medium)
         let chapterHeight = chapterLabel.font.lineHeight.rounded(.up)
         chapterLabel.frame = CGRect(
-            x: area.minX + 8, y: progress.frame.midY - Skin.knob / 2 - 2 - chapterHeight,
-            width: max(barStop - area.minX - 8, 0), height: chapterHeight
+            x: area.minX + edge, y: timelineY - 2 * scale - chapterHeight, width: max(area.width - 2 * edge, 0), height: chapterHeight
         )
+        // The fade rises from the bottom edge to the top of the column, so white controls read over a bright picture.
+        let columnTop = restingY - (chapterLabel.isHidden ? 0 : chapterHeight + 2 * scale) - Skin.columnTop * scale
+        fade.frame = CGRect(x: 0, y: columnTop, width: view.bounds.width, height: max(view.bounds.maxY - columnTop, 0))
 
         menu.map(place)
         panel?.frame = view.bounds
@@ -442,7 +464,11 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         // While the finger is on the bar the times follow it, as the roster's label does.
         var shown = next
         if let held = scrubbing { shown.position = held }
-        let (elapsed, remaining) = timeTexts(shown)
+        var (elapsed, remaining) = timeTexts(shown)
+        if showTotal, !shown.live {
+            let total = max(shown.duration, shown.position)
+            remaining = formatTime(total, guide: total)
+        }
         if timeLabel.text != elapsed || remainingLabel.text != remaining {
             timeLabel.text = elapsed
             remainingLabel.text = remaining
@@ -487,15 +513,33 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
             scrubbing = nil
             // A roster the press had open stays open, centred on where the video is going.
             let held = rosterFraction != nil && commands.thumbnails?.ready == true
-            hideRoster()
             commands.seek(position)
-            if held { openPin(at: position) }
+            if held {
+                rosterFraction = nil
+                openPin(at: position)
+            } else {
+                hideRoster()
+            }
+            resumeFromScrub()
         } else {
+            if scrubbing == nil { pauseForScrub() }
             scrubbing = position
             if rosterPinned { closePin() }
             if commands.thumbnails?.ready == true { updateRoster(fraction) }
         }
         refresh()
+    }
+
+    private func pauseForScrub() {
+        guard !resumeAfterScrub, state.playing else { return }
+        resumeAfterScrub = true
+        commands.pause()
+    }
+
+    private func resumeFromScrub() {
+        guard resumeAfterScrub else { return }
+        resumeAfterScrub = false
+        commands.play()
     }
 
     // MARK: Roster
@@ -505,33 +549,73 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         min(340, max(168, width / 6)) * 9 / 16
     }
 
-    private func updateRoster(_ fraction: Double) {
-        guard state.duration > 0 else { return }
-        let fraction = min(max(fraction, 0), 1)
-        rosterFraction = fraction
+    /// The frames are up: held from the timeline, or pinned open after it.
+    private var rosterUp: Bool { rosterFraction != nil || rosterPinned }
+
+    /// From the bottom edge over the buttons up to where the timeline rests; the frames are drawn at the hover
+    /// preview's height.
+    private func placeRoster() {
         let area = view.bounds.inset(by: view.safeAreaInsets)
         let height = rosterHeight(area.width)
-        // The strip rests on the bottom row, the whole width of the safe area.
-        roster.frame = CGRect(x: area.minX, y: area.maxY - Skin.control - height, width: area.width, height: height)
-        let markerX = progress.frame.minX + CGFloat(fraction) * progress.frame.width - roster.frame.minX
-        let time = fraction * state.duration
-        roster.show(time: time, markerX: min(max(markerX, 0), roster.frame.width), duration: state.duration)
-        roster.isHidden = false
+        let top = rowRest - height
+        roster.tileHeight = height
+        roster.frame = CGRect(x: area.minX, y: top, width: area.width, height: max(view.bounds.maxY - top, height))
+    }
+
+    /// The time over the lifted timeline, centred on `x` and kept inside the safe area.
+    private func placeRosterLabel(_ time: Double, at x: CGFloat) {
+        let area = view.bounds.inset(by: view.safeAreaInsets)
+        let scale = Skin.scale(forWidth: area.width)
         rosterLabel.text = formatTime(time, guide: state.duration)
         rosterLabel.sizeToFit()
         let half = rosterLabel.bounds.width / 2
-        let centre = min(max(roster.frame.minX + markerX, area.minX + half + 8), area.maxX - half - 8)
+        let centre = min(max(x, area.minX + half + 8), area.maxX - half - 8)
         rosterLabel.frame = CGRect(
-            x: centre - half, y: roster.frame.minY - rosterLabel.bounds.height - 6,
+            x: centre - half, y: progress.frame.minY - rosterLabel.bounds.height - 8 * scale,
             width: rosterLabel.bounds.width, height: rosterLabel.bounds.height
         )
         rosterLabel.isHidden = false
     }
 
+    /// The frames came up or went down: the timeline lifts onto them or settles back, and nothing but the two stays
+    /// while they are up, since the buttons would show through behind the strip and the fade would only dim it.
+    private func rosterChanged() {
+        let up = rosterUp
+        guard up != rosterWasUp else { return }
+        rosterWasUp = up
+        progress.onRoster = up
+        let parts: [UIView] = [
+            muteButton, audioButton, rateButton, subtitlesButton, browseButton, airPlayButton, pipButton, exitButton,
+            playPause, spinner, skipBack, skipForward, fade,
+        ]
+        UIView.animate(withDuration: 0.18) {
+            parts.forEach { $0.alpha = up ? 0 : 1 }
+            self.view.setNeedsLayout()
+            self.view.layoutIfNeeded()
+        }
+    }
+
+    private func updateRoster(_ fraction: Double) {
+        guard state.duration > 0 else { return }
+        let fraction = min(max(fraction, 0), 1)
+        rosterFraction = fraction
+        rosterChanged()
+        placeRoster()
+        // The marker sits under the finger.
+        let markerX = progress.frame.minX + CGFloat(fraction) * progress.frame.width - roster.frame.minX
+        let time = fraction * state.duration
+        roster.show(time: time, markerX: min(max(markerX, 0), roster.frame.width), duration: state.duration)
+        roster.isHidden = false
+        placeRosterLabel(time, at: roster.frame.minX + markerX)
+    }
+
     private func hideRoster() {
         rosterFraction = nil
-        roster.isHidden = true
-        rosterLabel.isHidden = true
+        if !rosterPinned {
+            roster.isHidden = true
+            rosterLabel.isHidden = true
+        }
+        rosterChanged()
     }
 
     // MARK: Pinned roster
@@ -539,6 +623,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     private func openPin(at time: Double) {
         guard state.duration > 0, commands.thumbnails?.ready == true else { return }
         rosterPinned = true
+        rosterChanged()
         visibility.pinned = true
         roster.setInteractive(true, closeLabel: texts.closeRoster)
         rest(at: time)
@@ -585,21 +670,12 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
 
     private func updatePinned() {
         guard rosterPinned, state.duration > 0 else { return }
-        let area = view.bounds.inset(by: view.safeAreaInsets)
-        let height = rosterHeight(area.width)
-        roster.frame = CGRect(x: area.minX, y: area.maxY - Skin.control - height, width: area.width, height: height)
+        placeRoster()
         let markerX = roster.frame.width / 2
         let time = min(max(pinTime, 0), state.duration)
         roster.show(time: time, markerX: markerX, duration: state.duration, step: Roster.fineStep(duration: state.duration))
         roster.isHidden = false
-        rosterLabel.text = formatTime(time, guide: state.duration)
-        rosterLabel.sizeToFit()
-        let half = rosterLabel.bounds.width / 2
-        rosterLabel.frame = CGRect(
-            x: roster.frame.midX - half, y: roster.frame.minY - rosterLabel.bounds.height - 6,
-            width: rosterLabel.bounds.width, height: rosterLabel.bounds.height
-        )
-        rosterLabel.isHidden = false
+        placeRosterLabel(time, at: roster.frame.midX)
     }
 
     private func pinPanned(_ dx: CGFloat, _ gesture: UIGestureRecognizer.State) {
@@ -608,6 +684,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         visibility.touched()
         switch gesture {
         case .began:
+            pauseForScrub()
             pinDrag = (pinTime, pinTime, false)
         case .changed:
             guard let drag = pinDrag else { return }
@@ -623,8 +700,10 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
                 rest(at: drag.time)
                 commands.seek(drag.time)
             }
+            resumeFromScrub()
         default:
             pinDrag = nil
+            resumeFromScrub()
         }
         updatePinned()
     }
@@ -643,12 +722,23 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     }
 
     @objc private func tapped() {
+        if rosterPinned {
+            closePin()
+            visibility.touched()
+            return
+        }
         if menu != nil {
             closeMenu()
             visibility.touched()
             return
         }
         visibility.tappedPicture()
+    }
+
+    @objc private func toggleTotal() {
+        showTotal.toggle()
+        visibility.touched()
+        refresh()
     }
 
     @objc private func doubleTapped() {
@@ -659,7 +749,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
         var view = touch.view
         while let current = view, current !== self.view {
-            if current is UIControl || current === progress || current === roster || current is FullscreenMenu
+            if current is UIControl || current === progress || current === roster || current === remainingLabel || current is FullscreenMenu
                 || current is BrowsePanel || current is NextUpStrip { return false }
             view = current.superview
         }
@@ -801,7 +891,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         let shown = visibility.visible
         let bottom: CGFloat
         if shown {
-            bottom = (chapterLabel.isHidden ? progress.frame.midY - Skin.knob / 2 : chapterLabel.frame.minY) - 8
+            bottom = (chapterLabel.isHidden ? progress.frame.minY : chapterLabel.frame.minY) - 8
         } else {
             bottom = area.maxY - 16
         }
@@ -881,12 +971,12 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         visibility.hold()
     }
 
-    /// Beside its button, a little down, as video.js opens it; kept on screen.
+    /// Centred over its button and just above it, kept inside the screen.
     private func place(_ menu: FullscreenMenu) {
-        guard let button = [audioButton, pipButton, subtitlesButton, rateButton, muteButton].first(where: { $0.hash == menu.tag }) else { return }
+        guard let button = [audioButton, subtitlesButton, rateButton].first(where: { $0.hash == menu.tag }) else { return }
         var frame = menu.bounds
-        frame.origin = CGPoint(x: button.frame.minX + Skin.control, y: button.frame.minY + 16)
-        frame.origin.y = min(frame.origin.y, view.bounds.maxY - frame.height - 8)
+        frame.origin.x = min(max(button.frame.midX - frame.width / 2, 8), max(view.bounds.width - frame.width - 8, 8))
+        frame.origin.y = max(button.frame.minY - frame.height - 4, 8)
         menu.frame = frame
     }
 
@@ -911,8 +1001,8 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     }
 }
 
-/// The progress bar: a 4 pt rounded track, what is loaded, what is played and a knob, cut at the
-/// chapter starts. Dragging or tapping it seeks.
+/// The timeline: thick and round with no knob, the fill being the playhead, cut at the chapter starts. The track
+/// grows a little while held, and stays so while the frames are under it. Dragging or tapping it seeks.
 final class ProgressBar: UIView {
     /// The fraction the viewer points at, and whether they let go.
     var onScrub: ((Double, Bool) -> Void)?
@@ -920,27 +1010,30 @@ final class ProgressBar: UIView {
     var cuts: [Double] = [] {
         didSet { if cuts != oldValue { setNeedsLayout() } }
     }
-    /// The skin's scale, which the gaps between chapters grow with.
+    /// The skin's scale, which the track and the gaps between chapters grow with.
     var scale: CGFloat = 1 {
         didSet { if scale != oldValue { setNeedsLayout() } }
     }
+    /// The frames are under the bar: it is as thick as when held.
+    var onRoster = false {
+        didSet { if onRoster != oldValue { setNeedsLayout() } }
+    }
 
-    /// The three bars, masked together so a cut goes through all of them; the knob stays whole.
+    /// The three bars, masked together so a cut goes through all of them.
     private let bars = UIView()
     private let cutMask = CAShapeLayer()
     private let track = UIView()
     private let loaded = UIView()
     private let played = UIView()
-    private let knob = UIView()
     private var playedFraction: Double = 0
     private var loadedFraction: Double = 0
+    private var held = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        track.backgroundColor = Skin.progressTrack
-        loaded.backgroundColor = Skin.progressLoaded
+        track.backgroundColor = Skin.trackColor
+        loaded.backgroundColor = Skin.loadedColor
         played.backgroundColor = .white
-        knob.backgroundColor = .white
         bars.isUserInteractionEnabled = false
         addSubview(bars)
         for part in [track, loaded, played] {
@@ -948,8 +1041,6 @@ final class ProgressBar: UIView {
             bars.addSubview(part)
         }
         cutMask.fillRule = .evenOdd
-        knob.isUserInteractionEnabled = false
-        addSubview(knob)
         addGestureRecognizer(UIPanGestureRecognizer(target: self, action: #selector(panned)))
         addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(tapped)))
         isAccessibilityElement = true
@@ -968,8 +1059,8 @@ final class ProgressBar: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         bars.frame = bounds
-        let y = (bounds.height - Skin.progressHeight) / 2
-        let radius = Skin.progressHeight / 2
+        let thickness = (held || onRoster ? Skin.trackHeld : Skin.track) * scale
+        let y = (bounds.height - thickness) / 2
         if cuts.isEmpty {
             bars.layer.mask = nil
         } else {
@@ -983,24 +1074,24 @@ final class ProgressBar: UIView {
             cutMask.path = path.cgPath
             bars.layer.mask = cutMask
         }
-        track.frame = CGRect(x: 0, y: y, width: bounds.width, height: Skin.progressHeight)
-        loaded.frame = CGRect(x: 0, y: y, width: bounds.width * loadedFraction, height: Skin.progressHeight)
-        played.frame = CGRect(x: 0, y: y, width: bounds.width * playedFraction, height: Skin.progressHeight)
-        for part in [track, loaded, played] { part.layer.cornerRadius = radius }
-        knob.frame = CGRect(
-            x: bounds.width * playedFraction - Skin.knob / 2, y: bounds.midY - Skin.knob / 2,
-            width: Skin.knob, height: Skin.knob
-        )
-        knob.layer.cornerRadius = Skin.knob / 2
+        track.frame = CGRect(x: 0, y: y, width: bounds.width, height: thickness)
+        loaded.frame = CGRect(x: 0, y: y, width: bounds.width * loadedFraction, height: thickness)
+        played.frame = CGRect(x: 0, y: y, width: bounds.width * playedFraction, height: thickness)
+        for part in [track, loaded, played] { part.layer.cornerRadius = thickness / 2 }
     }
 
     @objc private func panned(_ pan: UIPanGestureRecognizer) {
         let fraction = Double(pan.location(in: self).x / max(bounds.width, 1))
         switch pan.state {
-        case .began, .changed: onScrub?(fraction, false)
-        case .ended, .cancelled: onScrub?(fraction, true)
+        case .began, .changed:
+            held = true
+            onScrub?(fraction, false)
+        case .ended, .cancelled:
+            held = false
+            onScrub?(fraction, true)
         default: break
         }
+        setNeedsLayout()
     }
 
     @objc private func tapped(_ tap: UITapGestureRecognizer) {

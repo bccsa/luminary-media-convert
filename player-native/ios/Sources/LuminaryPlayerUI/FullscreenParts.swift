@@ -7,8 +7,6 @@ import LuminaryPlayerCore
 
 /// The skin's measures and colours, taken from `player-web` at iPhone landscape size (plan 05).
 enum Skin {
-    /// The top row's buttons and the corner buttons.
-    static let control: CGFloat = 44
     /// video.js draws an icon at 1.8 em: 0.875 rem → 25 pt.
     static let icon: CGFloat = 22
     /// The Video.js 10 centre cluster: play 80, the skips 56 round, 32 between the parts, on one line.
@@ -22,17 +20,32 @@ enum Skin {
     static let skipLift: CGFloat = 0
     /// `--lmpl-s`: one up to 900 pt wide, then 1.25, then 1.6, so the controls are not a stamp on an iPad.
     static func scale(forWidth width: CGFloat) -> CGFloat { width >= 1400 ? 1.6 : width >= 900 ? 1.25 : 1 }
+    /// `--lmpl-edge`: how far the controls keep in from the sides.
+    static func edge(forWidth width: CGFloat) -> CGFloat {
+        if width >= 1400 { return min(max(width * 0.06, 56), 200) }
+        if width >= 900 { return min(max(width * 0.05, 32), 110) }
+        return min(max(width * 0.05, 20), 64)
+    }
+    /// The bottom row's buttons, before scaling.
+    static let rowButton: CGFloat = 40
+    /// The timeline row: tall enough to hit, the track drawn in its middle.
+    static let timelineRow: CGFloat = 30
+    /// The track at rest, and while held or resting on the frames.
+    static let track: CGFloat = 12
+    static let trackHeld: CGFloat = 16
+    /// How far the held track's bottom sits above the row's: the row lifts by the frames' height less this.
+    static let trackInset: CGFloat = 7
+    /// The column the controls stand in: room above them for the fade, and below them to the edge.
+    static let columnTop: CGFloat = 12 + 72
+    static let columnBottom: CGFloat = 14
     /// The gap the elapsed and remaining times keep from the bar.
     static let timeGap: CGFloat = 12
-    static let progressHeight: CGFloat = 4
-    static let knob: CGFloat = 12
-    /// The progress bar's inset from the leading edge.
-    static let progressInset: CGFloat = 18
     /// The fade the controls stand on: dark at the foot of the picture, clear above it.
     static let fadeColors = [UIColor(white: 0, alpha: 0.75), UIColor(white: 0, alpha: 0.4), UIColor(white: 0, alpha: 0)]
+    /// The track, what is loaded, and what has played.
+    static let trackColor = UIColor(white: 1, alpha: 0.26)
+    static let loadedColor = UIColor(white: 1, alpha: 0.4)
     static let fadeLocations: [NSNumber] = [0, 0.55, 1]
-    static let progressTrack = UIColor(red: 115 / 255, green: 133 / 255, blue: 159 / 255, alpha: 0.5)
-    static let progressLoaded = UIColor(red: 115 / 255, green: 133 / 255, blue: 159 / 255, alpha: 0.75)
     static let text = UIFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
     /// video.js's rate label: 1.5 em of 0.875 rem.
     static let rateText = UIFont.systemFont(ofSize: 21)
@@ -304,10 +317,10 @@ final class FullscreenMenu: UIView {
             button.layer.cornerRadius = 9
             if item.selected {
                 button.backgroundColor = UIColor(white: 1, alpha: 0.12)
-                let check = UIImageView(image: UIImage(systemName: "checkmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 13, weight: .bold)))
-                check.tintColor = .white
-                check.contentMode = .center
-                check.frame = CGRect(x: rowWidth - 30, y: 0, width: 20, height: Self.itemHeight)
+                let check = GlyphButton(size: 18, iconSize: 18)
+                check.layers = V10Icons.check
+                check.isAccessibilityElement = false
+                check.frame = CGRect(x: rowWidth - 28, y: (Self.itemHeight - 18) / 2, width: 18, height: 18)
                 check.isUserInteractionEnabled = false
                 button.addSubview(check)
                 button.accessibilityTraits.insert(.selected)
@@ -339,6 +352,10 @@ final class RosterView: UIView {
     private let closeButton = UIButton(type: .system)
     private lazy var pan = UIPanGestureRecognizer(target: self, action: #selector(panned))
     private lazy var tap = UITapGestureRecognizer(target: self, action: #selector(tapped))
+    /// The frames' height, which sets their width; the strip itself reaches further, down over the buttons.
+    var tileHeight: CGFloat = 0 {
+        didSet { if tileHeight != oldValue { setNeedsDisplay() } }
+    }
     /// Decoded sheets, by address; the data itself lives in ``Thumbnails``' own cache.
     private var decoded: [String: CGImage] = [:]
 
@@ -375,7 +392,10 @@ final class RosterView: UIView {
     /// Points to the second at the roster's tile size and `step`, or nil until there are frames.
     func pointsPerSecond(step: Double) -> CGFloat? {
         guard let sample = frames?.sample(), step > 0 else { return nil }
-        return max(24, bounds.height * CGFloat(sample.w) / CGFloat(max(sample.h, 1))) / CGFloat(step)
+        return max(24, frameHeight * CGFloat(sample.w) / CGFloat(max(sample.h, 1))) / CGFloat(step)
+    }
+
+    private var frameHeight: CGFloat { tileHeight > 0 ? tileHeight : bounds.height
     }
 
     @objc private func panned(_ pan: UIPanGestureRecognizer) {
@@ -414,7 +434,7 @@ final class RosterView: UIView {
         guard let frames, let context = UIGraphicsGetCurrentContext(), let sample = frames.sample() else { return }
         let w = bounds.width
         let h = bounds.height
-        let tileWidth = max(24, h * CGFloat(sample.w) / CGFloat(max(sample.h, 1)))
+        let tileWidth = max(24, frameHeight * CGFloat(sample.w) / CGFloat(max(sample.h, 1)))
         let step = self.step ?? Roster.step(duration: duration)
         for tile in Roster.tiles(
             time: time, markerX: Double(markerX), width: Double(w), tileWidth: Double(tileWidth), step: step, duration: duration
@@ -452,7 +472,7 @@ final class RosterView: UIView {
         }
         // A hairline of light where the timeline rests on the strip.
         UIColor(white: 1, alpha: 0.14).setFill()
-        context.fill(CGRect(x: 0, y: h - 1, width: w, height: 1))
+        context.fill(CGRect(x: 0, y: 0, width: w, height: 1))
         // The marker: a rounded white bar with an outline and a glow.
         let bar: CGFloat = 3
         context.setFillColor(UIColor(white: 0, alpha: 0.4).cgColor)
