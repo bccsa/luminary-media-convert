@@ -6,6 +6,7 @@ import LuminaryPlayerCore
 private final class RecordingPresenter: FullscreenPresenter {
     var commands: FullscreenCommands?
     var presented = false
+    var browses: [Browse?] = []
 
     func present(
         _ player: AVPlayer,
@@ -19,6 +20,8 @@ private final class RecordingPresenter: FullscreenPresenter {
         self.commands = commands
         return true
     }
+
+    func setBrowse(_ browse: Browse?) { browses.append(browse) }
 
     func startPictureInPicture() -> Bool { false }
     func showRoutePicker() -> Bool { false }
@@ -84,7 +87,7 @@ struct AVPlayerEngineTests {
         let (engine, presenter) = make()
         engine.play()
         engine.setMuted(true)
-        engine.enterFullscreen(texts: nil)
+        engine.enterFullscreen(texts: nil, browse: nil)
         #expect(presenter.presented)
         let old = engine.player
 
@@ -97,9 +100,44 @@ struct AVPlayerEngineTests {
         #expect(engine.player.currentItem != nil)
         #expect(!presenter.presented)
         // The intent to play survived: full-screen opened now offers pause, not play.
-        engine.enterFullscreen(texts: nil)
+        engine.enterFullscreen(texts: nil, browse: nil)
         let commands = try #require(presenter.commands)
         #expect(commands.playbackWanted())
+    }
+
+    @Test("the panel's lists reach full-screen, a later call replaces them, and the viewer's picks are told to the page")
+    func browse() throws {
+        let (engine, presenter) = make()
+        var events: [(String, [String: JSON])] = []
+        let sink = EventSink(
+            playerId: "p", clock: ManualClock(), variantSwitching: false,
+            emit: { name, payload in events.append((name, payload)) }, position: { 0 }
+        )
+        sink.begin(loadId: "l1")
+        engine.events = sink
+        let first = Browse(chapters: [BrowseChapter(title: "Intro", start: 0, end: 30)], upNext: [])
+        let later = Browse(chapters: first.chapters, upNext: [BrowseItem(id: "v2", title: "Next")])
+
+        engine.enterFullscreen(texts: nil, browse: first)
+        let commands = try #require(presenter.commands)
+        #expect(commands.browse == first)
+
+        // Up next arrives while full-screen is up; a call without lists keeps them.
+        engine.enterFullscreen(texts: nil, browse: later)
+        engine.enterFullscreen(texts: nil, browse: nil)
+        #expect(presenter.browses == [first, later])
+
+        // A full-screen the engine opens again has the latest.
+        engine.exitFullscreen()
+        engine.enterFullscreen(texts: nil, browse: nil)
+        #expect(try #require(presenter.commands).browse == later)
+
+        commands.selectUpNext("v2")
+        commands.nextUp("v3")
+        commands.nextUp(nil)
+        let picks = events.filter { $0.0 == "browseselect" }.map { [$0.1["kind"], $0.1["id"]] }
+        #expect(picks == [[.string("upnext"), .string("v2")], [.string("nextup"), .string("v3")], [.string("nextupdismiss"), nil]])
+        engine.destroy()
     }
 
     @Test("a reset after the engine was destroyed does nothing")
@@ -115,7 +153,7 @@ struct AVPlayerEngineTests {
     func endedIsNotPlaying() throws {
         let (engine, presenter) = make()
         engine.play()
-        engine.enterFullscreen(texts: nil)
+        engine.enterFullscreen(texts: nil, browse: nil)
         let commands = try #require(presenter.commands)
         #expect(commands.playbackWanted())
 
@@ -132,7 +170,7 @@ struct AVPlayerEngineTests {
     func pauseAndFailure() throws {
         let (engine, presenter) = make()
         engine.play()
-        engine.enterFullscreen(texts: nil)
+        engine.enterFullscreen(texts: nil, browse: nil)
         let commands = try #require(presenter.commands)
 
         commands.pause()

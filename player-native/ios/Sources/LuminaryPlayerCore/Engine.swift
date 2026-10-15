@@ -50,7 +50,8 @@ public protocol Engine: AnyObject {
     func setInlineFrame(_ frame: InlineFrame?)
 
     /// `texts` are what the controls say, in the host's language; nil keeps the last, or English.
-    func enterFullscreen(texts: [String: String]?)
+    /// `browse` fills the chapters / up-next panel, and replaces the lists of one already on screen; nil keeps the last.
+    func enterFullscreen(texts: [String: String]?, browse: Browse?)
     func exitFullscreen()
 
     /// Where the scrub frames' VTT is, sent with each load; nil for none. The engine reads it

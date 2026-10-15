@@ -11,6 +11,8 @@ public struct FullscreenCommands {
     public var play: () -> Void
     public var pause: () -> Void
     public var seek: (_ position: Double) -> Void
+    /// To the frame: a chapter starts where it says, not at the keyframe before it. Falls back to ``seek``.
+    public var seekExactly: ((_ position: Double) -> Void)?
     public var setRate: (_ rate: Double) -> Void
     /// The speed playback has, which holds while paused when the player's own rate reads 0.
     public var rate: () -> Double
@@ -23,6 +25,12 @@ public struct FullscreenCommands {
     public var skin: SkinOptions
     /// The frames shown under a held timeline; nil for none.
     public var thumbnails: Thumbnails?
+    /// What the chapters / up-next panel and the strip near the end offer when full-screen opens; nil for nothing.
+    public var browse: Browse?
+    /// The viewer picked an up-next item in the panel.
+    public var selectUpNext: (_ id: String) -> Void
+    /// The strip near the end: the id of the video picked, or nil when the viewer closed it.
+    public var nextUp: (_ id: String?) -> Void
 
     public init(
         play: @escaping () -> Void,
@@ -34,7 +42,11 @@ public struct FullscreenCommands {
         audioTracks: @escaping () -> (tracks: [AudioTrack], activeId: String?),
         playbackWanted: @escaping () -> Bool,
         skin: SkinOptions,
-        thumbnails: Thumbnails? = nil
+        thumbnails: Thumbnails? = nil,
+        seekExactly: ((Double) -> Void)? = nil,
+        browse: Browse? = nil,
+        selectUpNext: @escaping (String) -> Void = { _ in },
+        nextUp: @escaping (String?) -> Void = { _ in }
     ) {
         self.play = play
         self.pause = pause
@@ -46,6 +58,10 @@ public struct FullscreenCommands {
         self.playbackWanted = playbackWanted
         self.skin = skin
         self.thumbnails = thumbnails
+        self.seekExactly = seekExactly
+        self.browse = browse
+        self.selectUpNext = selectUpNext
+        self.nextUp = nextUp
     }
 }
 
@@ -68,6 +84,13 @@ public protocol FullscreenPresenter: AnyObject {
     /// Starts picture in picture from the full-screen view. False when none is presented.
     func startPictureInPicture() -> Bool
 
+    /// Replaces what the panel and the strip offer while full-screen is up: up next may load after it opened.
+    func setBrowse(_ browse: Browse?)
+
     /// False when nothing was presented.
     func dismiss() -> Bool
+}
+
+extension FullscreenPresenter {
+    public func setBrowse(_ browse: Browse?) {}
 }

@@ -210,6 +210,18 @@ public struct FullscreenTexts: Equatable {
     public var loading = "Loading"
     /// The button that closes the pinned frame roster.
     public var closeRoster = "Hide frames"
+    /// The panel's chapters tab.
+    public var chapters = "Chapters"
+    /// The panel's up-next tab, and the heading of the strip near the end.
+    public var upNext = "Up next"
+    /// The button that opens the chapters / up-next panel, and the panel itself.
+    public var browse = "Chapters and up next"
+    /// The panel's close button.
+    public var closeBrowse = "Close"
+    /// The line above the timeline; `{index}` and `{count}` are the chapter the playhead is in and how many there are.
+    public var chapterOf = "Chapter {index} of {count}"
+    /// The up-next strip's close button.
+    public var dismiss = "Dismiss"
 
     public init() {}
 
@@ -235,6 +247,12 @@ public struct FullscreenTexts: Equatable {
         take("unmute", into: &unmute)
         take("loading", into: &loading)
         take("closeRoster", into: &closeRoster)
+        take("chapters", into: &chapters)
+        take("upNext", into: &upNext)
+        take("browse", into: &browse)
+        take("closeBrowse", into: &closeBrowse)
+        take("chapterOf", into: &chapterOf)
+        take("dismiss", into: &dismiss)
     }
 
     public func skipBack(_ seconds: Int) -> String { skipBack.replacingOccurrences(of: "{seconds}", with: "\(seconds)") }

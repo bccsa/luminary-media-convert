@@ -43,6 +43,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     private let rateButton = GlyphButton(size: Skin.control, iconSize: Skin.icon)
     private let muteButton = GlyphButton(size: Skin.control, iconSize: Skin.icon)
     private let exitButton = GlyphButton(size: Skin.control, iconSize: Skin.icon)
+    private let browseButton = GlyphButton(size: Skin.control, iconSize: Skin.icon)
     /// Apple's own AirPlay control: it draws the glyph, shows casting in its tint, and opens the
     /// system's device list. Hidden unless the detector finds a device to send to.
     private let airPlayButton = AVRoutePickerView()
@@ -52,6 +53,18 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     private let timeLabel = UILabel()
     private let remainingLabel = UILabel()
     private let fade = FadeView()
+    /// "Chapter 4 of 7" above the bar.
+    private let chapterLabel = UILabel()
+    /// The chapters and up next the panel lists; nil while there are none, and then there is no button.
+    private var browse: Browse?
+    private var panel: BrowsePanel?
+    /// The videos the strip near the end offers, best first.
+    private var nextUpItems: [BrowseItem] = []
+    /// Chosen or closed: either way the strip has done its job for this video.
+    private var nextUpClosed = false
+    private var nextUpStrip: NextUpStrip?
+    /// Where the video is, not where a finger on the bar is.
+    private var playhead: Double = 0
     /// The frames shown above the timeline while it is held, and the time under the finger.
     private let roster = RosterView()
     private let rosterLabel = PillLabel()
@@ -85,6 +98,8 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         super.init(nibName: nil, bundle: nil)
         // The engine's speed, which is right while paused too; the player's own reads 0 then.
         rate = commands.rate()
+        browse = commands.browse.flatMap { $0.isEmpty ? nil : $0 }
+        nextUpItems = Array((commands.browse?.nextUp ?? []).prefix(NextUp.max))
     }
 
     @available(*, unavailable)
@@ -161,7 +176,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         controls.backgroundColor = .clear
         view.addSubview(controls)
         controls.addSubview(fade)
-        for button in [playPause, skipBack, skipForward, audioButton, pipButton, subtitlesButton, rateButton, muteButton, exitButton] {
+        for button in [playPause, skipBack, skipForward, audioButton, pipButton, subtitlesButton, rateButton, muteButton, browseButton, exitButton] {
             controls.addSubview(button)
         }
         airPlayButton.tintColor = .white
@@ -179,6 +194,15 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         remainingLabel.textColor = .white
         remainingLabel.textAlignment = .right
         controls.addSubview(remainingLabel)
+        chapterLabel.font = .systemFont(ofSize: 13, weight: .medium)
+        chapterLabel.textColor = .white
+        chapterLabel.lineBreakMode = .byTruncatingTail
+        chapterLabel.layer.shadowColor = UIColor.black.cgColor
+        chapterLabel.layer.shadowOpacity = 0.7
+        chapterLabel.layer.shadowRadius = 2
+        chapterLabel.layer.shadowOffset = CGSize(width: 0, height: 1)
+        chapterLabel.isHidden = true
+        controls.addSubview(chapterLabel)
         roster.isHidden = true
         controls.addSubview(roster)
         rosterLabel.isHidden = true
@@ -204,6 +228,9 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         rateButton.layers = V10Icons.speed
         rateButton.accessibilityLabel = texts.playbackRate
         rateButton.accessibilityValue = rateLabel(rate)
+        browseButton.layers = BrowseIcons.list
+        browseButton.accessibilityLabel = texts.browse
+        browseButton.isHidden = browse == nil
         spinner.accessibilityLabel = texts.loading
         progress.accessibilityLabel = texts.seek
 
@@ -213,6 +240,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         on(exitButton) { $0.onLeave?() }
         on(pipButton) { $0.onPictureInPicture?() }
         on(muteButton) { $0.player.isMuted.toggle(); $0.refresh() }
+        on(browseButton) { $0.panel == nil ? $0.openBrowse() : $0.closeBrowse() }
         on(rateButton, opensMenu: true) { $0.openMenu(from: $0.rateButton, title: $0.texts.playbackRate, items: $0.rateItems()) }
         on(audioButton, opensMenu: true) { $0.openMenu(from: $0.audioButton, title: $0.texts.audioMenu, items: $0.audioItems()) }
         on(subtitlesButton, opensMenu: true) { $0.openMenu(from: $0.subtitlesButton, title: $0.texts.subtitlesMenu, items: $0.subtitleItems()) }
@@ -244,6 +272,9 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         closeMenu()
         closePin()
         hideRoster()
+        panel?.removeFromSuperview()
+        panel = nil
+        removeNextUp()
         commands.thumbnails?.onChange = nil
         videoView.playerLayer.player = nil
     }
@@ -268,7 +299,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
 
         // The top row, in `player-web`'s order, closing up around what is hidden.
         var x = area.minX
-        for button in [audioButton, pipButton, airPlayButton, subtitlesButton, rateButton, muteButton] as [UIView] where !button.isHidden {
+        for button in [audioButton, pipButton, airPlayButton, subtitlesButton, rateButton, muteButton, browseButton] as [UIView] where !button.isHidden {
             button.frame = CGRect(x: x, y: area.minY, width: Skin.control, height: Skin.control)
             x += Skin.control
         }
@@ -291,8 +322,18 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         let barStart = timeLabel.text?.isEmpty == false ? timeLabel.frame.maxX + Skin.timeGap : area.minX + Skin.progressInset
         let barStop = remainingWidth > 0 ? remainingLabel.frame.minX - Skin.timeGap : barEnd
         progress.frame = CGRect(x: barStart, y: area.maxY - Skin.control, width: max(barStop - barStart, 0), height: Skin.control)
+        progress.scale = scale
+        // The chapter line sits just over the bar, from the time's edge to the bar's end.
+        chapterLabel.font = .systemFont(ofSize: 13 * scale, weight: .medium)
+        let chapterHeight = chapterLabel.font.lineHeight.rounded(.up)
+        chapterLabel.frame = CGRect(
+            x: area.minX + 8, y: progress.frame.midY - Skin.knob / 2 - 2 - chapterHeight,
+            width: max(barStop - area.minX - 8, 0), height: chapterHeight
+        )
 
         menu.map(place)
+        panel?.frame = view.bounds
+        placeNextUp(animated: false)
         if let fraction = rosterFraction { updateRoster(fraction) }
         if rosterPinned { updatePinned() }
     }
@@ -360,7 +401,8 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         next.awaitingDuration = !duration.isIndefinite && !(duration.isNumeric && duration.seconds > 0)
         next.duration = duration.isNumeric ? duration.seconds : 0
         let position = player.currentTime().seconds
-        next.position = scrubbing ?? (position.isFinite ? position : 0)
+        playhead = position.isFinite ? position : 0
+        next.position = scrubbing ?? playhead
         next.loadedEnd = loadedEnd(item, at: next.position)
         next.rate = rate
         next.muted = player.isMuted
@@ -407,6 +449,9 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
             view.setNeedsLayout()
         }
         if rowChanged { view.setNeedsLayout() }
+        showChapter(layout.showsProgress ? next.duration : 0)
+        updateNextUp()
+        panel?.markChapter(browse?.chapterIndex(at: playhead))
         visibility.playbackChanged(playing: next.playing)
     }
 
@@ -614,7 +659,8 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
         var view = touch.view
         while let current = view, current !== self.view {
-            if current is UIControl || current === progress || current === roster || current is FullscreenMenu { return false }
+            if current is UIControl || current === progress || current === roster || current is FullscreenMenu
+                || current is BrowsePanel || current is NextUpStrip { return false }
             view = current.superview
         }
         return true
@@ -626,7 +672,155 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         UIView.animate(withDuration: visible ? Skin.showDuration : Skin.hideDuration) {
             self.controls.alpha = visible ? 1 : 0
         }
+        placeNextUp(animated: true)
         UIAccessibility.post(notification: .layoutChanged, argument: nil)
+    }
+
+    // MARK: Chapters and up next
+
+    /// "Chapter 4 of 7" over the bar, and the bar cut at the chapter starts, as the web player does.
+    private func showChapter(_ duration: Double) {
+        let chapters = browse?.chapters ?? []
+        progress.cuts = ChapterCuts.starts(chapters, duration: duration)
+        let text = duration > 0 ? ChapterCuts.nowText(texts.chapterOf, chapters: chapters, index: browse?.chapterIndex(at: playhead)) : ""
+        if chapterLabel.text != text { chapterLabel.text = text }
+        chapterLabel.isHidden = text.isEmpty
+        // Held, the bar and the frames carry the moment; the line would stack on them.
+        chapterLabel.alpha = scrubbing != nil || !roster.isHidden ? 0 : 1
+    }
+
+    /// Replaces what the panel and the strip offer, also while the panel is open; with nothing to list the button
+    /// goes and the panel closes.
+    func setBrowse(_ next: Browse?) {
+        // A different offer is a different video's: its strip opens again.
+        let offer = Array((next?.nextUp ?? []).prefix(NextUp.max))
+        if offer.map(\.id) != nextUpItems.map(\.id) {
+            nextUpClosed = false
+            removeNextUp()
+        }
+        nextUpItems = offer
+        browse = next.flatMap { $0.isEmpty ? nil : $0 }
+        guard isViewLoaded else { return }
+        browseButton.isHidden = browse == nil
+        view.setNeedsLayout()
+        if let panel {
+            if let browse {
+                panel.show(browse, texts: texts, chapter: browse.chapterIndex(at: playhead), duration: state.duration, scale: currentScale, keepScroll: true)
+            } else {
+                closeBrowse()
+            }
+        }
+        refresh()
+    }
+
+    private var currentScale: CGFloat { Skin.scale(forWidth: view.bounds.inset(by: view.safeAreaInsets).width) }
+
+    private func openBrowse() {
+        guard let browse, panel == nil else { return }
+        closeMenu()
+        closePin()
+        hideRoster()
+        let panel = BrowsePanel(frame: view.bounds)
+        panel.onClose = { [weak self] in self?.closeBrowse() }
+        panel.onChapter = { [weak self] chapter in
+            guard let self else { return }
+            (self.commands.seekExactly ?? self.commands.seek)(chapter.start)
+            self.closeBrowse()
+        }
+        panel.onUpNext = { [weak self] id in
+            self?.commands.selectUpNext(id)
+            self?.closeBrowse()
+        }
+        view.addSubview(panel)
+        self.panel = panel
+        panel.show(browse, texts: texts, chapter: browse.chapterIndex(at: playhead), duration: state.duration, scale: currentScale, keepScroll: false)
+        // The controls stay under the panel, whatever playback does, until it is put away.
+        visibility.pinned = true
+        updateNextUp()
+        UIAccessibility.post(notification: .screenChanged, argument: panel)
+    }
+
+    private func closeBrowse() {
+        guard let panel else { return }
+        panel.removeFromSuperview()
+        self.panel = nil
+        visibility.pinned = false
+        updateNextUp()
+        UIAccessibility.post(notification: .screenChanged, argument: browseButton)
+    }
+
+    /// Opens or puts away the strip as the playhead and the panel say; called as the state changes.
+    private func updateNextUp() {
+        let due = panel == nil && NextUp.due(
+            offered: !nextUpItems.isEmpty, closed: nextUpClosed, live: state.live,
+            duration: state.duration > 0 ? state.duration : nil, position: playhead
+        )
+        guard due != (nextUpStrip != nil) else { return }
+        due ? showNextUp() : removeNextUp()
+    }
+
+    private func showNextUp() {
+        let area = view.bounds.inset(by: view.safeAreaInsets)
+        let strip = NextUpStrip(items: nextUpItems, texts: texts, cardHeight: rosterHeight(area.width), scale: currentScale)
+        strip.onPick = { [weak self] id in self?.chooseNextUp(id) }
+        strip.onClose = { [weak self] in self?.closeNextUp() }
+        // Over the controls, under the panel.
+        view.insertSubview(strip, aboveSubview: controls)
+        nextUpStrip = strip
+        placeNextUp(animated: false)
+        strip.alpha = 0
+        UIView.animate(withDuration: BrowseSkin.stripDuration) { strip.alpha = 1 }
+    }
+
+    private func removeNextUp() {
+        nextUpStrip?.takeDown()
+        nextUpStrip = nil
+    }
+
+    private func closeNextUp() {
+        guard !nextUpClosed else { return }
+        nextUpClosed = true
+        removeNextUp()
+        commands.nextUp(nil)
+    }
+
+    private func chooseNextUp(_ id: String) {
+        guard !nextUpClosed else { return }
+        nextUpClosed = true
+        removeNextUp()
+        commands.nextUp(id)
+    }
+
+    /// Directly over the bar (and the chapter line over it) while the controls show, on the bottom edge when they
+    /// do not. When that would put it over the play and skip buttons it is held to the right of them instead,
+    /// which is as far as it need give way: the cards scroll.
+    private func placeNextUp(animated: Bool) {
+        guard let strip = nextUpStrip else { return }
+        let area = view.bounds.inset(by: view.safeAreaInsets)
+        let height = strip.preferredHeight
+        let shown = visibility.visible
+        let bottom: CGFloat
+        if shown {
+            bottom = (chapterLabel.isHidden ? progress.frame.midY - Skin.knob / 2 : chapterLabel.frame.minY) - 8
+        } else {
+            bottom = area.maxY - 16
+        }
+        var start = area.minX + 8
+        let cluster = [skipBack, playPause, spinner, skipForward].filter { !$0.isHidden }
+        if shown, let lowest = cluster.map(\.frame.maxY).max(), let rightmost = cluster.map(\.frame.maxX).max(),
+           bottom - height < lowest + 8 {
+            start = max(start, rightmost + 8)
+        }
+        let frame = CGRect(x: start, y: bottom - height, width: max(area.maxX - 8 - start, 0), height: height)
+        guard strip.frame != frame else { return }
+        if animated {
+            UIView.animate(withDuration: BrowseSkin.stripDuration) {
+                strip.frame = frame
+                strip.layoutIfNeeded()
+            }
+        } else {
+            strip.frame = frame
+        }
     }
 
     // MARK: Menus
@@ -717,12 +911,23 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     }
 }
 
-/// The progress bar: a 4 pt rounded track, what is loaded, what is played and a knob. Dragging
-/// or tapping it seeks.
+/// The progress bar: a 4 pt rounded track, what is loaded, what is played and a knob, cut at the
+/// chapter starts. Dragging or tapping it seeks.
 final class ProgressBar: UIView {
     /// The fraction the viewer points at, and whether they let go.
     var onScrub: ((Double, Bool) -> Void)?
+    /// Where each chapter after the first starts, as a fraction of the bar: ``ChapterCuts/starts(_:duration:)``.
+    var cuts: [Double] = [] {
+        didSet { if cuts != oldValue { setNeedsLayout() } }
+    }
+    /// The skin's scale, which the gaps between chapters grow with.
+    var scale: CGFloat = 1 {
+        didSet { if scale != oldValue { setNeedsLayout() } }
+    }
 
+    /// The three bars, masked together so a cut goes through all of them; the knob stays whole.
+    private let bars = UIView()
+    private let cutMask = CAShapeLayer()
     private let track = UIView()
     private let loaded = UIView()
     private let played = UIView()
@@ -736,10 +941,15 @@ final class ProgressBar: UIView {
         loaded.backgroundColor = Skin.progressLoaded
         played.backgroundColor = .white
         knob.backgroundColor = .white
-        for part in [track, loaded, played, knob] {
+        bars.isUserInteractionEnabled = false
+        addSubview(bars)
+        for part in [track, loaded, played] {
             part.isUserInteractionEnabled = false
-            addSubview(part)
+            bars.addSubview(part)
         }
+        cutMask.fillRule = .evenOdd
+        knob.isUserInteractionEnabled = false
+        addSubview(knob)
         addGestureRecognizer(UIPanGestureRecognizer(target: self, action: #selector(panned)))
         addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(tapped)))
         isAccessibilityElement = true
@@ -757,8 +967,22 @@ final class ProgressBar: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        bars.frame = bounds
         let y = (bounds.height - Skin.progressHeight) / 2
         let radius = Skin.progressHeight / 2
+        if cuts.isEmpty {
+            bars.layer.mask = nil
+        } else {
+            // Everything, less a thin gap at each cut: even-odd leaves the gaps out.
+            let path = UIBezierPath(rect: bounds)
+            let half = CGFloat(ChapterCuts.halfGap(stretches: cuts.count + 1)) * scale
+            for cut in cuts {
+                path.append(UIBezierPath(rect: CGRect(x: bounds.width * CGFloat(cut) - half, y: 0, width: 2 * half, height: bounds.height)))
+            }
+            cutMask.frame = bounds
+            cutMask.path = path.cgPath
+            bars.layer.mask = cutMask
+        }
         track.frame = CGRect(x: 0, y: y, width: bounds.width, height: Skin.progressHeight)
         loaded.frame = CGRect(x: 0, y: y, width: bounds.width * loadedFraction, height: Skin.progressHeight)
         played.frame = CGRect(x: 0, y: y, width: bounds.width * playedFraction, height: Skin.progressHeight)

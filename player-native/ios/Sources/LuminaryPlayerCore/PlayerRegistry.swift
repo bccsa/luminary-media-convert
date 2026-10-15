@@ -98,7 +98,7 @@ public final class PlayerRegistry {
         case .startPictureInPicture: engine.startPictureInPicture()
         case .showAirPlayPicker: engine.showAirPlayPicker()
         case .setSleepTimer(_, let endsAt): engine.setSleepTimer(endsAt: endsAt)
-        case .enterFullscreen(_, let texts): engine.enterFullscreen(texts: texts)
+        case .enterFullscreen(_, let texts, let browse): engine.enterFullscreen(texts: texts, browse: browse)
         case .exitFullscreen: player.exitFullscreen()
         case .resumed: return player.resumed().json
         case .getInfo, .reset, .create, .destroy:

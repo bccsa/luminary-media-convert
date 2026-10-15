@@ -203,6 +203,17 @@ public final class EventSink {
     }
 
     /// `inline` means not presented.
+    /// The viewer picked an up-next item in full-screen's panel (`upnext`) or its strip near the end (`nextup`);
+    /// the page plays it.
+    public func browseSelected(id: String, kind: String = "upnext") {
+        send("browseselect", ["kind": .string(kind), "id": .string(id)])
+    }
+
+    /// The viewer closed full-screen's strip of next videos.
+    public func nextUpDismissed() {
+        send("browseselect", ["kind": .string("nextupdismiss")])
+    }
+
     public func presentationChanged(_ state: String) {
         send("presentationchange", ["state": .string(state)])
     }

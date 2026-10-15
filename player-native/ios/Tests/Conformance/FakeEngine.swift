@@ -61,9 +61,24 @@ final class FakeEngine: Engine {
             "x": .number(frame.x), "y": .number(frame.y), "width": .number(frame.width), "height": .number(frame.height),
         ])
     }
-    func enterFullscreen(texts: [String: String]?) {
-        guard let texts else { return record("enterFullscreen") }
-        record("enterFullscreen", ["texts": .object(texts.mapValues { JSON.string($0) })])
+    func enterFullscreen(texts: [String: String]?, browse: Browse?) {
+        var args: [String: JSON] = [:]
+        if let texts { args["texts"] = .object(texts.mapValues { JSON.string($0) }) }
+        if let browse {
+            args["browse"] = .object([
+                "chapters": .array(browse.chapters.map {
+                    .object(["title": .string($0.title), "startTime": .number($0.start), "endTime": .number($0.end)])
+                }),
+                "upNext": .array(browse.upNext.map { item in
+                    var entry: [String: JSON] = ["id": .string(item.id), "title": .string(item.title)]
+                    if let subtitle = item.subtitle { entry["subtitle"] = .string(subtitle) }
+                    if let imageUrl = item.imageUrl { entry["imageUrl"] = .string(imageUrl) }
+                    if let section = item.section { entry["section"] = .string(section) }
+                    return .object(entry)
+                }),
+            ])
+        }
+        record("enterFullscreen", args)
     }
     func exitFullscreen() { record("exitFullscreen") }
     func destroy() { record("destroy") }

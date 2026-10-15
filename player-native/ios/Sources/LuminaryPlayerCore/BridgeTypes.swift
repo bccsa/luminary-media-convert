@@ -272,7 +272,8 @@ public enum BridgeCall: Sendable {
     case startPictureInPicture(playerId: String)
     case showAirPlayPicker(playerId: String)
     case setSleepTimer(playerId: String, endsAt: Double?)
-    case enterFullscreen(playerId: String, texts: [String: String]?)
+    /// `browse` is nil when the call carries none: the lists on screen stay as they are.
+    case enterFullscreen(playerId: String, texts: [String: String]?, browse: Browse?)
     case exitFullscreen(playerId: String)
     case resumed(playerId: String)
     case destroy(playerId: String)
@@ -286,7 +287,7 @@ public enum BridgeCall: Sendable {
              .reattach(let id, _), .play(let id), .pause(let id), .seek(let id, _, _),
              .setRate(let id, _), .setVariant(let id, _), .setAudioTrack(let id, _),
              .warmChunks(let id, _, _, _, _), .setInlineFrame(let id, _), .setMuted(let id, _),
-             .setSubtitleTrack(let id, _, _), .startPictureInPicture(let id), .showAirPlayPicker(let id), .setSleepTimer(let id, _), .enterFullscreen(let id, _), .exitFullscreen(let id),
+             .setSubtitleTrack(let id, _, _), .startPictureInPicture(let id), .showAirPlayPicker(let id), .setSleepTimer(let id, _), .enterFullscreen(let id, _, _), .exitFullscreen(let id),
              .resumed(let id), .destroy(let id):
             return id
         }
@@ -420,7 +421,8 @@ public enum BridgeCall: Sendable {
                 }
                 texts = strings
             }
-            return .enterFullscreen(playerId: try args.string("playerId"), texts: texts)
+            let browse = try args.optionalObject("browse").map { try $0.browse() }
+            return .enterFullscreen(playerId: try args.string("playerId"), texts: texts, browse: browse)
         case "exitFullscreen": return .exitFullscreen(playerId: try args.string("playerId"))
         case "resumed": return .resumed(playerId: try args.string("playerId"))
         case "destroy": return .destroy(playerId: try args.string("playerId"))
@@ -559,6 +561,31 @@ private struct Args {
             throw invalid("\(key) is a non-negative integer")
         }
         return Int(value)
+    }
+
+    /// `{ chapters, upNext, nextUp? }`: each entry's required fields are strings (numbers for a chapter's
+    /// times); refused whole when one is not.
+    func browse() throws -> Browse {
+        let chapters = try array("chapters").enumerated().map { i, element in
+            guard let object = element.objectValue else { throw invalid("chapters[\(i)] is not an object") }
+            let chapter = Args(object, path: "\(path).chapters[\(i)]")
+            return BrowseChapter(title: try chapter.string("title"), start: try chapter.number("startTime"), end: try chapter.number("endTime"))
+        }
+        let upNext = try browseItems("upNext")
+        let nextUp = json["nextUp"] == nil ? [] : try browseItems("nextUp")
+        return Browse(chapters: chapters, upNext: upNext, nextUp: nextUp)
+    }
+
+    private func browseItems(_ key: String) throws -> [BrowseItem] {
+        try array(key).enumerated().map { i, element in
+            guard let object = element.objectValue else { throw invalid("\(key)[\(i)] is not an object") }
+            let item = Args(object, path: "\(path).\(key)[\(i)]")
+            return BrowseItem(
+                id: try item.string("id"), title: try item.string("title"), subtitle: try item.optionalString("subtitle"),
+                imageUrl: try item.optionalString("imageUrl"), section: try item.optionalString("section"),
+                fallbackImageUrl: try item.optionalString("fallbackImageUrl")
+            )
+        }
     }
 
     /// Every asset must be addressed to `generation`.

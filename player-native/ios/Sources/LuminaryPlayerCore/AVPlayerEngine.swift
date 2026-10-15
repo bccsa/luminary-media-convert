@@ -31,6 +31,8 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     private var statusObservation: NSKeyValueObservation?
     private var rateObservations: [NSKeyValueObservation] = []
     private var fullscreenTexts = FullscreenTexts()
+    /// What the full-screen panel lists; the page's latest, kept for a full-screen the engine opens itself.
+    private var browse: Browse?
     /// Full-screen holds the picture: picture in picture starts from its view, not the inline one.
     private var presentation = Presentation.inline
     #if os(iOS)
@@ -116,7 +118,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
             if !self.intendedPlaying && !self.pictureSizeKnown { self.turnedWhileLoading = true; return }
             guard self.intendedPlaying, self.videoIsLandscape || !self.pictureSizeKnown else { return }
             self.fullscreenBeforeSizeKnown = !self.pictureSizeKnown
-            self.enterFullscreen(texts: nil)
+            self.enterFullscreen(texts: nil, browse: nil)
         }
         ladder = RecoveryLadder(policy: .default, clock: clock, hooks: .init(
             // AVPlayer offers no in-place repair: the rung is skipped rather than pretended.
@@ -306,7 +308,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
             turnedWhileLoading = false
             if hasVideo {
                 fullscreenBeforeSizeKnown = !pictureSizeKnown
-                enterFullscreen(texts: nil)
+                enterFullscreen(texts: nil, browse: nil)
             }
         }
         if ended {
@@ -476,8 +478,13 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
 
     /// Audio-only has no view: there is nothing to show full-screen. The texts are the last the
     /// host sent, so a turn of the phone that opens full-screen on its own speaks the same language.
-    public func enterFullscreen(texts: [String: String]?) {
+    public func enterFullscreen(texts: [String: String]?, browse: Browse?) {
         if let texts { fullscreenTexts = FullscreenTexts(overriding: texts) }
+        // The lists may arrive after full-screen opened (up next loads late): they replace what is on screen.
+        if let browse {
+            self.browse = browse
+            presenter?.setBrowse(browse)
+        }
         guard let presenter, hasVideo else { return }
         let presented = presenter.present(
             player,
@@ -500,7 +507,13 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
             audioTracks: { [weak self] in self?.currentAudio() ?? ([], nil) },
             playbackWanted: { [weak self] in self?.intendedPlaying ?? false },
             skin: skin,
-            thumbnails: thumbnails
+            thumbnails: thumbnails,
+            seekExactly: { [weak self] position in self?.seek(position: position, exact: true) },
+            browse: browse,
+            selectUpNext: { [weak self] id in self?.events?.browseSelected(id: id) },
+            nextUp: { [weak self] id in
+                if let id { self?.events?.browseSelected(id: id, kind: "nextup") } else { self?.events?.nextUpDismissed() }
+            }
         )
     }
 
