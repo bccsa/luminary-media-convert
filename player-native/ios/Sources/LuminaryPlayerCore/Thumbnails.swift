@@ -31,8 +31,12 @@ public enum ThumbnailVtt {
         guard parts.count == 3 else { return 0 }
         let seconds = parts[2].split(separator: ".", omittingEmptySubsequences: false)
         let fraction = seconds.count > 1 ? String(seconds[1]).padding(toLength: 3, withPad: "0", startingAt: 0) : "0"
-        return (Double(parts[0]) ?? 0) * 3600 + (Double(parts[1]) ?? 0) * 60 + (Double(seconds[0]) ?? 0)
-            + (Double(fraction.prefix(3)) ?? 0) / 1000
+        // Named parts: as one expression, the type checker gives up on slower machines.
+        let hours: Double = Double(parts[0]) ?? 0
+        let minutes: Double = Double(parts[1]) ?? 0
+        let whole: Double = Double(seconds[0]) ?? 0
+        let milliseconds: Double = Double(fraction.prefix(3)) ?? 0
+        return hours * 3600 + minutes * 60 + whole + milliseconds / 1000
     }
 
     /// The cues of `text`, with sprite paths resolved against `baseUrl`, the directory of the VTT.
