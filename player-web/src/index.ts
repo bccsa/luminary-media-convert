@@ -1,85 +1,70 @@
 /*
- * Deprecated: superseded by `@luminary-media-converter/player-web-legacy`,
- * whose `LuminaryPlayer` takes the same props and slots and exposes the same
- * surface. Moving is an import change plus a visual one — video.js draws its
- * full control bar over the picture, where this package draws none outside
- * fullscreen.
- *
- * Kept building only because the encoder app still uses it; it gets no new
- * work. Its own exports carry `@deprecated`, naming the replacement where
- * there is one. The `player-core` re-export does not: that package is current,
- * and is better imported directly.
+ * The stylesheet is pulled in from `LuminaryPlayer.vue`'s style block rather than from here, so that
+ * no `.css` specifier reaches the emitted declarations.
  */
 export * from '@luminary-media-converter/player-core';
 
-export {
-    /** @deprecated Use `LuminaryPlayer` from `player-web-legacy`. */
-    default as LuminaryPlayer,
-} from './components/LuminaryPlayer.vue';
-export {
-    /** @deprecated No replacement: video.js draws the controls in `player-web-legacy`. */
-    default as FullscreenControls,
-} from './components/FullscreenControls.vue';
+export { default as LuminaryPlayer } from './components/LuminaryPlayer.vue';
+export { default as AudioFullscreen } from './components/AudioFullscreen.vue';
+export { chapterMask } from './ui/chapterBar';
 
-// The web's serving layer, which `player-core` now requires a host to supply.
-export {
-    /** @deprecated Use `BlobServeStrategy` from `player-web-legacy`. */
-    BlobServeStrategy,
-} from './serve/BlobServeStrategy';
+// What `poster` takes: an image described in plain terms, so the shape outlives the engine.
+export type { PlayerImage, PlayerImageInput } from './image';
+
+// What `upNext` takes: the videos offered after this one.
+export { withSectionHeadings, type PlayerUpNextItem } from './upNext';
+
+// The web's serving layer. `player-core` requires one and defaults to nothing, so a host building its
+// own controller needs this — and a native shell implements `ServeStrategy` in its place.
+export { BlobServeStrategy, type BlobServeStrategyOptions } from './serve/BlobServeStrategy';
+export { LIVE_PLAYLIST_URI_PREFIX, isLivePlaylistUri, type LivePlaylistSource } from './serve/livePlaylistUri';
 
 export {
-    /** @deprecated Use `VideoJsAdapter` from `player-web-legacy`. */
-    HlsJsAdapter,
-    /** @deprecated Use `UnsupportedBrowserError` from `player-web-legacy`. */
+    HlsJsVideoAdapter,
     UnsupportedBrowserError,
-    /** @deprecated hls.js only; `player-web-legacy` has `installMemoryKeyXhr` for VHS. */
-    createMemoryKeyLoader,
-    /** @deprecated Use `isVideoJsEngineSupported` from `player-web-legacy`. */
     isHlsEngineSupported,
-    /** @deprecated Use `VideoJsAdapterOptions` from `player-web-legacy`. */
-    type HlsJsAdapterOptions,
-} from './adapter/HlsJsAdapter';
+    type HlsJsVideoAdapterOptions,
+} from './adapter/HlsJsVideoAdapter';
 
-// A copy of `player-web-legacy`'s warming loop, which is the reference a
-// native adapter is ported from. HlsJsAdapter owns its own instance.
-export {
-    /** @deprecated Use `ChunkPrefetcher` from `player-web-legacy`, the reference this copies. */
-    ChunkPrefetcher,
-    /** @deprecated Use `ChunkPrefetcherHooks` from `player-web-legacy`. */
-    type ChunkPrefetcherHooks,
-    /** @deprecated Use `ChunkPrefetcherOptions` from `player-web-legacy`. */
-    type ChunkPrefetcherOptions,
-} from './adapter/chunkWarming';
+// The hls.js request seam: one loader that answers `luminary://key` and `luminary://live/…`, and the
+// load policy that stops a cold byte-range chunk being abandoned.
+export { createLuminaryLoader, loadPolicyConfig, BYTE_RANGE_TTFB_MS, type LoaderState } from './adapter/hlsLoaders';
+export { HlsStallSignals, type HlsStallSignalHooks } from './adapter/hlsStallSignals';
+export { initialBandwidth, persistBandwidth, BANDWIDTH_STORAGE_KEY } from './adapter/hlsBandwidth';
+export { monotonicNow } from './drivers/clock';
 
+// The recovery ladder, whole. Exported because it IS the porting unit for a native adapter.
 export {
-    /** @deprecated Use `DEFAULT_MESSAGES` from `player-web-legacy`. */
-    DEFAULT_MESSAGES,
-    /** @deprecated Use `formatSeconds` from `player-web-legacy`. */
-    formatSeconds,
-    /** @deprecated Use `mergeMessages` from `player-web-legacy`. */
-    mergeMessages,
-    /** @deprecated Use `PlayerMessages` from `player-web-legacy`. */
-    type PlayerMessages,
-} from './messages';
+    RecoveryLadder,
+    type RecoveryLadderHooks,
+    type RecoveryLadderOptions,
+    type RecoveryReason,
+} from './drivers/RecoveryLadder';
 
-export {
-    /** @deprecated Use `DEFAULT_CONTROLS` from `player-web-legacy`, whose skips default to 10 s, not 15. */
-    DEFAULT_CONTROLS,
-    /** @deprecated Use `mergeControls` from `player-web-legacy`. */
-    mergeControls,
-    /** @deprecated Use `PlayerControlsOptions` from `player-web-legacy`. */
-    type PlayerControlsOptions,
-} from './controls';
+// The reference warming loop a native adapter is ported from; the adapter owns its own.
+export { ChunkPrefetcher, type ChunkPrefetcherHooks, type ChunkPrefetcherOptions } from './adapter/chunkWarming';
 
+export { DEFAULT_MESSAGES, formatSeconds, mergeMessages, type PlayerMessages } from './messages';
+export { DEFAULT_CONTROLS, mergeControls, type PlayerControlsOptions } from './controls';
+export { usePlayerState } from './composables/usePlayerState';
+export { createKeepAlive, SILENT_AUDIO_DATA_URI, type KeepAlive } from './ui/keepAlive';
 export {
-    /** @deprecated Use `usePlayerState` from `player-web-legacy`. */
-    usePlayerState,
-} from './composables/usePlayerState';
-export {
-    /** @deprecated No replacement: `player-web-legacy` leaves rotation to `videojs-mobile-ui`. */
-    useFullscreenOrientation,
-    /** @deprecated No replacement; see `useFullscreenOrientation`. */
-    type FullscreenMode,
-    /** @deprecated No replacement; see `useFullscreenOrientation`. */
-    type UseFullscreenOrientation,
-} from './composables/useFullscreenOrientation';
+    SCRUB_EDGE_PX,
+    SCRUB_SLOP_PX,
+    clampPreviewCentre,
+    formatClock,
+    isOnBar,
+    pointerRatio,
+    previewTimes,
+    rosterFineStep,
+    rosterStep,
+    rosterTiles,
+    type RosterTile,
+} from './ui/scrubPreview';
+export { default as ScrubThumbnail } from './components/ScrubThumbnail.vue';
+export { default as ScrubRoster } from './components/ScrubRoster.vue';
+export { installAutoHide, AUTO_HIDE_MS, type ControlsStore } from './ui/autoHide';
+export { buildControlsHtml, type ControlsHtmlLabels, type ControlsHtmlOptions } from './ui/controlsHtml';
+export { isVideoJsElement } from './elements';
+export { isYouTubeUrl, extractYouTubeId, toVideoJsYouTubeUrl } from './youtube';
+export { singleFlight } from './singleFlight';

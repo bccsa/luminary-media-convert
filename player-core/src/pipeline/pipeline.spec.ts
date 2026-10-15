@@ -76,6 +76,22 @@ describe('describeMaster', () => {
         expect(info.nativelyAudioOnly).toBe(false);
     });
 
+    it('lists an audio track once when the master repeats it in each group', () => {
+        const master = [
+            '#EXTM3U',
+            '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="hi",NAME="English",LANGUAGE="en",URI="a/en.m3u8"',
+            '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="hi",NAME="Français",LANGUAGE="fr",URI="a/fr.m3u8"',
+            '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="lo",NAME="English",LANGUAGE="en",URI="a/en.m3u8"',
+            '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="lo",NAME="Français",LANGUAGE="fr",URI="a/fr.m3u8"',
+            '#EXT-X-STREAM-INF:BANDWIDTH=2000000,AUDIO="hi"',
+            'v0.m3u8',
+            '#EXT-X-STREAM-INF:BANDWIDTH=500000,AUDIO="lo"',
+            'v1.m3u8',
+        ].join('\n');
+        const info = describeMaster(MASTER_URL, master);
+        expect(info.audioTracks.map((t) => t.label)).toEqual(['English', 'Français']);
+    });
+
     it('synthesizes a Default angle for a single-angle master', () => {
         const info = describeMaster(MASTER_URL, SIMPLE_MASTER);
         expect(info.angles.map((a) => a.id)).toEqual([

@@ -1,0 +1,457 @@
+/*
+ * Plain CSS with custom properties for theming — no Tailwind (library
+ * package), same approach as segment-editor/src/styles.css. Every knob is a
+ * `--lmp-*` variable an implementing app can override on `.lmp-root`.
+ */
+.lmp-root {
+    --lmp-bg: #000000;
+    --lmp-text: #ffffff;
+    --lmp-text-dim: rgba(255, 255, 255, 0.72);
+    --lmp-surface: rgba(9, 9, 11, 0.72);
+    --lmp-surface-strong: rgba(9, 9, 11, 0.88);
+    --lmp-border: rgba(255, 255, 255, 0.16);
+    --lmp-accent: #ffffff;
+    --lmp-track: rgba(255, 255, 255, 0.3);
+    /* Buffered-ahead: between the played white and the unloaded track, and
+       nearer the track — it marks what is ready, not what has been watched. */
+    --lmp-buffer: rgba(255, 255, 255, 0.55);
+    --lmp-radius: 10px;
+    --lmp-radius-sm: 6px;
+    --lmp-font: inherit;
+    --lmp-font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+    --lmp-control-size: 44px;
+    --lmp-transition: 180ms ease;
+
+    position: relative;
+    display: block;
+    width: 100%;
+    background: var(--lmp-bg);
+    color: var(--lmp-text);
+    font-family: var(--lmp-font);
+    overflow: hidden;
+    box-sizing: border-box;
+}
+
+.lmp-root:fullscreen,
+.lmp-root.lmp-is-fullscreen {
+    width: 100%;
+    height: 100%;
+}
+
+.lmp-video {
+    display: block;
+    width: 100%;
+    height: 100%;
+    background: var(--lmp-bg);
+}
+
+.lmp-slot {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+
+.lmp-slot > * {
+    pointer-events: auto;
+}
+
+/* --- Status / error panels ---------------------------------------------- */
+
+.lmp-panel {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.875rem;
+    padding: 1.5rem;
+    text-align: center;
+    background: var(--lmp-surface);
+    box-sizing: border-box;
+}
+
+.lmp-panel-text {
+    margin: 0;
+    font-size: 1rem;
+    line-height: 1.4;
+    color: var(--lmp-text);
+}
+
+.lmp-btn {
+    appearance: none;
+    border: 1px solid var(--lmp-border);
+    border-radius: var(--lmp-radius-sm);
+    background: transparent;
+    color: var(--lmp-text);
+    font: inherit;
+    padding: 0.45rem 0.9rem;
+    cursor: pointer;
+    transition: background var(--lmp-transition);
+}
+
+.lmp-btn:hover,
+.lmp-btn:focus-visible {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+/* --- Fullscreen affordance ---------------------------------------------- */
+
+.lmp-icon-btn {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: var(--lmp-control-size);
+    min-height: var(--lmp-control-size);
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: var(--lmp-surface);
+    color: var(--lmp-text);
+    cursor: pointer;
+    transition: background var(--lmp-transition), opacity var(--lmp-transition);
+}
+
+.lmp-icon-btn:hover,
+.lmp-icon-btn:focus-visible {
+    background: var(--lmp-surface-strong);
+}
+
+.lmp-icon-btn svg {
+    width: 22px;
+    height: 22px;
+    display: block;
+    fill: currentColor;
+}
+
+/* --- Fullscreen controls overlay ---------------------------------------- */
+
+.lmp-fs {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    opacity: 1;
+    transition: opacity var(--lmp-transition);
+}
+
+.lmp-fs.lmp-fs-hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* Dismissal sits apart from the transport, top right, where a full-screen
+   thing is closed — and clear of the notch on a landscape phone. */
+.lmp-fs-top {
+    display: flex;
+    justify-content: flex-end;
+    padding: calc(0.75rem + env(safe-area-inset-top, 0px)) calc(0.75rem + env(safe-area-inset-right, 0px))
+        0.75rem 0.75rem;
+    background: linear-gradient(to bottom, var(--lmp-surface-strong), transparent);
+}
+
+.lmp-fs-center {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    /* Wide enough to separate three targets on a phone, where they are hit with
+       a thumb rather than pointed at. */
+    gap: clamp(1.25rem, 6vw, 3rem);
+}
+
+.lmp-fs-center .lmp-icon-btn {
+    min-width: calc(var(--lmp-control-size) * 1.6);
+    min-height: calc(var(--lmp-control-size) * 1.6);
+}
+
+.lmp-fs-center .lmp-icon-btn svg {
+    width: 34px;
+    height: 34px;
+}
+
+/*
+ * Skip buttons read as siblings of play/pause: same circle and same surface,
+ * a slightly smaller glyph, so the centre of the cluster is still the control a
+ * viewer reaches for first. They keep the full 44px minimum target regardless —
+ * `--lmp-control-size` is a floor, and going below it would trade a touch
+ * target for a visual nicety.
+ */
+.lmp-fs-center .lmp-fs-skip svg {
+    width: 30px;
+    height: 30px;
+}
+
+/*
+ * The interval sits inside the ring, which is what makes these read as "back
+ * fifteen" rather than as two anonymous arrows. Sized in user units against the
+ * 24-unit viewBox so it tracks the icon, not the root font size. The whole SVG
+ * is aria-hidden — the button already carries the interval as a sentence, and
+ * it must not be announced twice.
+ */
+.lmp-fs-skip-num {
+    font-size: 9.2px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.2px;
+    text-anchor: middle;
+    fill: currentColor;
+}
+
+.lmp-fs-bar {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 2rem 1rem calc(2.75rem + env(safe-area-inset-bottom, 0px));
+    background: linear-gradient(to top, var(--lmp-surface-strong), transparent);
+}
+
+.lmp-fs-scrub-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+/*
+ * Full white and larger than a caption: these are the one thing on the bar a
+ * viewer reads rather than operates, and dimming them made them furniture.
+ * Tabular figures and a fixed minimum stop the row twitching as digits change.
+ */
+.lmp-fs-time {
+    font-family: var(--lmp-font-mono);
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--lmp-text);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+    min-width: 4.5em;
+}
+
+.lmp-fs-time-duration {
+    text-align: right;
+}
+
+/*
+ * Three stacked bands — the rest, buffered-ahead, played — each a pill with
+ * rounded caps, drawn largest to smallest so every cap stays visible.
+ *
+ * Not the input's own pseudo-elements: WebKit offers nothing for the value
+ * region, neither engine offers anything for buffered, and none of them can be
+ * given a cap independent of the track. So the bands are plain elements and the
+ * input lies over them at full size.
+ *
+ * Each band's width is the position of the *handle centre* at that ratio, not a
+ * raw percentage: an input insets its thumb by half its width at each end, so
+ * the handle travels `100% - thumb`. Measuring against the full width leaves
+ * the handle ahead of the fill through the first half of the video and behind
+ * it through the second, meeting only at the midpoint.
+ */
+.lmp-fs-scrub {
+    --lmp-thumb: 15px;
+    --lmp-bar: 5px;
+    --lmp-played-x: calc(
+        var(--lmp-thumb) / 2 + (100% - var(--lmp-thumb)) * var(--lmp-progress, 0)
+    );
+    --lmp-buffered-x: calc(
+        var(--lmp-thumb) / 2 + (100% - var(--lmp-thumb)) * var(--lmp-buffered, 0)
+    );
+
+    position: relative;
+    flex: 1;
+    /* Taller than the bar: the rest is thumb room and grab area. A 5px-tall
+       pointer target is not one. */
+    height: 18px;
+    display: flex;
+    align-items: center;
+}
+
+/*
+ * Scrub preview: above the bar, out of the flow.
+ *
+ * Absolute so that showing it cannot move the bar by a pixel — the bar's
+ * geometry is what the drag arithmetic is calibrated against, and a preview
+ * that reflowed its own reference would make the frame lag the pointer.
+ *
+ * `left` is set inline as a percentage of the bar; the translate centres it on
+ * that point, and the margins keep it on screen at either extreme.
+ */
+.lmp-fs-scrub-preview {
+    position: absolute;
+    bottom: calc(100% + 10px);
+    transform: translateX(-50%);
+    z-index: 2;
+    pointer-events: none;
+}
+
+.lmp-fs-scrub-track,
+.lmp-fs-scrub-buffered,
+.lmp-fs-scrub-played {
+    position: absolute;
+    left: 0;
+    height: var(--lmp-bar);
+    border-radius: calc(var(--lmp-bar) / 2);
+    /* Decoration only — every pointer event belongs to the input above. */
+    pointer-events: none;
+}
+
+.lmp-fs-scrub-track {
+    right: 0;
+    background: var(--lmp-track);
+}
+
+.lmp-fs-scrub-buffered {
+    width: var(--lmp-buffered-x);
+    background: var(--lmp-buffer);
+}
+
+.lmp-fs-scrub-played {
+    width: var(--lmp-played-x);
+    background: var(--lmp-accent);
+}
+
+/*
+ * The input keeps every behaviour and paints none of it: transparent track, the
+ * bands below showing through, and only its thumb drawn.
+ */
+.lmp-fs-scrubber {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    margin: 0;
+    appearance: none;
+    background: transparent;
+    cursor: pointer;
+}
+
+.lmp-fs-scrubber::-webkit-slider-runnable-track {
+    height: var(--lmp-bar);
+    background: transparent;
+}
+
+.lmp-fs-scrubber::-moz-range-track,
+.lmp-fs-scrubber::-moz-range-progress {
+    height: var(--lmp-bar);
+    background: transparent;
+}
+
+/*
+ * The handle appears on approach, not at rest.
+ *
+ * At rest the bar is a readout — a progress line across the picture — and a dot
+ * riding it is one more thing drawn over the video for no purpose. It is needed
+ * the moment the bar becomes a control, which is when a pointer arrives or the
+ * keyboard focuses it.
+ */
+.lmp-fs-scrubber::-webkit-slider-thumb {
+    appearance: none;
+    width: var(--lmp-thumb);
+    height: var(--lmp-thumb);
+    border: none;
+    border-radius: 50%;
+    background: var(--lmp-accent);
+    /* Straddles the bar rather than sitting on it. */
+    margin-top: calc((var(--lmp-bar) - var(--lmp-thumb)) / 2);
+    transform: scale(0);
+    transition: transform var(--lmp-transition);
+}
+
+.lmp-fs-scrubber::-moz-range-thumb {
+    width: var(--lmp-thumb);
+    height: var(--lmp-thumb);
+    border: none;
+    border-radius: 50%;
+    background: var(--lmp-accent);
+    transform: scale(0);
+    transition: transform var(--lmp-transition);
+}
+
+.lmp-fs-scrubber:hover::-webkit-slider-thumb,
+.lmp-fs-scrubber:focus-visible::-webkit-slider-thumb,
+.lmp-fs-scrubber:active::-webkit-slider-thumb {
+    transform: scale(1);
+}
+
+.lmp-fs-scrubber:hover::-moz-range-thumb,
+.lmp-fs-scrubber:focus-visible::-moz-range-thumb,
+.lmp-fs-scrubber:active::-moz-range-thumb {
+    transform: scale(1);
+}
+
+/* A handle that never appears is worse than one that appears instantly. */
+@media (prefers-reduced-motion: reduce) {
+    .lmp-fs-scrubber::-webkit-slider-thumb,
+    .lmp-fs-scrubber::-moz-range-thumb {
+        transition: none;
+    }
+}
+
+/* Track menus, inline at the trailing end of the scrubber row. */
+.lmp-fs-menus {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-shrink: 0;
+}
+
+/*
+ * A `<select>` is the one element here that otherwise announces itself as a
+ * form control sitting on a video. `appearance: none` had already removed the
+ * bevel; what was left was a bare box with no affordance and a 26px hit area.
+ *
+ * So: a pill to match the icon buttons, a drawn chevron — a background image,
+ * since `::after` does not render on a select — and room for it on the trailing
+ * edge. Not `--lmp-control-size` for the height: a menu is not a target of the
+ * same weight as the transport, and matching it would make this row heavier
+ * than the scrubber above it.
+ */
+.lmp-fs-select {
+    appearance: none;
+    min-height: 32px;
+    border: 1px solid var(--lmp-border);
+    border-radius: 9999px;
+    background-color: var(--lmp-surface);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23ffffff'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.4rem center;
+    background-size: 16px 16px;
+    color: var(--lmp-text);
+    font: inherit;
+    font-size: 0.8125rem;
+    line-height: 1;
+    padding: 0.3rem 1.6rem 0.3rem 0.75rem;
+    cursor: pointer;
+    transition: background-color var(--lmp-transition);
+}
+
+.lmp-fs-select:hover,
+.lmp-fs-select:focus-visible {
+    background-color: var(--lmp-surface-strong);
+}
+
+/*
+ * The dropdown itself is drawn by the platform and inherits none of the above,
+ * so its options would be dark-on-dark wherever the OS renders a light menu.
+ * Naming the colours on the option is the only reach we have into it.
+ */
+.lmp-fs-select option {
+    background: #18181b;
+    color: #ffffff;
+}
+
+/*
+ * Windowed scrub preview.
+ *
+ * The one thing this player draws over the picture outside fullscreen, and only
+ * when a host explicitly asks by binding `previewTime` — see the prop's own
+ * note for why that rule matters. Bottom-centre, clear of the video's own edges.
+ */
+.lmp-windowed-preview {
+    position: absolute;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 3;
+    pointer-events: none;
+}
