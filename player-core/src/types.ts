@@ -5,7 +5,8 @@
  * extraction, quality capping, key handling, decryption), playback policy
  * (recovery, coming-soon polling) and a framework-free state
  * store. It drives an engine through the {@link PlayerAdapter} interface —
- * hls.js on the web today, AVPlayer / ExoPlayer in a Capacitor shell later.
+ * video.js (VHS) on the web today, AVPlayer / ExoPlayer in a Capacitor shell
+ * later.
  *
  * Implementing projects (the media encoder app, the Luminary app, …) talk to
  * {@link PlayerController} only; they never touch the adapter or the engine.
@@ -110,8 +111,33 @@ export interface PlayerSource {
      * or below the cap, the single lowest rendition above it is kept.
      */
     maxHeight?: number;
+    /**
+     * The host's own measure of the connection, in bits per second, for the
+     * engine's adaptive logic to START from rather than guess: the host holds a
+     * measurement the engine has not made yet (the first segment is the one
+     * that costs). A HINT — an engine corrects it with what it measures and
+     * may ignore it, and one that has already measured this device's real
+     * throughput prefers its own. Not a cap: {@link maxHeight} is the cap.
+     * Absent or non-positive: no hint.
+     */
+    bandwidthEstimate?: number;
+    /**
+     * The viewer is on the host's data saver. The engine starts from a low
+     * rendition whatever {@link bandwidthEstimate} or its own record says (the
+     * estimate is clamped to {@link DATA_SAVER_START_BPS}), and climbs only as it
+     * measures. Not a cap: {@link maxHeight} is the cap.
+     */
+    dataSaver?: boolean;
     /** Start position in seconds for the initial load. */
     startPosition?: number;
+    /**
+     * The angle the load starts on, instead of the master's default. With
+     * `AUDIO_ONLY_ANGLE_ID` the load fetches no video at all, which is what a
+     * host offering "start as audio" needs: starting on video and switching
+     * away would already have downloaded some. An id the master does not have
+     * falls back to the default.
+     */
+    startAngleId?: string;
     /** Carry the previous source's position into this load. */
     preservePosition?: boolean;
     sidecars?: {
@@ -144,8 +170,8 @@ export interface PlayerSource {
 // ---------------------------------------------------------------------------
 
 // Imported for use below and re-exported, so a consumer can type a preview
-// without also depending on `hls/` — `player-web` draws these and has no other
-// reason to know that package exists.
+// without also depending on `hls-core` — `player-web-old` drew these and had no
+// other reason to know that package exists.
 import type { ThumbnailSpriteCue } from '@luminary-media-converter/hls-core';
 export type { ThumbnailSpriteCue };
 
@@ -212,6 +238,16 @@ export interface Chapter {
     endTime: number;
     title: string;
 }
+
+/** What a viewer can ask of the sleep timer: playback stops after some minutes, or at the end of the chapter playing. */
+export type SleepTimerOption = { kind: 'minutes'; minutes: number } | { kind: 'chapter' };
+
+/** A running sleep timer. */
+export type SleepTimerState =
+    /** `endsAt` is a `Date.now()` time in ms, so a countdown can be drawn from it. */
+    | { kind: 'minutes'; endsAt: number }
+    /** `endTime` is the media time, in seconds, at which the chapter ends. */
+    | { kind: 'chapter'; endTime: number };
 
 /** Typed, user-presentable failure. */
 export interface PlayerError {
@@ -290,9 +326,18 @@ export interface PlayerState {
     activeChapterTrackId: string | null;
     /** Cues of the active chapter track (loaded lazily per language). */
     chapters: Chapter[];
+    /** The sleep timer that is running, or null. */
+    sleepTimer: SleepTimerState | null;
 
     /** True when the active rendering carries no video (audio-only master or pseudo-angle). */
     isAudioOnly: boolean;
+
+    /**
+     * True for a live source: a media playlist is still being written. Its `duration` is 0, because an engine
+     * reports none for a stream with no end, so this is what tells a live stream from one whose length is not
+     * known yet.
+     */
+    live: boolean;
 
     /**
      * True once a thumbnail sidecar has been fetched and parsed into at least
@@ -348,11 +393,20 @@ export interface AdapterCapabilities {
      * 'url': the wrapper falls back to rewriting key URIs to a blob URL.
      */
     keyDelivery: 'memory' | 'url';
-    /** Supports pinning a specific variant via setVariant(). */
+    /**
+     * Supports pinning a specific variant via setVariant(). Without it the
+     * wrapper turns a quality choice into a reload with a height cap.
+     */
     variantSwitching: boolean;
-    /** Can render WebVTT text tracks handed over via setTextTracks(). */
+    /**
+     * Can render WebVTT text tracks handed over via setTextTracks(). Without it
+     * the wrapper neither fetches side-loaded subtitles nor offers them.
+     */
     renderText: boolean;
 }
+
+/** What a data saver starts the adaptive logic from, in bits per second: the lowest rungs. */
+export const DATA_SAVER_START_BPS = 1_000_000;
 
 /** What the wrapper hands the engine to play. */
 export interface AdapterSource {
@@ -361,6 +415,10 @@ export interface AdapterSource {
     isBlob: boolean;
     /** Raw session key for 'memory' key delivery. */
     keyHex?: string;
+    /** {@link PlayerSource.bandwidthEstimate}, passed on only when it is a usable number. */
+    bandwidthEstimate?: number;
+    /** {@link PlayerSource.dataSaver}: the engine ignores its own record of this device's throughput. */
+    dataSaver?: boolean;
     /**
      * The recovery ladder's tuning for this source, already resolved — the
      * adapter is handed decisions, never a partial bag whose defaults it would
@@ -515,7 +573,7 @@ export interface ChunkWarmOptions {
  * with it: ExoPlayer's `LoadErrorHandlingPolicy` is precisely a
  * retry-count-plus-backoff policy, and re-implementing ours beside it would be
  * two ladders fighting. A platform with no equivalent — AVPlayer — ports the
- * reference module, `player-web-legacy/src/drivers/RecoveryLadder.ts`, which
+ * reference module, `player-web/src/drivers/RecoveryLadder.ts`, which
  * is self-contained for that reason.
  */
 export interface PlayerAdapter {
@@ -573,7 +631,11 @@ export interface PlayerAdapter {
     setAudioTrack(id: string): void;
 
     setTextTracks(tracks: AdapterTextTrack[]): void;
-    setActiveTextTrack(id: string | null): void;
+    /**
+     * `track` is what the controller knows of the one chosen: its name and language, so an engine that names its
+     * tracks its own way can still find it.
+     */
+    setActiveTextTrack(id: string | null, track?: { label: string; lang?: string }): void;
 
     /**
      * Attempt an in-place recovery for the given error category
@@ -641,12 +703,19 @@ export interface PlayerAdapter {
      * bridge; the schedules themselves are plain data and serialize fine.
      *
      * Reference implementation:
-     * `player-web-legacy/src/adapter/chunkWarming.ts` (`ChunkPrefetcher`),
-     * wired up in `player-web-legacy/src/adapter/VideoJsAdapter.ts`. Prose
+     * `player-web/src/adapter/chunkWarming.ts` (`ChunkPrefetcher`),
+     * wired up in `player-web/src/adapter/HlsJsVideoAdapter.ts`. Prose
      * versions, for porting: `docs/chunk-warming.md` for the loop itself, and
      * `docs/suspension-safe-playback.md` for the rule it is one case of.
      */
     warmChunks?(schedules: ChunkBoundary[][], options: ChunkWarmOptions): void;
+    /**
+     * Stops playback at a `Date.now()` time (ms), or clears it with `null`; the sleep timer done beside the
+     * engine, for a shell whose JavaScript is suspended while the screen is locked. Absent: the controller keeps
+     * the timer in JavaScript, which is enough for the web. Only the minutes timer is delegated: the chapter
+     * timer follows the playhead, which the controller already watches.
+     */
+    setSleepTimer?(endsAt: number | null): void;
 
     on<E extends AdapterEventName>(
         event: E,
@@ -707,10 +776,24 @@ export interface PlayerControllerApi {
     togglePlay(): void;
     seek(seconds: number): void;
     setPlaybackRate(rate: number): void;
+    /**
+     * Starts, replaces or (with `null`) clears the sleep timer. A chapter timer needs chapters and a playhead
+     * inside one; without either it is ignored. Playback pauses when the timer fires, and the state's
+     * `sleepTimer` is null again. A minutes timer survives a new source; a chapter timer does not.
+     */
+    setSleepTimer(option: SleepTimerOption | null): void;
 
     /** Re-munges and reloads, preserving position and play state. */
     setAngle(id: string): Promise<void>;
-    /** Pins a rendition within the capped set; `'auto'` re-enables ABR. No reload. */
+    /**
+     * Chooses a rendition within the capped set; `'auto'` re-enables ABR.
+     *
+     * An engine that can pin a variant is asked to, with no reload. One that
+     * cannot (`variantSwitching: false`, AVPlayer) is reloaded with the chosen
+     * height as a cap, keeping position and play state, and its ABR stays at
+     * or below it; the choice holds across angle switches until `'auto'` or
+     * the next `load()`.
+     */
     setQuality(id: string | 'auto'): void;
     /**
      * Selects an audio track and keeps it selected until the next `load()`.

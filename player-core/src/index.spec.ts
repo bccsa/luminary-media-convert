@@ -6,13 +6,14 @@ import { describeLiveness, resolveLivePlaylist } from './policy/live.js';
  * The runtime surface of `@luminary-media-converter/player-core`, by name.
  *
  * Its consumers mostly live elsewhere — the players, the Luminary app through
- * `player-web-legacy`'s `export *`, native adapters — and find a removed symbol
+ * `player-web`'s `export *`, native adapters — and find a removed symbol
  * only at their next build. Pinned here, an export cannot appear or disappear
  * without a change to this list saying so. Type-only exports are erased at
  * runtime, and are the compiler's to check.
  */
 const RUNTIME_EXPORTS = [
     'AUDIO_ONLY_ANGLE_ID',
+    'DATA_SAVER_START_BPS',
     'DEFAULT_ANGLE_ID',
     'DEFAULT_LEAD_SECONDS',
     'DEFAULT_POLL_INTERVAL_MS',
@@ -33,6 +34,8 @@ const RUNTIME_EXPORTS = [
     'buildAudioOnlyMaster',
     'buildChunkSchedules',
     'bytesToHex',
+    'chapterIndexAt',
+    'chapterSegments',
     'chapterTrackId',
     'collectMasterRefs',
     'createInitialState',
@@ -42,6 +45,7 @@ const RUNTIME_EXPORTS = [
     'describeMaster',
     'fetchBytes',
     'fetchMaybeEncrypted',
+    'findPreferredTrack',
     'hasAes128Key',
     'hasAudioOnlyRendering',
     'hasVideoVariants',
@@ -53,6 +57,7 @@ const RUNTIME_EXPORTS = [
     'listQualities',
     'listSegmentUris',
     'loadMaster',
+    'matchesPreferredLanguage',
     'mungeSource',
     'parseMasterText',
     'parseVttCues',
