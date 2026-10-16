@@ -1285,7 +1285,32 @@ const audioArtwork = computed(() => {
 });
 const audioChapterIndex = computed(() => chapterIndexAt(state.value.chapters, state.value.currentTime));
 
-defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, pause, castAvailable, showCastPicker, canPictureInPicture, startPictureInPicture });
+// Volume and mute for a host that draws its own controls and keys: read off the element, which is the
+// truth (see onControlsClick), and set through the store, as the player's own controls do.
+const setMuted = (muted: boolean): void => void store()?.setMuted(muted);
+const setVolume = (volume: number): void => void store()?.setVolume(volume);
+
+defineExpose({
+    controller,
+    state,
+    enterFullscreen,
+    exitFullscreen,
+    seek,
+    play,
+    pause,
+    castAvailable,
+    showCastPicker,
+    canPictureInPicture,
+    startPictureInPicture,
+    get muted() {
+        return mediaEl.value?.muted ?? false;
+    },
+    get volume() {
+        return mediaEl.value?.volume ?? 1;
+    },
+    setMuted,
+    setVolume,
+});
 </script>
 
 <template>
