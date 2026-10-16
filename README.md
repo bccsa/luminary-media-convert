@@ -29,18 +29,18 @@ The API binds to `127.0.0.1` only. The renderer authenticates with a token minte
 
 ## Workspaces
 
-| Workspace            | Description                                            | README                                                                     |
-| -------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------- |
-| `api/`               | Encoding API — NestJS, embeddable via `createServer()` | [api/README.md](api/README.md)                                             |
-| `app/`               | Vue 3 renderer UI                                      | [app/README.md](app/README.md)                                             |
-| `app-electron/`      | Desktop shell, hosts the API in-process, packaging     | [app-electron/bin/README.md](app-electron/bin/README.md) (ffmpeg binaries) |
-| `cms-mock/`          | Dev-only stand-in for the Luminary CMS                 | [cms-mock/README.md](cms-mock/README.md)                                   |
-| `encode-config/`     | Shared encode-config form + types                      | [encode-config/README.md](encode-config/README.md)                         |
-| `hls-core/`          | Shared HLS parsing, key utilities, angle extraction    | —                                                                          |
-| `player-core/`       | Player pipeline: fetch, decrypt, extract angles, state | —                                                                          |
-| `player-web/`        | Web player over the `PlayerAdapter` contract           | —                                                                          |
-| `player-web-legacy/` | The same contract on Video.js 8 / VHS                  | [player-web-legacy/README.md](player-web-legacy/README.md)                 |
-| `ffmpeg-build/`      | Builds the bundled LGPL FFmpeg                         | [ffmpeg-build/README.md](ffmpeg-build/README.md)                           |
+| Workspace         | Description                                                    | README                                                                     |
+| ----------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `api/`            | Encoding API — NestJS, embeddable via `createServer()`         | [api/README.md](api/README.md)                                             |
+| `app/`            | Vue 3 renderer UI                                              | [app/README.md](app/README.md)                                             |
+| `app-electron/`   | Desktop shell, hosts the API in-process, packaging             | [app-electron/bin/README.md](app-electron/bin/README.md) (ffmpeg binaries) |
+| `cms-mock/`       | Dev-only stand-in for the Luminary CMS                         | [cms-mock/README.md](cms-mock/README.md)                                   |
+| `encode-config/`  | Shared encode-config form + types                              | [encode-config/README.md](encode-config/README.md)                         |
+| `hls-core/`       | Shared HLS parsing, key utilities, angle extraction            | —                                                                          |
+| `player-core/`    | Player pipeline: fetch, decrypt, extract angles, state         | —                                                                          |
+| `player-web/`     | Web player: Video.js 8 / VHS over the `PlayerAdapter` contract | [player-web/README.md](player-web/README.md)                               |
+| `player-web-old/` | Retired hls.js test implementation — frozen, not built         | —                                                                          |
+| `ffmpeg-build/`   | Builds the bundled LGPL FFmpeg                                 | [ffmpeg-build/README.md](ffmpeg-build/README.md)                           |
 
 ## Prerequisites
 
@@ -168,9 +168,8 @@ Signing, notarization and auto-update are tracked in [#206](https://github.com/b
 
 ## Consuming the player libraries
 
-An app that embeds `player-web` or `player-web-legacy` needs the five library
-workspaces built — they ship only `dist/` — and needs none of the desktop app to
-do it. `npm run ci:libs` installs exactly that subset, and `npm run build:libs`
+An app that embeds `player-web` needs the four library workspaces built — they
+ship only `dist/` — and needs none of the desktop app to do it. `npm run ci:libs` installs exactly that subset, and `npm run build:libs`
 builds it:
 
 ```bash
@@ -180,7 +179,7 @@ npm run build:libs
 
 A plain `npm ci` installs every workspace, which pulls in `electron` and
 `electron-builder` and downloads the Electron binary — around 500 MB and a
-lengthy download, to produce five small libraries. That is the right thing when
+lengthy download, to produce four small libraries. That is the right thing when
 working on the encoder and the wrong thing in a consumer's image build.
 
 The workspace list in `ci:libs` is the one in `build:libs`. Adding a library
@@ -194,7 +193,7 @@ by other applications, while the build scripts are a separate concern.
 
 |                                                                                                                                                    | Licence          |                                                                                                                        |
 | -------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| every workspace — `api/`, `app/`, `app-electron/`, `encode-config/`, `hls-core/`, `player-core/`, `player-web/`, `player-web-legacy/`, `cms-mock/` | Apache-2.0       | each carries its own `LICENSE`                                                                                         |
+| every workspace — `api/`, `app/`, `app-electron/`, `encode-config/`, `hls-core/`, `player-core/`, `player-web/`, `player-web-old/`, `cms-mock/`    | Apache-2.0       | each carries its own `LICENSE`                                                                                         |
 | `ffmpeg-build/`                                                                                                                                    | GPL-3.0-or-later | carries its own `LICENSE`; the build scripts also carry an SPDX header                                                 |
 | everything else — `docs/`, `test-media/`, the root files                                                                                           | Apache-2.0       | the root `LICENSE`                                                                                                     |
 | the bundled FFmpeg and FFprobe                                                                                                                     | LGPL-2.1         | built without `--enable-gpl` and without libx264; `COPYING.LGPLv2.1` and `LICENSE-ffmpeg.txt` ship beside the binaries |

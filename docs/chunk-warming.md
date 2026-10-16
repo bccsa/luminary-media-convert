@@ -164,10 +164,10 @@ platform's own scheduling primitives, following the semantics above.
   (`PlayerAdapter.warmChunks`, `ChunkWarmOptions`, `ChunkBoundary`).
 - Policy resolution: `player-core/src/controller.ts`
   (`PlayerController.updateChunkWarming`).
-- The loop, for the web: `player-web-legacy/src/adapter/chunkWarming.ts`
-  (`ChunkPrefetcher`), wired up in
-  `player-web-legacy/src/adapter/VideoJsAdapter.ts`. `player-web` carries a
-  byte-identical copy until it is retired.
-- Behaviour pinned by `player-web/__tests__/chunk-warming.test.ts` (the loop),
-  `player-web/__tests__/adapter.test.ts` (the wiring and its lifecycle) and
-  `player-core/src/controller.spec.ts` (the handover).
+- The loop, for the web: `player-web/src/adapter/chunkWarming.ts`
+  (`ChunkPrefetcher`), wired up in `player-web/src/adapter/VideoJsAdapter.ts`.
+  The retired hls.js package, `player-web-old`, carries a frozen copy.
+- Behaviour pinned by `player-web/__tests__/chunkWarming.test.ts` (the loop)
+  and `player-core/src/controller.spec.ts` (the handover). The wiring into
+  `VideoJsAdapter` has no test of its own yet; the one that pinned the hls.js
+  copy's wiring (`player-web-old/__tests__/adapter.test.ts`) no longer runs.

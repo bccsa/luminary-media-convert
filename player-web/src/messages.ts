@@ -56,6 +56,18 @@ export interface PlayerMessages {
     subtitlesMenuLabel: string;
     /** The "no subtitles" entry of the subtitles menu. */
     subtitlesOff: string;
+
+    // --- Audio / video toggle ----------------------------------------------
+    /**
+     * The half of the top-right toggle that plays the picture. Labels an
+     * action, not a state: pressing it is what returns to video.
+     */
+    videoModeLabel: string;
+    /**
+     * The half that plays sound only — no video data is downloaded at all, so
+     * the wording is about bandwidth as much as about listening.
+     */
+    audioModeLabel: string;
 }
 
 /** Built-in English strings. Merged under any partial the host supplies. */
@@ -82,6 +94,9 @@ export const DEFAULT_MESSAGES: PlayerMessages = {
     audioMenuLabel: 'Audio',
     subtitlesMenuLabel: 'Subtitles',
     subtitlesOff: 'Off',
+
+    videoModeLabel: 'Play video',
+    audioModeLabel: 'Play audio only',
 };
 
 /**

@@ -35,7 +35,7 @@ Per-session routes (preview, waveform, storyboard) use the session's own `sess_*
 ## Key components
 
 - **`SessionView`** — orchestrates the lifecycle; composed of `SessionWorkflowPanel` (probe → config → start), `SessionTrimWorkspace` (trim timeline), `SessionPlayerStrip` (player + track/quality selectors), `SessionPostProcessPanel` (chapters), `SessionOutputPanel` (output summary)
-- **`SessionPlayerStrip`** — hosts `LuminaryPlayer` from `@luminary-media-converter/player-web` and drives angle / quality / audio selection through its controller. Player-reported duration is treated as authoritative over the source probe duration, so cue positions match the actual stream
+- **`SessionPlayerStrip`** — hosts `LuminaryPlayer` from `@luminary-media-converter/player-web`, bare outside fullscreen, and drives angle / quality / audio selection through its controller. Player-reported duration is treated as authoritative over the source probe duration, so cue positions match the actual stream
 - **`FileDropZone`** — drop / browse, resolving real paths through the preload bridge
 - **`AccountMenu`** — no account any more; it keeps its place and carries the theme setting
 
@@ -87,6 +87,6 @@ Some specs were intentionally left broken during the local-only migration (`api.
 - Vue 3 (Composition API, `<script setup>`)
 - Vite 6, Tailwind CSS v4, TypeScript
 - Vue Router 4 (history mode)
-- `@luminary-media-converter/player-web` (hls.js on a plain `<video>`) — Video.js is gone
+- `@luminary-media-converter/player-web` (Video.js 8 / VHS), bare outside fullscreen (`controls.windowedControls: false`) — every control comes from the trim timeline
 - `@luminary-media-converter/{player-core,encode-config,hls-core}`, and the segment editor at `src/components/segment-editor/`
 - Vitest + `@vue/test-utils` + jsdom

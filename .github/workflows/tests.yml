@@ -67,7 +67,7 @@ jobs:
             # exactly how bccsa/luminary consumes them.
             - name: Every library emitted its type declarations
               run: |
-                  for lib in hls-core encode-config player-core player-web player-web-legacy; do
+                  for lib in hls-core encode-config player-core player-web; do
                     count=$(find "$lib/dist" -name '*.d.ts' 2>/dev/null | wc -l | tr -d ' ')
                     test "$count" -gt 0 || { echo "$lib emitted no .d.ts files"; exit 1; }
                     echo "  ✓ $lib ($count declaration files)"
@@ -90,7 +90,6 @@ jobs:
                         hls-core,
                         player-core,
                         player-web,
-                        player-web-legacy,
                     ]
         steps:
             - uses: actions/checkout@v5
