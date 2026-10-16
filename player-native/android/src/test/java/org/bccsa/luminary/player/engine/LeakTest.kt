@@ -96,6 +96,8 @@ class LeakTest {
             assertTrue(presenter.dismiss())
         }
         player.pause()
+        // Dismissing hands the orientation back after a short settle; that one-shot is not a loop, so let it run.
+        looper.idleFor(Duration.ofMillis(700))
         // ExoPlayer's own commands finish on its playback thread; measure once they have.
         TestPlayerRunHelper.advance(player).untilPendingCommandsAreFullyHandled()
 
