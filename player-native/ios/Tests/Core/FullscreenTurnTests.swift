@@ -1,69 +1,47 @@
 import XCTest
 @testable import LuminaryPlayerCore
 
-/// Full-screen opened from a phone held upright: held sideways through its own turn and until the
-/// phone is on its side, then left by turning the phone upright.
-final class FullscreenTurnTests: XCTestCase {
-    func testHoldsLandscapeWhileItsOwnTurnIsOnItsWay() {
-        var turn = FullscreenTurn()
-        XCTAssertFalse(turn.holdingLandscape)
-        turn.began()
-        XCTAssertTrue(turn.turning)
-        XCTAssertTrue(turn.holdingLandscape)
+final class PoseReadingTests: XCTestCase {
+    func testAChangeOfPoseIsReported() {
+        var reading = PoseReading()
+        XCTAssertTrue(reading.read(.upright))
+        XCTAssertTrue(reading.read(.sideways))
+        XCTAssertEqual(reading.pose, .sideways)
     }
 
-    func testLetsGoAsTheTurnEndsWhenThePhoneIsAlreadyOnItsSide() {
-        var turn = FullscreenTurn()
-        turn.began()
-        XCTAssertTrue(turn.ended(deviceSideways: true))
-        XCTAssertFalse(turn.turning)
-        XCTAssertFalse(turn.holdingLandscape)
+    func testTheSamePoseAgainIsNoChange() {
+        var reading = PoseReading(.sideways)
+        XCTAssertFalse(reading.read(.sideways))
     }
 
-    func testKeepsHoldingAPhoneStillHeldUprightUntilItIsTurned() {
-        var turn = FullscreenTurn()
-        turn.began()
-        XCTAssertFalse(turn.ended(deviceSideways: false))
-        XCTAssertTrue(turn.holdingLandscape)
-        // Wobbles and lying flat are not a turn.
-        XCTAssertFalse(turn.deviceTurned(sideways: false))
-        XCTAssertTrue(turn.holdingLandscape)
+    func testFlatOrUnknownKeepsThePoseTheTurnIsOnItsWayIn() {
+        // Held sideways and tilted back towards the sky: still sideways.
+        var reading = PoseReading(.sideways)
+        XCTAssertFalse(reading.read(nil))
+        XCTAssertEqual(reading.pose, .sideways)
+    }
+}
 
-        XCTAssertTrue(turn.deviceTurned(sideways: true))
-        XCTAssertFalse(turn.holdingLandscape)
+final class UprightExitTests: XCTestCase {
+    func testAPhoneStillHeldUprightDoesNotLeaveTheTurnFullScreenMadeItself() {
+        var exit = UprightExit()
+        XCTAssertFalse(exit.saw(.upright))
+        XCTAssertFalse(exit.saw(nil))
+        XCTAssertFalse(exit.beenSideways)
     }
 
-    func testIgnoresThePhoneWhileItsOwnTurnIsOnItsWay() {
-        var turn = FullscreenTurn()
-        turn.began()
-        XCTAssertFalse(turn.deviceTurned(sideways: true))
-        XCTAssertTrue(turn.holdingLandscape)
-        // The end of the turn reads the phone afresh.
-        XCTAssertTrue(turn.ended(deviceSideways: true))
+    func testOnceThePhoneHasBeenOnItsSideTurningItUprightLeaves() {
+        var exit = UprightExit()
+        XCTAssertFalse(exit.saw(.sideways))
+        XCTAssertFalse(exit.saw(nil))
+        XCTAssertTrue(exit.saw(.upright))
     }
 
-    func testEndsOnceWhetherByTheTransitionTheErrorOrTheTimer() {
-        var turn = FullscreenTurn()
-        turn.began()
-        XCTAssertFalse(turn.ended(deviceSideways: false))
-        XCTAssertFalse(turn.ended(deviceSideways: true))
-        XCTAssertTrue(turn.holdingLandscape)
-    }
-
-    func testTurningUprightLeavesALandscapePictureButNotItsOwnTurn() {
-        var turn = FullscreenTurn()
-        XCTAssertTrue(turn.leaves(toWidth: 390, height: 844, videoIsLandscape: true))
-        XCTAssertFalse(turn.leaves(toWidth: 844, height: 390, videoIsLandscape: true))
-        XCTAssertFalse(turn.leaves(toWidth: 390, height: 844, videoIsLandscape: false))
-
-        turn.began()
-        XCTAssertFalse(turn.leaves(toWidth: 390, height: 844, videoIsLandscape: true))
-    }
-
-    func testOpenedSidewaysByTurningThePhoneItFollowsThePhoneAtOnce() {
-        // No turn of its own: nothing is held, and turning upright leaves.
-        let turn = FullscreenTurn()
-        XCTAssertFalse(turn.holdingLandscape)
-        XCTAssertTrue(turn.leaves(toWidth: 390, height: 844, videoIsLandscape: true))
+    func testBackOnItsSideCallsTheLeavingOff() {
+        var exit = UprightExit()
+        _ = exit.saw(.sideways)
+        XCTAssertTrue(exit.saw(.upright))
+        XCTAssertFalse(exit.saw(.sideways))
+        XCTAssertTrue(exit.saw(.upright))
     }
 }

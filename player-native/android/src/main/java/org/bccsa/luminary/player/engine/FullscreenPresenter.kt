@@ -427,7 +427,7 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         private const val PIP_TOGGLE = "org.bccsa.luminary.player.PIP_TOGGLE"
         private const val MAX_RATIO = 2.39f
         private const val ORIENTATION_SETTLE_MS = 600L
-        private const val UPRIGHT_SETTLE_MS = 350L
+        private const val UPRIGHT_SETTLE_MS = 250L
 
         /** `ActivityInfo.FLAG_SUPPORTS_PICTURE_IN_PICTURE`: set by `android:supportsPictureInPicture`, and not in the public API. */
         private const val FLAG_SUPPORTS_PICTURE_IN_PICTURE = 0x400000

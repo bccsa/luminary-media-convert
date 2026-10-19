@@ -122,89 +122,109 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     override var prefersStatusBarHidden: Bool { true }
     override var prefersHomeIndicatorAutoHidden: Bool { true }
 
-    /// Whatever the app allows: full-screen follows how the phone is held. A landscape video opened
-    /// from a phone held upright turns it sideways (`turnToLandscape`) and is held there until the
-    /// phone is on its side; turning it upright then leaves (see ``FullscreenTurn``).
+    /// A landscape picture on a phone stays sideways for as long as full-screen is up, either way
+    /// round; turning the phone upright leaves (`watchDevice`). Elsewhere full-screen follows the
+    /// device, as the app allows.
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
-        turn.holdingLandscape ? .landscape : UIApplication.shared.supportedInterfaceOrientations(for: view.window)
+        holdsLandscape ? .landscape : UIApplication.shared.supportedInterfaceOrientations(for: view.window)
     }
 
-    /// Opened by turning the phone sideways, full-screen starts the way the phone is held: on iOS 15,
-    /// which cannot be asked to turn, that is the only way it comes up sideways. A device's
-    /// landscape-left is the interface's landscape-right.
+    /// Full-screen starts the way the phone is held when it is on its side. A device's landscape-left
+    /// is the interface's landscape-right.
     override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation {
         switch UIDevice.current.orientation {
         case .landscapeLeft: return .landscapeRight
         case .landscapeRight: return .landscapeLeft
-        default: return super.preferredInterfaceOrientationForPresentation
+        default: return holdsLandscape ? .landscapeRight : super.preferredInterfaceOrientationForPresentation
         }
     }
 
-    /// The picture is wider than tall, so full-screen is landscape. Known once the item has a size.
+    /// The picture is wider than tall. Known once the item has a size.
     private var videoIsLandscape: Bool {
         guard let size = player.currentItem?.presentationSize, size.width > 0, size.height > 0 else { return false }
         return size.width > size.height
     }
 
-    private var turn = FullscreenTurn()
+    /// Before the size is known the picture counts as landscape: a portrait one is let go of once
+    /// its size is known.
+    private var videoIsUpright: Bool {
+        guard let size = player.currentItem?.presentationSize, size.width > 0, size.height > 0 else { return false }
+        return size.height > size.width
+    }
+
+    private var holdsLandscape: Bool { UIDevice.current.userInterfaceIdiom == .phone && !videoIsUpright }
+
+    private var exit = UprightExit()
     private var deviceObserver: NSObjectProtocol?
+    private var leaving: DispatchWorkItem?
     private var turned = false
     private weak var scene: UIWindowScene?
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         scene = view.window?.windowScene
+        guard holdsLandscape else { return }
+        watchDevice()
         turnToLandscape()
     }
 
-    /// A landscape video opened from a phone held upright: full-screen turns sideways, as the
-    /// viewer asked for the picture to fill the screen.
+    /// Opened from a phone held upright: full-screen turns sideways itself, as the viewer asked for
+    /// the picture to fill the screen. iOS 15 cannot be asked, and turns as the mask allows.
     private func turnToLandscape() {
-        guard videoIsLandscape, let scene, scene.interfaceOrientation.isPortrait else { return }
+        guard let scene, scene.interfaceOrientation.isPortrait else { return }
+        turned = true
         if #available(iOS 16.0, *) {
-            turned = true
-            turn.began()
-            watchDevice()
             setNeedsUpdateOfSupportedInterfaceOrientations()
-            // The closure is only called when the turn fails; success is the transition below.
-            scene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscape)) { [weak self] _ in
-                DispatchQueue.main.async { self?.endTurn() }
-            }
-            // A turn that never comes (the scene already sideways) must not keep the turn open.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in self?.endTurn() }
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscape)) { _ in }
         }
     }
 
-    private func endTurn() {
-        if turn.ended(deviceSideways: UIDevice.current.orientation.isLandscape) { releasedLandscape() }
-    }
-
-    /// The phone's own position, read while full-screen is held sideways: it lets go once the phone
-    /// is on its side. The viewer's rotation lock silences it, which leaves the exit button.
+    /// The phone's own position, read while full-screen is held sideways: once it has been on its
+    /// side, holding it upright for a moment leaves. The viewer's rotation lock silences it, which
+    /// leaves the exit button.
     private func watchDevice() {
         guard deviceObserver == nil else { return }
         UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+        _ = exit.saw(PhonePose.current)
         deviceObserver = NotificationCenter.default.addObserver(
             forName: UIDevice.orientationDidChangeNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            guard let self else { return }
-            if self.turn.deviceTurned(sideways: UIDevice.current.orientation.isLandscape) { self.releasedLandscape() }
-        }
+        ) { [weak self] _ in self?.deviceTurned() }
     }
 
+    private func deviceTurned() {
+        let pose = PhonePose.current
+        // Flat or unknown says nothing: a phone laid down after turning it upright still leaves.
+        guard let pose else { return }
+        guard exit.saw(pose) else {
+            leaving?.cancel()
+            leaving = nil
+            return
+        }
+        guard leaving == nil else { return }
+        let leave = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.leaving = nil
+            guard PhonePose.current != .sideways else { return }
+            self.onLeave?()
+        }
+        leaving = leave
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.uprightSettle, execute: leave)
+    }
+
+    /// Long enough to pass a wobble, short enough to feel like the system's own turn.
+    private static let uprightSettle: TimeInterval = 0.25
+
     private func stopWatchingDevice() {
+        leaving?.cancel()
+        leaving = nil
         guard let deviceObserver else { return }
         NotificationCenter.default.removeObserver(deviceObserver)
         UIDevice.current.endGeneratingDeviceOrientationNotifications()
         self.deviceObserver = nil
     }
 
-    private func releasedLandscape() {
-        stopWatchingDevice()
-        if #available(iOS 16.0, *) { setNeedsUpdateOfSupportedInterfaceOrientations() }
-    }
-
     deinit {
+        leaving?.cancel()
         if let deviceObserver {
             NotificationCenter.default.removeObserver(deviceObserver)
             UIDevice.current.endGeneratingDeviceOrientationNotifications()
@@ -222,16 +242,10 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
 
     override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
         super.viewWillTransition(to: size, with: coordinator)
-        if turn.turning, size.width > size.height {
-            coordinator.animate(alongsideTransition: nil) { [weak self] _ in self?.endTurn() }
-            return
-        }
-        // The phone turned upright while a landscape video fills the screen: back to the page.
-        guard turn.leaves(toWidth: Double(size.width), height: Double(size.height), videoIsLandscape: videoIsLandscape) else { return }
-        coordinator.animate(alongsideTransition: nil) { [weak self] _ in
-            self?.turned = false
-            self?.onLeave?()
-        }
+        // Where the interface follows the device (an iPad), turning a landscape picture upright
+        // leaves.
+        guard !holdsLandscape, videoIsLandscape, size.height > size.width else { return }
+        coordinator.animate(alongsideTransition: nil) { [weak self] _ in self?.onLeave?() }
     }
 
     override func viewDidLoad() {
@@ -333,6 +347,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
 
     /// Stops watching the player and hands it back; called as the presentation ends.
     func detach() {
+        stopWatchingDevice()
         restorePortrait()
         stopObserving()
         visibility.stop()

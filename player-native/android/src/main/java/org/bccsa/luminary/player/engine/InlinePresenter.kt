@@ -233,4 +233,4 @@ class InlinePresenter(
 }
 
 /** How long the phone stays on its side before the picture goes full-screen. */
-private const val SIDEWAYS_SETTLE_MS = 350L
+private const val SIDEWAYS_SETTLE_MS = 250L
