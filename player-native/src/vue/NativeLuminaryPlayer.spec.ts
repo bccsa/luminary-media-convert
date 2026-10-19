@@ -541,6 +541,18 @@ describe('NativeLuminaryPlayer', () => {
             expect(measure.mock.calls.length - after).toBeLessThanOrEqual(2);
         });
 
+        it('takes the video down when the page stops asking for it', async () => {
+            const { plugin, wrapper } = await mountPlayer({ inline: true, plugin: new FakePlugin({ inlineVideo: true }) });
+            await ready(plugin);
+            await flush();
+            expect(frames(plugin).at(-1)).toEqual({ x: 0, y: 72, width: 390, height: 219 });
+
+            await wrapper.setProps({ inline: false });
+            await flush();
+
+            expect(frames(plugin).at(-1)).toBeUndefined();
+        });
+
         it('takes the video away in audio only, and when the component goes', async () => {
             const { plugin, wrapper } = await mountPlayer({ inline: true, plugin: new FakePlugin({ inlineVideo: true }) }, AUDIO_ONLY_MASTER);
             await ready(plugin);
