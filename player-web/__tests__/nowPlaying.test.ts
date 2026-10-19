@@ -125,6 +125,31 @@ describe('the now-playing view for a host', () => {
             }
         });
 
+        it('offers the lyrics in each language the post has, and shows the one chosen', async () => {
+            const tracks = [
+                { id: 'en', label: 'English' },
+                { id: 'fr', label: 'Français' },
+            ];
+            const wrapper = mountView({ lyrics, subtitleTracks: tracks, activeSubtitleTrackId: 'en' });
+            await find(wrapper, 'afsLyricsLanguage').trigger('click');
+            const items = wrapper.findAll('[role="menuitemradio"]');
+            expect(items.map((item) => item.text())).toEqual(['English', 'Français']);
+            await items[1]!.trigger('click');
+            expect(wrapper.emitted('subtitle-track')).toEqual([['fr']]);
+            expect(find(wrapper, 'afsLyrics').exists()).toBe(true);
+
+            // The French words on their way: the lyrics stay asked for, and come back with them.
+            await wrapper.setProps({ lyrics: [], activeSubtitleTrackId: 'fr' });
+            expect(find(wrapper, 'afsLyrics').exists()).toBe(false);
+            await wrapper.setProps({ lyrics });
+            expect(find(wrapper, 'afsLyrics').exists()).toBe(true);
+        });
+
+        it('has no lyrics language to choose with words in one language only', () => {
+            const wrapper = mountView({ lyrics, subtitleTracks: [{ id: 'en', label: 'English' }] });
+            expect(find(wrapper, 'afsLyricsLanguage').exists()).toBe(false);
+        });
+
         it('has no lyrics button for a post without words, and keeps the sleep timer', () => {
             const wrapper = mountView();
             expect(find(wrapper, 'afsLyricsToggle').exists()).toBe(false);

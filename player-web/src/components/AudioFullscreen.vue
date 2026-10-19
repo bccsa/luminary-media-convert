@@ -116,8 +116,9 @@ function measureWide(): void {
 }
 const lyricsInStage = computed(() => showLyrics.value && !wide.value);
 const lyricsBeside = computed(() => showLyrics.value && wide.value);
-watch([isVideo, () => lyricLines.value.length], ([video, count]) => {
-    if (video || count === 0) lyricsOpen.value = false;
+// The picture puts them away. Words still on their way (another language being read) keep them asked for.
+watch(isVideo, (video) => {
+    if (video) lyricsOpen.value = false;
 });
 
 type MenuId = 'speed' | 'language' | 'sleep' | 'subtitles';
@@ -300,6 +301,11 @@ function chooseTrack(id: string): void {
 function chooseSubtitles(id: string | null): void {
     emit('subtitle-track', id);
     closeMenu();
+}
+/** With the sound alone the subtitles are the lyrics: choosing their language shows them. */
+function chooseLyrics(id: string): void {
+    lyricsOpen.value = true;
+    chooseSubtitles(id);
 }
 
 // The stage's band, for a picture drawn behind the page: the screen's colour is cut out there (see .lmpl-afs-hole).
@@ -611,6 +617,23 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                             >
                                 <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 10h10M4 14h16M4 18h7" /><circle cx="18" cy="18" r="2" /></svg>
                             </button>
+
+                            <div v-if="!isVideo && subtitleTracks.length > 1" class="lmpl-afs-tool">
+                                <button
+                                    type="button"
+                                    class="lmpl-afs-iconbtn"
+                                    :aria-label="messages.lyricsLanguage"
+                                    :aria-expanded="menu === 'subtitles'"
+                                    aria-haspopup="menu"
+                                    data-test="afsLyricsLanguage"
+                                    @click="toggleMenu('subtitles')"
+                                >
+                                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5" /><path d="M7 14h4M13 14h4M7 10.5h2M11 10.5h6" /></svg>
+                                </button>
+                                <div v-if="menu === 'subtitles'" class="lmpl-afs-menu" role="menu" :aria-label="messages.lyricsLanguage">
+                                    <button v-for="track in subtitleTracks" :key="track.id" type="button" role="menuitemradio" :aria-checked="track.id === activeSubtitleTrackId" class="lmpl-afs-menuitem" @click="chooseLyrics(track.id)">{{ track.label }}</button>
+                                </div>
+                            </div>
 
                             <div v-if="isVideo && subtitleTracks.length > 0" class="lmpl-afs-tool">
                                 <button
