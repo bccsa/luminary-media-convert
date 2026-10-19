@@ -6,6 +6,8 @@ export * from '@luminary-media-converter/player-core';
 
 export { default as LuminaryPlayer } from './components/LuminaryPlayer.vue';
 export { default as AudioFullscreen } from './components/AudioFullscreen.vue';
+export { default as NowPlayingLyrics } from './components/NowPlayingLyrics.vue';
+export { activeLyric, cuesToLyrics, lyricText, type LyricCue } from './ui/lyrics';
 export { chapterMask } from './ui/chapterBar';
 
 // What `poster` takes: an image described in plain terms, so the shape outlives the engine.

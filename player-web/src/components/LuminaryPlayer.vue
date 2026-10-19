@@ -38,6 +38,7 @@ import { buildControlsHtml } from '../ui/controlsHtml';
 import { installAutoHide, type ControlsStore } from '../ui/autoHide';
 import { stepVolume } from '../ui/volume';
 import { liftCues, liftLine, type LiftableCue } from '../ui/cueLift';
+import { cuesToLyrics, type LyricCue } from '../ui/lyrics';
 import { chapterMask, formatChapterOf } from '../ui/chapterBar';
 import { attachControlTooltips, clampTooltipLeft, showOnTop, type Tooltip } from '../ui/controlTooltip';
 import {
@@ -1209,11 +1210,27 @@ function placeCues(): void {
         const line = track.mode === 'showing' ? cueLine : null;
         liftCues(Array.from(track.cues ?? []) as unknown as LiftableCue[], line, liftedCues);
     }
+    readSubtitleCues();
+}
+
+/**
+ * The words of the subtitles that are on, for a host that shows them itself (as lyrics): read again whenever the
+ * track changes or a cue comes up, since a stream's subtitles arrive a segment at a time as the video plays.
+ */
+const subtitleCues = shallowRef<LyricCue[]>([]);
+function readSubtitleCues(): void {
+    const track = Array.from(innerVideo()?.textTracks ?? []).find((t) => t.kind === 'subtitles' && t.mode !== 'disabled');
+    const next = cuesToLyrics(track?.cues as unknown as ArrayLike<{ startTime: number; endTime: number; text: string }> | null);
+    const now = subtitleCues.value;
+    if (next.length !== now.length || next.some((line, i) => line.start !== now[i]?.start || line.text !== now[i]?.text)) {
+        subtitleCues.value = next;
+    }
 }
 
 /** hls.js adds a stream's cues as the video plays, after a lift: each one is placed as it comes up. */
 function onCueChange(event: Event): void {
     const track = event.target as TextTrack;
+    readSubtitleCues();
     if (cueLine === null || track.mode !== 'showing') return;
     liftCues(Array.from(track.activeCues ?? []) as unknown as LiftableCue[], cueLine, liftedCues);
 }
@@ -1350,6 +1367,10 @@ defineExpose({
     },
     setMuted,
     setVolume,
+    /** The subtitles' words that are on, timed; empty with none on. */
+    get subtitleCues() {
+        return subtitleCues.value;
+    },
 });
 </script>
 

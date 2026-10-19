@@ -55,6 +55,12 @@ export interface PlayerMessages {
      * not floating over the picture. Call `enterFullscreen()` on the player.
      */
     exitFullscreen: string;
+    /** The now-playing screen's button that opens the picture full screen. */
+    enterFullscreen: string;
+    /** The now-playing screen's button that floats the picture over other apps. */
+    pictureInPicture: string;
+    /** The now-playing screen's button, and list, for the words of what plays. */
+    lyrics: string;
 
     // --- Track menus -------------------------------------------------------
     audioMenuLabel: string;
@@ -137,6 +143,9 @@ export const DEFAULT_MESSAGES: PlayerMessages = {
     chapterOf: 'Chapter {index} of {count}',
 
     exitFullscreen: 'Exit full screen',
+    enterFullscreen: 'Full screen',
+    pictureInPicture: 'Picture in picture',
+    lyrics: 'Lyrics',
 
     audioMenuLabel: 'Audio',
     qualityLabel: 'Quality',
