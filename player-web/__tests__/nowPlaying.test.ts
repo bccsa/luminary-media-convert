@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
-import { h } from 'vue';
+import { h, nextTick } from 'vue';
 import AudioFullscreen from '../src/components/AudioFullscreen.vue';
 import NowPlayingLyrics from '../src/components/NowPlayingLyrics.vue';
 import { DEFAULT_MESSAGES } from '../src/messages';
@@ -166,6 +166,29 @@ describe('the now-playing view for a host', () => {
             await wrapper.setProps({ stage: 'cover' });
             expect(find(wrapper, 'afsLyrics').exists()).toBe(false);
             expect(find(wrapper, 'afsCover').exists()).toBe(true);
+        });
+
+        it('says when its stage moves, so a picture drawn behind the page is placed again', async () => {
+            const tops = [100, 100, 140];
+            let call = 0;
+            const original = HTMLElement.prototype.getBoundingClientRect;
+            HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+                const top = this.dataset.test === 'afsStage' ? (tops[Math.min(call++, tops.length - 1)] ?? 0) : 0;
+                return { top, bottom: top, left: 0, right: 0, width: 0, height: 0, x: 0, y: top, toJSON: () => ({}) } as DOMRect;
+            };
+            try {
+                const wrapper = mountView({ ...video, stageHole: true, stage: 'cover' });
+                await wrapper.setProps({ stage: 'video' });
+                await nextTick();
+                const first = wrapper.emitted('stagechange')?.length ?? 0;
+                expect(first).toBeGreaterThan(0);
+                await wrapper.setProps({ stageHole: false });
+                await wrapper.setProps({ stageHole: true });
+                await nextTick();
+                expect(wrapper.emitted('stagechange')!.length).toBeGreaterThan(first);
+            } finally {
+                HTMLElement.prototype.getBoundingClientRect = original;
+            }
         });
 
         it('leaves its stage clear for a picture drawn behind the page', () => {

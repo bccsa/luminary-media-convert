@@ -88,6 +88,8 @@ const emit = defineEmits<{
     'subtitle-track': [id: string | null];
     'picture-in-picture': [];
     fullscreen: [];
+    /** The stage moved or changed size: a picture drawn behind the page has to be placed again. */
+    stagechange: [];
 }>();
 
 const slots = useSlots();
@@ -265,15 +267,26 @@ function measureHole(): void {
     const stageBox = stageEl.value;
     if (!root || !stageBox) return;
     const top = stageBox.getBoundingClientRect().top - root.getBoundingClientRect().top;
+    const bottom = top + stageBox.offsetHeight;
+    if (top === holeTop.value && bottom === holeBottom.value) return;
     holeTop.value = top;
-    holeBottom.value = top + stageBox.offsetHeight;
+    holeBottom.value = bottom;
+    emit('stagechange');
 }
+/**
+ * The stage moves without changing size whenever something around it does (the title wrapping, the top line
+ * filling in): portrait spreads the parts evenly. Every part is watched, since a move alone reports nothing.
+ */
 let holeObserver: ResizeObserver | null = null;
 onMounted(() => {
     if (typeof ResizeObserver === 'undefined') return;
     holeObserver = new ResizeObserver(measureHole);
-    if (rootEl.value) holeObserver.observe(rootEl.value);
-    if (stageEl.value) holeObserver.observe(stageEl.value);
+    const root = rootEl.value;
+    if (!root) return;
+    holeObserver.observe(root);
+    for (const part of root.querySelectorAll(':scope > .lmpl-afs-top, :scope > .lmpl-afs-main, :scope > .lmpl-afs-main > *')) {
+        holeObserver.observe(part);
+    }
 });
 watch([isVideo, () => props.stageHole], async () => {
     await nextTick();
