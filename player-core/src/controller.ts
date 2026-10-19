@@ -24,6 +24,8 @@ import {
 } from './pipeline/pipeline.js';
 import { sortQualities, toQuality } from './pipeline/quality-cap.js';
 import { Poller } from './poller.js';
+import { readSubtitleCues } from './pipeline/subtitle-cues.js';
+import type { LyricCue } from './lyrics.js';
 import {
     DEFAULT_LEAD_SECONDS,
     DEFAULT_WARM_BYTES,
@@ -126,6 +128,8 @@ export class PlayerController implements PlayerControllerApi {
     private generation = 0;
     private source: PlayerSource | null = null;
     private master: MasterInfo | null = null;
+    /** Each subtitle track's lines, read once per master. */
+    private subtitleCues = new Map<string, Promise<LyricCue[]>>();
     private cache = new Map<string, string>();
     /** What this source has served; see {@link ServeMemo}. */
     private served: ServeMemo = { playlists: new Map() };
@@ -301,6 +305,7 @@ export class PlayerController implements PlayerControllerApi {
         info: MasterInfo,
     ): Promise<void> {
         this.master = info;
+        this.subtitleCues.clear();
         const requested = this.source?.startAngleId;
         const angleId =
             requested && info.angles.some((angle) => angle.id === requested)
@@ -606,6 +611,24 @@ export class PlayerController implements PlayerControllerApi {
         this.store.setState({ activeSubtitleTrackId: id });
     }
 
+    readSubtitleCues(id: string): Promise<LyricCue[]> {
+        const master = this.master;
+        if (!master) return Promise.resolve([]);
+        const cached = this.subtitleCues.get(id);
+        if (cached) return cached;
+        const read = readSubtitleCues(master, id, {
+            fetchImpl: this.fetchImpl,
+            keyHex: this.source?.keyHex,
+            subtle: this.subtle,
+        }).catch(() => {
+            // A failed read is tried again the next time it is asked for.
+            if (this.subtitleCues.get(id) === read) this.subtitleCues.delete(id);
+            return [];
+        });
+        this.subtitleCues.set(id, read);
+        return read;
+    }
+
     setChapterTrack(id: string | null): void {
         this.chapterTrackPinned = true;
         void this.applyChapterTrack(this.generation, id);
@@ -704,6 +727,7 @@ export class PlayerController implements PlayerControllerApi {
         this.updateChunkWarming(null);
         this.serveStrategy.release();
         this.master = null;
+        this.subtitleCues.clear();
     }
 
     private prepareChapterTracks() {

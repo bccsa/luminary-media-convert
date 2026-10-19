@@ -14,6 +14,7 @@
 
 import type { ChunkBoundary } from './prefetch.js';
 import type { LivePlaylistSpec } from './policy/live.js';
+import type { LyricCue } from './lyrics.js';
 
 // Re-exported so this file reads as the whole contract: an adapter author
 // implementing warmChunks() needs the boundary shape in front of them, and a
@@ -806,6 +807,12 @@ export interface PlayerControllerApi {
     setAudioTrack(id: string): void;
     /** null = subtitles off. */
     setSubtitleTrack(id: string | null): void;
+    /**
+     * Every line of a subtitle track, read from the stream rather than the engine, for a host that shows the
+     * words elsewhere (lyrics). Cached per track until the next `load()`; empty for a track the master does not
+     * declare or that cannot be read.
+     */
+    readSubtitleCues(id: string): Promise<LyricCue[]>;
     /** Lazy-loads (fetch + decrypt + parse) and caches the language's cues. */
     setChapterTrack(id: string | null): void;
 

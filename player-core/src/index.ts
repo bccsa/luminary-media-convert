@@ -23,6 +23,8 @@ export {
     pickDefaultChapterTrack,
 } from './sidecars.js';
 export { parseVttCues, parseVttTimestamp } from './vtt.js';
+export { activeLyric, cuesToLyrics, lyricText, type LyricCue } from './lyrics.js';
+export { readSubtitleCues, type SubtitleReadContext } from './pipeline/subtitle-cues.js';
 export { chapterIndexAt, chapterSegments } from './chapters.js';
 export type { ChapterSegment } from './chapters.js';
 

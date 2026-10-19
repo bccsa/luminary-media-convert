@@ -404,6 +404,24 @@ describe('NativeLuminaryPlayer', () => {
             await flush();
             expect(exposed.state.activeSubtitleTrackId).toBeNull();
         });
+
+        it('hands out the words of the track that is on, read from the stream, and none once it is off', async () => {
+            const { plugin, exposed } = await mountPlayer({}, WITH_SUBTITLES);
+            await ready(plugin);
+            expect(exposed.subtitleCues).toEqual([]);
+
+            exposed.controller!.setSubtitleTrack(exposed.state.subtitleTracks[0]!.id);
+            await flush();
+            await flush();
+            expect(exposed.subtitleCues).toEqual([
+                { start: 0, end: 90.5, text: 'Opening' },
+                { start: 90.5, end: 240, text: 'The interview' },
+            ]);
+
+            exposed.controller!.setSubtitleTrack(null);
+            await flush();
+            expect(exposed.subtitleCues).toEqual([]);
+        });
     });
 
     describe('muting and picture in picture, for a host that draws its own controls', () => {

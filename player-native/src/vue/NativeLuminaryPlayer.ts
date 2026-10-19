@@ -22,6 +22,7 @@ import {
     AUDIO_ONLY_ANGLE_ID,
     createInitialState,
     findPreferredTrack,
+    type LyricCue,
     type PlayerController,
     type PlayerControllerOptions,
     type PlayerError,
@@ -76,6 +77,8 @@ export interface NativeLuminaryPlayerExposed {
     readonly airPlayAvailable: boolean;
     /** Playback is going to an AirPlay device. */
     readonly airPlayActive: boolean;
+    /** The lines of the subtitle track that is on, read from the stream; empty while none is. */
+    readonly subtitleCues: readonly LyricCue[];
     setMuted(muted: boolean): void;
     startPictureInPicture(): void;
     /** Opens the system's AirPlay device list. */
@@ -544,6 +547,22 @@ export const NativeLuminaryPlayer = defineComponent({
             native.value?.adapter.showAirPlayPicker();
         }
 
+        /**
+         * The lines of the subtitle track that is on, for a host that shows them as lyrics. The engine draws
+         * subtitles itself and hands none of their words back, so they are read from the stream.
+         */
+        const subtitleCues = shallowRef<readonly LyricCue[]>([]);
+        watch(
+            () => [controller.value, state.value.subtitleTracks, state.value.activeSubtitleTrackId] as const,
+            ([owner, , id]) => {
+                subtitleCues.value = [];
+                if (!owner || !id) return;
+                void owner.readSubtitleCues(id).then((lines) => {
+                    if (controller.value === owner && state.value.activeSubtitleTrackId === id) subtitleCues.value = lines;
+                });
+            },
+        );
+
         expose({
             controller,
             state,
@@ -553,6 +572,7 @@ export const NativeLuminaryPlayer = defineComponent({
             canPictureInPicture,
             airPlayAvailable,
             airPlayActive,
+            subtitleCues,
             setMuted,
             startPictureInPicture,
             showAirPlayPicker,
