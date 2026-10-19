@@ -701,6 +701,7 @@
     /* A hairline of light along its top edge, where the timeline rests on it. */
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.14);
     pointer-events: none;
+    contain: strict;
     animation: lmpl-roster-in 0.2s ease-out both;
 }
 
@@ -713,6 +714,7 @@
 
 .lmpl-roster-tile {
     position: absolute;
+    will-change: left;
     top: 0;
     overflow: hidden;
     background: #151518;
@@ -792,6 +794,10 @@
 
 .lmpl-root.lmpl-scrubbing .lmpl-timeline-row {
     transform: translateY(calc(var(--lmpl-track-inset) * var(--lmpl-s) - var(--lmpl-roster-h)));
+}
+
+.lmpl-root .lmpl-time-slider {
+    touch-action: none;
 }
 
 .lmpl-root.lmpl-scrubbing .lmpl-time-slider .lmpl-track {
@@ -1699,6 +1705,17 @@
 }
 .lmpl-afs-hole .lmpl-afs-art {
     background: transparent;
+}
+
+/* The picture's foot, a band that takes a drag as the seek bar does; clear of the full-screen corner. */
+.lmpl-afs-scrubzone {
+    position: absolute;
+    z-index: 1;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 56px;
+    touch-action: none;
 }
 
 /* Full screen from the picture's corner. */

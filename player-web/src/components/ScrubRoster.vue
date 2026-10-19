@@ -23,7 +23,7 @@ const props = defineProps<{
 }>();
 
 function tileStyle(tile: { left: number }) {
-    return { left: `${tile.left}px`, width: `${props.tileWidth}px`, height: `${props.height}px` };
+    return { left: `${Math.round(tile.left)}px`, width: `${props.tileWidth}px`, height: `${props.height}px` };
 }
 
 function frameStyle(cue: ThumbnailSpriteCue) {

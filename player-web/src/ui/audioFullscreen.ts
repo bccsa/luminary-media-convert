@@ -37,3 +37,11 @@ export function sleepMinutesLeft(state: SleepTimerState | null, now: number): nu
 export function formatMinutes(template: string, minutes: number): string {
     return template.replace('{minutes}', String(minutes));
 }
+
+/** The held bar's moment, and where the frames go: `markerX` and `width` in px from the screen's left, `bottom` above its bottom. */
+export interface ScrubPosition {
+    time: number;
+    markerX: number;
+    width: number;
+    bottom: number;
+}

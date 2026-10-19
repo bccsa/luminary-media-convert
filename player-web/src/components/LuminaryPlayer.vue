@@ -717,6 +717,7 @@ function resumeFromScrub(): void {
 /** The press ended, or was taken from us: nothing is being scrubbed any more. */
 function endScrub(event?: PointerEvent): void {
     scrubbing = false;
+    heldGap = null;
     resumeFromScrub();
     // A press that opened the roster leaves it open: the viewer lifted a finger to look, not to be done.
     const roster = scrub.value?.roster;
@@ -772,9 +773,12 @@ function updateScrub(event: PointerEvent): void {
         restBarTop = bar.top;
         restBarBottom = bar.bottom;
     }
+    // The gap is fixed for the hold: controls fading in or out of full screen would otherwise resize every tile mid-drag.
+    if (!held) heldGap = null;
+    else heldGap ??= frame.bottom - restBarBottom;
     const roster =
         held && mergedControls.value.scrubRoster
-            ? buildRoster(instance, time, event.clientX - frame.left, frame.width, duration, rosterStep(duration), frame.bottom - restBarBottom)
+            ? buildRoster(instance, time, event.clientX - frame.left, frame.width, duration, rosterStep(duration), heldGap!)
             : null;
     scrub.value = {
         // A lookup that lands in a gap in the cues keeps the frame already on show: a preview that blanks
@@ -792,7 +796,7 @@ function updateScrub(event: PointerEvent): void {
             tileWidth: roster.tileWidth,
             bottom: 0,
             height: roster.height,
-            gap: frame.bottom - restBarBottom,
+            gap: heldGap ?? frame.bottom - restBarBottom,
             labelBottom:
                 frame.bottom -
                 (restBarTop - (rosterHeight.value - TRACK_INSET_PX * controlsScale(slider))) +
@@ -844,6 +848,8 @@ function controlsScale(el: Element): number {
 /** Where the timeline's top and bottom edges sat before it made way for the roster. */
 let restBarTop = 0;
 let restBarBottom = 0;
+/** The gap under the timeline, read once when a press begins and kept until it ends. */
+let heldGap: number | null = null;
 
 /**
  * The strip of frames for a held press: the tile size comes from the sprite's own frame shape, the marker

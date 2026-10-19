@@ -7,6 +7,7 @@ import BrowsePanel from './BrowsePanel.vue';
 import NowPlayingLyrics from './NowPlayingLyrics.vue';
 import type { LyricCue } from '../ui/lyrics';
 import { skipIcon } from '../ui/controlsHtml';
+import type { ScrubPosition } from '../ui/audioFullscreen';
 import { SLEEP_MINUTES, SPEED_OPTIONS, chapterWindow, formatMinutes, sleepMinutesLeft } from '../ui/audioFullscreen';
 
 /**
@@ -90,6 +91,8 @@ const emit = defineEmits<{
     fullscreen: [];
     /** The stage moved or changed size: a picture drawn behind the page has to be placed again. */
     stagechange: [];
+    /** The bar is held: where, for a host that shows frames in the `roster` slot. Null when it is let go. */
+    scrub: [position: ScrubPosition | null];
 }>();
 
 const slots = useSlots();
@@ -167,18 +170,30 @@ function timeAt(clientX: number): number {
     if (!rect || !rect.width) return 0;
     return Math.min(1, Math.max(0, (clientX - rect.left) / rect.width)) * knownDuration.value;
 }
+// Measured on each move, not once: a turn of the phone moves the bar mid-drag.
+function announceScrub(time: number): void {
+    const bar = barEl.value?.getBoundingClientRect();
+    const root = rootEl.value?.getBoundingClientRect();
+    if (!bar || !root || !knownDuration.value) return;
+    const markerX = bar.left - root.left + Math.min(1, Math.max(0, time / knownDuration.value)) * bar.width;
+    emit('scrub', { time, markerX, width: root.width, bottom: root.bottom - bar.top + 8 });
+}
 function onBarDown(event: PointerEvent): void {
     if (!knownDuration.value) return;
     (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
     dragTime.value = timeAt(event.clientX);
+    announceScrub(dragTime.value);
 }
 function onBarMove(event: PointerEvent): void {
-    if (dragTime.value !== null) dragTime.value = timeAt(event.clientX);
+    if (dragTime.value === null) return;
+    dragTime.value = timeAt(event.clientX);
+    announceScrub(dragTime.value);
 }
 function onBarUp(): void {
     if (dragTime.value === null) return;
     emit('seek', dragTime.value);
     dragTime.value = null;
+    emit('scrub', null);
 }
 function onBarKey(event: KeyboardEvent): void {
     const step = event.key === 'ArrowLeft' || event.key === 'ArrowDown' ? -5 : event.key === 'ArrowRight' || event.key === 'ArrowUp' ? 5 : 0;
@@ -338,6 +353,8 @@ const washSrc = computed(() => props.wash || cover.value?.src);
             <img v-if="washSrc" class="lmpl-afs-wash" :class="{ 'lmpl-afs-wash-hash': wash }" :src="washSrc" alt="" draggable="false" data-test="afsWash" />
         </div>
 
+        <slot name="roster"></slot>
+
         <div class="lmpl-afs-top">
             <button
                 type="button"
@@ -357,6 +374,16 @@ const washSrc = computed(() => props.wash || cover.value?.src);
             <div ref="stageEl" class="lmpl-afs-art" :class="{ 'lmpl-afs-art-lyrics': showLyrics }" data-test="afsStage">
                 <!-- The host's player stays mounted with sound alone, only hidden, so switching never stops playback. -->
                 <div v-if="slots.stage" v-show="isVideo" class="lmpl-afs-stage" data-test="afsStageSlot"><slot name="stage"></slot></div>
+                <!-- A drag along the picture's foot scrubs like the bar, for a thumb that lands short of it. -->
+                <div
+                    v-if="isVideo && knownDuration && !isLive"
+                    class="lmpl-afs-scrubzone"
+                    data-test="afsScrubZone"
+                    @pointerdown="onBarDown"
+                    @pointermove="onBarMove"
+                    @pointerup="onBarUp"
+                    @pointercancel="onBarUp"
+                ></div>
                 <button
                     v-if="isVideo"
                     type="button"
