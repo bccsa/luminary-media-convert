@@ -126,7 +126,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     /// landscape video opened from a phone held upright turns it sideways (`turnToLandscape`),
     /// and turning it upright again leaves.
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
-        turning ? .landscape : UIApplication.shared.supportedInterfaceOrientations(for: view.window)
+        holdLandscape ? .landscape : UIApplication.shared.supportedInterfaceOrientations(for: view.window)
     }
 
     /// The picture is wider than tall, so full-screen is landscape. Known once the item has a size.
@@ -137,6 +137,10 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
 
     /// Asked of the system and not yet arrived: the turn is ours, not the viewer's.
     private var turning = false
+    /// Full-screen is held sideways after a turn it asked for until the phone itself is on its side:
+    /// following the phone at once would turn a phone still held upright straight back, and leave.
+    private var holdLandscape = false
+    private var deviceObserver: NSObjectProtocol?
     private var turned = false
     private weak var scene: UIWindowScene?
 
@@ -153,10 +157,46 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         if #available(iOS 16.0, *) {
             turning = true
             turned = true
+            holdLandscape = true
             setNeedsUpdateOfSupportedInterfaceOrientations()
+            // The closure is only called when the turn fails; success is the transition below.
             scene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscape)) { [weak self] _ in
-                DispatchQueue.main.async { self?.turning = false }
+                DispatchQueue.main.async { self?.endTurn() }
             }
+            // A turn that never comes (the scene already sideways) must not hold full-screen to landscape.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in self?.endTurn() }
+        }
+    }
+
+    /// The turn this view asked for is over. Full-screen follows the phone again, so that turning it
+    /// upright leaves, once the phone is on its side.
+    private func endTurn() {
+        guard turning else { return }
+        turning = false
+        if UIDevice.current.orientation.isLandscape { return releaseLandscape() }
+        UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+        deviceObserver = NotificationCenter.default.addObserver(
+            forName: UIDevice.orientationDidChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            if UIDevice.current.orientation.isLandscape { self?.releaseLandscape() }
+        }
+    }
+
+    private func releaseLandscape() {
+        if let deviceObserver {
+            NotificationCenter.default.removeObserver(deviceObserver)
+            UIDevice.current.endGeneratingDeviceOrientationNotifications()
+            self.deviceObserver = nil
+        }
+        guard holdLandscape else { return }
+        holdLandscape = false
+        if #available(iOS 16.0, *) { setNeedsUpdateOfSupportedInterfaceOrientations() }
+    }
+
+    deinit {
+        if let deviceObserver {
+            NotificationCenter.default.removeObserver(deviceObserver)
+            UIDevice.current.endGeneratingDeviceOrientationNotifications()
         }
     }
 
@@ -171,6 +211,10 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
 
     override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
         super.viewWillTransition(to: size, with: coordinator)
+        if turning, size.width > size.height {
+            coordinator.animate(alongsideTransition: nil) { [weak self] _ in self?.endTurn() }
+            return
+        }
         // The phone turned upright while a landscape video fills the screen: back to the page.
         guard !turning, videoIsLandscape, size.height > size.width else { return }
         coordinator.animate(alongsideTransition: nil) { [weak self] _ in
