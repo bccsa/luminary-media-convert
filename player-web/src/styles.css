@@ -1796,6 +1796,19 @@
     -webkit-mask-image: linear-gradient(transparent, #000 18%, #000 82%, transparent);
     mask-image: linear-gradient(transparent, #000 18%, #000 82%, transparent);
 }
+/* Beside the cover on a wide screen: the lyrics fill the column between the title and the controls. */
+.lmpl-afs-sidelyrics {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+}
+.lmpl-afs-sidelyrics .lmpl-afs-lyrics {
+    flex: 1;
+    height: auto;
+    min-height: 0;
+    padding: 18% 0;
+}
 .lmpl-afs-lyrics::-webkit-scrollbar {
     display: none;
 }
