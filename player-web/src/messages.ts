@@ -61,6 +61,8 @@ export interface PlayerMessages {
     pictureInPicture: string;
     /** The now-playing screen's button, and list, for the words of what plays. */
     lyrics: string;
+    /** The menu that picks which subtitles the lyrics are, on the sound alone. */
+    lyricsLanguage: string;
 
     // --- Track menus -------------------------------------------------------
     audioMenuLabel: string;
@@ -146,6 +148,7 @@ export const DEFAULT_MESSAGES: PlayerMessages = {
     enterFullscreen: 'Full screen',
     pictureInPicture: 'Picture in picture',
     lyrics: 'Lyrics',
+    lyricsLanguage: 'Lyrics language',
 
     audioMenuLabel: 'Audio',
     qualityLabel: 'Quality',
