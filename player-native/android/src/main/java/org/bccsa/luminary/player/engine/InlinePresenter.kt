@@ -88,8 +88,7 @@ class InlinePresenter(
         if (sensor != null) return
         val listener = object : OrientationEventListener(host) {
             override fun onOrientationChanged(degrees: Int) {
-                if (degrees == ORIENTATION_UNKNOWN) return
-                val now = degrees in 60..120 || degrees in 240..300
+                val now = phonePoseOf(degrees)?.let { it == PhonePose.SIDEWAYS } ?: return
                 if (now == sideways) return
                 sideways = now
                 main.removeCallbacks(settled)

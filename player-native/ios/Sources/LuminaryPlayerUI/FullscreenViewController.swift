@@ -122,11 +122,22 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     override var prefersStatusBarHidden: Bool { true }
     override var prefersHomeIndicatorAutoHidden: Bool { true }
 
-    /// Whatever the app allows: full-screen follows how the phone is held, as on Android. A
-    /// landscape video opened from a phone held upright turns it sideways (`turnToLandscape`),
-    /// and turning it upright again leaves.
+    /// Whatever the app allows: full-screen follows how the phone is held. A landscape video opened
+    /// from a phone held upright turns it sideways (`turnToLandscape`) and is held there until the
+    /// phone is on its side; turning it upright then leaves (see ``FullscreenTurn``).
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
-        holdLandscape ? .landscape : UIApplication.shared.supportedInterfaceOrientations(for: view.window)
+        turn.holdingLandscape ? .landscape : UIApplication.shared.supportedInterfaceOrientations(for: view.window)
+    }
+
+    /// Opened by turning the phone sideways, full-screen starts the way the phone is held: on iOS 15,
+    /// which cannot be asked to turn, that is the only way it comes up sideways. A device's
+    /// landscape-left is the interface's landscape-right.
+    override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation {
+        switch UIDevice.current.orientation {
+        case .landscapeLeft: return .landscapeRight
+        case .landscapeRight: return .landscapeLeft
+        default: return super.preferredInterfaceOrientationForPresentation
+        }
     }
 
     /// The picture is wider than tall, so full-screen is landscape. Known once the item has a size.
@@ -135,11 +146,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         return size.width > size.height
     }
 
-    /// Asked of the system and not yet arrived: the turn is ours, not the viewer's.
-    private var turning = false
-    /// Full-screen is held sideways after a turn it asked for until the phone itself is on its side:
-    /// following the phone at once would turn a phone still held upright straight back, and leave.
-    private var holdLandscape = false
+    private var turn = FullscreenTurn()
     private var deviceObserver: NSObjectProtocol?
     private var turned = false
     private weak var scene: UIWindowScene?
@@ -155,41 +162,45 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     private func turnToLandscape() {
         guard videoIsLandscape, let scene, scene.interfaceOrientation.isPortrait else { return }
         if #available(iOS 16.0, *) {
-            turning = true
             turned = true
-            holdLandscape = true
+            turn.began()
+            watchDevice()
             setNeedsUpdateOfSupportedInterfaceOrientations()
             // The closure is only called when the turn fails; success is the transition below.
             scene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscape)) { [weak self] _ in
                 DispatchQueue.main.async { self?.endTurn() }
             }
-            // A turn that never comes (the scene already sideways) must not hold full-screen to landscape.
+            // A turn that never comes (the scene already sideways) must not keep the turn open.
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in self?.endTurn() }
         }
     }
 
-    /// The turn this view asked for is over. Full-screen follows the phone again, so that turning it
-    /// upright leaves, once the phone is on its side.
     private func endTurn() {
-        guard turning else { return }
-        turning = false
-        if UIDevice.current.orientation.isLandscape { return releaseLandscape() }
+        if turn.ended(deviceSideways: UIDevice.current.orientation.isLandscape) { releasedLandscape() }
+    }
+
+    /// The phone's own position, read while full-screen is held sideways: it lets go once the phone
+    /// is on its side. The viewer's rotation lock silences it, which leaves the exit button.
+    private func watchDevice() {
+        guard deviceObserver == nil else { return }
         UIDevice.current.beginGeneratingDeviceOrientationNotifications()
         deviceObserver = NotificationCenter.default.addObserver(
             forName: UIDevice.orientationDidChangeNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            if UIDevice.current.orientation.isLandscape { self?.releaseLandscape() }
+            guard let self else { return }
+            if self.turn.deviceTurned(sideways: UIDevice.current.orientation.isLandscape) { self.releasedLandscape() }
         }
     }
 
-    private func releaseLandscape() {
-        if let deviceObserver {
-            NotificationCenter.default.removeObserver(deviceObserver)
-            UIDevice.current.endGeneratingDeviceOrientationNotifications()
-            self.deviceObserver = nil
-        }
-        guard holdLandscape else { return }
-        holdLandscape = false
+    private func stopWatchingDevice() {
+        guard let deviceObserver else { return }
+        NotificationCenter.default.removeObserver(deviceObserver)
+        UIDevice.current.endGeneratingDeviceOrientationNotifications()
+        self.deviceObserver = nil
+    }
+
+    private func releasedLandscape() {
+        stopWatchingDevice()
         if #available(iOS 16.0, *) { setNeedsUpdateOfSupportedInterfaceOrientations() }
     }
 
@@ -211,12 +222,12 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
 
     override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
         super.viewWillTransition(to: size, with: coordinator)
-        if turning, size.width > size.height {
+        if turn.turning, size.width > size.height {
             coordinator.animate(alongsideTransition: nil) { [weak self] _ in self?.endTurn() }
             return
         }
         // The phone turned upright while a landscape video fills the screen: back to the page.
-        guard !turning, videoIsLandscape, size.height > size.width else { return }
+        guard turn.leaves(toWidth: Double(size.width), height: Double(size.height), videoIsLandscape: videoIsLandscape) else { return }
         coordinator.animate(alongsideTransition: nil) { [weak self] _ in
             self?.turned = false
             self?.onLeave?()

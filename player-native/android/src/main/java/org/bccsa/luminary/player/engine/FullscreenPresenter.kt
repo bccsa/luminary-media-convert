@@ -16,6 +16,8 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
+import android.view.OrientationEventListener
 import android.util.Rational
 import androidx.core.content.ContextCompat
 import androidx.core.util.Consumer
@@ -65,6 +67,19 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
     private var wasPortrait = false
     /** Turning back to portrait, then handing the orientation back to what it was. */
     private var restoring: Runnable? = null
+
+    /**
+     * The landscape lock keeps the activity sideways whatever the phone does, so turning the phone
+     * upright is read from the sensor, while the viewer lets the phone rotate. The phone has to stay
+     * upright for a moment: a wobble on the way does not count.
+     */
+    private var sensor: OrientationEventListener? = null
+    private val uprightExit = UprightExit()
+    private var uprightPending = false
+    private val upright = Runnable {
+        uprightPending = false
+        onLeave?.invoke()
+    }
 
     private var texts = FullscreenTexts()
     private var pipReceiver: BroadcastReceiver? = null
@@ -281,8 +296,47 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         this.controls = controls
         this.surface = surface
         view.post { armAutoEnter(activity, true) }
+        watchSensor(activity)
         return true
     }
+
+    private fun watchSensor(activity: Activity) {
+        if (sensor != null) return
+        uprightExit.reset()
+        val listener = object : OrientationEventListener(activity) {
+            override fun onOrientationChanged(degrees: Int) {
+                val pose = phonePoseOf(degrees) ?: return
+                if (!uprightExit.saw(pose)) {
+                    cancelUpright()
+                    return
+                }
+                if (uprightPending) return
+                val inSmallWindow = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && activity.isInPictureInPictureMode
+                if (inSmallWindow || !autoRotateOn(activity)) return
+                uprightPending = true
+                main.postDelayed(upright, UPRIGHT_SETTLE_MS)
+            }
+        }
+        if (listener.canDetectOrientation()) {
+            listener.enable()
+            sensor = listener
+        }
+    }
+
+    private fun stopWatchingSensor() {
+        sensor?.disable()
+        sensor = null
+        uprightExit.reset()
+        cancelUpright()
+    }
+
+    private fun cancelUpright() {
+        uprightPending = false
+        main.removeCallbacks(upright)
+    }
+
+    private fun autoRotateOn(activity: Activity): Boolean =
+        Settings.System.getInt(activity.contentResolver, Settings.System.ACCELEROMETER_ROTATION, 0) == 1
 
     /** Replaces the lists the panel offers while full-screen is up; a no-op when it is not. */
     fun setBrowse(browse: Browse?) {
@@ -317,6 +371,7 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         val view = view ?: return false
         val activity = host
         stopWatching()
+        stopWatchingSensor()
         unwatchPipPlayback()
         if (activity != null) armAutoEnter(activity, false)
         (activity as? OnPictureInPictureModeChangedProvider)?.removeOnPictureInPictureModeChangedListener(pipListener)
@@ -372,6 +427,7 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         private const val PIP_TOGGLE = "org.bccsa.luminary.player.PIP_TOGGLE"
         private const val MAX_RATIO = 2.39f
         private const val ORIENTATION_SETTLE_MS = 600L
+        private const val UPRIGHT_SETTLE_MS = 350L
 
         /** `ActivityInfo.FLAG_SUPPORTS_PICTURE_IN_PICTURE`: set by `android:supportsPictureInPicture`, and not in the public API. */
         private const val FLAG_SUPPORTS_PICTURE_IN_PICTURE = 0x400000
