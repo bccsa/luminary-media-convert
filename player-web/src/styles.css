@@ -1669,11 +1669,12 @@
 }
 
 /* Video: the host's picture in the cover's place, from edge to edge of the screen. */
+/* The full width is given, not stretched into the padding by negative margins: a 16:9 box takes its height from
+   its width before margins, which would leave it short of 16:9 and cut off the foot of the picture. */
 .lmpl-afs-video .lmpl-afs-art {
-    align-self: stretch;
-    width: auto;
+    align-self: center;
+    width: 100cqw;
     aspect-ratio: 16 / 9;
-    margin-inline: calc(-1 * max(24px, env(safe-area-inset-left))) calc(-1 * max(24px, env(safe-area-inset-right)));
     overflow: hidden;
     background: #000;
 }
