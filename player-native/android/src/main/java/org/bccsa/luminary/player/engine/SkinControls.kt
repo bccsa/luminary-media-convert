@@ -709,7 +709,7 @@ internal class SkinControls(
         scheduleHide()
     }
 
-    private fun rosterWanted() = thumbnails?.ready == true && player.duration != C.TIME_UNSET && player.duration > 0
+    private fun rosterWanted() = player.duration != C.TIME_UNSET && player.duration > 0 && thumbnails?.covers(player.duration / 1000.0) == true
 
     /** The roster's height: the frame the web's hover preview shows, which is a sixth of the width, 16:9. */
     private fun rosterHeight() = dpf(min(340f, max(168f, widthDp / 6f)) * 9f / 16f)

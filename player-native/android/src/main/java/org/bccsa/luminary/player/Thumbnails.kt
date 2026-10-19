@@ -54,6 +54,14 @@ object ThumbnailVtt {
         return cues
     }
 
+    /** The share of a video its frames must span to be shown (`THUMBNAIL_MIN_COVERAGE` in hls-core). */
+    private const val MIN_COVERAGE = 0.9
+
+    fun covers(cues: List<ThumbnailCue>, durationSeconds: Double): Boolean {
+        val last = cues.lastOrNull() ?: return false
+        return durationSeconds > 0 && durationSeconds.isFinite() && last.end >= durationSeconds * MIN_COVERAGE
+    }
+
     /** The cue covering [time], or null; binary search, because a scrub asks on every move. */
     fun find(cues: List<ThumbnailCue>, time: Double): ThumbnailCue? {
         var lo = 0
@@ -96,6 +104,12 @@ class Thumbnails(private val read: (String) -> ByteArray? = ::fetch) {
     var onChange: (() -> Unit)? = null
 
     val ready: Boolean get() = cues.isNotEmpty()
+
+    /**
+     * Whether the frames span a video of [durationSeconds]. A storyboard that stops early would leave the
+     * roster blank for the rest of the video, so it counts as none (`THUMBNAIL_MIN_COVERAGE` in hls-core).
+     */
+    fun covers(durationSeconds: Double): Boolean = ThumbnailVtt.covers(cues, durationSeconds)
 
     /** Starts reading [url] (null: no frames). [key] is the LMCENC key, which is zeroed after use. */
     fun load(url: String?, key: ByteArray?) {

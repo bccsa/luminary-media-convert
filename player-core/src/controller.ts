@@ -32,6 +32,7 @@ import {
 import { SidecarLoader, pickDefaultChapterTrack } from './sidecars.js';
 import {
     findThumbnailCue,
+    thumbnailsCoverDuration,
     type ThumbnailSpriteCue,
 } from '@luminary-media-converter/hls-core';
 import { StateStore, createInitialState } from './store.js';
@@ -463,7 +464,14 @@ export class PlayerController implements PlayerControllerApi {
             )) ?? [];
         if (generation !== this.generation) return;
         this.thumbnailCues = cues;
-        this.store.setState({ thumbnailsReady: cues.length > 0 });
+        this.updateThumbnailsReady();
+    }
+
+    /** Ready once there are cues that span the video; re-asked when the duration becomes known. */
+    private updateThumbnailsReady(): void {
+        this.store.setState({
+            thumbnailsReady: thumbnailsCoverDuration(this.thumbnailCues, this.state.duration),
+        });
     }
 
     /**
@@ -845,6 +853,7 @@ export class PlayerController implements PlayerControllerApi {
             }),
             this.adapter.on('durationchange', ({ duration }) => {
                 this.store.setState({ duration });
+                this.updateThumbnailsReady();
             }),
             this.adapter.on('progress', ({ bufferedEnd }) => {
                 this.store.setState({ bufferedEnd });

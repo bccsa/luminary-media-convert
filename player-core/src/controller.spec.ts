@@ -1285,12 +1285,13 @@ describe('PlayerController — scrub thumbnails', () => {
     const routes = { ...simpleRoutes, [THUMBS_URL]: THUMBS_VTT };
 
     it('reports readiness and answers lookups once loaded', async () => {
-        const { controller } = setup(routes);
+        const { controller, adapter } = setup(routes);
 
         await controller.load({
             masterUrl: MASTER_URL,
             sidecars: { thumbnails: { url: THUMBS_URL } },
         });
+        adapter.emit('durationchange', { duration: 20 });
 
         expect(controller.state.thumbnailsReady).toBe(true);
         expect(controller.thumbnailAt(3)).toMatchObject({ x: 0 });
@@ -1298,6 +1299,23 @@ describe('PlayerController — scrub thumbnails', () => {
         // Past the last cue there is no frame to show, and guessing one would
         // show a viewer the wrong moment with full confidence.
         expect(controller.thumbnailAt(9999)).toBeNull();
+    });
+
+    it('is not ready until the video length is known, and not for frames that stop early', async () => {
+        // An encode whose frame pass was cut short leaves the roster blank past its last frame.
+        const { controller, adapter } = setup(routes);
+
+        await controller.load({
+            masterUrl: MASTER_URL,
+            sidecars: { thumbnails: { url: THUMBS_URL } },
+        });
+        expect(controller.state.thumbnailsReady).toBe(false);
+
+        adapter.emit('durationchange', { duration: 6150 });
+        expect(controller.state.thumbnailsReady).toBe(false);
+
+        adapter.emit('durationchange', { duration: 21 });
+        expect(controller.state.thumbnailsReady).toBe(true);
     });
 
     it('stays quiet and unready when no sidecar is passed', async () => {
