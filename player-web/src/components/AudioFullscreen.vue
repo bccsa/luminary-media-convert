@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useSlots, watch } from 'vue';
 import type { Chapter, SleepTimerOption, SleepTimerState } from '@luminary-media-converter/player-core';
 import { formatSeconds, type PlayerMessages } from '../messages';
 import type { PlayerUpNextItem } from '../upNext';
 import BrowsePanel from './BrowsePanel.vue';
+import NowPlayingLyrics from './NowPlayingLyrics.vue';
+import type { LyricCue } from '../ui/lyrics';
 import { skipIcon } from '../ui/controlsHtml';
 import { SLEEP_MINUTES, SPEED_OPTIONS, chapterWindow, formatMinutes, sleepMinutesLeft } from '../ui/audioFullscreen';
 
@@ -20,6 +22,11 @@ import { SLEEP_MINUTES, SPEED_OPTIONS, chapterWindow, formatMinutes, sleepMinute
  *
  * It draws everything from what it is given and says what is asked through events, so it does not care which player
  * is under it: the web player's, or the app's over a native one. Only casting is the host's own, in the `cast` slot.
+ *
+ * A host can also make it its now-playing view for video: with `stage: 'video'` the picture's place is the host's
+ * `stage` slot, full width, and the tools are a video's (subtitles, picture in picture, full screen) instead of a
+ * listener's. `stageHole` leaves that place transparent, for a picture the platform draws behind the page. The
+ * `top-end` slot fills the right of the top line (a switch between sound and picture, say).
  */
 const props = defineProps<{
     title: string;
@@ -53,6 +60,19 @@ const props = defineProps<{
     upNext?: readonly PlayerUpNextItem[];
     /** Open the panel for chapters and up next on this screen, instead of asking the host (`open-browse`) to show them. */
     chaptersSheet?: boolean;
+    /** What takes the picture's place: the cover, or the host's picture (`stage` slot) at full width. */
+    stage?: 'cover' | 'video';
+    /** The host draws the picture behind the page, where the stage is: nothing of the screen may cover it there. */
+    stageHole?: boolean;
+    /** The screen's colour in place of the cover blurred: a small picture (a ThumbHash) that is soft once stretched. */
+    wash?: string;
+    /** The chevron's name, where it minimises the player rather than leaving full screen. */
+    exitLabel?: string;
+    subtitleTracks?: readonly { id: string; label: string }[];
+    activeSubtitleTrackId?: string | null;
+    canPictureInPicture?: boolean;
+    /** The words of what plays, timed: offered, with sound alone, as lyrics in the picture's place. */
+    lyrics?: readonly LyricCue[];
 }>();
 
 const emit = defineEmits<{
@@ -65,9 +85,26 @@ const emit = defineEmits<{
     rate: [rate: number];
     'audio-track': [id: string];
     sleep: [option: SleepTimerOption | null];
+    'subtitle-track': [id: string | null];
+    'picture-in-picture': [];
+    fullscreen: [];
+    /** The stage moved or changed size: a picture drawn behind the page has to be placed again. */
+    stagechange: [];
 }>();
 
-type MenuId = 'speed' | 'language' | 'sleep';
+const slots = useSlots();
+const isVideo = computed(() => props.stage === 'video');
+const subtitleTracks = computed(() => props.subtitleTracks ?? []);
+const lyricLines = computed(() => props.lyrics ?? []);
+
+// The words take the cover's place while they are asked for, and only with sound alone and words to show.
+const lyricsOpen = ref(false);
+const showLyrics = computed(() => lyricsOpen.value && !isVideo.value && lyricLines.value.length > 0);
+watch([isVideo, () => lyricLines.value.length], ([video, count]) => {
+    if (video || count === 0) lyricsOpen.value = false;
+});
+
+type MenuId = 'speed' | 'language' | 'sleep' | 'subtitles';
 const menu = ref<MenuId | null>(null);
 const rootEl = ref<HTMLElement | null>(null);
 
@@ -216,6 +253,46 @@ function chooseTrack(id: string): void {
     emit('audio-track', id);
     closeMenu();
 }
+function chooseSubtitles(id: string | null): void {
+    emit('subtitle-track', id);
+    closeMenu();
+}
+
+// The stage's band, for a picture drawn behind the page: the screen's colour is cut out there (see .lmpl-afs-hole).
+const stageEl = ref<HTMLElement | null>(null);
+const holeTop = ref(0);
+const holeBottom = ref(0);
+function measureHole(): void {
+    const root = rootEl.value;
+    const stageBox = stageEl.value;
+    if (!root || !stageBox) return;
+    const top = stageBox.getBoundingClientRect().top - root.getBoundingClientRect().top;
+    const bottom = top + stageBox.offsetHeight;
+    if (top === holeTop.value && bottom === holeBottom.value) return;
+    holeTop.value = top;
+    holeBottom.value = bottom;
+    emit('stagechange');
+}
+/**
+ * The stage moves without changing size whenever something around it does (the title wrapping, the top line
+ * filling in): portrait spreads the parts evenly. Every part is watched, since a move alone reports nothing.
+ */
+let holeObserver: ResizeObserver | null = null;
+onMounted(() => {
+    if (typeof ResizeObserver === 'undefined') return;
+    holeObserver = new ResizeObserver(measureHole);
+    const root = rootEl.value;
+    if (!root) return;
+    holeObserver.observe(root);
+    for (const part of root.querySelectorAll(':scope > .lmpl-afs-top, :scope > .lmpl-afs-main, :scope > .lmpl-afs-main > *')) {
+        holeObserver.observe(part);
+    }
+});
+watch([isVideo, () => props.stageHole], async () => {
+    await nextTick();
+    measureHole();
+});
+onBeforeUnmount(() => holeObserver?.disconnect());
 
 const speedText = (rate: number): string => `${Number.isInteger(rate) ? rate : rate}×`;
 const artworkSizes = computed(() => props.artwork?.sizes ?? '(min-aspect-ratio: 6/5) 40vh, 80vw');
@@ -232,41 +309,73 @@ const cover = computed(() => {
     if (!coverFailed.value) return art;
     return art.fallback ? { src: art.fallback } : null;
 });
+const washSrc = computed(() => props.wash || cover.value?.src);
 </script>
 
 <template>
     <div
         ref="rootEl"
         class="lmpl-afs"
-        :class="[`lmpl-afs-${appearance}`, { 'lmpl-afs-nolist': !showChapterList }]"
-        :style="{ '--lmpl-chapter-mask': chapterMask || undefined }"
+        :class="[
+            `lmpl-afs-${appearance}`,
+            {
+                'lmpl-afs-nolist': !showChapterList,
+                'lmpl-afs-video': isVideo,
+                'lmpl-afs-hole': isVideo && stageHole,
+            },
+        ]"
+        :style="{
+            '--lmpl-chapter-mask': chapterMask || undefined,
+            '--lmpl-hole-top': `${holeTop}px`,
+            '--lmpl-hole-bottom': `${holeBottom}px`,
+        }"
         data-test="audioFullscreen"
         @keydown="onKeydown"
         @pointerdown="onPointerdown"
     >
         <!-- The picture, blurred, as the screen's colour: lighter in `light`, darker in `dark`. -->
         <div class="lmpl-afs-bg" aria-hidden="true">
-            <img v-if="cover?.src" class="lmpl-afs-wash" :src="cover.src" alt="" draggable="false" />
+            <img v-if="washSrc" class="lmpl-afs-wash" :class="{ 'lmpl-afs-wash-hash': wash }" :src="washSrc" alt="" draggable="false" data-test="afsWash" />
         </div>
 
         <div class="lmpl-afs-top">
             <button
                 type="button"
                 class="lmpl-afs-iconbtn"
-                :aria-label="messages.exitFullscreen"
+                :aria-label="exitLabel || messages.exitFullscreen"
                 data-test="afsExit"
                 @click="emit('exit')"
             >
                 <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
             </button>
             <span class="lmpl-afs-eyebrow">{{ eyebrow }}</span>
-            <span class="lmpl-afs-iconbtn lmpl-afs-spacer" aria-hidden="true"></span>
+            <div v-if="slots['top-end']" class="lmpl-afs-topend" data-test="afsTopEnd"><slot name="top-end"></slot></div>
+            <span v-else class="lmpl-afs-iconbtn lmpl-afs-spacer" aria-hidden="true"></span>
         </div>
 
         <div class="lmpl-afs-main">
-            <div class="lmpl-afs-art">
+            <div ref="stageEl" class="lmpl-afs-art" :class="{ 'lmpl-afs-art-lyrics': showLyrics }" data-test="afsStage">
+                <!-- The host's player stays mounted with sound alone, only hidden, so switching never stops playback. -->
+                <div v-if="slots.stage" v-show="isVideo" class="lmpl-afs-stage" data-test="afsStageSlot"><slot name="stage"></slot></div>
+                <button
+                    v-if="isVideo"
+                    type="button"
+                    class="lmpl-afs-stagefs"
+                    :aria-label="messages.enterFullscreen"
+                    data-test="afsFullscreen"
+                    @click="emit('fullscreen')"
+                >
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" /></svg>
+                </button>
+                <NowPlayingLyrics
+                    v-if="showLyrics"
+                    :lines="lyricLines"
+                    :current-time="currentTime"
+                    :label="messages.lyrics"
+                    @seek="emit('seek', $event)"
+                />
                 <img
-                    v-if="cover?.src"
+                    v-else-if="!isVideo && cover?.src"
                     class="lmpl-afs-cover"
                     :src="cover.src"
                     :srcset="'srcset' in cover ? cover.srcset : undefined"
@@ -276,7 +385,7 @@ const cover = computed(() => {
                     data-test="afsCover"
                     @error="coverFailed = true"
                 />
-                <div v-else class="lmpl-afs-cover lmpl-afs-cover-empty" aria-hidden="true">
+                <div v-else-if="!isVideo" class="lmpl-afs-cover lmpl-afs-cover-empty" aria-hidden="true">
                     <svg viewBox="0 0 24 24" width="40%" height="40%" fill="currentColor"><path d="M19.952 1.651a.75.75 0 0 1 .298.599V16.303a3 3 0 0 1-2.176 2.884l-1.32.377a2.553 2.553 0 1 1-1.403-4.909l2.311-.66a1.5 1.5 0 0 0 1.088-1.442V6.994l-9 2.572v9.737a3 3 0 0 1-2.176 2.884l-1.32.377a2.553 2.553 0 1 1-1.403-4.909l2.311-.66a1.5 1.5 0 0 0 1.088-1.442V5.25a.75.75 0 0 1 .544-.721l10.5-3a.75.75 0 0 1 .658.122Z" /></svg>
                 </div>
             </div>
@@ -400,7 +509,7 @@ const cover = computed(() => {
                                 </div>
                             </div>
 
-                            <div class="lmpl-afs-tool">
+                            <div v-if="!isVideo" class="lmpl-afs-tool">
                                 <button
                                     type="button"
                                     class="lmpl-afs-iconbtn"
@@ -420,6 +529,49 @@ const cover = computed(() => {
                                     <button v-if="chapters.length > 1 && chapterIndex >= 0" type="button" role="menuitemradio" :aria-checked="sleepTimer?.kind === 'chapter'" class="lmpl-afs-menuitem" data-test="afsSleepChapter" @click="chooseSleep({ kind: 'chapter' })">{{ messages.sleepEndOfChapter }}</button>
                                 </div>
                             </div>
+
+                            <button
+                                v-if="!isVideo && lyricLines.length > 0"
+                                type="button"
+                                class="lmpl-afs-iconbtn"
+                                :class="{ 'lmpl-afs-on': showLyrics }"
+                                :aria-label="messages.lyrics"
+                                :aria-pressed="showLyrics"
+                                data-test="afsLyricsToggle"
+                                @click="lyricsOpen = !lyricsOpen"
+                            >
+                                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 10h10M4 14h16M4 18h7" /><circle cx="18" cy="18" r="2" /></svg>
+                            </button>
+
+                            <div v-if="isVideo && subtitleTracks.length > 0" class="lmpl-afs-tool">
+                                <button
+                                    type="button"
+                                    class="lmpl-afs-iconbtn"
+                                    :class="{ 'lmpl-afs-on': activeSubtitleTrackId }"
+                                    :aria-label="messages.subtitlesMenuLabel"
+                                    :aria-expanded="menu === 'subtitles'"
+                                    aria-haspopup="menu"
+                                    data-test="afsSubtitles"
+                                    @click="toggleMenu('subtitles')"
+                                >
+                                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5" /><path d="M7 14h4M13 14h4M7 10.5h2M11 10.5h6" /></svg>
+                                </button>
+                                <div v-if="menu === 'subtitles'" class="lmpl-afs-menu" role="menu" :aria-label="messages.subtitlesMenuLabel">
+                                    <button type="button" role="menuitemradio" :aria-checked="!activeSubtitleTrackId" class="lmpl-afs-menuitem" data-test="afsSubtitlesOff" @click="chooseSubtitles(null)">{{ messages.subtitlesOff }}</button>
+                                    <button v-for="track in subtitleTracks" :key="track.id" type="button" role="menuitemradio" :aria-checked="track.id === activeSubtitleTrackId" class="lmpl-afs-menuitem" @click="chooseSubtitles(track.id)">{{ track.label }}</button>
+                                </div>
+                            </div>
+
+                            <button
+                                v-if="isVideo && canPictureInPicture"
+                                type="button"
+                                class="lmpl-afs-iconbtn"
+                                :aria-label="messages.pictureInPicture"
+                                data-test="afsPictureInPicture"
+                                @click="emit('picture-in-picture')"
+                            >
+                                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="4.5" width="19" height="15" rx="2.5" /><rect x="12" y="11.5" width="7" height="5.5" rx="1.2" fill="currentColor" stroke="none" /></svg>
+                            </button>
 
                             <slot name="cast"></slot>
 
