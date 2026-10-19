@@ -92,6 +92,32 @@ describe('PlayerController — a subtitle pick', () => {
     });
 });
 
+describe('PlayerController — a subtitle track read for its words', () => {
+    it('reads the lines once per track, and nothing before a source is loaded', async () => {
+        const { controller, calls } = setup(multiAngleRoutes);
+        expect(await controller.readSubtitleCues('m:subs:English')).toEqual([]);
+
+        await controller.load({ masterUrl: MASTER_URL });
+        const track = controller.getState().subtitleTracks[0]!;
+        const lines = await controller.readSubtitleCues(track.id);
+        expect(lines.map((line) => line.text)).toEqual(['Opening', 'The interview']);
+
+        const reads = calls.filter((url) => url.endsWith('en_0.vtt')).length;
+        expect(await controller.readSubtitleCues(track.id)).toEqual(lines);
+        expect(calls.filter((url) => url.endsWith('en_0.vtt'))).toHaveLength(reads);
+    });
+
+    it('is empty when the track cannot be read, and tries again when asked again', async () => {
+        const { controller, routes } = setup({ ...multiAngleRoutes, [`${BASE}/subs_en/en_0.vtt`]: { status: 500 } });
+        await controller.load({ masterUrl: MASTER_URL });
+        const track = controller.getState().subtitleTracks[0]!;
+        expect(await controller.readSubtitleCues(track.id)).toEqual([]);
+
+        routes.set(`${BASE}/subs_en/en_0.vtt`, CHAPTERS_VTT);
+        expect(await controller.readSubtitleCues(track.id)).toHaveLength(2);
+    });
+});
+
 describe('PlayerController — a live source', () => {
     const LIVE_PLAYLIST =
         '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:4\n#EXT-X-MEDIA-SEQUENCE:7\n' +
