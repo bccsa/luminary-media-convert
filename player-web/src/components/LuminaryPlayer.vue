@@ -37,6 +37,7 @@ import { createKeepAlive, SILENT_AUDIO_DATA_URI, type KeepAlive } from '../ui/ke
 import { buildControlsHtml } from '../ui/controlsHtml';
 import { installAutoHide, type ControlsStore } from '../ui/autoHide';
 import { stepVolume } from '../ui/volume';
+import { liftCues, liftLine, type LiftableCue } from '../ui/cueLift';
 import { chapterMask, formatChapterOf } from '../ui/chapterBar';
 import { attachControlTooltips, clampTooltipLeft, showOnTop, type Tooltip } from '../ui/controlTooltip';
 import {
@@ -303,11 +304,15 @@ let textTrackList: EventTarget | undefined;
 function bindTrackLists(): void {
     audioTrackList?.removeEventListener('change', onEngineAudioTrackChange);
     textTrackList?.removeEventListener('change', onEngineTextTrackChange);
+    textTrackList?.removeEventListener('change', placeCues);
+    textTrackList?.removeEventListener('addtrack', placeCues);
     const media = mediaEl.value;
     audioTrackList = media?.audioTracks as unknown as EventTarget | undefined;
     textTrackList = media?.textTracks as unknown as EventTarget | undefined;
     audioTrackList?.addEventListener('change', onEngineAudioTrackChange);
     textTrackList?.addEventListener('change', onEngineTextTrackChange);
+    textTrackList?.addEventListener('change', placeCues);
+    textTrackList?.addEventListener('addtrack', placeCues);
 }
 
 /** The name of the control the pointer rests on, or that the keyboard has reached; see ui/controlTooltip.ts. */
@@ -407,6 +412,8 @@ onBeforeUnmount(() => {
     mediaListeners.length = 0;
     audioTrackList?.removeEventListener('change', onEngineAudioTrackChange);
     textTrackList?.removeEventListener('change', onEngineTextTrackChange);
+    textTrackList?.removeEventListener('change', placeCues);
+    textTrackList?.removeEventListener('addtrack', placeCues);
     document.removeEventListener('fullscreenchange', onFullscreenChange);
     document.removeEventListener('webkitfullscreenchange', onFullscreenChange);
     removeAutoHide?.();
@@ -1179,6 +1186,39 @@ watch(
     { flush: 'post' }
 );
 onBeforeUnmount(() => nextUpObserver?.disconnect());
+
+// --- subtitles clear of the controls ---------------------------------------
+
+/** Where each lifted cue sat before, to put it back; see ui/cueLift.ts. */
+const liftedCues = new WeakMap<LiftableCue, Pick<LiftableCue, 'line' | 'snapToLines'>>();
+const cueTracks = new WeakSet<TextTrack>();
+let cueLine: number | null = null;
+
+/** While the bar is up, the subtitles rest on it rather than under it. */
+function placeCues(): void {
+    const video = innerVideo();
+    const bar = controlsShown.value ? containerEl.value?.querySelector<HTMLElement>('.lmpl-bottom') : null;
+    const frame = video?.getBoundingClientRect();
+    cueLine = bar && frame ? liftLine(frame.bottom - bar.getBoundingClientRect().top, frame.height) : null;
+    for (const track of Array.from(video?.textTracks ?? [])) {
+        if (!cueTracks.has(track)) {
+            cueTracks.add(track);
+            track.addEventListener('cuechange', onCueChange);
+        }
+        // A track that is not showing keeps nothing lifted, so it shows as authored when it is turned back on.
+        const line = track.mode === 'showing' ? cueLine : null;
+        liftCues(Array.from(track.cues ?? []) as unknown as LiftableCue[], line, liftedCues);
+    }
+}
+
+/** hls.js adds a stream's cues as the video plays, after a lift: each one is placed as it comes up. */
+function onCueChange(event: Event): void {
+    const track = event.target as TextTrack;
+    if (cueLine === null || track.mode !== 'showing') return;
+    liftCues(Array.from(track.activeCues ?? []) as unknown as LiftableCue[], cueLine, liftedCues);
+}
+
+watch([controlsShown, isFullscreen, frameWidth], placeCues, { flush: 'post' });
 
 /** The card holds the controls up while the viewer is working it by keyboard. */
 function nextUpHasFocus(): boolean {
