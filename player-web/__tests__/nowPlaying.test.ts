@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { h, nextTick } from 'vue';
 import AudioFullscreen from '../src/components/AudioFullscreen.vue';
@@ -108,6 +108,21 @@ describe('the now-playing view for a host', () => {
 
             await find(wrapper, 'afsLyrics').findAll('[data-lyric]')[0]!.trigger('click');
             expect(wrapper.emitted('seek')).toEqual([[10]]);
+        });
+
+        it('puts the lyrics beside the cover, where the chapters are, on a wide screen', async () => {
+            const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(844);
+            const height = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(390);
+            try {
+                const wrapper = mountView({ lyrics });
+                await find(wrapper, 'afsLyricsToggle').trigger('click');
+                expect(find(wrapper, 'afsCover').exists()).toBe(true);
+                expect(find(wrapper, 'afsStage').find("[data-test='afsLyrics']").exists()).toBe(false);
+                expect(find(wrapper, 'afsSideLyrics').find("[data-test='afsLyrics']").exists()).toBe(true);
+            } finally {
+                width.mockRestore();
+                height.mockRestore();
+            }
         });
 
         it('has no lyrics button for a post without words, and keeps the sleep timer', () => {

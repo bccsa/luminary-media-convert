@@ -550,8 +550,10 @@ export const NativeLuminaryPlayer = defineComponent({
          * subtitles itself and hands none of their words back, so they are read from the stream.
          */
         const subtitleCues = shallowRef<readonly LyricCue[]>([]);
+        // Separate sources, each compared on its own: every state update is a new state, and the words are read
+        // again only when the controller, the track list or the track that is on changes.
         watch(
-            () => [controller.value, state.value.subtitleTracks, state.value.activeSubtitleTrackId] as const,
+            [controller, () => state.value.subtitleTracks, () => state.value.activeSubtitleTrackId],
             ([owner, , id]) => {
                 subtitleCues.value = [];
                 if (!owner || !id) return;

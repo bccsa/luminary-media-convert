@@ -97,9 +97,18 @@ const isVideo = computed(() => props.stage === 'video');
 const subtitleTracks = computed(() => props.subtitleTracks ?? []);
 const lyricLines = computed(() => props.lyrics ?? []);
 
-// The words take the cover's place while they are asked for, and only with sound alone and words to show.
+// The words are shown while they are asked for, and only with sound alone and words to show: in the cover's place
+// when the screen is tall, beside the cover, where the chapters are, when it is wide.
 const lyricsOpen = ref(false);
 const showLyrics = computed(() => lyricsOpen.value && !isVideo.value && lyricLines.value.length > 0);
+/** Wider than tall by the layout's own measure (`min-aspect-ratio: 6/5`), as the styles lay it out. */
+const wide = ref(false);
+function measureWide(): void {
+    const root = rootEl.value;
+    if (root && root.clientHeight > 0) wide.value = root.clientWidth * 5 >= root.clientHeight * 6;
+}
+const lyricsInStage = computed(() => showLyrics.value && !wide.value);
+const lyricsBeside = computed(() => showLyrics.value && wide.value);
 watch([isVideo, () => lyricLines.value.length], ([video, count]) => {
     if (video || count === 0) lyricsOpen.value = false;
 });
@@ -279,8 +288,12 @@ function measureHole(): void {
  */
 let holeObserver: ResizeObserver | null = null;
 onMounted(() => {
+    measureWide();
     if (typeof ResizeObserver === 'undefined') return;
-    holeObserver = new ResizeObserver(measureHole);
+    holeObserver = new ResizeObserver(() => {
+        measureWide();
+        measureHole();
+    });
     const root = rootEl.value;
     if (!root) return;
     holeObserver.observe(root);
@@ -319,7 +332,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
         :class="[
             `lmpl-afs-${appearance}`,
             {
-                'lmpl-afs-nolist': !showChapterList,
+                'lmpl-afs-nolist': !showChapterList && !lyricsBeside,
                 'lmpl-afs-video': isVideo,
                 'lmpl-afs-hole': isVideo && stageHole,
             },
@@ -354,7 +367,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
         </div>
 
         <div class="lmpl-afs-main">
-            <div ref="stageEl" class="lmpl-afs-art" :class="{ 'lmpl-afs-art-lyrics': showLyrics }" data-test="afsStage">
+            <div ref="stageEl" class="lmpl-afs-art" :class="{ 'lmpl-afs-art-lyrics': lyricsInStage }" data-test="afsStage">
                 <!-- The host's player stays mounted with sound alone, only hidden, so switching never stops playback. -->
                 <div v-if="slots.stage" v-show="isVideo" class="lmpl-afs-stage" data-test="afsStageSlot"><slot name="stage"></slot></div>
                 <button
@@ -368,7 +381,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" /></svg>
                 </button>
                 <NowPlayingLyrics
-                    v-if="showLyrics"
+                    v-if="lyricsInStage"
                     :lines="lyricLines"
                     :current-time="currentTime"
                     :label="messages.lyrics"
@@ -396,8 +409,16 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                     <p v-if="subtitle" class="lmpl-afs-subtitle">{{ subtitle }}</p>
                 </div>
 
-                <!-- Wide: the chapters, a list that follows the audio. -->
-                <ol v-if="showChapterList" class="lmpl-afs-chapters" data-test="afsChapters">
+                <!-- Wide: the lyrics when they are on, beside the cover; else the chapters, a list that follows the audio. -->
+                <div v-if="lyricsBeside" class="lmpl-afs-sidelyrics" data-test="afsSideLyrics">
+                    <NowPlayingLyrics
+                        :lines="lyricLines"
+                        :current-time="currentTime"
+                        :label="messages.lyrics"
+                        @seek="emit('seek', $event)"
+                    />
+                </div>
+                <ol v-else-if="showChapterList" class="lmpl-afs-chapters" data-test="afsChapters">
                     <li v-for="row in windowRows" :key="row.index">
                         <button
                             type="button"
