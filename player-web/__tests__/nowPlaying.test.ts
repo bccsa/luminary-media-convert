@@ -147,6 +147,18 @@ describe('the now-playing view for a host', () => {
             expect(wrapper.emitted('picture-in-picture')).toHaveLength(1);
         });
 
+        it("keeps the host's player mounted with sound alone, only hidden, so switching never stops it", async () => {
+            const wrapper = mountView({ stage: 'cover' }, { stage: () => h('div', { 'data-test': 'hostPicture' }) });
+            const slot = find(wrapper, 'afsStageSlot');
+            expect(slot.find("[data-test='hostPicture']").exists()).toBe(true);
+            expect(slot.isVisible()).toBe(false);
+            expect(find(wrapper, 'afsCover').exists()).toBe(true);
+
+            await wrapper.setProps({ stage: 'video' });
+            expect(find(wrapper, 'afsStageSlot').isVisible()).toBe(true);
+            expect(find(wrapper, 'afsCover').exists()).toBe(false);
+        });
+
         it('closes the lyrics when the picture comes back', async () => {
             const wrapper = mountView({ lyrics });
             await find(wrapper, 'afsLyricsToggle').trigger('click');

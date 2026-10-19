@@ -1677,7 +1677,8 @@
     overflow: hidden;
     background: #000;
 }
-.lmpl-afs-video .lmpl-afs-art > :not(.lmpl-afs-stagefs) {
+.lmpl-afs-stage,
+.lmpl-afs-stage > * {
     position: absolute;
     inset: 0;
 }

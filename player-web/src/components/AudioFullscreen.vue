@@ -342,27 +342,27 @@ const washSrc = computed(() => props.wash || cover.value?.src);
 
         <div class="lmpl-afs-main">
             <div ref="stageEl" class="lmpl-afs-art" :class="{ 'lmpl-afs-art-lyrics': showLyrics }" data-test="afsStage">
-                <template v-if="isVideo">
-                    <slot name="stage"></slot>
-                    <button
-                        type="button"
-                        class="lmpl-afs-stagefs"
-                        :aria-label="messages.enterFullscreen"
-                        data-test="afsFullscreen"
-                        @click="emit('fullscreen')"
-                    >
-                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" /></svg>
-                    </button>
-                </template>
+                <!-- The host's player stays mounted with sound alone, only hidden, so switching never stops playback. -->
+                <div v-if="slots.stage" v-show="isVideo" class="lmpl-afs-stage" data-test="afsStageSlot"><slot name="stage"></slot></div>
+                <button
+                    v-if="isVideo"
+                    type="button"
+                    class="lmpl-afs-stagefs"
+                    :aria-label="messages.enterFullscreen"
+                    data-test="afsFullscreen"
+                    @click="emit('fullscreen')"
+                >
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" /></svg>
+                </button>
                 <NowPlayingLyrics
-                    v-else-if="showLyrics"
+                    v-if="showLyrics"
                     :lines="lyricLines"
                     :current-time="currentTime"
                     :label="messages.lyrics"
                     @seek="emit('seek', $event)"
                 />
                 <img
-                    v-else-if="cover?.src"
+                    v-else-if="!isVideo && cover?.src"
                     class="lmpl-afs-cover"
                     :src="cover.src"
                     :srcset="'srcset' in cover ? cover.srcset : undefined"
@@ -372,7 +372,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                     data-test="afsCover"
                     @error="coverFailed = true"
                 />
-                <div v-else class="lmpl-afs-cover lmpl-afs-cover-empty" aria-hidden="true">
+                <div v-else-if="!isVideo" class="lmpl-afs-cover lmpl-afs-cover-empty" aria-hidden="true">
                     <svg viewBox="0 0 24 24" width="40%" height="40%" fill="currentColor"><path d="M19.952 1.651a.75.75 0 0 1 .298.599V16.303a3 3 0 0 1-2.176 2.884l-1.32.377a2.553 2.553 0 1 1-1.403-4.909l2.311-.66a1.5 1.5 0 0 0 1.088-1.442V6.994l-9 2.572v9.737a3 3 0 0 1-2.176 2.884l-1.32.377a2.553 2.553 0 1 1-1.403-4.909l2.311-.66a1.5 1.5 0 0 0 1.088-1.442V5.25a.75.75 0 0 1 .544-.721l10.5-3a.75.75 0 0 1 .658.122Z" /></svg>
                 </div>
             </div>
