@@ -1482,6 +1482,10 @@
     color: rgb(255 255 255 / 0.8);
 }
 
+.lmpl-afs .lmpl-time-end {
+    text-align: end;
+}
+
 .lmpl-afs-bottomrow {
     display: flex;
     flex-direction: column;

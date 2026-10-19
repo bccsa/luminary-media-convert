@@ -225,13 +225,24 @@ function pickUpNext(id: string): void {
 const showChapterList = computed(() => props.chapters.length > 1);
 const windowRows = computed(() => chapterWindow(props.chapters, props.chapterIndex));
 
-function clock(seconds: number): string {
+/**
+ * `m:ss`, or `h:mm:ss` for every time once `guide` (the length) reaches an hour, and minutes padded
+ * from ten of them: all the times of one video read in one shape, so the bar between them never moves.
+ */
+function clock(seconds: number, guide = 0): string {
     const whole = Math.max(0, Math.floor(seconds));
+    const guideWhole = Math.max(0, Math.floor(guide));
     const h = Math.floor(whole / 3600);
     const m = Math.floor((whole % 3600) / 60);
     const s = String(whole % 60).padStart(2, '0');
-    return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
+    if (h > 0 || guideWhole >= 3600) return `${h}:${String(m).padStart(2, '0')}:${s}`;
+    const minutes = Math.floor(whole / 60);
+    return `${guideWhole >= 600 ? String(minutes).padStart(2, '0') : minutes}:${s}`;
 }
+/** The length the times are read against: the video's, or the position if it has run past it. */
+const timeGuide = computed(() => Math.max(knownDuration.value, shownTime.value));
+/** Wide enough for the longest time and a minus, so a label never changes the bar's length. */
+const timeWidth = computed(() => `${clock(timeGuide.value, timeGuide.value).length + 1}ch`);
 
 // The sleep timer's button says how long is left; it is looked at every half minute, which is as fine as it reads.
 const now = ref(Date.now());
@@ -433,14 +444,14 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                             @click="emit('seek-chapter', row.chapter)"
                         >
                             <span class="lmpl-afs-chapter-title">{{ row.chapter.title }}</span>
-                            <span class="lmpl-afs-chapter-time">{{ clock(row.chapter.startTime) }}</span>
+                            <span class="lmpl-afs-chapter-time">{{ clock(row.chapter.startTime, timeGuide) }}</span>
                         </button>
                     </li>
                 </ol>
 
                 <div class="lmpl-afs-controls">
                     <div class="lmpl-afs-timeline">
-                        <span class="lmpl-time" data-test="afsElapsed">{{ clock(shownTime) }}</span>
+                        <span class="lmpl-time" :style="{ minWidth: timeWidth }" data-test="afsElapsed">{{ clock(shownTime, timeGuide) }}</span>
                         <div
                             ref="barEl"
                             class="lmpl-afs-bar"
@@ -449,7 +460,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                             aria-valuemin="0"
                             :aria-valuemax="knownDuration"
                             :aria-valuenow="Math.floor(shownTime)"
-                            :aria-valuetext="clock(shownTime)"
+                            :aria-valuetext="clock(shownTime, timeGuide)"
                             :aria-label="messages.scrubberLabel"
                             :class="{ 'lmpl-afs-bar-dragging': dragTime !== null }"
                             data-test="afsBar"
@@ -465,7 +476,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                             </div>
                         </div>
                         <span v-if="isLive" class="lmpl-time lmpl-afs-live" data-test="afsLive">{{ messages.live }}</span>
-                        <span v-else class="lmpl-time" data-test="afsRemaining">-{{ clock(Math.max(0, knownDuration - shownTime)) }}</span>
+                        <span v-else class="lmpl-time lmpl-time-end" :style="{ minWidth: timeWidth }" data-test="afsRemaining">-{{ clock(Math.max(0, knownDuration - shownTime), timeGuide) }}</span>
                     </div>
 
                     <div class="lmpl-afs-bottomrow">
