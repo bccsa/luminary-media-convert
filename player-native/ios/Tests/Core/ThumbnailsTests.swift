@@ -19,6 +19,16 @@ struct ThumbnailsTests {
         https://cdn.example.com/other.webp#xywh=0,90,160,90
         """
 
+    @Test("frames that stop early do not span the video")
+    func coverage() {
+        let cues = ThumbnailVtt.parse(vtt, baseUrl: "https://cdn.example.com/v")
+
+        #expect(ThumbnailVtt.covers(cues, duration: 61))
+        #expect(!ThumbnailVtt.covers(cues, duration: 6150))
+        #expect(!ThumbnailVtt.covers([], duration: 10))
+        #expect(!ThumbnailVtt.covers(cues, duration: 0))
+    }
+
     @Test("cues come back in order, sprite paths resolved against the VTT's folder")
     func cues() {
         let cues = ThumbnailVtt.parse(vtt, baseUrl: "https://bucket.example.com/abc/thumbnails")

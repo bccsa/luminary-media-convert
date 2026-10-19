@@ -69,6 +69,14 @@ public enum ThumbnailVtt {
     }
 
     /// The cue covering `time`, or nil; binary search, because a scrub asks on every move.
+    /// The share of a video its frames must span to be shown (`THUMBNAIL_MIN_COVERAGE` in hls-core).
+    static let minCoverage = 0.9
+
+    public static func covers(_ cues: [ThumbnailCue], duration: Double) -> Bool {
+        guard let last = cues.last, duration > 0, duration.isFinite else { return false }
+        return last.end >= duration * minCoverage
+    }
+
     public static func find(_ cues: [ThumbnailCue], time: Double) -> ThumbnailCue? {
         var lo = 0
         var hi = cues.count - 1
@@ -156,6 +164,14 @@ public final class Thumbnails: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return !cues.isEmpty
+    }
+
+    /// Whether the frames span a video of `duration` seconds. A storyboard that stops early would leave the
+    /// roster blank for the rest of the video, so it counts as none (`THUMBNAIL_MIN_COVERAGE` in hls-core).
+    public func covers(duration: Double) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return ThumbnailVtt.covers(cues, duration: duration)
     }
 
     /// Starts reading `url` (nil: no frames). `keyHex` is the LMCENC key.

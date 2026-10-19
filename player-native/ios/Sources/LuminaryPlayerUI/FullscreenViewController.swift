@@ -582,7 +582,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         if ended {
             scrubbing = nil
             // A roster the press had open stays open, centred on where the video is going.
-            let held = rosterFraction != nil && commands.thumbnails?.ready == true
+            let held = rosterFraction != nil && commands.thumbnails?.covers(duration: state.duration) == true
             commands.seek(position)
             if held {
                 rosterFraction = nil
@@ -596,7 +596,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
             if scrubbing == nil { pauseForScrub() }
             scrubbing = position
             if rosterPinned { closePin() }
-            if commands.thumbnails?.ready == true { updateRoster(fraction) }
+            if commands.thumbnails?.covers(duration: state.duration) == true { updateRoster(fraction) }
         }
         refresh()
     }
@@ -692,7 +692,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     // MARK: Pinned roster
 
     private func openPin(at time: Double, markerX: CGFloat) {
-        guard state.duration > 0, commands.thumbnails?.ready == true else { return }
+        guard state.duration > 0, commands.thumbnails?.covers(duration: state.duration) == true else { return }
         pinMarkerX = markerX
         rosterPinned = true
         rosterChanged()

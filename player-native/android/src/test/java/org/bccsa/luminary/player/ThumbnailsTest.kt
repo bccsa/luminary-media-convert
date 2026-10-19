@@ -34,6 +34,15 @@ class ThumbnailsTest {
     }
 
     @Test
+    fun `frames that stop early do not span the video`() {
+        val cues = ThumbnailVtt.parse(vtt, "https://cdn.example.com/v")
+        assertTrue(ThumbnailVtt.covers(cues, 61.0))
+        assertTrue(!ThumbnailVtt.covers(cues, 6150.0))
+        assertTrue(!ThumbnailVtt.covers(emptyList(), 10.0))
+        assertTrue(!ThumbnailVtt.covers(cues, 0.0))
+    }
+
+    @Test
     fun `a file with CRLF line endings is still every cue, not the first`() {
         val cues = ThumbnailVtt.parse(vtt.replace("\n", "\r\n"), "base")
 
