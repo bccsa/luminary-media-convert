@@ -28,6 +28,8 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
     private var pictureInPicture: AVPictureInPictureController?
     private var routePicker: AVRoutePickerView?
     private var rotationObserver: NSObjectProtocol?
+    private var deviceObserver: NSObjectProtocol?
+    private var deviceSettle: DispatchWorkItem?
     private var frameObservation: NSKeyValueObservation?
     private var wasOnScreen = false
     private var settleCheck: DispatchWorkItem?
@@ -47,10 +49,33 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
         ) { [weak self] _ in
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self?.rotated() }
         }
+        // A host whose pages stay upright on a phone never turns its interface, so the turn is read
+        // from the device itself as well. It reports nothing while the viewer's rotation lock is on.
+        UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+        deviceObserver = NotificationCenter.default.addObserver(
+            forName: UIDevice.orientationDidChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.deviceTurned()
+        }
     }
 
     deinit {
         if let rotationObserver { NotificationCenter.default.removeObserver(rotationObserver) }
+        if let deviceObserver { NotificationCenter.default.removeObserver(deviceObserver) }
+        UIDevice.current.endGeneratingDeviceOrientationNotifications()
+    }
+
+    /// The phone held on its side for a moment, while the interface stays upright: a glance or a
+    /// wobble on the way does not count, so it is checked again once the turn has settled.
+    private func deviceTurned() {
+        deviceSettle?.cancel()
+        let check = DispatchWorkItem { [weak self] in
+            guard let self, self.frame != nil, !self.suspended, UIDevice.current.orientation.isLandscape,
+                  self.webView()?.window?.windowScene?.interfaceOrientation.isPortrait == true else { return }
+            self.onRotatedToLandscape?()
+        }
+        deviceSettle = check
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: check)
     }
 
     /// Only a video the page is showing, and that nothing else holds, turns into full-screen.
