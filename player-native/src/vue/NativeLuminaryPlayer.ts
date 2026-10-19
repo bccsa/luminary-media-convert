@@ -265,13 +265,17 @@ export const NativeLuminaryPlayer = defineComponent({
             created.adapter.setNowPlaying(nowPlaying.value);
             created.adapter.setThumbnailsUrl(props.source.sidecars?.thumbnails?.url);
             await created.controller.load(props.source);
+            sourceLoaded.value = true;
         });
 
         watch(
             () => props.source,
             (source) => {
                 native.value?.adapter.setThumbnailsUrl(source.sidecars?.thumbnails?.url);
-                void controller.value?.load(source);
+                sourceLoaded.value = false;
+                void controller.value?.load(source).finally(() => {
+                    if (props.source === source) sourceLoaded.value = true;
+                });
             },
         );
         // Takes effect with the next load: the bridge carries it on `load`.
@@ -284,6 +288,8 @@ export const NativeLuminaryPlayer = defineComponent({
         const inlineActive = computed(() => props.inline && native.value?.adapter.inlineVideo === true);
         let sentFrame = '';
         let measureQueued = false;
+        /** Whether native holds the current source: until it does, its view still shows the previous video's last picture. */
+        const sourceLoaded = shallowRef(false);
 
         /** Tells native where the video goes: this element's frame, or nothing in audio-only. */
         function sendFrame(): void {
@@ -293,7 +299,7 @@ export const NativeLuminaryPlayer = defineComponent({
             if (!adapter || !inlineActive.value) return;
             const rect = el?.getBoundingClientRect();
             const frame =
-                rect && rect.width > 0 && rect.height > 0 && !state.value.isAudioOnly
+                sourceLoaded.value && rect && rect.width > 0 && rect.height > 0 && !state.value.isAudioOnly
                     ? { x: rect.left, y: rect.top, width: rect.width, height: rect.height }
                     : null;
             const key = frame ? `${frame.x},${frame.y},${frame.width},${frame.height}` : '';
@@ -344,7 +350,12 @@ export const NativeLuminaryPlayer = defineComponent({
             [inlineActive, rootEl],
             ([active, el]) => {
                 frameWatchers.splice(0).forEach((stop) => stop());
-                if (!active || !el) return;
+                if (!active || !el) {
+                    // Native keeps drawing where it was last told to; a picture the page no longer wants has to be taken down.
+                    if (sentFrame) native.value?.adapter.setInlineFrame(null);
+                    sentFrame = '';
+                    return;
+                }
                 const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(queueFrame);
                 observer?.observe(el);
                 window.addEventListener('resize', queueFrame);
@@ -368,6 +379,7 @@ export const NativeLuminaryPlayer = defineComponent({
         );
         // Audio-only has no picture: the frame goes, and comes back with the video.
         watch(() => state.value.isAudioOnly, queueFrame);
+        watch(sourceLoaded, queueFrame);
 
         onBeforeUnmount(() => {
             frameWatchers.splice(0).forEach((stop) => stop());
