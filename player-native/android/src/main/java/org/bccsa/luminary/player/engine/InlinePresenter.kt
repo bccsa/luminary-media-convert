@@ -5,6 +5,10 @@ import android.content.ComponentCallbacks
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.drawable.Drawable
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
+import android.view.OrientationEventListener
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
@@ -59,6 +63,43 @@ class InlinePresenter(
         override fun onLowMemory() {}
     }
     private var observing: Activity? = null
+
+    /**
+     * A host whose pages stay upright never changes configuration on a turn, so the turn is read from the
+     * sensor as well, while the viewer lets the phone rotate. The phone has to stay on its side for a moment:
+     * a glance or a wobble on the way does not count.
+     */
+    private var sensor: OrientationEventListener? = null
+    private var sideways = false
+    private val main = Handler(Looper.getMainLooper())
+    private val settled = Runnable {
+        val host = activity() ?: return@Runnable
+        if (sideways && frame != null && !suspended &&
+            host.resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
+        ) {
+            onRotatedToLandscape?.invoke()
+        }
+    }
+
+    private fun autoRotateOn(host: Activity): Boolean =
+        Settings.System.getInt(host.contentResolver, Settings.System.ACCELEROMETER_ROTATION, 0) == 1
+
+    private fun watchSensor(host: Activity) {
+        if (sensor != null) return
+        val listener = object : OrientationEventListener(host) {
+            override fun onOrientationChanged(degrees: Int) {
+                val now = phonePoseOf(degrees)?.let { it == PhonePose.SIDEWAYS } ?: return
+                if (now == sideways) return
+                sideways = now
+                main.removeCallbacks(settled)
+                if (now && autoRotateOn(host)) main.postDelayed(settled, SIDEWAYS_SETTLE_MS)
+            }
+        }
+        if (listener.canDetectOrientation()) {
+            listener.enable()
+            sensor = listener
+        }
+    }
 
     /** The view showing the picture, for tests. */
     internal val view: PlayerView? get() = videoView
@@ -162,6 +203,7 @@ class InlinePresenter(
 
     private fun observeRotation() {
         val host = activity() ?: return
+        watchSensor(host)
         if (observing === host) return
         observing?.unregisterComponentCallbacks(configuration)
         host.registerComponentCallbacks(configuration)
@@ -173,6 +215,10 @@ class InlinePresenter(
         tracking = null
         observing?.unregisterComponentCallbacks(configuration)
         observing = null
+        sensor?.disable()
+        sensor = null
+        sideways = false
+        main.removeCallbacks(settled)
         videoView?.let { view ->
             view.player = null
             (view.parent as? ViewGroup)?.removeView(view)
@@ -185,3 +231,6 @@ class InlinePresenter(
         }
     }
 }
+
+/** How long the phone stays on its side before the picture goes full-screen. */
+private const val SIDEWAYS_SETTLE_MS = 250L
