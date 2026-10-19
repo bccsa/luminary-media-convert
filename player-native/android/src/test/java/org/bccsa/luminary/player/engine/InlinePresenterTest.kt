@@ -73,7 +73,7 @@ class InlinePresenterTest {
         presenter.setFrame(InlineFrame(20.0, 30.0, 200.0, 150.0), player)
 
         assertSame(view, presenter.view)
-        assertEquals(2, container.childCount)
+        assertEquals(3, container.childCount)
         assertEquals(20 * density, view!!.x, 0.5f)
         assertEquals((200 * density).toInt(), view.layoutParams.width)
     }

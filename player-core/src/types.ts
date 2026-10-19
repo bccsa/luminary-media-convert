@@ -209,6 +209,8 @@ export interface Quality {
     /** Stable id: `String(height)` for video, `b<bandwidth>` for resolution-less variants. */
     id: string;
     height?: number;
+    /** From the master's `RESOLUTION`: with `height`, the picture's shape. */
+    width?: number;
     bandwidth: number;
     label: string;
 }

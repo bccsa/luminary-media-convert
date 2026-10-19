@@ -766,7 +766,9 @@ export class PlayerController implements PlayerControllerApi {
         const map = new Map<string, string>();
         const qualities: Quality[] = [];
         for (const variant of variants) {
-            const quality = toQuality(variant.height, variant.bandwidth);
+            // The engine reports no width, so the playlist's own is kept.
+            const known = this.state.qualities.find((q) => q.height === variant.height);
+            const quality = toQuality(variant.height, variant.bandwidth, known?.width);
             if (!map.has(quality.id)) qualities.push(quality);
             map.set(quality.id, variant.id);
         }

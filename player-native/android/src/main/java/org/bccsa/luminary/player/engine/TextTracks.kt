@@ -18,7 +18,10 @@ fun subtitleChoicesOf(tracks: Tracks): List<SubtitleChoice> = buildList {
             if (!group.isTrackSupported(i)) continue
             val format = group.getTrackFormat(i)
             val language = format.language?.takeIf { it.isNotEmpty() }
-            add(SubtitleChoice(format.label ?: language ?: "Subtitles ${size + 1}", language, group, i))
+            // A track the master does not name is the stream's own closed captions, which an encoder's video can carry
+            // without any words in them: offering it shows a subtitles button for a video that has none.
+            val name = format.label ?: language ?: continue
+            add(SubtitleChoice(name, language, group, i))
         }
     }
 }

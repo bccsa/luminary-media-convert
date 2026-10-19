@@ -171,7 +171,7 @@ class ExoEngineInlineTest {
     fun `hiding the frame takes the view away, and the web view is as it was`() {
         load()
         call("setInlineFrame", "frame" to frame())
-        assertEquals(2, container.childCount)
+        assertEquals(3, container.childCount)
 
         call("setInlineFrame")
         assertEquals(1, container.childCount)

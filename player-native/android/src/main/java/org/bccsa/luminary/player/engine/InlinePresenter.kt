@@ -12,11 +12,16 @@ import android.view.OrientationEventListener
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
+import android.widget.FrameLayout
+import android.view.Gravity
 import android.view.ViewGroup
 import androidx.annotation.OptIn
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.CaptionStyleCompat
+import androidx.media3.ui.SubtitleView
+import android.util.TypedValue
 import org.bccsa.luminary.player.InlineFrame
 
 /**
@@ -36,6 +41,8 @@ class InlinePresenter(
     private val activity: () -> Activity? = { null },
 ) {
     private var videoView: PlayerView? = null
+    /** The subtitles, over the page: in the room the page leaves under the picture, or over the picture's foot. */
+    private var subtitleView: View? = null
     private var frame: InlineFrame? = null
     private var suspended = false
     private var player: Player? = null
@@ -120,6 +127,7 @@ class InlinePresenter(
             tracking = web
         }
         observeRotation()
+        stack(container, web, view, frame.front)
         layout()
         makeTransparent(web)
         view.player = if (suspended) null else player
@@ -167,6 +175,48 @@ class InlinePresenter(
         }
         view.x = web.x + (frame.x * density).toFloat()
         view.y = web.y + (frame.y * density).toFloat()
+        layoutSubtitles(frame, web, density)
+    }
+
+    /** Under the picture when the page left room there, else over its foot; none over a small picture in front. */
+    private fun layoutSubtitles(frame: InlineFrame, web: View, density: Float) {
+        val subtitles = subtitleView ?: return
+        if (frame.front) {
+            subtitles.visibility = View.GONE
+            return
+        }
+        subtitles.visibility = View.VISIBLE
+        val room = (frame.captionHeight * density).toInt()
+        // A band of its own is read at a size a phone reads; over the picture the size follows the picture's.
+        (subtitles as? SubtitleView)?.let { text ->
+            if (room > 0) {
+                text.setFixedTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+                // On the page's own colour the words need no box of their own, only a shadow to keep them readable.
+                text.setStyle(CaptionStyleCompat(Color.WHITE, Color.TRANSPARENT, Color.TRANSPARENT, CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW, Color.BLACK, null))
+            } else {
+                text.setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION)
+                text.setStyle(CaptionStyleCompat.DEFAULT)
+            }
+        }
+        val height = if (room > 0) room else (frame.height * density).toInt().coerceAtLeast(1)
+        val width = (frame.width * density).toInt().coerceAtLeast(1)
+        val params = subtitles.layoutParams
+        if (params.width != width || params.height != height) {
+            params.width = width
+            params.height = height
+            subtitles.layoutParams = params
+        }
+        subtitles.x = web.x + (frame.x * density).toFloat()
+        subtitles.y = web.y + (frame.y * density).toFloat() + (if (room > 0) (frame.height * density).toFloat() else 0f)
+        subtitles.bringToFront()
+    }
+
+    /** Behind the web view, where the page cuts a hole for it, or over it for a small picture. */
+    private fun stack(container: ViewGroup, web: View, view: PlayerView, front: Boolean) {
+        val inFront = container.indexOfChild(view) > container.indexOfChild(web)
+        if (front == inFront) return
+        container.removeView(view)
+        if (front) container.addView(view) else container.addView(view, container.indexOfChild(web))
     }
 
     private fun makeVideoView(container: ViewGroup, web: View): PlayerView {
@@ -178,8 +228,17 @@ class InlinePresenter(
             isClickable = false
             isFocusable = false
         }
+        // The picture sits at the top of the frame: the page leaves a band under it, and the subtitles,
+        // drawn at the view's foot, fall in that band instead of over the picture.
+        (view.findViewById<View>(androidx.media3.ui.R.id.exo_content_frame)?.layoutParams as? FrameLayout.LayoutParams)
+            ?.let { it.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL }
         // Below the web view in the draw order, so the page draws over the picture.
         container.addView(view, container.indexOfChild(web), ViewGroup.LayoutParams(1, 1))
+        view.subtitleView?.let { subtitles ->
+            (subtitles.parent as? ViewGroup)?.removeView(subtitles)
+            container.addView(subtitles, ViewGroup.LayoutParams(1, 1))
+            subtitleView = subtitles
+        }
         (view.videoSurfaceView as? SurfaceView)?.holder?.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {
                 onSurfaceCreated?.invoke()
@@ -223,6 +282,8 @@ class InlinePresenter(
             view.player = null
             (view.parent as? ViewGroup)?.removeView(view)
         }
+        subtitleView?.let { (it.parent as? ViewGroup)?.removeView(it) }
+        subtitleView = null
         videoView = null
         if (transparent) {
             webView()?.background = restore

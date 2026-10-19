@@ -163,6 +163,8 @@ export class SidecarLoader {
                 signal: this.options.signal,
                 subtle: this.options.subtle,
             });
+            // A file with no cues is a track to nothing: offering it would show a subtitles button for a video with none.
+            if (parseVttCues(asset.text).length === 0) continue;
             const id = subtitleSidecarId(sidecar.lang);
             tracks.push({
                 id,

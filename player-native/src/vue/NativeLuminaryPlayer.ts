@@ -136,7 +136,9 @@ export const NativeLuminaryPlayer = defineComponent({
          * ignored and the component behaves as it always has (poster, play, native full-screen).
          * The page must leave everything behind the frame transparent.
          */
-        inline: { type: Boolean, default: false },
+        inline: { type: [Boolean, String] as PropType<boolean | 'front'>, default: false },
+        /** Room the page leaves under the picture for native's subtitles, in CSS pixels. */
+        captionBand: { type: Number, default: 0 },
         /** Controls to switch off, as `player-web`'s `controls` prop. */
         controls: { type: Object as PropType<Partial<NativeLuminaryPlayerControls>>, default: undefined },
         /** The plugin to drive; the Capacitor one unless a host supplies another. */
@@ -294,9 +296,9 @@ export const NativeLuminaryPlayer = defineComponent({
             const rect = el?.getBoundingClientRect();
             const frame =
                 rect && rect.width > 0 && rect.height > 0 && !state.value.isAudioOnly
-                    ? { x: rect.left, y: rect.top, width: rect.width, height: rect.height }
+                    ? { x: rect.left, y: rect.top, width: rect.width, height: rect.height, ...(props.inline === 'front' ? { front: true } : {}), ...(props.captionBand > 0 && props.inline !== 'front' ? { captionHeight: props.captionBand } : {}) }
                     : null;
-            const key = frame ? `${frame.x},${frame.y},${frame.width},${frame.height}` : '';
+            const key = frame ? `${frame.x},${frame.y},${frame.width},${frame.height},${frame.front === true},${frame.captionHeight ?? 0}` : '';
             if (key === sentFrame) return;
             sentFrame = key;
             adapter.setInlineFrame(frame);
@@ -714,8 +716,8 @@ const STYLES = {
     // `overflow: hidden` makes this a scroll container, where the browser stops reading its ancestors' `touch-action`:
     // without its own, a sideways drag on the picture is taken over and cancelled before the host sees it.
     root: { position: 'relative', aspectRatio: '16 / 9', background: '#000', overflow: 'hidden', touchAction: 'pan-y' },
-    /** Transparent: native draws the video behind it. */
-    rootInline: { position: 'relative', aspectRatio: '16 / 9', background: 'transparent', overflow: 'hidden', touchAction: 'pan-y' },
+    /** Transparent: native draws the video behind it. It fills the place the host gives it, whatever its shape. */
+    rootInline: { position: 'relative', width: '100%', height: '100%', background: 'transparent', overflow: 'hidden', touchAction: 'pan-y' },
     poster: { position: 'absolute', inset: '0', width: '100%', height: '100%', objectFit: 'cover' },
     glyph: {
         position: 'absolute',

@@ -231,6 +231,10 @@ export interface InlineFrame {
     y: number;
     width: number;
     height: number;
+    /** Over the web view instead of behind it: a small picture the page has no room to cut a hole for. */
+    front?: boolean;
+    /** Room under the picture, in CSS pixels, where native draws the subtitles over the page. */
+    captionHeight?: number;
 }
 
 export interface BridgeInfo {

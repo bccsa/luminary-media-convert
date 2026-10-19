@@ -703,10 +703,13 @@ class ExoEngine(
             reportedAudio = audio to activeAudio
             events.audioTracks(audio, activeAudio)
         }
+        // Only a change is told: a repeat would reach the page before its own pick has landed and undo it.
         if (subtitleChoicesOf(tracks).isNotEmpty() || reportedSubtitle != null) {
             val selected = subtitleChoicesOf(tracks).firstOrNull { it.selected }?.label
-            reportedSubtitle = selected
-            events.subtitleChanged(selected)
+            if (selected != reportedSubtitle) {
+                reportedSubtitle = selected
+                events.subtitleChanged(selected)
+            }
         }
         val pinHeld = applyVariantPin(tracks)
         if (variants.isNotEmpty() && (variants != reportedVariants || !pinHeld)) {
