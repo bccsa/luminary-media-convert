@@ -62,6 +62,12 @@ describe('AudioFullscreen — what it shows', () => {
         expect(bare.find('.lmpl-afs-cover-empty').exists()).toBe(true);
     });
 
+    it('names the chapter the playhead is in, among the others, under what plays', () => {
+        const wrapper = mountScreen();
+        expect(find(wrapper, 'afsChapterChip').text()).toBe('Chapter 3 of 8 · Chapter 3');
+        expect(find(mountScreen({ chapters: [], chapterIndex: -1 }), 'afsChapterChip').exists()).toBe(false);
+    });
+
     it('has no chapters button without chapters', () => {
         const wrapper = mountScreen({ chapters: [], chapterIndex: -1 });
         expect(find(wrapper, 'afsChaptersButton').exists()).toBe(false);

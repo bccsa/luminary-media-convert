@@ -2134,17 +2134,69 @@
         justify-content: flex-end;
     }
 
-    /* The tools are small and quiet, the transport leading. */
+    /* The dock is sized from the window: a measured title, a thin timeline, a transport that leads and tools that stay quiet. */
+    .lmpl-afs-title {
+        font-size: clamp(16px, 1.45cqw, 30px);
+    }
+
+    .lmpl-afs-subtitle {
+        margin-top: 2px;
+        font-size: clamp(11px, 0.95cqw, 19px);
+        opacity: 0.7;
+    }
+
+    .lmpl-afs-chip {
+        font-size: clamp(11px, 0.9cqw, 17px);
+    }
+
+    .lmpl-root .lmpl-afs .lmpl-time {
+        font-size: clamp(11px, 0.9cqw, 18px);
+    }
+
+    .lmpl-afs-bar-track {
+        height: 4px;
+    }
+
+    .lmpl-afs-playbtn {
+        width: clamp(52px, 4.8cqw, 96px);
+        height: clamp(52px, 4.8cqw, 96px);
+    }
+
+    .lmpl-afs-skip {
+        width: clamp(34px, 3cqw, 58px);
+        height: clamp(34px, 3cqw, 58px);
+    }
+
+    /* Plain turning arrows, the interval left to the label. */
+    .lmpl-afs-skip svg text {
+        display: none;
+    }
+
+    .lmpl-afs-transport {
+        gap: clamp(20px, 2.2cqw, 44px);
+    }
+
+    .lmpl-afs-lyric {
+        font-size: clamp(18px, 1.9cqw, 36px);
+    }
+
     .lmpl-root .lmpl-afs-tools .lmpl-afs-iconbtn {
-        width: calc(38px * var(--lmpl-s));
-        height: calc(38px * var(--lmpl-s));
+        width: clamp(32px, 2.6cqw, 52px);
+        height: clamp(32px, 2.6cqw, 52px);
         opacity: 0.85;
     }
 
     .lmpl-root .lmpl-afs-tools .lmpl-afs-iconbtn svg,
     .lmpl-root .lmpl-afs-tools .lmpl-afs-iconbtn .media-button-icon {
-        width: calc(20px * var(--lmpl-s));
-        height: calc(20px * var(--lmpl-s));
+        width: clamp(17px, 1.4cqw, 28px);
+        height: clamp(17px, 1.4cqw, 28px);
+    }
+
+    /* The words being on is shown by the lyrics button's colour. */
+    .lmpl-root .lmpl-afs-tools .lmpl-afs-on {
+        color: #5cc6c2;
+        opacity: 1;
+        filter: drop-shadow(0 0 4px rgb(92 198 194 / 0.55));
     }
 }
 
