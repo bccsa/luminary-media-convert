@@ -1193,9 +1193,9 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         visibility.hold()
     }
 
-    /// Centred over its button and just above it, kept inside the screen.
+    /// Centred over the button that opened it and just above it, kept inside the screen.
     private func place(_ menu: FullscreenMenu) {
-        guard let button = [audioButton, subtitlesButton, rateButton].first(where: { $0.hash == menu.tag }) else { return }
+        guard let button = controls.subviews.first(where: { $0 !== menu && $0.hash == menu.tag }) else { return }
         var frame = menu.bounds
         frame.origin.x = min(max(button.frame.midX - frame.width / 2, 8), max(view.bounds.width - frame.width - 8, 8))
         frame.origin.y = max(button.frame.minY - frame.height - 4, 8)
