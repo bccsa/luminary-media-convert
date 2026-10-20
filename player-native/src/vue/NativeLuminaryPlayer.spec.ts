@@ -404,6 +404,45 @@ describe('NativeLuminaryPlayer', () => {
             await flush();
             expect(exposed.state.activeSubtitleTrackId).toBeNull();
         });
+
+        it('hands out the words of the track that is on, read from the stream, and none once it is off', async () => {
+            const { plugin, exposed } = await mountPlayer({}, WITH_SUBTITLES);
+            await ready(plugin);
+            expect(exposed.subtitleCues).toEqual([]);
+
+            exposed.controller!.setSubtitleTrack(exposed.state.subtitleTracks[0]!.id);
+            await flush();
+            await flush();
+            expect(exposed.subtitleCues).toEqual([
+                { start: 0, end: 90.5, text: 'Opening' },
+                { start: 90.5, end: 240, text: 'The interview' },
+            ]);
+
+            exposed.controller!.setSubtitleTrack(null);
+            await flush();
+            expect(exposed.subtitleCues).toEqual([]);
+        });
+
+        it('keeps the words through the updates that come as it plays, read once', async () => {
+            const { plugin, exposed } = await mountPlayer({}, WITH_SUBTITLES);
+            await ready(plugin);
+            const load = plugin.argsOf<LoadArgs>('load').at(-1)!;
+            const read = vi.spyOn(exposed.controller!, 'readSubtitleCues');
+            exposed.controller!.setSubtitleTrack(exposed.state.subtitleTracks[0]!.id);
+            await flush();
+            await flush();
+            const words = exposed.subtitleCues;
+            expect(words).toHaveLength(2);
+
+            for (const currentTime of [1, 2, 3]) {
+                plugin.emit('timeupdate', { playerId: load.playerId, loadId: load.loadId }, { currentTime });
+                await nextTick();
+                expect(exposed.subtitleCues).toBe(words);
+            }
+            await flush();
+            expect(exposed.subtitleCues).toBe(words);
+            expect(read).toHaveBeenCalledTimes(1);
+        });
     });
 
     describe('muting and picture in picture, for a host that draws its own controls', () => {

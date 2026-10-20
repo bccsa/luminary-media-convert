@@ -100,11 +100,21 @@ const isVideo = computed(() => props.stage === 'video');
 const subtitleTracks = computed(() => props.subtitleTracks ?? []);
 const lyricLines = computed(() => props.lyrics ?? []);
 
-// The words take the cover's place while they are asked for, and only with sound alone and words to show.
+// The words are shown while they are asked for, and only with sound alone and words to show: in the cover's place
+// when the screen is tall, beside the cover, where the chapters are, when it is wide.
 const lyricsOpen = ref(false);
 const showLyrics = computed(() => lyricsOpen.value && !isVideo.value && lyricLines.value.length > 0);
-watch([isVideo, () => lyricLines.value.length], ([video, count]) => {
-    if (video || count === 0) lyricsOpen.value = false;
+/** Wider than tall by the layout's own measure (`min-aspect-ratio: 6/5`), as the styles lay it out. */
+const wide = ref(false);
+function measureWide(): void {
+    const root = rootEl.value;
+    if (root && root.clientHeight > 0) wide.value = root.clientWidth * 5 >= root.clientHeight * 6;
+}
+const lyricsInStage = computed(() => showLyrics.value && !wide.value);
+const lyricsBeside = computed(() => showLyrics.value && wide.value);
+// The picture puts them away. Words still on their way (another language being read) keep them asked for.
+watch(isVideo, (video) => {
+    if (video) lyricsOpen.value = false;
 });
 
 type MenuId = 'speed' | 'language' | 'sleep' | 'subtitles';
@@ -272,6 +282,11 @@ function chooseSubtitles(id: string | null): void {
     emit('subtitle-track', id);
     closeMenu();
 }
+/** With the sound alone the subtitles are the lyrics: choosing their language shows them. */
+function chooseLyrics(id: string): void {
+    lyricsOpen.value = true;
+    chooseSubtitles(id);
+}
 
 // The stage's band, for a picture drawn behind the page: the screen's colour is cut out there (see .lmpl-afs-hole).
 const stageEl = ref<HTMLElement | null>(null);
@@ -294,8 +309,12 @@ function measureHole(): void {
  */
 let holeObserver: ResizeObserver | null = null;
 onMounted(() => {
+    measureWide();
     if (typeof ResizeObserver === 'undefined') return;
-    holeObserver = new ResizeObserver(measureHole);
+    holeObserver = new ResizeObserver(() => {
+        measureWide();
+        measureHole();
+    });
     const root = rootEl.value;
     if (!root) return;
     holeObserver.observe(root);
@@ -334,7 +353,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
         :class="[
             `lmpl-afs-${appearance}`,
             {
-                'lmpl-afs-nolist': !showChapterList,
+                'lmpl-afs-nolist': !showChapterList && !lyricsBeside,
                 'lmpl-afs-video': isVideo,
                 'lmpl-afs-hole': isVideo && stageHole,
             },
@@ -371,7 +390,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
         </div>
 
         <div class="lmpl-afs-main">
-            <div ref="stageEl" class="lmpl-afs-art" :class="{ 'lmpl-afs-art-lyrics': showLyrics }" data-test="afsStage">
+            <div ref="stageEl" class="lmpl-afs-art" :class="{ 'lmpl-afs-art-lyrics': lyricsInStage }" data-test="afsStage">
                 <!-- The host's player stays mounted with sound alone, only hidden, so switching never stops playback. -->
                 <div v-if="slots.stage" v-show="isVideo" class="lmpl-afs-stage" data-test="afsStageSlot"><slot name="stage"></slot></div>
                 <!-- A drag along the picture's foot scrubs like the bar, for a thumb that lands short of it. -->
@@ -395,7 +414,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" /></svg>
                 </button>
                 <NowPlayingLyrics
-                    v-if="showLyrics"
+                    v-if="lyricsInStage"
                     :lines="lyricLines"
                     :current-time="currentTime"
                     :label="messages.lyrics"
@@ -423,8 +442,16 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                     <p v-if="subtitle" class="lmpl-afs-subtitle">{{ subtitle }}</p>
                 </div>
 
-                <!-- Wide: the chapters, a list that follows the audio. -->
-                <ol v-if="showChapterList" class="lmpl-afs-chapters" data-test="afsChapters">
+                <!-- Wide: the lyrics when they are on, beside the cover; else the chapters, a list that follows the audio. -->
+                <div v-if="lyricsBeside" class="lmpl-afs-sidelyrics" data-test="afsSideLyrics">
+                    <NowPlayingLyrics
+                        :lines="lyricLines"
+                        :current-time="currentTime"
+                        :label="messages.lyrics"
+                        @seek="emit('seek', $event)"
+                    />
+                </div>
+                <ol v-else-if="showChapterList" class="lmpl-afs-chapters" data-test="afsChapters">
                     <li v-for="row in windowRows" :key="row.index">
                         <button
                             type="button"
@@ -569,6 +596,23 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                             >
                                 <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 10h10M4 14h16M4 18h7" /><circle cx="18" cy="18" r="2" /></svg>
                             </button>
+
+                            <div v-if="!isVideo && subtitleTracks.length > 1" class="lmpl-afs-tool">
+                                <button
+                                    type="button"
+                                    class="lmpl-afs-iconbtn"
+                                    :aria-label="messages.lyricsLanguage"
+                                    :aria-expanded="menu === 'subtitles'"
+                                    aria-haspopup="menu"
+                                    data-test="afsLyricsLanguage"
+                                    @click="toggleMenu('subtitles')"
+                                >
+                                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5" /><path d="M7 14h4M13 14h4M7 10.5h2M11 10.5h6" /></svg>
+                                </button>
+                                <div v-if="menu === 'subtitles'" class="lmpl-afs-menu" role="menu" :aria-label="messages.lyricsLanguage">
+                                    <button v-for="track in subtitleTracks" :key="track.id" type="button" role="menuitemradio" :aria-checked="track.id === activeSubtitleTrackId" class="lmpl-afs-menuitem" @click="chooseLyrics(track.id)">{{ track.label }}</button>
+                                </div>
+                            </div>
 
                             <div v-if="isVideo && subtitleTracks.length > 0" class="lmpl-afs-tool">
                                 <button

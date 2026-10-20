@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { h, nextTick } from 'vue';
 import AudioFullscreen from '../src/components/AudioFullscreen.vue';
@@ -108,6 +108,46 @@ describe('the now-playing view for a host', () => {
 
             await find(wrapper, 'afsLyrics').findAll('[data-lyric]')[0]!.trigger('click');
             expect(wrapper.emitted('seek')).toEqual([[10]]);
+        });
+
+        it('puts the lyrics beside the cover, where the chapters are, on a wide screen', async () => {
+            const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(844);
+            const height = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(390);
+            try {
+                const wrapper = mountView({ lyrics });
+                await find(wrapper, 'afsLyricsToggle').trigger('click');
+                expect(find(wrapper, 'afsCover').exists()).toBe(true);
+                expect(find(wrapper, 'afsStage').find("[data-test='afsLyrics']").exists()).toBe(false);
+                expect(find(wrapper, 'afsSideLyrics').find("[data-test='afsLyrics']").exists()).toBe(true);
+            } finally {
+                width.mockRestore();
+                height.mockRestore();
+            }
+        });
+
+        it('offers the lyrics in each language the post has, and shows the one chosen', async () => {
+            const tracks = [
+                { id: 'en', label: 'English' },
+                { id: 'fr', label: 'Français' },
+            ];
+            const wrapper = mountView({ lyrics, subtitleTracks: tracks, activeSubtitleTrackId: 'en' });
+            await find(wrapper, 'afsLyricsLanguage').trigger('click');
+            const items = wrapper.findAll('[role="menuitemradio"]');
+            expect(items.map((item) => item.text())).toEqual(['English', 'Français']);
+            await items[1]!.trigger('click');
+            expect(wrapper.emitted('subtitle-track')).toEqual([['fr']]);
+            expect(find(wrapper, 'afsLyrics').exists()).toBe(true);
+
+            // The French words on their way: the lyrics stay asked for, and come back with them.
+            await wrapper.setProps({ lyrics: [], activeSubtitleTrackId: 'fr' });
+            expect(find(wrapper, 'afsLyrics').exists()).toBe(false);
+            await wrapper.setProps({ lyrics });
+            expect(find(wrapper, 'afsLyrics').exists()).toBe(true);
+        });
+
+        it('has no lyrics language to choose with words in one language only', () => {
+            const wrapper = mountView({ lyrics, subtitleTracks: [{ id: 'en', label: 'English' }] });
+            expect(find(wrapper, 'afsLyricsLanguage').exists()).toBe(false);
         });
 
         it('has no lyrics button for a post without words, and keeps the sleep timer', () => {

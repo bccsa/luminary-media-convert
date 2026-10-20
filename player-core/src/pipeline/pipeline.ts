@@ -603,7 +603,7 @@ function requireKeyFor(
     );
 }
 
-function masterTrackId(
+export function masterTrackId(
     prefix: string,
     groupId: string | undefined,
     name: string | undefined,

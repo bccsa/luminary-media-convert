@@ -38,8 +38,9 @@ watch(active, async () => {
     await nextTick();
     follow(true);
 });
+// An equal list handed over again (a text track re-read on every cue change) leaves the scroll where it is.
 watch(
-    () => props.lines,
+    () => props.lines.map((line) => `${line.start}\u0000${line.text}`).join('\u0001'),
     async () => {
         await nextTick();
         follow(false);
