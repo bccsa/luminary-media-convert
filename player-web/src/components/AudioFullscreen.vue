@@ -438,6 +438,8 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                     v-if="lyricsInStage"
                     :lines="lyricLines"
                     :current-time="currentTime"
+                    :playing="playing"
+                    :rate="playbackRate"
                     :label="messages.lyrics"
                     @seek="emit('seek', $event)"
                 />
@@ -468,6 +470,8 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                     <NowPlayingLyrics
                         :lines="lyricLines"
                         :current-time="currentTime"
+                        :playing="playing"
+                        :rate="playbackRate"
                         :label="messages.lyrics"
                         @seek="emit('seek', $event)"
                     />
