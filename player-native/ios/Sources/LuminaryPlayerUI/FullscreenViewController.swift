@@ -45,6 +45,11 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     private let audioButton = GlyphButton(size: Skin.rowButton, iconSize: Skin.icon)
     private let pipButton = GlyphButton(size: Skin.rowButton, iconSize: Skin.icon)
     private let subtitlesButton = GlyphButton(size: Skin.rowButton, iconSize: Skin.icon)
+    private let qualityButton = GlyphButton(size: Skin.rowButton, iconSize: Skin.icon)
+    /// The heights the item's variants offer, read once per item; none hides the menu.
+    private var qualities: (item: AVPlayerItem, heights: [Int])?
+    /// The height the viewer chose in this menu, kept for the next video while full-screen stays open; nil is auto.
+    private var heldHeight: Int?
     private let rateButton = GlyphButton(size: Skin.rowButton, iconSize: Skin.icon)
     private let muteButton = GlyphButton(size: Skin.rowButton, iconSize: Skin.icon)
     private let exitButton = GlyphButton(size: Skin.rowButton, iconSize: Skin.icon)
@@ -294,7 +299,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         headingTitle.textColor = .white
         headingSubtitle.textColor = UIColor(white: 1, alpha: 0.6)
         setHeading(title: commands.title, subtitle: commands.subtitle)
-        for button in [playPause, skipBack, skipForward, audioButton, pipButton, subtitlesButton, rateButton, muteButton, browseButton, exitButton] {
+        for button in [playPause, skipBack, skipForward, audioButton, pipButton, subtitlesButton, qualityButton, rateButton, muteButton, browseButton, exitButton] {
             controls.addSubview(button)
         }
         airPlayButton.tintColor = .white
@@ -343,6 +348,8 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         audioButton.accessibilityLabel = texts.audioMenu
         subtitlesButton.layers = V10Icons.captions
         subtitlesButton.accessibilityLabel = texts.subtitlesMenu
+        qualityButton.layers = V10Icons.quality
+        qualityButton.accessibilityLabel = texts.qualityMenu
         rateButton.layers = V10Icons.speed
         rateButton.accessibilityLabel = texts.playbackRate
         rateButton.accessibilityValue = rateLabel(rate)
@@ -362,6 +369,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         on(rateButton, opensMenu: true) { $0.openMenu(from: $0.rateButton, title: $0.texts.playbackRate, items: $0.rateItems()) }
         on(audioButton, opensMenu: true) { $0.openMenu(from: $0.audioButton, title: $0.texts.audioMenu, items: $0.audioItems()) }
         on(subtitlesButton, opensMenu: true) { $0.openMenu(from: $0.subtitlesButton, title: $0.texts.subtitlesMenu, items: $0.subtitleItems()) }
+        on(qualityButton, opensMenu: true) { $0.openMenu(from: $0.qualityButton, title: $0.texts.qualityMenu, items: $0.qualityItems()) }
         progress.onScrub = { [weak self] fraction, ended in self?.scrub(to: fraction, ended: ended) }
 
         let doubleTap = UITapGestureRecognizer(target: self, action: #selector(doubleTapped))
@@ -424,7 +432,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         let side = Skin.rowButton * scale
         let rowY = area.maxY - Skin.columnBottom * scale - side
         var left = area.minX + edge - 8 * scale
-        for button in [muteButton, audioButton, rateButton, subtitlesButton, browseButton] as [UIView] where !button.isHidden {
+        for button in [muteButton, qualityButton, audioButton, rateButton, subtitlesButton, browseButton] as [UIView] where !button.isHidden {
             button.frame = CGRect(x: left + 1, y: rowY, width: side, height: side)
             left += side + 2
         }
@@ -511,9 +519,50 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         guard subtitles?.item !== player.currentItem else { return }
         closePin()
         subtitles = nil
-        if menu?.tag == subtitlesButton.hash { closeMenu() }
+        if menu?.tag == subtitlesButton.hash || menu?.tag == qualityButton.hash { closeMenu() }
         loadSubtitles()
+        loadQualities()
+        applyHeldHeight()
         refresh()
+    }
+
+    /// The heights of the item's video variants, as its master states them.
+    private func loadQualities() {
+        guard let item = player.currentItem, let asset = item.asset as? AVURLAsset else { return }
+        Task { @MainActor [weak self] in
+            let variants: [AVAssetVariant]
+            if #available(iOS 16.0, *) {
+                variants = (try? await asset.load(.variants)) ?? []
+            } else {
+                variants = asset.variants
+            }
+            guard let self, self.player.currentItem === item else { return }
+            let heights = variants.compactMap { $0.videoAttributes.map { Double($0.presentationSize.height) } }
+            self.qualities = (item, VideoQuality.choices(heights: heights))
+            self.refresh()
+        }
+    }
+
+    /// The picture held to the chosen height or under it; the player cannot be pinned to one variant, only capped.
+    private func applyHeldHeight() {
+        guard let item = player.currentItem else { return }
+        item.preferredMaximumResolution = heldHeight.map { CGSize(width: 100_000, height: CGFloat($0)) } ?? .zero
+    }
+
+    private func qualityItems() -> [FullscreenMenu.Item] {
+        guard let qualities, qualities.item === player.currentItem, !qualities.heights.isEmpty else { return [] }
+        let auto = FullscreenMenu.Item(title: texts.qualityAuto, selected: heldHeight == nil) { [weak self] in
+            self?.chooseQuality(nil)
+        }
+        return [auto] + qualities.heights.map { height in
+            .init(title: VideoQuality.label(height), selected: heldHeight == height) { [weak self] in self?.chooseQuality(height) }
+        }
+    }
+
+    private func chooseQuality(_ height: Int?) {
+        heldHeight = height
+        applyHeldHeight()
+        closeMenu()
     }
 
     private func stopObserving() {
@@ -569,6 +618,9 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         skipForward.accessibilityLabel = layout.skipForward.map(texts.skipForward)
         audioButton.isHidden = !layout.showsAudioMenu
         subtitlesButton.isHidden = !layout.showsSubtitlesMenu
+        let showsQuality = qualities?.item === item && qualities?.heights.isEmpty == false
+        let qualityChanged = qualityButton.isHidden == showsQuality
+        qualityButton.isHidden = !showsQuality
         pipButton.isHidden = !pictureInPictureAvailable
         airPlayButton.isHidden = !routeDetector.multipleRoutesDetected && !player.isExternalPlaybackActive
         rateButton.isHidden = !layout.showsRate
@@ -594,7 +646,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
             remainingLabel.text = remaining
             view.setNeedsLayout()
         }
-        if rowChanged { view.setNeedsLayout() }
+        if rowChanged || qualityChanged { view.setNeedsLayout() }
         showChapter(layout.showsProgress ? next.duration : 0)
         updateNextUp()
         panel?.markChapter(browse?.chapterIndex(at: playhead))
@@ -706,7 +758,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         rosterWasUp = up
         progress.onRoster = up
         let parts: [UIView] = [
-            muteButton, audioButton, rateButton, subtitlesButton, browseButton, airPlayButton, pipButton, exitButton,
+            muteButton, qualityButton, audioButton, rateButton, subtitlesButton, browseButton, airPlayButton, pipButton, exitButton,
             playPause, spinner, skipBack, skipForward, fade,
         ]
         UIView.animate(withDuration: 0.18) {

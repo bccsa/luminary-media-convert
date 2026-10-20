@@ -205,6 +205,9 @@ public struct FullscreenTexts: Equatable {
     public var audioMenu = "Audio"
     public var subtitlesMenu = "Subtitles"
     public var subtitlesOff = "Off"
+    public var qualityMenu = "Quality"
+    /// The player choosing for itself.
+    public var qualityAuto = "Auto"
     public var pictureInPicture = "Picture-in-Picture"
     public var playbackRate = "Playback Rate"
     public var mute = "Mute"
@@ -241,6 +244,8 @@ public struct FullscreenTexts: Equatable {
         take("audioMenu", into: &audioMenu)
         take("subtitlesMenu", into: &subtitlesMenu)
         take("subtitlesOff", into: &subtitlesOff)
+        take("qualityMenu", into: &qualityMenu)
+        take("qualityAuto", into: &qualityAuto)
         take("pictureInPicture", into: &pictureInPicture)
         take("playbackRate", into: &playbackRate)
         take("mute", into: &mute)
