@@ -237,6 +237,9 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         onBrowseSelect: ((String) -> Unit)? = null,
         /** The strip near the end: the id of the video picked, or null when the viewer closes it. */
         onNextUp: ((String?) -> Unit)? = null,
+        /** What plays, named at the top left of the controls. */
+        title: String? = null,
+        subtitle: String? = null,
     ): Boolean {
         if (view != null) return false
         val activity = activity() ?: return false
@@ -256,6 +259,8 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
             browse = browse,
             onBrowseSelect = onBrowseSelect,
             onNextUp = onNextUp,
+            title = title,
+            subtitle = subtitle,
             onLeave = onLeave,
         )
         val view = FrameLayout(activity).apply {

@@ -77,6 +77,11 @@ interface Props {
      * view. Set on the element's own `<video>`, which lives in its shadow DOM and so cannot be reached by a host's CSS.
      */
     windowedFit?: 'contain' | 'cover';
+    /**
+     * Keeps the browser from drawing the subtitles on the picture while it is windowed, for a host that shows the words
+     * itself (see `subtitleCues`). Fullscreen draws them as usual, since the host's own place for them is out of view.
+     */
+    captionsHidden?: boolean;
     /** Artwork under the picture, until the first frame and while audio-only. */
     poster?: PlayerImageInput;
     /** Not supported yet on the v10 player; YouTube sources raise a `media` error. */
@@ -150,7 +155,9 @@ const controlsHtml = computed(() =>
         captions: msg.value.captionsLabel,
         volumeUp: msg.value.volumeUp,
         volumeDown: msg.value.volumeDown,
-    })
+    },
+    props.nowPlaying?.title ? { title: props.nowPlaying.title, subtitle: props.nowPlaying.subtitle } : undefined
+    )
 );
 
 /**
@@ -479,6 +486,23 @@ function applyFit(): void {
 }
 
 watch([isFullscreen, () => props.windowedFit], applyFit);
+
+/** The browser's own subtitle drawing sits in the `<video>`'s shadow DOM too, so the rule that hides it goes there. */
+const CUES_HIDDEN_CLASS = 'lmpl-cues-hidden';
+function applyCaptionsHidden(): void {
+    const video = innerVideo();
+    if (!video) return;
+    const root = video.getRootNode();
+    const holder = root instanceof ShadowRoot ? root : document.head;
+    if (!holder.querySelector('style[data-lmpl-cues]')) {
+        const style = document.createElement('style');
+        style.dataset.lmplCues = '';
+        style.textContent = `video.${CUES_HIDDEN_CLASS}::cue { opacity: 0; }`;
+        holder.appendChild(style);
+    }
+    video.classList.toggle(CUES_HIDDEN_CLASS, !!props.captionsHidden && !isFullscreen.value);
+}
+watch([isFullscreen, () => props.captionsHidden, () => state.value.subtitleTracks.length], applyCaptionsHidden, { flush: 'post' });
 
 function onFullscreenChange(): void {
     const doc = document as Document & { webkitFullscreenElement?: Element | null };
@@ -1407,6 +1431,7 @@ defineExpose({
             'lmpl-has-subtitles': state.subtitleTracks.length > 0,
             'lmpl-has-thumbs': state.thumbnailsReady,
             'lmpl-has-browse': hasBrowse,
+            'lmpl-has-heading': !!nowPlaying?.title,
             'lmpl-audio-fs': audioFullscreen,
             'lmpl-scrubbing': rosterShown,
             'lmpl-previewing': scrub !== null,

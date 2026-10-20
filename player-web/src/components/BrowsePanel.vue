@@ -21,6 +21,8 @@ const props = defineProps<{
     messages: PlayerMessages;
     /** An id prefix, so two players on a page do not share element ids. */
     idPrefix: string;
+    /** The tab to open on, when it has anything to show. */
+    initialTab?: 'chapters' | 'upnext';
 }>();
 
 const emit = defineEmits<{
@@ -39,7 +41,7 @@ const tabs = computed<{ id: Tab; label: string }[]>(() => [
     ...(upNextRows.value.length ? [{ id: 'upnext' as const, label: props.messages.upNext }] : []),
 ]);
 
-const requested = ref<Tab>('chapters');
+const requested = ref<Tab>(props.initialTab ?? 'chapters');
 const active = computed<Tab | null>(() => tabs.value.find((tab) => tab.id === requested.value)?.id ?? tabs.value[0]?.id ?? null);
 
 const el = ref<HTMLElement | null>(null);
@@ -142,8 +144,13 @@ defineExpose({ hasFocus });
                         :aria-current="index === currentChapter ? 'true' : undefined"
                         @click="emit('pick-chapter', chapter)"
                     >
-                        <span class="lmpl-chapter-title">{{ chapter.title }}</span>
-                        <span class="lmpl-chapter-time">{{ formatClock(chapter.startTime, haveHours) }}</span>
+                        <span class="lmpl-upnext-thumb lmpl-chapter-tile" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" /></svg>
+                        </span>
+                        <span class="lmpl-upnext-text">
+                            <span class="lmpl-upnext-title">{{ chapter.title }}</span>
+                            <span class="lmpl-upnext-subtitle lmpl-chapter-time">{{ formatClock(chapter.startTime, haveHours) }}</span>
+                        </span>
                     </button>
                 </li>
             </ol>
