@@ -2153,10 +2153,6 @@
         font-size: clamp(11px, 0.9cqw, 18px);
     }
 
-    .lmpl-afs-bar-track {
-        height: 4px;
-    }
-
     .lmpl-afs-playbtn {
         width: clamp(52px, 4.8cqw, 96px);
         height: clamp(52px, 4.8cqw, 96px);
@@ -2165,11 +2161,6 @@
     .lmpl-afs-skip {
         width: clamp(34px, 3cqw, 58px);
         height: clamp(34px, 3cqw, 58px);
-    }
-
-    /* Plain turning arrows, the interval left to the label. */
-    .lmpl-afs-skip svg text {
-        display: none;
     }
 
     .lmpl-afs-transport {
