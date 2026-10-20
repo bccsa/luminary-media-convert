@@ -31,6 +31,10 @@ public struct FullscreenCommands {
     public var selectUpNext: (_ id: String) -> Void
     /// The strip near the end: the id of the video picked, or nil when the viewer closed it.
     public var nextUp: (_ id: String?) -> Void
+    /// What plays, named at the top left; nothing there when blank.
+    public var title: String?
+    /// Who it is by, small under the title.
+    public var subtitle: String?
 
     public init(
         play: @escaping () -> Void,
@@ -46,7 +50,9 @@ public struct FullscreenCommands {
         seekExactly: ((Double) -> Void)? = nil,
         browse: Browse? = nil,
         selectUpNext: @escaping (String) -> Void = { _ in },
-        nextUp: @escaping (String?) -> Void = { _ in }
+        nextUp: @escaping (String?) -> Void = { _ in },
+        title: String? = nil,
+        subtitle: String? = nil
     ) {
         self.play = play
         self.pause = pause
@@ -62,6 +68,8 @@ public struct FullscreenCommands {
         self.browse = browse
         self.selectUpNext = selectUpNext
         self.nextUp = nextUp
+        self.title = title
+        self.subtitle = subtitle
     }
 }
 
@@ -87,10 +95,14 @@ public protocol FullscreenPresenter: AnyObject {
     /// Replaces what the panel and the strip offer while full-screen is up: up next may load after it opened.
     func setBrowse(_ browse: Browse?)
 
+    /// Names another video at the top left, when the one playing is swapped for it while full-screen stays open.
+    func setHeading(title: String?, subtitle: String?)
+
     /// False when nothing was presented.
     func dismiss() -> Bool
 }
 
 extension FullscreenPresenter {
     public func setBrowse(_ browse: Browse?) {}
+    public func setHeading(title: String?, subtitle: String?) {}
 }

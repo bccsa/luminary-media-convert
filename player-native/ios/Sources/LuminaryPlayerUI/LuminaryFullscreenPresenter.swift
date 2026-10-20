@@ -77,6 +77,10 @@ public final class LuminaryFullscreenPresenter: NSObject, FullscreenPresenter {
         controller?.setBrowse(browse)
     }
 
+    public func setHeading(title: String?, subtitle: String?) {
+        controller?.setHeading(title: title, subtitle: subtitle)
+    }
+
     public func startPictureInPicture() -> Bool {
         guard controller != nil, let pictureInPicture, pictureInPicture.isPictureInPicturePossible else { return false }
         pictureInPicture.startPictureInPicture()

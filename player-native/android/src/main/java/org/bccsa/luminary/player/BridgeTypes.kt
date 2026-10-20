@@ -464,7 +464,7 @@ private class Args(private val json: JsonObject, private val path: String) {
         val item = Args(element as? JsonObject ?: invalid("$where is not an object"), "$path.$where")
         return BrowseItem(
             item.string("id"), item.string("title"), item.optString("subtitle"), item.optString("imageUrl"), item.optString("section"),
-            item.optString("fallbackImageUrl"),
+            item.optString("fallbackImageUrl"), item.optBoolean("current") ?: false,
         )
     }
 
@@ -526,6 +526,8 @@ data class BrowseItem(
     val section: String?,
     /** Drawn when there is no picture, or it does not load. */
     val fallbackImageUrl: String? = null,
+    /** What plays now: marked where it stands in its list, and not a pick. */
+    val current: Boolean = false,
 )
 
 /** What full-screen's chapters / up-next panel lists, and the videos its strip offers near the end. */

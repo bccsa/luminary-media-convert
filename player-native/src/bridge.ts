@@ -212,6 +212,8 @@ export interface BridgeUpNextItem {
     /** Drawn when there is no picture, or it does not load, so a card is never an empty tile. */
     fallbackImageUrl?: string;
     section?: string;
+    /** What plays now: marked where it stands in its list, and not a pick. */
+    current?: boolean;
 }
 
 /** What the page offers in full-screen's chapters / up-next panel. Either list may be empty. */

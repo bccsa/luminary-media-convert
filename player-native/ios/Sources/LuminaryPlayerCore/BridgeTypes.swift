@@ -395,7 +395,7 @@ public enum BridgeCall: Sendable {
             if let object = try args.optionalObject("frame") {
                 let (width, height) = (try object.number("width"), try object.number("height"))
                 guard width > 0, height > 0 else { throw args.invalid("frame has a positive width and height") }
-                frame = InlineFrame(x: try object.number("x"), y: try object.number("y"), width: width, height: height, front: try object.optionalBool("front") ?? false, captionHeight: try object.optionalNumber("captionHeight") ?? 0)
+                frame = InlineFrame(x: try object.number("x"), y: try object.number("y"), width: width, height: height, front: try object.optionalBool("front") ?? false, captionHeight: try object.optionalNumber("captionHeight") ?? 0, captionsHidden: try object.optionalBool("captionsHidden") ?? false)
             }
             return .setInlineFrame(playerId: try args.string("playerId"), frame: frame)
         case "setMuted":
@@ -583,7 +583,8 @@ private struct Args {
             return BrowseItem(
                 id: try item.string("id"), title: try item.string("title"), subtitle: try item.optionalString("subtitle"),
                 imageUrl: try item.optionalString("imageUrl"), section: try item.optionalString("section"),
-                fallbackImageUrl: try item.optionalString("fallbackImageUrl")
+                fallbackImageUrl: try item.optionalString("fallbackImageUrl"),
+                current: try item.optionalBool("current") ?? false
             )
         }
     }

@@ -109,12 +109,13 @@ struct BrowseArgumentsTests {
     func decodes() throws {
         let lists = JSON.object([
             "chapters": .array([.object(["title": .string("Intro"), "startTime": .number(0), "endTime": .number(30)])]),
-            "upNext": .array([.object(["id": .string("p2"), "title": .string("Next"), "subtitle": .string("Part 2"), "section": .string("Related")])]),
+            "upNext": .array([.object(["id": .string("p2"), "title": .string("Next"), "subtitle": .string("Part 2"), "section": .string("Related"), "current": .bool(true)])]),
             "nextUp": .array([.object(["id": .string("p3"), "title": .string("After"), "fallbackImageUrl": .string("/assets/x.webp")])]),
         ])
         let decoded = try #require(browse(try BridgeCall.decode("enterFullscreen", enter(lists))))
         #expect(decoded.chapters == [BrowseChapter(title: "Intro", start: 0, end: 30)])
-        #expect(decoded.upNext == [BrowseItem(id: "p2", title: "Next", subtitle: "Part 2", section: "Related")])
+        // The item playing is marked; one that does not say is not.
+        #expect(decoded.upNext == [BrowseItem(id: "p2", title: "Next", subtitle: "Part 2", section: "Related", current: true)])
         #expect(decoded.nextUp == [BrowseItem(id: "p3", title: "After", fallbackImageUrl: "/assets/x.webp")])
         #expect(browse(try BridgeCall.decode("enterFullscreen", enter(nil))) == nil)
     }

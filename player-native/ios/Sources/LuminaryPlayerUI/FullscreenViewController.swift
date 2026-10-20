@@ -58,6 +58,10 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     private let timeLabel = UILabel()
     private let remainingLabel = UILabel()
     private let fade = FadeView()
+    /// The top line: what plays at the left, leaving full-screen at the right, over a fade from the top edge.
+    private let topFade = FadeView(fromTop: true)
+    private let headingTitle = UILabel()
+    private let headingSubtitle = UILabel()
     /// "Chapter 4 of 7" above the bar.
     private let chapterLabel = UILabel()
     /// The chapters and up next the panel lists; nil while there are none, and then there is no button.
@@ -270,6 +274,19 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         controls.backgroundColor = .clear
         view.addSubview(controls)
         controls.addSubview(fade)
+        controls.addSubview(topFade)
+        for label in [headingTitle, headingSubtitle] {
+            label.numberOfLines = 1
+            label.lineBreakMode = .byTruncatingTail
+            label.layer.shadowColor = UIColor.black.cgColor
+            label.layer.shadowOpacity = 0.7
+            label.layer.shadowRadius = 2
+            label.layer.shadowOffset = CGSize(width: 0, height: 1)
+            controls.addSubview(label)
+        }
+        headingTitle.textColor = .white
+        headingSubtitle.textColor = UIColor(white: 1, alpha: 0.6)
+        setHeading(title: commands.title, subtitle: commands.subtitle)
         for button in [playPause, skipBack, skipForward, audioButton, pipButton, subtitlesButton, rateButton, muteButton, browseButton, exitButton] {
             controls.addSubview(button)
         }
@@ -403,7 +420,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
             left += side + 2
         }
         var right = area.maxX - edge + 8 * scale
-        for button in [exitButton, pipButton, airPlayButton] as [UIView] where !button.isHidden {
+        for button in [pipButton, airPlayButton] as [UIView] where !button.isHidden {
             right -= side + 2
             button.frame = CGRect(x: right + 1, y: rowY, width: side, height: side)
         }
@@ -438,6 +455,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         // The fade rises from the bottom edge to the top of the column, so white controls read over a bright picture.
         let columnTop = restingY - (chapterLabel.isHidden ? 0 : chapterHeight + 2 * scale) - Skin.columnTop * scale
         fade.frame = CGRect(x: 0, y: columnTop, width: view.bounds.width, height: max(view.bounds.maxY - columnTop, 0))
+        layoutTopLine(area: area, scale: scale, edge: edge)
 
         menu.map(place)
         panel?.frame = view.bounds
@@ -840,6 +858,36 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         }
         placeNextUp(animated: true)
         UIAccessibility.post(notification: .layoutChanged, argument: nil)
+    }
+
+    /// Leaving at the top right, on the line of the timeline's right end; what plays at the left, clear of it. The fade
+    /// reaches the screen's top edge and sides, over the area the system keeps clear.
+    private func layoutTopLine(area: CGRect, scale: CGFloat, edge: CGFloat) {
+        let side = Skin.rowButton * scale
+        let top = area.minY + 12 * scale
+        exitButton.frame = CGRect(x: area.maxX - edge + 8 * scale - side + 1, y: top, width: side, height: side)
+        headingTitle.font = .systemFont(ofSize: 17 * scale, weight: .bold)
+        headingSubtitle.font = .systemFont(ofSize: 12 * scale, weight: .regular)
+        let left = area.minX + edge
+        let width = max(exitButton.frame.minX - 16 * scale - left, 0)
+        let titleHeight = headingTitle.font.lineHeight.rounded(.up)
+        headingTitle.frame = CGRect(x: left, y: top + (side - titleHeight) / 2 - (headingSubtitle.isHidden ? 0 : 7 * scale), width: width, height: titleHeight)
+        let subtitleHeight = headingSubtitle.font.lineHeight.rounded(.up)
+        headingSubtitle.frame = CGRect(x: left, y: headingTitle.frame.maxY, width: width, height: subtitleHeight)
+        let foot = max(exitButton.frame.maxY, headingSubtitle.isHidden ? headingTitle.frame.maxY : headingSubtitle.frame.maxY) + 36 * scale
+        topFade.frame = CGRect(x: 0, y: 0, width: view.bounds.width, height: foot)
+    }
+
+    /// Names another video at the top left, when the one playing is swapped for it while full-screen stays open.
+    func setHeading(title: String?, subtitle: String?) {
+        let title = title?.trimmingCharacters(in: .whitespaces) ?? ""
+        let subtitle = subtitle?.trimmingCharacters(in: .whitespaces) ?? ""
+        headingTitle.text = title
+        headingSubtitle.text = subtitle
+        headingTitle.isHidden = title.isEmpty
+        headingSubtitle.isHidden = title.isEmpty || subtitle.isEmpty
+        headingTitle.accessibilityTraits = .header
+        if isViewLoaded { view.setNeedsLayout() }
     }
 
     /// Over the chapter line and the timeline while they show, as the web player lifts its own; near the foot when

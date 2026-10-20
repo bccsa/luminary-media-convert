@@ -1269,14 +1269,18 @@ internal class SkinControls(
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(px(8f), px(8f), px(8f), px(8f))
-                background = rowBackground(false)
+                // What plays now is marked where it stands, as the chapter playing is, and is not a pick.
+                background = rowBackground(item.current)
                 addView(picture, LinearLayout.LayoutParams(px(UP_NEXT_PICTURE_DP), px(UP_NEXT_PICTURE_DP * 9f / 16f)))
                 addView(words, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { marginStart = px(12f) })
                 contentDescription = listOfNotNull(item.title, item.subtitle?.takeIf { it.isNotEmpty() }).joinToString(", ")
-                isClickable = true
-                setOnClickListener {
-                    onBrowseSelect?.invoke(item.id)
-                    closeBrowse()
+                isClickable = !item.current
+                isSelected = item.current
+                if (!item.current) {
+                    setOnClickListener {
+                        onBrowseSelect?.invoke(item.id)
+                        closeBrowse()
+                    }
                 }
             }
             into.addView(row, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = px(2f) })

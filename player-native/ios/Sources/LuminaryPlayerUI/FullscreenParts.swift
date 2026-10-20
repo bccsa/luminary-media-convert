@@ -90,15 +90,22 @@ final class PillLabel: UILabel {
 final class FadeView: UIView {
     override class var layerClass: AnyClass { CAGradientLayer.self }
 
-    override init(frame: CGRect) {
-        super.init(frame: frame)
+    /// From the bottom edge up, under the controls; `fromTop`, the lighter fade down from the top edge under the top line.
+    init(fromTop: Bool = false) {
+        super.init(frame: .zero)
         isUserInteractionEnabled = false
         let gradient = layer as! CAGradientLayer
-        // Bottom to top.
-        gradient.startPoint = CGPoint(x: 0.5, y: 1)
-        gradient.endPoint = CGPoint(x: 0.5, y: 0)
-        gradient.colors = Skin.fadeColors.map(\.cgColor)
-        gradient.locations = Skin.fadeLocations
+        if fromTop {
+            gradient.startPoint = CGPoint(x: 0.5, y: 0)
+            gradient.endPoint = CGPoint(x: 0.5, y: 1)
+            gradient.colors = [UIColor(white: 0, alpha: 0.5), UIColor(white: 0, alpha: 0.2), UIColor(white: 0, alpha: 0)].map(\.cgColor)
+            gradient.locations = [0, 0.5, 1]
+        } else {
+            gradient.startPoint = CGPoint(x: 0.5, y: 1)
+            gradient.endPoint = CGPoint(x: 0.5, y: 0)
+            gradient.colors = Skin.fadeColors.map(\.cgColor)
+            gradient.locations = Skin.fadeLocations
+        }
     }
 
     @available(*, unavailable)
