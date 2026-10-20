@@ -259,6 +259,7 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
             browse = browse,
             onBrowseSelect = onBrowseSelect,
             onNextUp = onNextUp,
+            onSubtitleLift = { lift -> liftSubtitles(surface, lift) },
             title = title,
             subtitle = subtitle,
             onLeave = onLeave,
@@ -303,6 +304,14 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         view.post { armAutoEnter(activity, true) }
         watchSensor(activity)
         return true
+    }
+
+    /**
+     * The subtitles rise by `lift` pixels from the screen's foot, so they rest above the controls while those show.
+     * The whole view is moved: a cue that states its own line would ignore a padding.
+     */
+    private fun liftSubtitles(surface: PlayerView, lift: Int) {
+        surface.subtitleView?.animate()?.translationY(-lift.toFloat())?.setDuration(LIFT_MS)?.start()
     }
 
     private fun watchSensor(activity: Activity) {
@@ -450,6 +459,7 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         private const val MAX_RATIO = 2.39f
         private const val ORIENTATION_SETTLE_MS = 600L
         private const val BARS_SETTLE_MS = 700L
+        private const val LIFT_MS = 150L
         private const val UPRIGHT_SETTLE_MS = 250L
 
         /** `ActivityInfo.FLAG_SUPPORTS_PICTURE_IN_PICTURE`: set by `android:supportsPictureInPicture`, and not in the public API. */

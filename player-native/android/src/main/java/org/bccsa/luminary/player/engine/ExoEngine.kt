@@ -389,18 +389,22 @@ class ExoEngine(
         val before = pinnedVariant
         pinnedVariant = id.takeUnless { it == "auto" }
         if (castPlayer != null && pinnedVariant != before) recast()
-        if (!applyVariantPin(player.currentTracks)) {
+        if (!applyVariantPin(player.currentTracks, clearWhenAuto = true)) {
             // A rendition this device cannot play (or no longer offers) falls back to auto.
             events.variants(reportedVariants ?: emptyList())
         }
     }
 
-    /** Pins [pinnedVariant] if [tracks] offer it, else clears the pin; false when a pin was dropped. */
-    private fun applyVariantPin(tracks: Tracks): Boolean {
+    /**
+     * Pins [pinnedVariant] if [tracks] offer it, else clears the pin; false when a pin was dropped. With no pin the
+     * picture is left as it is, unless [clearWhenAuto]: the full-screen controls hold a quality of their own on the
+     * player, which a change of tracks must not undo.
+     */
+    private fun applyVariantPin(tracks: Tracks, clearWhenAuto: Boolean = false): Boolean {
         val pinned = pinnedVariant
         val builder = player.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_VIDEO)
         if (pinned == null) {
-            player.trackSelectionParameters = builder.build()
+            if (clearWhenAuto) player.trackSelectionParameters = builder.build()
             return true
         }
         for (group in tracks.groups) {

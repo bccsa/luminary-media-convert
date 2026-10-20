@@ -1725,8 +1725,7 @@
    its width before margins, which would leave it short of 16:9 and cut off the foot of the picture. */
 .lmpl-afs-video .lmpl-afs-art {
     align-self: center;
-    width: calc(100cqw - 2 * var(--lmpl-stage-gutter, 16px));
-    border-radius: 12px;
+    width: calc(100cqw - 2 * var(--lmpl-stage-gutter, 0px));
     aspect-ratio: var(--lmpl-stage-ar, 16 / 9);
     max-height: 46cqh;
     /* Visible, so the words under the picture can hang from its foot; the stage clips the picture. */
@@ -1736,7 +1735,7 @@
 /* The picture sits at the top of its place and the host's subtitles under it, in a band the size of two lines. */
 .lmpl-afs-captions .lmpl-afs-art {
     aspect-ratio: auto;
-    height: calc((100cqw - 2 * var(--lmpl-stage-gutter, 16px)) / var(--lmpl-stage-ar, 16 / 9) + 64px);
+    height: calc((100cqw - 2 * var(--lmpl-stage-gutter, 0px)) / var(--lmpl-stage-ar, 16 / 9) + 64px);
 }
 .lmpl-afs-captions .lmpl-afs-art {
     background: transparent;
@@ -1770,6 +1769,11 @@
 .lmpl-afs-stage {
     overflow: hidden;
     border-radius: inherit;
+    /* Lifted off the screen's colour: a soft shadow above and below the picture alone (not the room for the subtitles
+       under it), so it does not look glued on. */
+    box-shadow:
+        0 16px 34px -14px rgb(0 0 0 / 0.5),
+        0 -12px 28px -14px rgb(0 0 0 / 0.35);
 }
 
 /* The host's player fills the picture's place, whatever shape that is, rather than keeping its own 16:9 and leaving a

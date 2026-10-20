@@ -89,6 +89,8 @@ internal class SkinControls(
     private val onBrowseSelect: ((String) -> Unit)? = null,
     /** The strip near the end: the id of the video picked, or null when the viewer closes it. */
     private val onNextUp: ((String?) -> Unit)? = null,
+    /** How far the picture's subtitles rise to clear the controls while they show, in pixels; 0 when they are away. */
+    private val onSubtitleLift: ((Int) -> Unit)? = null,
     /** What plays, named at the top left; nothing there when blank. */
     title: String? = null,
     /** Who it is by, small under the title. */
@@ -152,6 +154,8 @@ internal class SkinControls(
     /** Changes whenever the strip is put away, so the pictures of one that is gone are not drawn into the next. */
     private var nextUpGeneration = 0
     private var inset = Insets.NONE
+    private var edgesKey: List<Any> = emptyList()
+    private var topClear = 0
     private var shown = true
     private var attached = false
     private var safe = Insets.NONE
@@ -190,6 +194,8 @@ internal class SkinControls(
     init {
         setBackgroundColor(Color.TRANSPARENT)
         panel.setBackgroundColor(Color.TRANSPARENT)
+        panel.clipToPadding = false
+        panel.clipChildren = false
         addView(panel, LayoutParams(MATCH_PARENT, MATCH_PARENT))
 
         // Middle: the skips either side of play / pause; a spinner stands in for play while waiting.
@@ -307,10 +313,14 @@ internal class SkinControls(
         // The controls stay clear of the system's own edges.
         ViewCompat.setOnApplyWindowInsetsListener(this) { _, insets ->
             safe = safeInsets(insets)
+            // The top line keeps clear of a camera cutout only: the status bar is put away in full-screen, and a swipe
+            // that brings it back may pass over the title for a moment.
+            topClear = insets.getInsets(WindowInsetsCompat.Type.displayCutout()).top
             padClearOfSystem()
             insets
         }
         addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> padClearOfSystem() }
+        column.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> if (shown) liftSubtitles(true) }
         thumbnails?.onChange = {
             roster.invalidate()
             if (rosterOpen) updateRoster(rosterTime)
@@ -834,6 +844,7 @@ internal class SkinControls(
         if (inPictureInPicture) return
         main.removeCallbacks(hide)
         panel.animate().cancel()
+        liftSubtitles(show)
         if (show) {
             panel.visibility = VISIBLE
             panel.animate().alpha(1f).setDuration(FADE_IN_MS).start()
@@ -842,6 +853,13 @@ internal class SkinControls(
             // Quick to arrive, unhurried to leave: the skin's asymmetry.
             panel.animate().alpha(0f).setDuration(FADE_OUT_MS).withEndAction { if (!shown) panel.visibility = GONE }.start()
         }
+    }
+
+    /** The words rest on the control bar while it shows, and drop to the edge when it goes. */
+    private fun liftSubtitles(show: Boolean) {
+        // The column's top is the empty fade; the words rest on the timeline and the buttons, which are what is under it.
+        val lift = if (show && column.height > 0) column.height - column.paddingTop + dpf(2f * scale).roundToInt() else 0
+        onSubtitleLift?.invoke(lift.coerceAtLeast(0))
     }
 
     /** Whether the controls are on screen; the controls are up while paused. */
@@ -1330,7 +1348,6 @@ internal class SkinControls(
         exitButton.layoutParams = LayoutParams(px(40f), px(40f), Gravity.TOP or Gravity.END).apply { marginEnd = -px(8f) }
         titleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 17f * s)
         subtitleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12f * s)
-        topBar.setPadding(edgePx(), px(12f), edgePx(), px(36f))
         // Clear of the exit button, which shares the line.
         heading.layoutParams = LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.TOP or Gravity.START).apply { marginEnd = px(56f) }
         timeline.lp(px(30f))
@@ -1349,8 +1366,7 @@ internal class SkinControls(
             marginStart = -px(8f)
             marginEnd = -px(8f)
         }
-        val edge = edgePx()
-        column.setPadding(edge, px(12f) + px(72f), edge, px(14f))
+        layoutEdges()
         label.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14f * s)
         label.setPadding(px(11f), px(4f), px(11f), px(4f))
         label.background = GradientDrawable().apply {
@@ -1360,6 +1376,34 @@ internal class SkinControls(
         }
         timelineRow.translationY = 0f
         requestLayout()
+    }
+
+    /**
+     * The two fades reach the screen's own edges, over the areas the system keeps clear, while what stands on them keeps
+     * to the safe area: the panel is padded for the system, so each fade steps out of that padding and pads itself back in.
+     */
+    private fun layoutEdges() {
+        fun px(dp: Float) = dpf(dp * scale).roundToInt()
+        val edge = edgePx()
+        val at = inset
+        // Only when something it depends on changed: setting these lays the view out again, which asks for them again.
+        val key = listOf(edge, at.left, at.top, at.right, at.bottom, scale, topClear)
+        if (key == edgesKey) return
+        edgesKey = key
+        (topBar.layoutParams as? LayoutParams)?.let {
+            it.topMargin = -at.top
+            it.leftMargin = -at.left
+            it.rightMargin = -at.right
+            topBar.layoutParams = it
+        }
+        topBar.setPadding(edge + at.left, px(12f) + min(at.top, topClear), edge + at.right, px(36f))
+        (column.layoutParams as? LayoutParams)?.let {
+            it.bottomMargin = -at.bottom
+            it.leftMargin = -at.left
+            it.rightMargin = -at.right
+            column.layoutParams = it
+        }
+        column.setPadding(edge + at.left, px(12f) + px(72f), edge + at.right, px(14f) + at.bottom)
     }
 
     /** `--lmpl-edge`: how far the controls keep in from the sides. */
@@ -1408,6 +1452,7 @@ internal class SkinControls(
             panel.setPadding(left, top, right, bottom)
         }
         inset = Insets.of(left, top, right, bottom)
+        layoutEdges()
         browseSheet?.setPadding(0, top, right, bottom)
     }
 

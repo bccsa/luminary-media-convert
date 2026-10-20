@@ -81,7 +81,8 @@ class InlinePresenter(
     private val main = Handler(Looper.getMainLooper())
     private val settled = Runnable {
         val host = activity() ?: return@Runnable
-        if (sideways && frame != null && !suspended &&
+        // A picture that is only the small one in the minimised bar is not what the viewer turned the phone to watch.
+        if (sideways && frame != null && frame?.front != true && !suspended &&
             host.resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
         ) {
             onRotatedToLandscape?.invoke()
@@ -178,10 +179,11 @@ class InlinePresenter(
         layoutSubtitles(frame, web, density)
     }
 
-    /** Under the picture when the page left room there, else over its foot; none over a small picture in front. */
+    /** Under the picture when the page left room there, else over its foot; none over a small picture in front or a covered place. */
     private fun layoutSubtitles(frame: InlineFrame, web: View, density: Float) {
         val subtitles = subtitleView ?: return
-        if (frame.front) {
+        // Not over a small picture in front, nor over what the page puts across the picture's place.
+        if (frame.front || frame.captionsHidden) {
             subtitles.visibility = View.GONE
             return
         }

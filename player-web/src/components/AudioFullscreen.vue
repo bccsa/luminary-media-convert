@@ -48,6 +48,10 @@ const props = defineProps<{
     /** The chapter the playhead is in; -1 for none. */
     chapterIndex: number;
     playbackRate: number;
+    /** The video's renditions, for the quality menu; none or one and the menu is not offered. */
+    qualities?: readonly { id: string; label: string }[];
+    /** The rendition held, or `auto` while the player chooses. */
+    activeQualityId?: string;
     audioTracks: readonly { id: string; label: string }[];
     activeAudioTrackId: string | null;
     sleepTimer: SleepTimerState | null;
@@ -84,6 +88,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
     exit: [];
+    /** A menu or the chapters panel is over the screen, or is not any more. */
+    covered: [open: boolean];
     'toggle-play': [];
     seek: [time: number];
     'open-browse': [];
@@ -91,6 +97,7 @@ const emit = defineEmits<{
     upnextselect: [id: string];
     rate: [rate: number];
     'audio-track': [id: string];
+    quality: [id: string];
     sleep: [option: SleepTimerOption | null];
     'subtitle-track': [id: string | null];
     'picture-in-picture': [];
@@ -123,7 +130,7 @@ watch(isVideo, (video) => {
     if (video) lyricsOpen.value = false;
 });
 
-type MenuId = 'speed' | 'language' | 'sleep' | 'subtitles';
+type MenuId = 'speed' | 'language' | 'sleep' | 'subtitles' | 'quality';
 const menu = ref<MenuId | null>(null);
 const rootEl = ref<HTMLElement | null>(null);
 
@@ -225,6 +232,7 @@ function onBarKey(event: KeyboardEvent): void {
 const skip = (seconds: number): void => emit('seek', Math.min(knownDuration.value || Infinity, Math.max(0, props.currentTime + seconds)));
 
 const browseOpen = ref(false);
+watch([menu, browseOpen], ([open, panel]) => emit('covered', open !== null || panel));
 const uid = `lmpl-afs-${Math.random().toString(36).slice(2, 9)}`;
 /** The tab the panel opens on; the host's default when none is asked for. */
 const browseTab = ref<'chapters' | 'upnext' | undefined>(undefined);
@@ -295,6 +303,10 @@ function chooseSleep(option: SleepTimerOption | null): void {
 }
 function chooseRate(rate: number): void {
     emit('rate', rate);
+    closeMenu();
+}
+function chooseQuality(id: string): void {
+    emit('quality', id);
     closeMenu();
 }
 function chooseTrack(id: string): void {
@@ -555,11 +567,30 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                                     data-test="afsSpeed"
                                     @click="toggleMenu('speed')"
                                 >
-                                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.3 17.5a8.5 8.5 0 1 1 15.4 0" /><path d="m12 14 3.6-4.6" /><circle cx="12" cy="14.2" r="1.1" fill="currentColor" /></svg>
+                                    <media-icon name="speed" class="media-button-icon"></media-icon>
                                     <span v-if="playbackRate !== 1" class="lmpl-afs-badge">{{ speedText(playbackRate) }}</span>
                                 </button>
                                 <div v-if="menu === 'speed'" class="lmpl-afs-menu" role="menu" :aria-label="messages.speedLabel">
                                     <button v-for="rate in SPEED_OPTIONS" :key="rate" type="button" role="menuitemradio" :aria-checked="rate === playbackRate" class="lmpl-afs-menuitem" @click="chooseRate(rate)">{{ speedText(rate) }}</button>
+                                </div>
+                            </div>
+
+                            <div v-if="isVideo && (qualities?.length ?? 0) > 1" class="lmpl-afs-tool">
+                                <button
+                                    type="button"
+                                    class="lmpl-afs-iconbtn"
+                                    :aria-label="messages.qualityLabel"
+                                    :aria-expanded="menu === 'quality'"
+                                    aria-haspopup="menu"
+                                    data-test="afsQuality"
+                                    @click="toggleMenu('quality')"
+                                >
+                                    <media-icon name="switches" class="media-button-icon"></media-icon>
+                                    <span v-if="activeQualityId && activeQualityId !== 'auto'" class="lmpl-afs-badge">{{ qualities?.find((q) => q.id === activeQualityId)?.label }}</span>
+                                </button>
+                                <div v-if="menu === 'quality'" class="lmpl-afs-menu" role="menu" :aria-label="messages.qualityLabel">
+                                    <button type="button" role="menuitemradio" :aria-checked="!activeQualityId || activeQualityId === 'auto'" class="lmpl-afs-menuitem" data-test="afsQualityAuto" @click="chooseQuality('auto')">{{ messages.qualityAuto }}</button>
+                                    <button v-for="quality in qualities" :key="quality.id" type="button" role="menuitemradio" :aria-checked="quality.id === activeQualityId" class="lmpl-afs-menuitem" @click="chooseQuality(quality.id)">{{ quality.label }}</button>
                                 </div>
                             </div>
 
@@ -642,7 +673,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                                     data-test="afsSubtitles"
                                     @click="toggleMenu('subtitles')"
                                 >
-                                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5" /><path d="M7 14h4M13 14h4M7 10.5h2M11 10.5h6" /></svg>
+                                    <media-icon name="captions-off" class="media-button-icon"></media-icon>
                                 </button>
                                 <div v-if="menu === 'subtitles'" class="lmpl-afs-menu" role="menu" :aria-label="messages.subtitlesMenuLabel">
                                     <button type="button" role="menuitemradio" :aria-checked="!activeSubtitleTrackId" class="lmpl-afs-menuitem" data-test="afsSubtitlesOff" @click="chooseSubtitles(null)">{{ messages.subtitlesOff }}</button>
@@ -658,7 +689,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                                 data-test="afsPictureInPicture"
                                 @click="emit('picture-in-picture')"
                             >
-                                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="4.5" width="19" height="15" rx="2.5" /><rect x="12" y="11.5" width="7" height="5.5" rx="1.2" fill="currentColor" stroke="none" /></svg>
+                                <media-icon name="pip-enter" class="media-button-icon"></media-icon>
                             </button>
 
                             <button
@@ -669,7 +700,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                                 data-test="afsFullscreen"
                                 @click="emit('fullscreen')"
                             >
-                                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" /></svg>
+                                <media-icon name="fullscreen-enter" class="media-button-icon"></media-icon>
                             </button>
 
                             <slot name="cast"></slot>

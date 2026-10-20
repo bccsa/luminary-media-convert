@@ -68,6 +68,8 @@ export interface PlayerMessages {
     audioMenuLabel: string;
     /** Name of the video quality setting: its button, its tooltip and its card's title. */
     qualityLabel: string;
+    /** The quality card's row that lets the player choose. */
+    qualityAuto: string;
     /** Name of the audio language setting, as above. */
     languageLabel: string;
     /** Name of the captions setting, as above. */
@@ -152,6 +154,7 @@ export const DEFAULT_MESSAGES: PlayerMessages = {
 
     audioMenuLabel: 'Audio',
     qualityLabel: 'Quality',
+    qualityAuto: 'Auto',
     languageLabel: 'Language',
     captionsLabel: 'Captions',
     volumeUp: 'Volume up',

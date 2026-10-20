@@ -142,6 +142,8 @@ export const NativeLuminaryPlayer = defineComponent({
         inline: { type: [Boolean, String] as PropType<boolean | 'front'>, default: false },
         /** Room the page leaves under the picture for native's subtitles, in CSS pixels. */
         captionBand: { type: Number, default: 0 },
+        /** The page covers the picture's place (a sheet, a menu): native keeps its subtitles away from it. */
+        captionsHidden: { type: Boolean, default: false },
         /** Controls to switch off, as `player-web`'s `controls` prop. */
         controls: { type: Object as PropType<Partial<NativeLuminaryPlayerControls>>, default: undefined },
         /** The plugin to drive; the Capacitor one unless a host supplies another. */
@@ -299,9 +301,9 @@ export const NativeLuminaryPlayer = defineComponent({
             const rect = el?.getBoundingClientRect();
             const frame =
                 rect && rect.width > 0 && rect.height > 0 && !state.value.isAudioOnly
-                    ? { x: rect.left, y: rect.top, width: rect.width, height: rect.height, ...(props.inline === 'front' ? { front: true } : {}), ...(props.captionBand > 0 && props.inline !== 'front' ? { captionHeight: props.captionBand } : {}) }
+                    ? { x: rect.left, y: rect.top, width: rect.width, height: rect.height, ...(props.inline === 'front' ? { front: true } : {}), ...(props.captionBand > 0 && props.inline !== 'front' ? { captionHeight: props.captionBand } : {}), ...(props.captionsHidden ? { captionsHidden: true } : {}) }
                     : null;
-            const key = frame ? `${frame.x},${frame.y},${frame.width},${frame.height},${frame.front === true},${frame.captionHeight ?? 0}` : '';
+            const key = frame ? `${frame.x},${frame.y},${frame.width},${frame.height},${frame.front === true},${frame.captionHeight ?? 0},${frame.captionsHidden === true}` : '';
             if (key === sentFrame) return;
             sentFrame = key;
             adapter.setInlineFrame(frame);
@@ -373,6 +375,7 @@ export const NativeLuminaryPlayer = defineComponent({
         );
         // Audio-only has no picture: the frame goes, and comes back with the video.
         watch(() => state.value.isAudioOnly, queueFrame);
+        watch(() => props.captionsHidden, queueFrame);
 
         onBeforeUnmount(() => {
             frameWatchers.splice(0).forEach((stop) => stop());

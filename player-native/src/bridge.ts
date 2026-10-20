@@ -235,6 +235,8 @@ export interface InlineFrame {
     front?: boolean;
     /** Room under the picture, in CSS pixels, where native draws the subtitles over the page. */
     captionHeight?: number;
+    /** Native leaves the subtitles undrawn, while something of the page covers the picture's place. */
+    captionsHidden?: boolean;
 }
 
 export interface BridgeInfo {

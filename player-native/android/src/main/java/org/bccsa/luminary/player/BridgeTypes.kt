@@ -117,7 +117,7 @@ data class BridgeLiveSpec(
 )
 
 /** A rectangle in the web view's coordinates, in CSS pixels. */
-data class InlineFrame(val x: Double, val y: Double, val width: Double, val height: Double, val front: Boolean = false, val captionHeight: Double = 0.0)
+data class InlineFrame(val x: Double, val y: Double, val width: Double, val height: Double, val front: Boolean = false, val captionHeight: Double = 0.0, val captionsHidden: Boolean = false)
 
 data class CreateOptions(val protocolVersion: Double, val skipBackSeconds: Double, val skipForwardSeconds: Double)
 
@@ -327,7 +327,7 @@ sealed interface BridgeCall {
                         val width = frame.number("width")
                         val height = frame.number("height")
                         if (width <= 0 || height <= 0) args.invalid("frame has a positive width and height")
-                        InlineFrame(frame.number("x"), frame.number("y"), width, height, frame.optBoolean("front") ?: false, frame.optNumber("captionHeight") ?: 0.0)
+                        InlineFrame(frame.number("x"), frame.number("y"), width, height, frame.optBoolean("front") ?: false, frame.optNumber("captionHeight") ?: 0.0, frame.optBoolean("captionsHidden") ?: false)
                     }
                     SetInlineFrame(args.string("playerId"), frame)
                 }
