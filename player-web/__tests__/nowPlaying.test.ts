@@ -226,6 +226,15 @@ describe('the now-playing view for a host', () => {
         });
     });
 
+    describe('filling the window', () => {
+        it('lets the picture take the whole screen with the picture, and keeps the screen as it is with the sound', () => {
+            const video = mountView({ stage: 'video', fill: true }, { stage: () => h('div') });
+            expect(video.find('.lmpl-afs').classes()).toContain('lmpl-afs-fill');
+            const sound = mountView({ fill: true });
+            expect(sound.find('.lmpl-afs').classes()).not.toContain('lmpl-afs-fill');
+        });
+    });
+
     describe('with the picture', () => {
         const video = { stage: 'video', subtitleTracks: [{ id: 'fr', label: 'Français' }], canPictureInPicture: true, lyrics };
 
