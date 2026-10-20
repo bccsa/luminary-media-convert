@@ -1067,7 +1067,7 @@ internal class SkinControls(
     }
 
     private fun browseWidthPx(): Int {
-        // A third of a landscape screen is enough for a list; a portrait one needs nearly all of its width.
+        // Near half of a landscape screen, room for a thumbnail and a two-line title; a portrait one needs nearly all of its width.
         val wide = (width * BROWSE_FRACTION).roundToInt()
         val floor = min(dpf(BROWSE_MIN_DP * scale).roundToInt(), (width * 0.92f).roundToInt())
         return max(wide, floor)
@@ -1521,8 +1521,8 @@ internal class SkinControls(
         private const val SWITCHING_LIMIT_MS = 15_000L
         private const val MENU_WIDTH_DP = 168
         private const val BROWSE_SHEET = 0xF2121216.toInt()
-        private const val BROWSE_FRACTION = 0.4f
-        private const val BROWSE_MIN_DP = 320f
+        private const val BROWSE_FRACTION = 0.46f
+        private const val BROWSE_MIN_DP = 380f
         private const val UP_NEXT_PICTURE_DP = 128f
         private const val NEXT_UP_MS = 250L
         private const val CARD = 0xF718181B.toInt()
