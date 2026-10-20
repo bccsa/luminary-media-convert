@@ -189,6 +189,20 @@ describe('the now-playing view for a host', () => {
             expect(find(wrapper, 'afsLyricsLanguage').exists()).toBe(false);
         });
 
+        it('turns its play button while the player gets ready, and still takes a press', async () => {
+            const wrapper = mountView({ busy: true });
+            const play = find(wrapper, 'afsPlay');
+            expect(play.find("[data-test='afsSpinner']").exists()).toBe(true);
+            expect(play.attributes('aria-label')).toBe('Loading');
+            expect(play.attributes('aria-busy')).toBe('true');
+            await play.trigger('click');
+            expect(wrapper.emitted('toggle-play')).toHaveLength(1);
+
+            await wrapper.setProps({ busy: false });
+            expect(play.find("[data-test='afsSpinner']").exists()).toBe(false);
+            expect(play.attributes('aria-busy')).toBeUndefined();
+        });
+
         it('has no lyrics button for a post without words, and keeps the sleep timer', () => {
             const wrapper = mountView();
             expect(find(wrapper, 'afsLyricsToggle').exists()).toBe(false);

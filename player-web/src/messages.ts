@@ -63,6 +63,8 @@ export interface PlayerMessages {
     lyrics: string;
     /** The menu that picks which subtitles the lyrics are, on the sound alone. */
     lyricsLanguage: string;
+    /** The play button while the player gets ready. */
+    loading: string;
 
     // --- Track menus -------------------------------------------------------
     audioMenuLabel: string;
@@ -151,6 +153,7 @@ export const DEFAULT_MESSAGES: PlayerMessages = {
     pictureInPicture: 'Picture in picture',
     lyrics: 'Lyrics',
     lyricsLanguage: 'Lyrics language',
+    loading: 'Loading',
 
     audioMenuLabel: 'Audio',
     qualityLabel: 'Quality',

@@ -10,6 +10,8 @@ public struct FullscreenControlsState: Equatable {
     public var playing = false
     /// Waiting for data while playing.
     public var waiting = false
+    /// The item is not ready to play yet: loading, or another just swapped in, before anything asked it to play.
+    public var loading = false
     public var live = false
     /// The item has not said yet whether it is live or how long it is: a live stream reports an
     /// indefinite duration only once it is known, so until then nothing about seeking is shown.
@@ -53,7 +55,7 @@ public struct FullscreenControlsLayout: Equatable {
         showsAudioMenu = state.audioTrackCount > 1
         showsSubtitlesMenu = state.hasSubtitles
         showsProgress = seekable
-        showsSpinner = state.playing && state.waiting
+        showsSpinner = state.loading || (state.playing && state.waiting)
         showsPause = state.playing
     }
 }

@@ -162,6 +162,13 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
 
     private var holdsLandscape: Bool { UIDevice.current.userInterfaceIdiom == .phone && !videoIsUpright }
 
+    /// A video was picked to play next: the spinner shows from the tap until it plays, as the page prepares it.
+    private var switching: DispatchWorkItem?
+    /// The item that was showing at the pick: the spinner goes once another one plays.
+    private weak var switchingFrom: AVPlayerItem?
+    /// Long enough for the page to fetch the next video's key and load it; past it, the controls show again.
+    private static let switchingLimit: TimeInterval = 15
+
     private var exit = UprightExit()
     private var deviceObserver: NSObjectProtocol?
     private var leaving: DispatchWorkItem?
@@ -377,6 +384,8 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
 
     /// Stops watching the player and hands it back; called as the presentation ends.
     func detach() {
+        switching?.cancel()
+        switching = nil
         LegibleText.of(player).stopObserving(subtitleWatch)
         subtitleWatch = nil
         stopWatchingDevice()
@@ -483,6 +492,8 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         observations = [
             player.observe(\.isExternalPlaybackActive) { [weak self] _, _ in DispatchQueue.main.async { self?.refresh() } },
             player.observe(\.timeControlStatus) { [weak self] _, _ in DispatchQueue.main.async { self?.refresh() } },
+            // A swapped-in item becomes ready while paused, when no time passes to redraw the controls.
+            player.observe(\.currentItem?.status) { [weak self] _, _ in DispatchQueue.main.async { self?.refresh() } },
             player.observe(\.rate) { [weak self] player, _ in
                 DispatchQueue.main.async {
                     if player.rate > 0 { self?.rate = roundedRate(Double(player.rate)) }
@@ -523,6 +534,11 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         var next = FullscreenControlsState()
         next.playing = commands.playbackWanted()
         next.waiting = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+        if let pending = switching, item !== switchingFrom, player.timeControlStatus == .playing || item?.status == .failed {
+            pending.cancel()
+            switching = nil
+        }
+        next.loading = item == nil || item?.status == .unknown || switching != nil
         next.live = duration.isIndefinite
         next.awaitingDuration = !duration.isIndefinite && !(duration.isNumeric && duration.seconds > 0)
         next.duration = duration.isNumeric ? duration.seconds : 0
@@ -954,6 +970,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
             self.closeBrowse()
         }
         panel.onUpNext = { [weak self] id in
+            self?.startSwitching()
             self?.commands.selectUpNext(id)
             self?.closeBrowse()
         }
@@ -1014,7 +1031,24 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         guard !nextUpClosed else { return }
         nextUpClosed = true
         removeNextUp()
+        startSwitching()
         commands.nextUp(id)
+    }
+
+    private func startSwitching() {
+        switching?.cancel()
+        let limit = DispatchWorkItem { [weak self] in self?.endSwitching() }
+        switching = limit
+        switchingFrom = player.currentItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.switchingLimit, execute: limit)
+        refresh()
+    }
+
+    private func endSwitching() {
+        guard let switching else { return }
+        switching.cancel()
+        self.switching = nil
+        refresh()
     }
 
     /// Directly over the bar (and the chapter line over it) while the controls show, on the bottom edge when they

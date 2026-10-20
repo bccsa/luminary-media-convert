@@ -41,6 +41,7 @@ import androidx.core.graphics.PathParser
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.media3.common.C
+import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
@@ -359,6 +360,7 @@ internal class SkinControls(
         player.removeListener(this)
         main.removeCallbacks(tick)
         main.removeCallbacks(hide)
+        main.removeCallbacks(switchingLimit)
         if (thumbnails?.onChange != null) thumbnails.onChange = null
         cancelImages()
         super.onDetachedFromWindow()
@@ -434,8 +436,10 @@ internal class SkinControls(
         play.layers = if (showPlay) V10Icons.play else V10Icons.pause
         play.contentDescription = if (showPlay) texts.play else texts.pause
 
+        // A video picked to play next is on its way from the tap until it plays, while the page prepares it.
+        if (switching && player.currentMediaItem != switchingFrom && (player.isPlaying || player.playerError != null)) endSwitching()
         // Waiting for data the viewer asked to see: the spinner stands in for play / pause.
-        val waiting = player.playWhenReady && player.playbackState == Player.STATE_BUFFERING
+        val waiting = switching || (player.playWhenReady && player.playbackState == Player.STATE_BUFFERING)
         spinner.visibility = if (waiting) VISIBLE else GONE
         play.visibility = if (waiting) INVISIBLE else VISIBLE
 
@@ -552,7 +556,29 @@ internal class SkinControls(
         if (nextUpClosed) return
         nextUpClosed = true
         removeNextUp()
+        startSwitching()
         onNextUp?.invoke(id)
+    }
+
+    /** The item showing at the pick: the spinner goes once another one plays, or after [SWITCHING_LIMIT_MS]. */
+    private var switching = false
+    private var switchingFrom: MediaItem? = null
+    private val switchingLimit = Runnable { endSwitching() }
+
+    private fun startSwitching() {
+        switching = true
+        switchingFrom = player.currentMediaItem
+        main.removeCallbacks(switchingLimit)
+        main.postDelayed(switchingLimit, SWITCHING_LIMIT_MS)
+        refresh()
+    }
+
+    private fun endSwitching() {
+        if (!switching) return
+        switching = false
+        switchingFrom = null
+        main.removeCallbacks(switchingLimit)
+        refresh()
     }
 
     private fun showNextUp() {
@@ -1278,6 +1304,7 @@ internal class SkinControls(
                 isSelected = item.current
                 if (!item.current) {
                     setOnClickListener {
+                        startSwitching()
                         onBrowseSelect?.invoke(item.id)
                         closeBrowse()
                     }
@@ -1490,6 +1517,8 @@ internal class SkinControls(
         const val FADE_IN_MS = 100L
         const val FADE_OUT_MS = 500L
         private const val TICK_MS = 250L
+        /** Long enough for the page to fetch the next video's key and load it; past it, the controls show again. */
+        private const val SWITCHING_LIMIT_MS = 15_000L
         private const val MENU_WIDTH_DP = 168
         private const val BROWSE_SHEET = 0xF2121216.toInt()
         private const val BROWSE_FRACTION = 0.4f

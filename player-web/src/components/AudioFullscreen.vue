@@ -43,6 +43,8 @@ const props = defineProps<{
     duration: number;
     bufferedEnd?: number;
     playing: boolean;
+    /** Loading or stuck: the play button turns while the player gets ready, as a video's spinner does. */
+    busy?: boolean;
     /** A live stream: nothing to skip and no time left to show. */
     live?: boolean;
     /** The chapter the playhead is in; -1 for none. */
@@ -538,11 +540,14 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                             <button
                                 type="button"
                                 class="lmpl-afs-playbtn"
-                                :aria-label="playing ? messages.pause : messages.play"
+                                :class="{ 'lmpl-afs-busy': busy }"
+                                :aria-label="busy ? messages.loading : playing ? messages.pause : messages.play"
+                                :aria-busy="busy ? 'true' : undefined"
                                 data-test="afsPlay"
                                 @click="emit('toggle-play')"
                             >
-                                <svg v-if="playing" viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden="true"><rect x="6.2" y="4.8" width="4" height="14.4" rx="1.8" /><rect x="13.8" y="4.8" width="4" height="14.4" rx="1.8" /></svg>
+                                <svg v-if="busy" class="lmpl-afs-spinner" viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true" data-test="afsSpinner"><path d="M12 3a9 9 0 1 1-9 9" /></svg>
+                                <svg v-else-if="playing" viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden="true"><rect x="6.2" y="4.8" width="4" height="14.4" rx="1.8" /><rect x="13.8" y="4.8" width="4" height="14.4" rx="1.8" /></svg>
                                 <svg v-else viewBox="0 0 24 24" width="30" height="30" fill="currentColor" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round" aria-hidden="true"><path d="M20.4 12 7.8 4.73v14.54Z" /></svg>
                             </button>
                             <button

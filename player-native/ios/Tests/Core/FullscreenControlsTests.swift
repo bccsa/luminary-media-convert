@@ -30,6 +30,16 @@ struct FullscreenControlsLayoutTests {
         #expect(layout().showsProgress)
     }
 
+    @Test("the spinner stands in for play while the item loads, wanted or not, and while playback waits for data")
+    func spinnerWhileLoading() {
+        #expect(!layout().showsSpinner)
+        // A video swapped in from up next loads before anything asks it to play.
+        #expect(layout { $0.loading = true }.showsSpinner)
+        #expect(layout { $0.playing = true; $0.waiting = true }.showsSpinner)
+        // Paused and waiting is not loading: the viewer chose to stop.
+        #expect(!layout { $0.waiting = true }.showsSpinner)
+    }
+
     @Test("until the item says what it is, no skip, speed or progress is shown")
     func awaitingDuration() {
         let waiting = layout { $0.awaitingDuration = true }
