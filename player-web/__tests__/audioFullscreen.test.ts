@@ -102,6 +102,21 @@ describe('AudioFullscreen — what it shows', () => {
 });
 
 describe('AudioFullscreen — the transport', () => {
+    it('reads every time in hours once the video is an hour long, and keeps the labels the same width', () => {
+        // Each label switching shape on its own as it crossed an hour moved the bar between them.
+        const early = mountScreen({ currentTime: 2423, duration: 6150 });
+        expect(find(early, 'afsElapsed').text()).toBe('0:40:23');
+        expect(find(early, 'afsRemaining').text()).toBe('-1:02:07');
+
+        const late = mountScreen({ currentTime: 3700, duration: 6150 });
+        expect(find(late, 'afsElapsed').text()).toBe('1:01:40');
+        expect(find(late, 'afsRemaining').text()).toBe('-0:40:50');
+
+        const width = (wrapper: ReturnType<typeof mountScreen>, id: string) => find(wrapper, id).attributes('style');
+        expect(width(early, 'afsElapsed')).toBe(width(late, 'afsElapsed'));
+        expect(width(early, 'afsElapsed')).toBe(width(early, 'afsRemaining'));
+    });
+
     it('shows the time played and left, and the fill of the bar', () => {
         const wrapper = mountScreen();
         expect(find(wrapper, 'afsElapsed').text()).toBe('2:30');

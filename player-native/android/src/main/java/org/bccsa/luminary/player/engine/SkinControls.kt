@@ -1346,10 +1346,16 @@ internal class SkinControls(
     private fun padClearOfSystem() {
         val window = rootView
         val at = IntArray(2).also(::getLocationInWindow)
-        val left = (safe.left - at[0]).coerceAtLeast(0)
+        // The same on both sides, so a camera cutout on one does not push the centred controls off the picture's middle,
+        // and half the gesture bar's height at the foot: the buttons are tall enough to stay clear of it.
+        val side = max(
+            (safe.left - at[0]).coerceAtLeast(0),
+            (safe.right - (window.width - at[0] - width)).coerceAtLeast(0),
+        )
+        val left = side
+        val right = side
         val top = (safe.top - at[1]).coerceAtLeast(0)
-        val right = (safe.right - (window.width - at[0] - width)).coerceAtLeast(0)
-        val bottom = (safe.bottom - (window.height - at[1] - height)).coerceAtLeast(0)
+        val bottom = (safe.bottom - (window.height - at[1] - height)).coerceAtLeast(0) / 2
         // Padding only when it changes: setting it lays the view out again.
         if (panel.paddingLeft != left || panel.paddingTop != top || panel.paddingRight != right || panel.paddingBottom != bottom) {
             panel.setPadding(left, top, right, bottom)

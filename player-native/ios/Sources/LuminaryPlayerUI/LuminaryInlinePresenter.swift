@@ -101,6 +101,7 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
             return
         }
         let view = videoView ?? makeVideoView(in: container, below: webView)
+        if frame.front { container.bringSubviewToFront(view) } else { container.insertSubview(view, belowSubview: webView) }
         // The web view moves too (the status bar's resize after a turn): the picture follows it.
         if frameObservation == nil {
             frameObservation = webView.observe(\.frame) { [weak self] _, _ in

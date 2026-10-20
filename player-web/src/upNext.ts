@@ -15,6 +15,8 @@ export type PlayerUpNextItem = {
     fallbackImageUrl?: string;
     /** A heading (e.g. "Next in series"), shown above the first item of each run that carries it. */
     section?: string;
+    /** What plays now: marked where it stands in its list, and not a pick. */
+    current?: boolean;
 };
 
 /** The items with the heading to draw above each: a section's name shows once, over its first item. */

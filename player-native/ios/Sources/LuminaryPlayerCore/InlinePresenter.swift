@@ -7,8 +7,11 @@ public struct InlineFrame: Equatable, Sendable {
     public let y: Double
     public let width: Double
     public let height: Double
+    /// Over the web view instead of behind it: a small picture the page has no room to cut a hole for.
+    public let front: Bool
 
-    public init(x: Double, y: Double, width: Double, height: Double) {
+    public init(x: Double, y: Double, width: Double, height: Double, front: Bool = false) {
+        self.front = front
         self.x = x
         self.y = y
         self.width = width

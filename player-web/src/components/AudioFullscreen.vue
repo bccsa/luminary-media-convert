@@ -63,6 +63,10 @@ const props = defineProps<{
     chaptersSheet?: boolean;
     /** What takes the picture's place: the cover, or the host's picture (`stage` slot) at full width. */
     stage?: 'cover' | 'video';
+    /** The picture's width over its height, so its place takes the picture's shape; 16:9 when not known. */
+    stageAspect?: number;
+    /** Room under the picture for the host's subtitles. */
+    captionBand?: boolean;
     /** The host draws the picture behind the page, where the stage is: nothing of the screen may cover it there. */
     stageHole?: boolean;
     /** The screen's colour in place of the cover blurred: a small picture (a ThumbHash) that is soft once stretched. */
@@ -164,6 +168,11 @@ function onKeydown(event: KeyboardEvent): void {
         closeMenu();
     }
 }
+/** A tap leaves the button focused on a touch screen; only a keyboard's focus is worth keeping. */
+function onClick(event: MouseEvent): void {
+    const button = event.target instanceof Element ? event.target.closest('button') : null;
+    if (button && !button.matches(':focus-visible')) button.blur();
+}
 function onPointerdown(event: PointerEvent): void {
     if (menu.value && !(event.target instanceof Element && event.target.closest('[data-afs-tools]'))) closeMenu();
 }
@@ -235,13 +244,24 @@ function pickUpNext(id: string): void {
 const showChapterList = computed(() => props.chapters.length > 1);
 const windowRows = computed(() => chapterWindow(props.chapters, props.chapterIndex));
 
-function clock(seconds: number): string {
+/**
+ * `m:ss`, or `h:mm:ss` for every time once `guide` (the length) reaches an hour, and minutes padded
+ * from ten of them: all the times of one video read in one shape, so the bar between them never moves.
+ */
+function clock(seconds: number, guide = 0): string {
     const whole = Math.max(0, Math.floor(seconds));
+    const guideWhole = Math.max(0, Math.floor(guide));
     const h = Math.floor(whole / 3600);
     const m = Math.floor((whole % 3600) / 60);
     const s = String(whole % 60).padStart(2, '0');
-    return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
+    if (h > 0 || guideWhole >= 3600) return `${h}:${String(m).padStart(2, '0')}:${s}`;
+    const minutes = Math.floor(whole / 60);
+    return `${guideWhole >= 600 ? String(minutes).padStart(2, '0') : minutes}:${s}`;
 }
+/** The length the times are read against: the video's, or the position if it has run past it. */
+const timeGuide = computed(() => Math.max(knownDuration.value, shownTime.value));
+/** Wide enough for the longest time and a minus, so a label never changes the bar's length. */
+const timeWidth = computed(() => `${clock(timeGuide.value, timeGuide.value).length + 1}ch`);
 
 // The sleep timer's button says how long is left; it is looked at every half minute, which is as fine as it reads.
 const now = ref(Date.now());
@@ -297,7 +317,8 @@ function measureHole(): void {
     const stageBox = stageEl.value;
     if (!root || !stageBox) return;
     const top = stageBox.getBoundingClientRect().top - root.getBoundingClientRect().top;
-    const bottom = top + stageBox.offsetHeight;
+    // The room for subtitles under the picture is the page's, not part of the picture's hole.
+    const bottom = top + stageBox.offsetHeight - (isVideo.value && props.captionBand ? 64 : 0);
     if (top === holeTop.value && bottom === holeBottom.value) return;
     holeTop.value = top;
     holeBottom.value = bottom;
@@ -356,20 +377,30 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                 'lmpl-afs-nolist': !showChapterList && !lyricsBeside,
                 'lmpl-afs-video': isVideo,
                 'lmpl-afs-hole': isVideo && stageHole,
+                'lmpl-afs-captions': isVideo && captionBand,
             },
         ]"
         :style="{
             '--lmpl-chapter-mask': chapterMask || undefined,
             '--lmpl-hole-top': `${holeTop}px`,
             '--lmpl-hole-bottom': `${holeBottom}px`,
+            '--lmpl-stage-ar': stageAspect && stageAspect > 0 ? String(stageAspect) : undefined,
         }"
         data-test="audioFullscreen"
         @keydown="onKeydown"
         @pointerdown="onPointerdown"
+        @click="onClick"
     >
         <!-- The picture, blurred, as the screen's colour: lighter in `light`, darker in `dark`. -->
         <div class="lmpl-afs-bg" aria-hidden="true">
             <img v-if="washSrc" class="lmpl-afs-wash" :class="{ 'lmpl-afs-wash-hash': wash }" :src="washSrc" alt="" draggable="false" data-test="afsWash" />
+        </div>
+
+        <!-- A picture drawn behind the page: the wash is cut at the picture and the lower part carries on from the upper. -->
+        <div v-if="isVideo && stageHole && washSrc" class="lmpl-afs-bg lmpl-afs-bg-low" aria-hidden="true">
+            <div class="lmpl-afs-bg-shift" :style="{ transform: `translateY(${holeBottom - holeTop}px)` }">
+                <img class="lmpl-afs-wash" :class="{ 'lmpl-afs-wash-hash': wash }" :src="washSrc" alt="" draggable="false" />
+            </div>
         </div>
 
         <slot name="roster"></slot>
@@ -403,16 +434,6 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                     @pointerup="onBarUp"
                     @pointercancel="onBarUp"
                 ></div>
-                <button
-                    v-if="isVideo"
-                    type="button"
-                    class="lmpl-afs-stagefs"
-                    :aria-label="messages.enterFullscreen"
-                    data-test="afsFullscreen"
-                    @click="emit('fullscreen')"
-                >
-                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" /></svg>
-                </button>
                 <NowPlayingLyrics
                     v-if="lyricsInStage"
                     :lines="lyricLines"
@@ -460,14 +481,14 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                             @click="emit('seek-chapter', row.chapter)"
                         >
                             <span class="lmpl-afs-chapter-title">{{ row.chapter.title }}</span>
-                            <span class="lmpl-afs-chapter-time">{{ clock(row.chapter.startTime) }}</span>
+                            <span class="lmpl-afs-chapter-time">{{ clock(row.chapter.startTime, timeGuide) }}</span>
                         </button>
                     </li>
                 </ol>
 
                 <div class="lmpl-afs-controls">
                     <div class="lmpl-afs-timeline">
-                        <span class="lmpl-time" data-test="afsElapsed">{{ clock(shownTime) }}</span>
+                        <span class="lmpl-time" :style="{ minWidth: timeWidth }" data-test="afsElapsed">{{ clock(shownTime, timeGuide) }}</span>
                         <div
                             ref="barEl"
                             class="lmpl-afs-bar"
@@ -476,7 +497,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                             aria-valuemin="0"
                             :aria-valuemax="knownDuration"
                             :aria-valuenow="Math.floor(shownTime)"
-                            :aria-valuetext="clock(shownTime)"
+                            :aria-valuetext="clock(shownTime, timeGuide)"
                             :aria-label="messages.scrubberLabel"
                             :class="{ 'lmpl-afs-bar-dragging': dragTime !== null }"
                             data-test="afsBar"
@@ -492,7 +513,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                             </div>
                         </div>
                         <span v-if="isLive" class="lmpl-time lmpl-afs-live" data-test="afsLive">{{ messages.live }}</span>
-                        <span v-else class="lmpl-time" data-test="afsRemaining">-{{ clock(Math.max(0, knownDuration - shownTime)) }}</span>
+                        <span v-else class="lmpl-time lmpl-time-end" :style="{ minWidth: timeWidth }" data-test="afsRemaining">-{{ clock(Math.max(0, knownDuration - shownTime), timeGuide) }}</span>
                     </div>
 
                     <div class="lmpl-afs-bottomrow">
@@ -513,8 +534,8 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                                 data-test="afsPlay"
                                 @click="emit('toggle-play')"
                             >
-                                <svg v-if="playing" viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden="true"><path d="M7 4h3.5v16H7zM13.5 4H17v16h-3.5z" /></svg>
-                                <svg v-else viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l11-6.5a1 1 0 0 0 0-1.72l-11-6.5A1 1 0 0 0 8 5.5Z" /></svg>
+                                <svg v-if="playing" viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden="true"><rect x="6.2" y="4.8" width="4" height="14.4" rx="1.8" /><rect x="13.8" y="4.8" width="4" height="14.4" rx="1.8" /></svg>
+                                <svg v-else viewBox="0 0 24 24" width="30" height="30" fill="currentColor" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round" aria-hidden="true"><path d="M20.4 12 7.8 4.73v14.54Z" /></svg>
                             </button>
                             <button
                                 v-if="skipForwardSeconds > 0 && !isLive"
@@ -642,6 +663,17 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                                 @click="emit('picture-in-picture')"
                             >
                                 <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="4.5" width="19" height="15" rx="2.5" /><rect x="12" y="11.5" width="7" height="5.5" rx="1.2" fill="currentColor" stroke="none" /></svg>
+                            </button>
+
+                            <button
+                                v-if="isVideo"
+                                type="button"
+                                class="lmpl-afs-iconbtn"
+                                :aria-label="messages.enterFullscreen"
+                                data-test="afsFullscreen"
+                                @click="emit('fullscreen')"
+                            >
+                                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" /></svg>
                             </button>
 
                             <slot name="cast"></slot>

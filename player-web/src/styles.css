@@ -374,10 +374,10 @@
     flex-direction: column;
     gap: 2px;
     padding-top: calc(12px * var(--lmpl-s));
-    padding-bottom: max(calc(14px * var(--lmpl-s)), env(safe-area-inset-bottom));
-    /* In from both edges, past the device's own: see `--lmpl-edge`. */
-    padding-left: max(var(--lmpl-edge), env(safe-area-inset-left));
-    padding-right: max(var(--lmpl-edge), env(safe-area-inset-right));
+    padding-bottom: max(calc(14px * var(--lmpl-s)), calc(env(safe-area-inset-bottom) * 0.5));
+    /* In from both edges, past the device's own and alike on both, so a cutout on one side leaves the controls centred: see `--lmpl-edge`. */
+    padding-left: max(var(--lmpl-edge), env(safe-area-inset-left), env(safe-area-inset-right));
+    padding-right: max(var(--lmpl-edge), env(safe-area-inset-left), env(safe-area-inset-right));
     isolation: isolate;
 }
 
@@ -1005,7 +1005,8 @@
     background: rgb(255 255 255 / 0.1);
 }
 
-.lmpl-chapter[aria-current='true'] {
+.lmpl-chapter[aria-current='true'],
+.lmpl-upnext[aria-current='true'] {
     background: rgb(255 255 255 / 0.14);
     font-weight: 700;
 }
@@ -1306,9 +1307,20 @@
     cursor: pointer;
 }
 
-.lmpl-afs-iconbtn:hover,
-.lmpl-afs-iconbtn[aria-expanded='true'] {
+.lmpl-afs-iconbtn[aria-expanded='true'],
+.lmpl-afs-iconbtn:active {
     background: rgb(255 255 255 / 0.14);
+}
+
+/* A touch leaves :hover on the last thing tapped, so the highlight is for a pointer that can hover. */
+@media (hover: hover) {
+    .lmpl-afs-iconbtn:hover {
+        background: rgb(255 255 255 / 0.14);
+    }
+}
+
+.lmpl-afs button {
+    -webkit-tap-highlight-color: transparent;
 }
 
 .lmpl-afs-iconbtn:focus-visible {
@@ -1320,9 +1332,20 @@
     pointer-events: none;
 }
 
+/* On, as a dot under the glyph: a filled disc reads as a button left pressed. */
 .lmpl-afs-on {
     color: #fff;
-    background: rgb(255 255 255 / 0.14);
+}
+.lmpl-afs-on::after {
+    content: '';
+    position: absolute;
+    bottom: 6px;
+    left: 50%;
+    width: 5px;
+    height: 5px;
+    margin-left: -2.5px;
+    border-radius: 50%;
+    background: #fff;
 }
 
 .lmpl-afs-badge {
@@ -1365,7 +1388,9 @@
     height: 100%;
     border-radius: 16px;
     object-fit: cover;
-    box-shadow: 0 22px 50px -14px rgb(0 0 0 / 0.65);
+    box-shadow:
+        0 22px 50px -14px rgb(0 0 0 / 0.65),
+        0 0 40px 2px rgb(255 255 255 / 0.14);
 }
 
 .lmpl-afs-cover-empty {
@@ -1464,7 +1489,7 @@
 .lmpl-afs-controls {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 14px;
     margin-top: auto;
 }
 
@@ -1482,10 +1507,14 @@
     color: rgb(255 255 255 / 0.8);
 }
 
+.lmpl-afs .lmpl-time-end {
+    text-align: end;
+}
+
 .lmpl-afs-bottomrow {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    row-gap: 22px;
 }
 
 .lmpl-afs-transport {
@@ -1550,7 +1579,7 @@
     padding: 0;
     border: 0;
     border-radius: 50%;
-    background: #fff;
+    background: rgb(255 255 255 / 0.86);
     color: #111;
     cursor: pointer;
 }
@@ -1564,7 +1593,7 @@
     padding: 0;
     border: 0;
     background: transparent;
-    color: inherit;
+    color: rgb(255 255 255 / 0.82);
     cursor: pointer;
 }
 
@@ -1575,24 +1604,32 @@
 
 /* The play and pause glyph is a share of its disc, so it grows with it. */
 .lmpl-afs-playbtn svg {
-    width: 46%;
-    height: 46%;
+    width: 62%;
+    height: 62%;
 }
 
 .lmpl-afs-tools {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: center;
+    gap: 10px;
 }
 
+/* A tool with a menu shrinks like the bare buttons beside it, so a crowded row stays evenly spaced. */
 .lmpl-afs-tool {
     position: relative;
+    display: flex;
+    flex: 0 1 auto;
+    min-width: 0;
 }
 
-/* The row under the transport is thumb-sized: a larger target, and a larger glyph in it. */
+/* The row under the transport is thumb-sized: a larger target, and a larger glyph in it. Sized by its width (no
+   basis of its own), so a bare button and one in a tool wrapper grow and shrink alike. */
 .lmpl-root .lmpl-afs-tools .lmpl-afs-iconbtn {
+    flex: 0 1 auto;
     width: calc(52px * var(--lmpl-s));
     height: calc(52px * var(--lmpl-s));
+    color: rgb(255 255 255 / 0.82);
 }
 
 .lmpl-root .lmpl-afs-tools .lmpl-afs-iconbtn svg,
@@ -1646,10 +1683,16 @@
     cursor: pointer;
 }
 
-.lmpl-afs-menuitem:hover,
+.lmpl-afs-menuitem:active,
 .lmpl-afs-menuitem:focus-visible {
     background: rgb(255 255 255 / 0.12);
     outline: none;
+}
+
+@media (hover: hover) {
+    .lmpl-afs-menuitem:hover {
+        background: rgb(255 255 255 / 0.12);
+    }
 }
 
 .lmpl-afs-menuitem[aria-checked='true']::after {
@@ -1680,9 +1723,18 @@
 .lmpl-afs-video .lmpl-afs-art {
     align-self: center;
     width: 100cqw;
-    aspect-ratio: 16 / 9;
+    aspect-ratio: var(--lmpl-stage-ar, 16 / 9);
+    max-height: 46cqh;
     overflow: hidden;
     background: #000;
+}
+/* The picture sits at the top of its place and the host's subtitles under it, in a band the size of two lines. */
+.lmpl-afs-captions .lmpl-afs-art {
+    aspect-ratio: auto;
+    height: calc(100cqw / var(--lmpl-stage-ar, 16 / 9) + 64px);
+}
+.lmpl-afs-captions .lmpl-afs-stage {
+    bottom: 64px;
 }
 .lmpl-afs-stage,
 .lmpl-afs-stage > * {
@@ -1697,17 +1749,24 @@
 }
 .lmpl-afs-hole .lmpl-afs-bg {
     background: #0e1013;
-    clip-path: polygon(
-        evenodd,
-        0 0, 100% 0, 100% 100%, 0 100%, 0 0,
-        0 var(--lmpl-hole-top), 100% var(--lmpl-hole-top), 100% var(--lmpl-hole-bottom), 0 var(--lmpl-hole-bottom), 0 var(--lmpl-hole-top)
-    );
+    clip-path: inset(0 0 calc(100% - var(--lmpl-hole-top)) 0);
+}
+.lmpl-afs-hole .lmpl-afs-bg-low {
+    clip-path: inset(var(--lmpl-hole-bottom) 0 0 0);
+}
+.lmpl-afs-bg-shift {
+    position: absolute;
+    inset: 0;
+}
+/* One flat tint on both sides of the picture, so the two parts of the wash meet it alike. */
+.lmpl-afs-hole .lmpl-afs-bg::after {
+    background: rgb(8 10 14 / 0.74);
 }
 .lmpl-afs-hole .lmpl-afs-art {
     background: transparent;
 }
 
-/* The picture's foot, a band that takes a drag as the seek bar does; clear of the full-screen corner. */
+/* The picture's foot, a band that takes a drag as the seek bar does; . */
 .lmpl-afs-scrubzone {
     position: absolute;
     z-index: 1;
@@ -1718,27 +1777,6 @@
     touch-action: none;
 }
 
-/* Full screen from the picture's corner. */
-.lmpl-afs-stagefs {
-    position: absolute;
-    z-index: 1;
-    top: 8px;
-    right: max(8px, env(safe-area-inset-right));
-    display: grid;
-    place-items: center;
-    width: 36px;
-    height: 36px;
-    padding: 0;
-    border: 0;
-    border-radius: 9999px;
-    color: #fff;
-    background: rgb(0 0 0 / 0.42);
-    cursor: pointer;
-}
-.lmpl-afs-stagefs:focus-visible {
-    outline: 2px solid #fff;
-    outline-offset: 2px;
-}
 
 /* Lyrics in the cover's place: the line being sung bright and large, the rest dim, fading out at both ends. */
 .lmpl-afs-art.lmpl-afs-art-lyrics {
@@ -1838,6 +1876,7 @@
     .lmpl-afs-video .lmpl-afs-art {
         align-self: center;
         width: min(52cqw, 62cqh * 16 / 9);
+        max-height: 62cqh;
         margin-inline: 0;
         border-radius: 14px;
     }

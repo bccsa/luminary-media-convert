@@ -182,10 +182,10 @@ class PictureInPictureTest {
     )
 
     @Test
-    fun `a master's subtitles are listed by name, else by language, in its order`() {
+    fun `a master's subtitles are listed by name, else by language, in its order, and a track with neither is left out`() {
         val tracks = Tracks(listOf(subtitle("en", "English"), subtitle("fr", null), subtitle(null, null)))
 
-        assertEquals(listOf("English", "fr", "Subtitles 3"), subtitleChoicesOf(tracks).map { it.label })
+        assertEquals(listOf("English", "fr"), subtitleChoicesOf(tracks).map { it.label })
     }
 
     @Test
