@@ -1845,7 +1845,7 @@
     }
 }
 
-/* Narrow and tall: the seek bar is one plain bar, and the picture and what plays share the room above the controls. */
+/* Narrow and tall: the picture and what plays share the room above the controls. */
 @container lmpl-afs (max-aspect-ratio: 6/5) {
     .lmpl-afs-main {
         justify-content: space-evenly;
@@ -1853,11 +1853,6 @@
 
     .lmpl-afs-info {
         flex: none;
-    }
-
-    .lmpl-root .lmpl-afs .lmpl-afs-bar-track {
-        -webkit-mask-image: none;
-        mask-image: none;
     }
 }
 
