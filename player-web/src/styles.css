@@ -1853,6 +1853,18 @@
     /* From the screen's height: a percentage here would be of the column's width, and push the words under the controls. */
     padding: 10cqh 0;
 }
+/* Over the picture while the player gets ready or waits for data: the same turning ring, out of the way of taps. */
+.lmpl-root .lmpl-busy {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    display: grid;
+    place-items: center;
+    color: #fff;
+    pointer-events: none;
+    filter: drop-shadow(0 1px 3px rgb(0 0 0 / 0.6));
+}
+
 /* The play button while the player gets ready: a ring, three quarters round, turning. */
 .lmpl-afs-spinner {
     animation: lmpl-afs-turn 0.9s linear infinite;
