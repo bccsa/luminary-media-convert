@@ -22,8 +22,14 @@ public struct BrowseItem: Sendable, Equatable {
     public let section: String?
     /// Drawn when there is no picture, or it does not load.
     public let fallbackImageUrl: String?
+    /// What plays now: marked where it stands in its list, and not a pick.
+    public let current: Bool
 
-    public init(id: String, title: String, subtitle: String? = nil, imageUrl: String? = nil, section: String? = nil, fallbackImageUrl: String? = nil) {
+    public init(
+        id: String, title: String, subtitle: String? = nil, imageUrl: String? = nil, section: String? = nil,
+        fallbackImageUrl: String? = nil, current: Bool = false
+    ) {
+        self.current = current
         self.id = id
         self.title = title
         self.subtitle = subtitle

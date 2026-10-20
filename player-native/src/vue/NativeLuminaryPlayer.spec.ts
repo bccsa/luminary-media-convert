@@ -244,7 +244,7 @@ describe('NativeLuminaryPlayer', () => {
 
     describe('the chapters and up next native full-screen lists', () => {
         const upNext = [
-            { id: 'post-2', title: 'Next', subtitle: 'Part 2', imageUrl: 'https://cdn/x.jpg', section: 'Next in series' },
+            { id: 'post-2', title: 'Next', subtitle: 'Part 2', imageUrl: 'https://cdn/x.jpg', section: 'Next in series', current: true },
             { id: 'post-3', title: 'Related' },
         ];
         const chapters = [{ title: 'Intro', startTime: 0, endTime: 30 }];

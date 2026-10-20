@@ -328,10 +328,16 @@ final class BrowsePanel: UIView {
             }
             row.isAccessibilityElement = true
             row.accessibilityLabel = [item.title, item.subtitle].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: ", ")
-            row.accessibilityTraits = .button
-            row.addAction(UIAction { [weak self] _ in self?.onUpNext?(item.id) }, for: .touchUpInside)
-            row.addAction(UIAction { [weak row] _ in row?.backgroundColor = BrowseSkin.selectedRow }, for: .touchDown)
-            row.addAction(UIAction { [weak row] _ in row?.backgroundColor = .clear }, for: [.touchUpInside, .touchUpOutside, .touchCancel])
+            if item.current {
+                // What plays now is marked where it stands, as the chapter playing is, and is not a pick.
+                row.backgroundColor = BrowseSkin.selectedRow
+                row.accessibilityTraits = [.selected, .notEnabled]
+            } else {
+                row.accessibilityTraits = .button
+                row.addAction(UIAction { [weak self] _ in self?.onUpNext?(item.id) }, for: .touchUpInside)
+                row.addAction(UIAction { [weak row] _ in row?.backgroundColor = BrowseSkin.selectedRow }, for: .touchDown)
+                row.addAction(UIAction { [weak row] _ in row?.backgroundColor = .clear }, for: [.touchUpInside, .touchUpOutside, .touchCancel])
+            }
             list.addSubview(row)
         }
     }

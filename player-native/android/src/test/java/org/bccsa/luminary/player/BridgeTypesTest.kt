@@ -124,7 +124,7 @@ class BridgeTypesTest {
             put(
                 "upNext",
                 buildJsonArray {
-                    add(buildJsonObject { put("id", "p2"); put("title", "Next"); put("subtitle", "Part 2"); put("section", "Related") })
+                    add(buildJsonObject { put("id", "p2"); put("title", "Next"); put("subtitle", "Part 2"); put("section", "Related"); put("current", true) })
                 },
             )
         }
@@ -132,7 +132,7 @@ class BridgeTypesTest {
         val call = BridgeCall.decode("enterFullscreen", enter(browse)) as BridgeCall.EnterFullscreen
 
         assertEquals(listOf(BrowseChapter("Intro", 0.0, 30.0)), call.browse!!.chapters)
-        assertEquals(listOf(BrowseItem("p2", "Next", "Part 2", null, "Related")), call.browse!!.upNext)
+        assertEquals(listOf(BrowseItem("p2", "Next", "Part 2", null, "Related", current = true)), call.browse!!.upNext)
         assertEquals(null, (BridgeCall.decode("enterFullscreen", enter(null)) as BridgeCall.EnterFullscreen).browse)
     }
 

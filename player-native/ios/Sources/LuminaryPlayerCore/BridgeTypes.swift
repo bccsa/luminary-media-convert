@@ -583,7 +583,8 @@ private struct Args {
             return BrowseItem(
                 id: try item.string("id"), title: try item.string("title"), subtitle: try item.optionalString("subtitle"),
                 imageUrl: try item.optionalString("imageUrl"), section: try item.optionalString("section"),
-                fallbackImageUrl: try item.optionalString("fallbackImageUrl")
+                fallbackImageUrl: try item.optionalString("fallbackImageUrl"),
+                current: try item.optionalBool("current") ?? false
             )
         }
     }
