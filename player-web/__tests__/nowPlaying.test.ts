@@ -163,21 +163,6 @@ describe('the now-playing view for a host', () => {
             }
         });
 
-        it('puts the lyrics beside the cover on a computer', async () => {
-            const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1280);
-            const height = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(720);
-            try {
-                const wrapper = mountView({ lyrics });
-                await find(wrapper, 'afsLyricsToggle').trigger('click');
-                expect(find(wrapper, 'afsCover').exists()).toBe(true);
-                expect(find(wrapper, 'afsStage').find("[data-test='afsLyrics']").exists()).toBe(false);
-                expect(find(wrapper, 'afsSideLyrics').find("[data-test='afsLyrics']").exists()).toBe(true);
-            } finally {
-                width.mockRestore();
-                height.mockRestore();
-            }
-        });
-
         it('offers the lyrics in each language the post has, and shows the one chosen', async () => {
             const tracks = [
                 { id: 'en', label: 'English' },

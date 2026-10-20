@@ -121,23 +121,11 @@ const isVideo = computed(() => props.stage === 'video');
 const subtitleTracks = computed(() => props.subtitleTracks ?? []);
 const lyricLines = computed(() => props.lyrics ?? []);
 
-// The words are shown while they are asked for, and only with sound alone and words to show: in the cover's place
-// when the screen is tall, beside the cover, where the chapters are, when it is wide.
+// The words are shown while they are asked for, and only with sound alone and words to show.
 const lyricsOpen = ref(false);
 const showLyrics = computed(() => lyricsOpen.value && !isVideo.value && lyricLines.value.length > 0);
-/** Wider than tall by the layout's own measure (`min-aspect-ratio: 6/5`), as the styles lay it out. */
-const wide = ref(false);
-/** A computer's window: wide and at least 900 px across, which the styles lay out as a dock under the cover. */
-const desktop = ref(false);
-function measureWide(): void {
-    const root = rootEl.value;
-    if (!root || root.clientHeight <= 0) return;
-    wide.value = root.clientWidth * 5 >= root.clientHeight * 6;
-    desktop.value = wide.value && root.clientWidth >= 900;
-}
-// The words take the cover's place on a phone, held upright or on its side; beside the cover on a computer.
-const lyricsInStage = computed(() => showLyrics.value && !desktop.value);
-const lyricsBeside = computed(() => showLyrics.value && desktop.value);
+// In the cover's place, in a window of any shape, as on a phone.
+const lyricsInStage = showLyrics;
 // The picture puts them away. Words still on their way (another language being read) keep them asked for.
 watch(isVideo, (video) => {
     if (video) lyricsOpen.value = false;
@@ -358,12 +346,8 @@ function measureHole(): void {
  */
 let holeObserver: ResizeObserver | null = null;
 onMounted(() => {
-    measureWide();
     if (typeof ResizeObserver === 'undefined') return;
-    holeObserver = new ResizeObserver(() => {
-        measureWide();
-        measureHole();
-    });
+    holeObserver = new ResizeObserver(measureHole);
     const root = rootEl.value;
     if (!root) return;
     holeObserver.observe(root);
@@ -402,7 +386,6 @@ const washSrc = computed(() => props.wash || cover.value?.src);
         :class="[
             `lmpl-afs-${appearance}`,
             {
-                'lmpl-afs-nolist': !lyricsBeside,
                 'lmpl-afs-video': isVideo,
                 'lmpl-afs-fill': fill && isVideo,
                 'lmpl-afs-hole': isVideo && stageHole,
@@ -437,13 +420,12 @@ const washSrc = computed(() => props.wash || cover.value?.src);
         <div class="lmpl-afs-top">
             <button
                 type="button"
-                class="lmpl-afs-iconbtn lmpl-afs-exit"
+                class="lmpl-afs-iconbtn"
                 :aria-label="exitLabel || messages.exitFullscreen"
                 data-test="afsExit"
                 @click="emit('exit')"
             >
-                <svg class="lmpl-afs-exit-chevron" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
-                <svg class="lmpl-afs-exit-compress" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 9V4.5M9 9H4.5M9 9 3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5 5.25 5.25" /></svg>
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
             </button>
             <span class="lmpl-afs-eyebrow">{{ eyebrow }}</span>
             <div v-if="slots['top-end']" class="lmpl-afs-topend" data-test="afsTopEnd"><slot name="top-end"></slot></div>
@@ -497,18 +479,6 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                     <span v-if="chapters.length > 1 && chapterIndex >= 0" class="lmpl-afs-chip" data-test="afsChapterChip">
                         <i aria-hidden="true"></i>{{ formatChapterOf(messages.chapterOf, chapterIndex + 1, chapters.length) }} · {{ chapters[chapterIndex]?.title }}
                     </span>
-                </div>
-
-                <!-- Wide: the lyrics, when they are on, beside the cover. -->
-                <div v-if="lyricsBeside" class="lmpl-afs-sidelyrics" data-test="afsSideLyrics">
-                    <NowPlayingLyrics
-                        :lines="lyricLines"
-                        :current-time="currentTime"
-                        :playing="playing"
-                        :rate="playbackRate"
-                        :label="messages.lyrics"
-                        @seek="emit('seek', $event)"
-                    />
                 </div>
 
                 <div class="lmpl-afs-controls">

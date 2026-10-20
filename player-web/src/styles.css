@@ -1343,10 +1343,6 @@
     opacity: 0.9;
 }
 
-.lmpl-afs-exit-compress {
-    display: none;
-}
-
 .lmpl-afs-iconbtn {
     position: relative;
     display: inline-flex;
@@ -1856,20 +1852,6 @@
     -webkit-mask-image: linear-gradient(transparent, #000 18%, #000 82%, transparent);
     mask-image: linear-gradient(transparent, #000 18%, #000 82%, transparent);
 }
-/* Beside the cover on a wide screen: the lyrics fill the column between the title and the controls. */
-.lmpl-afs-sidelyrics {
-    display: flex;
-    flex: 1;
-    flex-direction: column;
-    min-height: 0;
-}
-.lmpl-afs-sidelyrics .lmpl-afs-lyrics {
-    flex: 1;
-    height: auto;
-    min-height: 0;
-    /* From the screen's height: a percentage here would be of the column's width, and push the words under the controls. */
-    padding: 10cqh 0;
-}
 /* Over the picture while the player gets ready or waits for data: the same turning ring, out of the way of taps. */
 .lmpl-root .lmpl-busy {
     position: absolute;
@@ -1980,9 +1962,8 @@
         min-width: 0;
     }
 
-    /* No chapter list to fill the column: the title and the controls sit together, level with the picture, not at
-       the two ends of an empty column. */
-    .lmpl-afs-nolist .lmpl-afs-controls {
+    /* The title and the controls sit together, level with the picture, not at the two ends of the column. */
+    .lmpl-afs-controls {
         margin-top: 12px;
     }
 
@@ -2066,146 +2047,32 @@
     }
 }
 
-/* A desktop window: the cover on the left with the lyrics beside it when they are on, the timeline across the width, and one
-   dock along the foot: what plays at the left, the transport in the middle, the tools at the right. The column's own boxes
-   dissolve, so each part takes its place on the main grid. The lyrics' room is a row of the grid, bounded by the dock. */
+/* A large window on its side: the phone's own layout across the screen, the column beside the cover taking the rest of
+   the width. The lyrics keep the cover's width, so the column stays put when they open. */
 @container lmpl-afs (min-aspect-ratio: 6/5) and (min-width: 900px) {
     .lmpl-afs-main {
         box-sizing: border-box;
         align-self: center;
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-        grid-template-rows: minmax(0, 1fr) auto auto;
-        column-gap: clamp(32px, 5cqw, 96px);
-        row-gap: clamp(10px, 2cqh, 22px);
         width: 100%;
-        max-width: max(1240px, 90cqw);
-        padding-inline: clamp(32px, 5cqw, 96px);
+        max-width: 1800px;
+        gap: clamp(32px, 3.5cqw, 72px);
+        padding-inline: clamp(32px, 5.5cqw, 120px);
     }
 
-    .lmpl-afs-info,
-    .lmpl-afs-controls,
-    .lmpl-afs-bottomrow {
-        display: contents;
-    }
-
-    /* Leaving the window is the compress icon at the top right, as the chevron is for a screen that minimises. */
-    .lmpl-afs-top {
-        justify-content: flex-end;
-    }
-
-    .lmpl-afs-exit {
-        order: 3;
-    }
-
-    .lmpl-afs-exit-chevron {
-        display: none;
-    }
-
-    .lmpl-afs-exit-compress {
-        display: block;
-    }
-
-    .lmpl-afs-art {
-        grid-column: 1;
-        grid-row: 1;
+    .lmpl-afs-art,
+    .lmpl-afs-art.lmpl-afs-art-lyrics {
         align-self: center;
-        justify-self: center;
-        width: min(100%, 56cqh, 640px);
+        flex: none;
+        width: min(36cqw, 62cqh, 720px);
     }
 
-    /* No lyrics: the cover stands in the middle. */
-    .lmpl-afs-nolist .lmpl-afs-art {
-        grid-column: 1 / -1;
+    .lmpl-afs-art.lmpl-afs-art-lyrics {
+        height: min(70cqh, 760px);
     }
 
-    .lmpl-afs-sidelyrics {
-        grid-column: 2 / 4;
-        grid-row: 1;
-        align-self: stretch;
-        min-height: 0;
-    }
-
-    .lmpl-afs-timeline {
-        grid-column: 1 / -1;
-        grid-row: 2;
-    }
-
-    .lmpl-afs-titles {
-        display: block;
-        grid-column: 1;
-        grid-row: 3;
+    .lmpl-afs-info {
         align-self: center;
-        justify-self: start;
-        min-width: 0;
-    }
-
-    .lmpl-afs-transport {
-        grid-column: 2;
-        grid-row: 3;
-    }
-
-    .lmpl-afs-tools {
-        grid-column: 3;
-        grid-row: 3;
-        justify-self: end;
-        justify-content: flex-end;
-    }
-
-    /* The dock is sized from the window: a measured title, a thin timeline, a transport that leads and tools that stay quiet. */
-    .lmpl-afs-title {
-        font-size: clamp(16px, 1.45cqw, 30px);
-    }
-
-    .lmpl-afs-subtitle {
-        margin-top: 2px;
-        font-size: clamp(11px, 0.95cqw, 19px);
-        opacity: 0.7;
-    }
-
-    .lmpl-afs-chip {
-        font-size: clamp(11px, 0.9cqw, 17px);
-    }
-
-    .lmpl-root .lmpl-afs .lmpl-time {
-        font-size: clamp(11px, 0.9cqw, 18px);
-    }
-
-    .lmpl-afs-playbtn {
-        width: clamp(52px, 4.8cqw, 96px);
-        height: clamp(52px, 4.8cqw, 96px);
-    }
-
-    .lmpl-afs-skip {
-        width: clamp(34px, 3cqw, 58px);
-        height: clamp(34px, 3cqw, 58px);
-    }
-
-    .lmpl-afs-transport {
-        gap: clamp(20px, 2.2cqw, 44px);
-    }
-
-    .lmpl-afs-lyric {
-        font-size: clamp(18px, 1.9cqw, 36px);
-    }
-
-    .lmpl-root .lmpl-afs-tools .lmpl-afs-iconbtn {
-        width: clamp(32px, 2.6cqw, 52px);
-        height: clamp(32px, 2.6cqw, 52px);
-        opacity: 0.85;
-    }
-
-    .lmpl-root .lmpl-afs-tools .lmpl-afs-iconbtn svg,
-    .lmpl-root .lmpl-afs-tools .lmpl-afs-iconbtn .media-button-icon {
-        width: clamp(17px, 1.4cqw, 28px);
-        height: clamp(17px, 1.4cqw, 28px);
-    }
-
-    /* The words being on is shown by the lyrics button's colour. */
-    .lmpl-root .lmpl-afs-tools .lmpl-afs-on {
-        color: #5cc6c2;
-        opacity: 1;
-        filter: drop-shadow(0 0 4px rgb(92 198 194 / 0.55));
+        flex: 1 1 0;
     }
 }
 
