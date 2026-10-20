@@ -431,12 +431,13 @@ const washSrc = computed(() => props.wash || cover.value?.src);
         <div class="lmpl-afs-top">
             <button
                 type="button"
-                class="lmpl-afs-iconbtn"
+                class="lmpl-afs-iconbtn lmpl-afs-exit"
                 :aria-label="exitLabel || messages.exitFullscreen"
                 data-test="afsExit"
                 @click="emit('exit')"
             >
-                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+                <svg class="lmpl-afs-exit-chevron" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+                <svg class="lmpl-afs-exit-compress" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 9V4.5M9 9H4.5M9 9 3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5 5.25 5.25" /></svg>
             </button>
             <span class="lmpl-afs-eyebrow">{{ eyebrow }}</span>
             <div v-if="slots['top-end']" class="lmpl-afs-topend" data-test="afsTopEnd"><slot name="top-end"></slot></div>

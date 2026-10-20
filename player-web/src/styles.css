@@ -1343,6 +1343,10 @@
     opacity: 0.9;
 }
 
+.lmpl-afs-exit-compress {
+    display: none;
+}
+
 .lmpl-afs-iconbtn {
     position: relative;
     display: inline-flex;
@@ -2067,6 +2071,23 @@
         display: contents;
     }
 
+    /* Leaving the window is the compress icon at the top right, as the chevron is for a screen that minimises. */
+    .lmpl-afs-top {
+        justify-content: flex-end;
+    }
+
+    .lmpl-afs-exit {
+        order: 3;
+    }
+
+    .lmpl-afs-exit-chevron {
+        display: none;
+    }
+
+    .lmpl-afs-exit-compress {
+        display: block;
+    }
+
     .lmpl-afs-art {
         grid-column: 1;
         grid-row: 1;
@@ -2113,16 +2134,17 @@
         justify-content: flex-end;
     }
 
-    /* The tools grow with the window, more slowly than the transport, so they still fit beside it. */
+    /* The tools are small and quiet, the transport leading. */
     .lmpl-root .lmpl-afs-tools .lmpl-afs-iconbtn {
-        width: calc(40px + 10px * var(--lmpl-s));
-        height: calc(40px + 10px * var(--lmpl-s));
+        width: calc(38px * var(--lmpl-s));
+        height: calc(38px * var(--lmpl-s));
+        opacity: 0.85;
     }
 
     .lmpl-root .lmpl-afs-tools .lmpl-afs-iconbtn svg,
     .lmpl-root .lmpl-afs-tools .lmpl-afs-iconbtn .media-button-icon {
-        width: calc(22px + 8px * var(--lmpl-s));
-        height: calc(22px + 8px * var(--lmpl-s));
+        width: calc(20px * var(--lmpl-s));
+        height: calc(20px * var(--lmpl-s));
     }
 }
 
