@@ -26,6 +26,7 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
     public var onRotatedToPortrait: (() -> Void)?
     public var onPictureInPicture: ((Bool) -> Void)?
     private var pictureInPicture: AVPictureInPictureController?
+    private var pendingPictureInPicture: NSKeyValueObservation?
     private var routePicker: AVRoutePickerView?
     private var rotationObserver: NSObjectProtocol?
     private var deviceObserver: NSObjectProtocol?
@@ -122,6 +123,7 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
         }
         wasOnScreen = onScreen
         view.playerLayer.player = suspended ? nil : player
+        if !suspended && !frame.front { preparePictureInPicture() }
         scheduleSettleCheck()
         // A turn that came before the picture had a place in the page was not heard (nothing to
         // show yet); a phone already on its side when the picture appears counts as turned.
@@ -190,18 +192,43 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
         }
     }
 
-    /// From the inline layer: the picture continues in its own window, and the page goes on.
+    /// From the inline layer: the picture continues in its own window, and the page goes on. A press that comes
+    /// before the system is ready (just after the picture appeared) starts it as soon as it is.
     public func startPictureInPicture() -> Bool {
-        guard let layer = videoView?.playerLayer, !suspended,
-              AVPictureInPictureController.isPictureInPictureSupported() else { return false }
+        guard !suspended, let pictureInPicture = preparePictureInPicture(),
+              !pictureInPicture.isPictureInPictureActive else { return false }
+        pendingPictureInPicture = nil
+        if pictureInPicture.isPictureInPicturePossible {
+            pictureInPicture.startPictureInPicture()
+            return true
+        }
+        pendingPictureInPicture = pictureInPicture.observe(\.isPictureInPicturePossible, options: [.new]) { [weak self] controller, _ in
+            guard controller.isPictureInPicturePossible else { return }
+            DispatchQueue.main.async {
+                guard let self, self.pendingPictureInPicture != nil else { return }
+                self.pendingPictureInPicture = nil
+                if !self.suspended { controller.startPictureInPicture() }
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.pictureInPictureWait) { [weak self] in
+            self?.pendingPictureInPicture = nil
+        }
+        return true
+    }
+
+    /// How long a press waits for the system to be ready.
+    private static let pictureInPictureWait: TimeInterval = 2
+
+    /// The controller for the layer showing now, made as soon as there is one: a controller made at the press is
+    /// not possible yet, so the first press did nothing.
+    @discardableResult
+    private func preparePictureInPicture() -> AVPictureInPictureController? {
+        guard let layer = videoView?.playerLayer, AVPictureInPictureController.isPictureInPictureSupported() else { return nil }
         if pictureInPicture == nil || pictureInPicture?.playerLayer !== layer {
             pictureInPicture = AVPictureInPictureController(playerLayer: layer)
             pictureInPicture?.delegate = self
         }
-        guard let pictureInPicture, pictureInPicture.isPictureInPicturePossible,
-              !pictureInPicture.isPictureInPictureActive else { return false }
-        pictureInPicture.startPictureInPicture()
-        return true
+        return pictureInPicture
     }
 
     /// Apple's own device list. Its button is a view that has to be in the window to answer, so a
@@ -304,6 +331,7 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
     }
 
     private func tearDown() {
+        pendingPictureInPicture = nil
         subtitleWatch.map { $0.text.stopObserving($0.token) }
         subtitleWatch = nil
         subtitles?.removeFromSuperview()
