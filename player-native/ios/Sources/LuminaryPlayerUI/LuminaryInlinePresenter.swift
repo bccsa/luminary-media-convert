@@ -78,7 +78,8 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
         deviceSettle = nil
         guard pose.pose == .sideways else { return }
         let check = DispatchWorkItem { [weak self] in
-            guard let self, self.pose.pose == .sideways, self.frame != nil, !self.suspended,
+            // A picture that is only the small one in the minimised bar is not what the viewer turned the phone to watch.
+            guard let self, self.pose.pose == .sideways, let frame = self.frame, !frame.front, !self.suspended,
                   self.webView()?.window?.windowScene?.interfaceOrientation.isPortrait == true else { return }
             self.onRotatedToLandscape?()
         }
@@ -91,7 +92,7 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
 
     /// Only a video the page is showing, and that nothing else holds, turns into full-screen.
     private func rotated() {
-        guard frame != nil, !suspended,
+        guard let frame, !frame.front, !suspended,
               let landscape = webView()?.window?.windowScene?.interfaceOrientation.isLandscape else { return }
         if landscape { onRotatedToLandscape?() } else { onRotatedToPortrait?() }
     }
@@ -176,7 +177,8 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
     private func layoutSubtitles(picture: CGRect) {
         guard let label = subtitles, let frame else { return }
         let empty = label.text?.isEmpty ?? true
-        label.isHidden = frame.front || suspended || empty
+        // Not over a small picture in front, nor over what the page puts across the picture's place.
+        label.isHidden = frame.front || frame.captionsHidden || suspended || empty
         guard !label.isHidden else { return }
         let band = CGFloat(frame.captionHeight)
         let inset: CGFloat = 12

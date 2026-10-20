@@ -140,6 +140,25 @@ struct BridgeTypesTests {
         #expect(with.thumbnailsUrl == "https://cdn.example.com/m/thumbnails/thumbnails.vtt")
     }
 
+    @Test("the page's picture says whether it sits in front, the band under it, and whether it is covered")
+    func inlineFrameDecode() throws {
+        let frame: [String: JSON] = ["x": .number(0), "y": .number(40), "width": .number(390), "height": .number(219)]
+        guard case .setInlineFrame(_, let plain?) = try BridgeCall.decode("setInlineFrame", ["playerId": .string("p"), "frame": .object(frame)]) else {
+            Issue.record("not a frame")
+            return
+        }
+        #expect(!plain.front && plain.captionHeight == 0 && !plain.captionsHidden)
+
+        var covered = frame
+        covered["captionHeight"] = .number(64)
+        covered["captionsHidden"] = .bool(true)
+        guard case .setInlineFrame(_, let flagged?) = try BridgeCall.decode("setInlineFrame", ["playerId": .string("p"), "frame": .object(covered)]) else {
+            Issue.record("not a frame")
+            return
+        }
+        #expect(flagged.captionHeight == 64 && flagged.captionsHidden)
+    }
+
     @Test("counts that fit decode as they are")
     func countsDecode() throws {
         guard case .load(let args) = try BridgeCall.decode("load", load(maxReloadAttempts: .number(3))) else {

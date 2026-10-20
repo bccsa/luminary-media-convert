@@ -11,10 +11,16 @@ public struct InlineFrame: Equatable, Sendable {
     public let front: Bool
     /// The band the page leaves under the picture for its subtitles; 0 puts them over the picture's foot.
     public let captionHeight: Double
+    /// Something of the page covers the picture's place (a sheet, a menu): no subtitles are drawn there.
+    public let captionsHidden: Bool
 
-    public init(x: Double, y: Double, width: Double, height: Double, front: Bool = false, captionHeight: Double = 0) {
+    public init(
+        x: Double, y: Double, width: Double, height: Double,
+        front: Bool = false, captionHeight: Double = 0, captionsHidden: Bool = false
+    ) {
         self.front = front
         self.captionHeight = captionHeight
+        self.captionsHidden = captionsHidden
         self.x = x
         self.y = y
         self.width = width

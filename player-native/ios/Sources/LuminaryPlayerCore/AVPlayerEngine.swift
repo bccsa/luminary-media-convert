@@ -53,6 +53,8 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     private var reportedBufferedEnd = -1.0
     private var poll: Cancellable?
     private var nowPlaying: NowPlayingController?
+    /// What the page said is playing, for the full-screen's top line.
+    private var loadedMetadata: NowPlaying?
     private var ladder: RecoveryLadder?
     /// Whether playback should be running: every play and pause, whoever made it, and the end
     /// of the item, which is what the viewer asked for; but not a failure, which stops the player
@@ -241,6 +243,9 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         self.masterUri = masterUri
         restoreAudioId = nil
         nowPlaying?.setMetadata(metadata)
+        loadedMetadata = metadata
+        // A video swapped in while full-screen is open is named there too.
+        if presentation == .fullscreen { presenter?.setHeading(title: metadata?.title, subtitle: metadata?.subtitle) }
         ladder?.setPolicy(recovery)
         // The reload the ladder asked for picks up what the viewer asked for, even when playback
         // never got going: the controller resumes only what it saw playing.
@@ -517,7 +522,9 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
             selectUpNext: { [weak self] id in self?.events?.browseSelected(id: id) },
             nextUp: { [weak self] id in
                 if let id { self?.events?.browseSelected(id: id, kind: "nextup") } else { self?.events?.nextUpDismissed() }
-            }
+            },
+            title: loadedMetadata?.title,
+            subtitle: loadedMetadata?.subtitle
         )
     }
 
