@@ -1149,6 +1149,13 @@ onBeforeUnmount(() => clearTimeout(switchingLimit));
  * loading, which a poster nobody has pressed play on does too.
  */
 const busy = computed(() => switching.value || (mediaWaiting.value && state.value.playing));
+/** The now-playing screen draws its own spinner. */
+const showsBusy = computed(() => busy.value && !audioFullscreen.value && state.value.lifecycle !== 'error');
+/**
+ * A finite video whose length is not known yet: skipping, speed and the timeline wait for it, so a source that turns
+ * out to be live does not show them for a moment and take them away.
+ */
+const awaitingDuration = computed(() => !state.value.live && !(state.value.duration > 0));
 
 /** Leaving fullscreen, nothing left to browse, or another video: the panel has no business staying. */
 watch([isFullscreen, hasBrowse, () => props.source], ([full, any]) => {
@@ -1476,6 +1483,8 @@ defineExpose({
             'lmpl-audio-fs': audioFullscreen,
             'lmpl-scrubbing': rosterShown,
             'lmpl-previewing': scrub !== null,
+            'lmpl-is-busy': showsBusy,
+            'lmpl-awaiting-duration': awaitingDuration,
         }"
         :style="{
             '--lmpl-roster-h': `${rosterHeight}px`,
@@ -1537,6 +1546,11 @@ defineExpose({
                 <media-gesture v-if="gesturesOn" type="tap" action="toggleControls" pointer="touch"></media-gesture>
 
                 <media-controls class="lmpl-controls" v-html="controlsHtml"></media-controls>
+
+                <!-- Inside the container, so it goes fullscreen with the picture, in the play button's place. -->
+                <div v-if="showsBusy" class="lmpl-busy" role="status" :aria-label="msg.loading" data-test="lmplBusy">
+                    <svg class="lmpl-afs-spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 3a9 9 0 1 1-9 9" /></svg>
+                </div>
 
                 <!-- Fullscreen with sound alone: a now-playing screen, over the controls it hides. -->
                 <AudioFullscreen
@@ -1720,10 +1734,6 @@ defineExpose({
 
         <div class="lmpl-slot">
             <slot :state="state" :controller="controller"></slot>
-        </div>
-
-        <div v-if="busy && state.lifecycle !== 'error'" class="lmpl-busy" role="status" :aria-label="msg.loading" data-test="lmplBusy">
-            <svg class="lmpl-afs-spinner" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 3a9 9 0 1 1-9 9" /></svg>
         </div>
 
         <template v-if="state.lifecycle === 'waiting-for-master'">

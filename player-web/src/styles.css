@@ -1853,16 +1853,34 @@
     -webkit-mask-image: linear-gradient(transparent, #000 18%, #000 82%, transparent);
     mask-image: linear-gradient(transparent, #000 18%, #000 82%, transparent);
 }
-/* Over the picture while the player gets ready or waits for data: the same turning ring, out of the way of taps. */
+/*
+ * While the player gets ready or waits for data: a turning ring in the play button's place, out of the way of taps.
+ * It stays when the controls hide, so the picture always says it is loading.
+ */
 .lmpl-root .lmpl-busy {
     position: absolute;
     inset: 0;
-    z-index: 3;
+    z-index: 31;
     display: grid;
     place-items: center;
     color: #fff;
     pointer-events: none;
     filter: drop-shadow(0 1px 3px rgb(0 0 0 / 0.6));
+}
+.lmpl-root .lmpl-busy svg {
+    width: calc(56px * var(--lmpl-s));
+    height: calc(56px * var(--lmpl-s));
+}
+.lmpl-root.lmpl-is-busy .lmpl-play {
+    visibility: hidden;
+}
+
+/* Until a finite video's length is known there is nothing to skip through or scrub, and no speed worth offering. */
+.lmpl-root.lmpl-awaiting-duration .lmpl-seek,
+.lmpl-root.lmpl-awaiting-duration .lmpl-opt-speed,
+.lmpl-root.lmpl-awaiting-duration .lmpl-timeline-row,
+.lmpl-root.lmpl-awaiting-duration .lmpl-chapter-now {
+    display: none;
 }
 
 /* The play button while the player gets ready: a ring, three quarters round, turning. */
