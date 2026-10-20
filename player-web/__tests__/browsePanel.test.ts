@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { nextTick } from 'vue';
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils';
 import { createInitialState, type PlayerControllerApi, type PlayerState } from '@luminary-media-converter/player-core';
 import LuminaryPlayer from '../src/components/LuminaryPlayer.vue';
@@ -155,6 +156,35 @@ describe('LuminaryPlayer browse panel', () => {
         await flushPromises();
         expect(w.emitted('upnextselect')).toEqual([['n1']]);
         expect(panel()).toBeNull();
+    });
+
+    it('shows the player busy from a pick until something plays, for 15 s at most', async () => {
+        await mountPlayer({ upNext: UP_NEXT }, {});
+        await setFullscreen(true);
+        vi.useFakeTimers();
+        try {
+            toggle().click();
+            await nextTick();
+            document.querySelectorAll<HTMLElement>('.lmpl-upnext')[0]!.click();
+            await nextTick();
+            expect(document.querySelector("[data-test='lmplBusy']")).not.toBeNull();
+            vi.advanceTimersByTime(15_000);
+            await nextTick();
+            expect(document.querySelector("[data-test='lmplBusy']")).toBeNull();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('shows the player busy while it waits for data it was asked to play, and not once it plays', async () => {
+        await mountPlayer({}, { playing: true });
+        const video = document.querySelector('hlsjs-video')!;
+        video.dispatchEvent(new Event('waiting'));
+        await nextTick();
+        expect(document.querySelector("[data-test='lmplBusy']")).not.toBeNull();
+        video.dispatchEvent(new Event('playing'));
+        await nextTick();
+        expect(document.querySelector("[data-test='lmplBusy']")).toBeNull();
     });
 
     it('closes on Escape, on the close button and on a tap outside', async () => {

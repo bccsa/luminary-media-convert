@@ -356,7 +356,12 @@ onMounted(() => {
         mediaListeners.push([type, handler]);
     };
     on('play', () => keepAlive?.sync(true));
-    on('playing', () => keepAlive?.sync(true));
+    on('playing', () => {
+        keepAlive?.sync(true);
+        mediaWaiting.value = false;
+    });
+    on('waiting', () => (mediaWaiting.value = true));
+    on('canplay', () => (mediaWaiting.value = false));
     on('pause', () => keepAlive?.sync(false));
     on('ended', () => {
         keepAlive?.sync(false);
@@ -1106,9 +1111,44 @@ function pickChapter(chapter: Chapter): void {
 }
 
 function pickUpNext(id: string): void {
+    startSwitching();
     emit('upnextselect', id);
     closeBrowse();
 }
+
+// --- busy -------------------------------------------------------------------
+
+/** Waiting for data, as the browser reports it. */
+const mediaWaiting = ref(false);
+/**
+ * A video picked to play next is on its way from the tap until it plays: the host prepares it (its key, its source)
+ * while the video before stands paused. Past `SWITCHING_LIMIT_MS` the controls show again whatever came.
+ */
+const SWITCHING_LIMIT_MS = 15_000;
+const switching = ref(false);
+let switchingFrom = '';
+let switchingLimit: ReturnType<typeof setTimeout> | undefined;
+function startSwitching(): void {
+    switching.value = true;
+    switchingFrom = props.source.masterUrl;
+    clearTimeout(switchingLimit);
+    switchingLimit = setTimeout(() => (switching.value = false), SWITCHING_LIMIT_MS);
+}
+watch(
+    () => [props.source.masterUrl, state.value.playing, state.value.lifecycle] as const,
+    ([url, playing, lifecycle]) => {
+        if (switching.value && url !== switchingFrom && (playing || lifecycle === 'error')) {
+            switching.value = false;
+            clearTimeout(switchingLimit);
+        }
+    }
+);
+onBeforeUnmount(() => clearTimeout(switchingLimit));
+/**
+ * Waiting for data the viewer asked to see, or a pick on its way: a spinner over the picture. Not a source merely
+ * loading, which a poster nobody has pressed play on does too.
+ */
+const busy = computed(() => switching.value || (mediaWaiting.value && state.value.playing));
 
 /** Leaving fullscreen, nothing left to browse, or another video: the panel has no business staying. */
 watch([isFullscreen, hasBrowse, () => props.source], ([full, any]) => {
@@ -1293,6 +1333,7 @@ function selectNextUp(id?: string): void {
     const next = id ?? props.nextUp?.[0]?.id;
     if (!next || nextUpClosed.value) return;
     nextUpClosed.value = true;
+    startSwitching();
     emit('nextupselect', next);
 }
 
@@ -1679,6 +1720,10 @@ defineExpose({
 
         <div class="lmpl-slot">
             <slot :state="state" :controller="controller"></slot>
+        </div>
+
+        <div v-if="busy && state.lifecycle !== 'error'" class="lmpl-busy" role="status" :aria-label="msg.loading" data-test="lmplBusy">
+            <svg class="lmpl-afs-spinner" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 3a9 9 0 1 1-9 9" /></svg>
         </div>
 
         <template v-if="state.lifecycle === 'waiting-for-master'">
