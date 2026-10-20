@@ -34,6 +34,10 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     private let visibility: FullscreenControlsVisibility
 
     private let controls = UIView()
+    /// The subtitles, drawn here rather than by the player: over the picture's foot, lifted over the timeline while
+    /// the controls show.
+    private let subtitleLabel = SubtitleLabel()
+    private var subtitleWatch: UUID?
     private let playPause = GlyphButton(size: Skin.play, iconSize: Skin.playIcon, circle: true)
     private let spinner = SpinnerView()
     private let skipBack = GlyphButton(size: Skin.skip, iconSize: Skin.skipIcon, circle: true)
@@ -254,6 +258,15 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         videoView.playerLayer.videoGravity = .resizeAspect
         view.addSubview(videoView)
 
+        // Under the controls, so a menu or the panel covers the words rather than the other way round.
+        view.addSubview(subtitleLabel)
+        subtitleWatch = LegibleText.of(player).observe { [weak self] lines in
+            guard let self else { return }
+            self.subtitleLabel.text = lines
+            self.subtitleLabel.isHidden = lines.isEmpty
+            self.view.setNeedsLayout()
+        }
+
         controls.backgroundColor = .clear
         view.addSubview(controls)
         controls.addSubview(fade)
@@ -347,6 +360,8 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
 
     /// Stops watching the player and hands it back; called as the presentation ends.
     func detach() {
+        LegibleText.of(player).stopObserving(subtitleWatch)
+        subtitleWatch = nil
         stopWatchingDevice()
         restorePortrait()
         stopObserving()
@@ -419,6 +434,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         chapterLabel.frame = CGRect(
             x: area.minX + edge, y: timelineY - 2 * scale - chapterHeight, width: max(area.width - 2 * edge, 0), height: chapterHeight
         )
+        placeSubtitles(controlsShown: visibility.visible)
         // The fade rises from the bottom edge to the top of the column, so white controls read over a bright picture.
         let columnTop = restingY - (chapterLabel.isHidden ? 0 : chapterHeight + 2 * scale) - Skin.columnTop * scale
         fade.frame = CGRect(x: 0, y: columnTop, width: view.bounds.width, height: max(view.bounds.maxY - columnTop, 0))
@@ -820,9 +836,22 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         controls.isUserInteractionEnabled = visible
         UIView.animate(withDuration: visible ? Skin.showDuration : Skin.hideDuration) {
             self.controls.alpha = visible ? 1 : 0
+            self.placeSubtitles(controlsShown: visible)
         }
         placeNextUp(animated: true)
         UIAccessibility.post(notification: .layoutChanged, argument: nil)
+    }
+
+    /// Over the chapter line and the timeline while they show, as the web player lifts its own; near the foot when
+    /// they hide.
+    private func placeSubtitles(controlsShown: Bool) {
+        let area = view.bounds.inset(by: view.safeAreaInsets)
+        let scale = Skin.scale(forWidth: area.width)
+        let width = min(area.width * 0.8, 900)
+        subtitleLabel.font = .systemFont(ofSize: 18 * scale, weight: .semibold)
+        let fit = subtitleLabel.sizeThatFits(CGSize(width: width, height: area.height / 2))
+        let bottom = controlsShown ? min(chapterLabel.frame.minY, progress.frame.minY) - 10 * scale : area.maxY - 16 * scale
+        subtitleLabel.frame = CGRect(x: area.midX - width / 2, y: bottom - fit.height, width: width, height: fit.height)
     }
 
     // MARK: Chapters and up next
