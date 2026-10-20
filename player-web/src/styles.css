@@ -2163,3 +2163,25 @@
     text-transform: uppercase;
     color: #ff6b6b;
 }
+
+/* The picture fills the window, for a browser turned sideways: the host's player, with its own controls, is all
+   there is. Placed after the layouts so it wins over each of them. */
+.lmpl-root .lmpl-afs.lmpl-afs-fill .lmpl-afs-top,
+.lmpl-root .lmpl-afs.lmpl-afs-fill .lmpl-afs-info {
+    display: none;
+}
+.lmpl-root .lmpl-afs.lmpl-afs-fill .lmpl-afs-main {
+    position: absolute;
+    inset: 0;
+    padding: 0;
+    gap: 0;
+}
+.lmpl-root .lmpl-afs.lmpl-afs-fill .lmpl-afs-art {
+    width: 100%;
+    max-width: none;
+    height: 100%;
+    margin: 0;
+    aspect-ratio: auto;
+    border-radius: 0;
+    box-shadow: none;
+}

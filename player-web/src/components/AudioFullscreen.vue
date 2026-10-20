@@ -69,6 +69,11 @@ const props = defineProps<{
     chaptersSheet?: boolean;
     /** What takes the picture's place: the cover, or the host's picture (`stage` slot) at full width. */
     stage?: 'cover' | 'video';
+    /**
+     * The picture takes the whole screen and nothing else shows: a browser turned sideways, which cannot go full
+     * screen without a tap, has the host's player and its own controls fill the window instead.
+     */
+    fill?: boolean;
     /** The picture's width over its height, so its place takes the picture's shape; 16:9 when not known. */
     stageAspect?: number;
     /** Room under the picture for the host's subtitles. */
@@ -393,6 +398,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
             {
                 'lmpl-afs-nolist': !lyricsBeside,
                 'lmpl-afs-video': isVideo,
+                'lmpl-afs-fill': fill && isVideo,
                 'lmpl-afs-hole': isVideo && stageHole,
                 'lmpl-afs-captions': isVideo && captionBand,
             },
