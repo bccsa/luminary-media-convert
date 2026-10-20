@@ -682,7 +682,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                                 data-test="afsChaptersButton"
                                 @click="openChapters('chapters')"
                             >
-                                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" /></svg>
+                                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 6h10M10 12h10M10 18h10" /><rect x="3.5" y="4.5" width="3" height="3" rx="0.8" /><rect x="3.5" y="10.5" width="3" height="3" rx="0.8" fill="currentColor" /><rect x="3.5" y="16.5" width="3" height="3" rx="0.8" /></svg>
                             </button>
 
                             <button

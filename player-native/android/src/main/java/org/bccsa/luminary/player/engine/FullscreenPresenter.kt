@@ -349,6 +349,23 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
     }
 
     /**
+     * Names another video while full-screen stays open. The page behind may bring the system bars back as it
+     * changes, so they are put away again once it has settled.
+     */
+    fun setHeading(title: String?, subtitle: String?) {
+        controls?.setHeading(title, subtitle)
+        val view = view ?: return
+        val activity = host ?: return
+        val hideBars = Runnable {
+            if (this.view === view) {
+                WindowCompat.getInsetsController(activity.window, view).hide(WindowInsetsCompat.Type.systemBars())
+            }
+        }
+        view.post(hideBars)
+        view.postDelayed(hideBars, BARS_SETTLE_MS)
+    }
+
+    /**
      * Moves the picture to its own small window, which shows this view's picture alone. False when
      * nothing is presented or the system will not.
      */
@@ -432,6 +449,7 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         private const val PIP_TOGGLE = "org.bccsa.luminary.player.PIP_TOGGLE"
         private const val MAX_RATIO = 2.39f
         private const val ORIENTATION_SETTLE_MS = 600L
+        private const val BARS_SETTLE_MS = 700L
         private const val UPRIGHT_SETTLE_MS = 250L
 
         /** `ActivityInfo.FLAG_SUPPORTS_PICTURE_IN_PICTURE`: set by `android:supportsPictureInPicture`, and not in the public API. */

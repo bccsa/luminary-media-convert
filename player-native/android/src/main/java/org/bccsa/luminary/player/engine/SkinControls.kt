@@ -973,6 +973,14 @@ internal class SkinControls(
     /** True while the panel is open. */
     val hasBrowseOpen: Boolean get() = browseOpen
 
+    /** Names another video at the top left, when the one playing is swapped for it while full-screen stays open. */
+    fun setHeading(title: String?, subtitle: String?) {
+        titleView.text = title.orEmpty()
+        subtitleView.text = subtitle.orEmpty()
+        subtitleView.visibility = if (subtitle.isNullOrBlank()) GONE else VISIBLE
+        heading.visibility = if (title.isNullOrBlank()) GONE else VISIBLE
+    }
+
     /** Replaces what the panel lists, also while it is open; with nothing to list the button goes and the panel closes. */
     fun setBrowse(next: Browse?) {
         // A different offer is a different video's: its strip opens again.

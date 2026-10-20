@@ -286,6 +286,8 @@ class ExoEngine(
         // A recovery loads the same video again; only another video drops the old picture.
         keepLastFrame(nowPlaying != null && nowPlaying == loadedNowPlaying)
         loadedNowPlaying = nowPlaying
+        // A video swapped in while full-screen is open is named there too.
+        if (presenter.isPresented) presenter.setHeading(nowPlaying?.title, nowPlaying?.subtitle)
         artworkLoader.fallback = fallbackOf(nowPlaying)
         val item = MediaItem.Builder()
             .setUri(masterUri)
