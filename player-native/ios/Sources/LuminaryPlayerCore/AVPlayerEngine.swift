@@ -68,6 +68,8 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     private var legibleGroup: AVMediaSelectionGroup?
     private var audioOptions: [(id: String, option: AVMediaSelectionOption)] = []
     private var reportedAudio: (ids: [String], activeId: String?)?
+    /// The subtitle last told to the page; none on until a track is.
+    private var reportedSubtitle = ChangeReport<String?>(nil)
     /// The audio a reattach restores once the rebuilt item lists it.
     private var restoreAudioId: String?
 
@@ -274,6 +276,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         legibleGroup = nil
         audioOptions = []
         reportedAudio = nil
+        reportedSubtitle = ChangeReport(nil)
 
         let asset = AVURLAsset(url: url)
         asset.resourceLoader.setDelegate(router, queue: router.queue)
@@ -757,9 +760,12 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         }
     }
 
+    /// Only a change is told: the selection changes for audio too, and a repeat would reach the page before its own
+    /// pick has landed and undo it.
     private func reportSubtitle() {
         guard let item, let group = legibleGroup else { return }
-        events?.subtitleChanged(item.currentMediaSelection.selectedMediaOption(in: group)?.playlistName)
+        let selected = item.currentMediaSelection.selectedMediaOption(in: group)?.playlistName
+        if reportedSubtitle.tells(selected) { events?.subtitleChanged(selected) }
     }
 
     private func audioGroupLoaded(_ group: AVMediaSelectionGroup?, in item: AVPlayerItem) {

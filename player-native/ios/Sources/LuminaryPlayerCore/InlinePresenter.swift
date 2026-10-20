@@ -9,9 +9,12 @@ public struct InlineFrame: Equatable, Sendable {
     public let height: Double
     /// Over the web view instead of behind it: a small picture the page has no room to cut a hole for.
     public let front: Bool
+    /// The band the page leaves under the picture for its subtitles; 0 puts them over the picture's foot.
+    public let captionHeight: Double
 
-    public init(x: Double, y: Double, width: Double, height: Double, front: Bool = false) {
+    public init(x: Double, y: Double, width: Double, height: Double, front: Bool = false, captionHeight: Double = 0) {
         self.front = front
+        self.captionHeight = captionHeight
         self.x = x
         self.y = y
         self.width = width

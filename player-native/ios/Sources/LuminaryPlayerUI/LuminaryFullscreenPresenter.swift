@@ -128,6 +128,11 @@ public final class LuminaryFullscreenPresenter: NSObject, FullscreenPresenter {
 }
 
 extension LuminaryFullscreenPresenter: AVPictureInPictureControllerDelegate {
+    /// Only the player can draw in the small window, so it draws the subtitles there.
+    public func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPicture: AVPictureInPictureController) {
+        pictureInPicture.playerLayer.player.map { LegibleText.of($0).setPictureInPicture(true) }
+    }
+
     /// The picture is in its own window now: the full-screen view steps aside, kept for the
     /// return, and JavaScript is told. Not earlier: picture in picture can still refuse to start,
     /// and then the view is still up and nothing was said.
@@ -142,7 +147,9 @@ extension LuminaryFullscreenPresenter: AVPictureInPictureControllerDelegate {
     public func pictureInPictureController(
         _ pictureInPicture: AVPictureInPictureController,
         failedToStartPictureInPictureWithError error: Error
-    ) {}
+    ) {
+        pictureInPicture.playerLayer.player.map { LegibleText.of($0).setPictureInPicture(false) }
+    }
 
     /// The viewer returning to full-screen from picture in picture: the view comes back.
     public func pictureInPictureController(
@@ -158,6 +165,7 @@ extension LuminaryFullscreenPresenter: AVPictureInPictureControllerDelegate {
 
     /// Back in full-screen when the view was restored; closing picture in picture is leaving.
     public func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPicture: AVPictureInPictureController) {
+        pictureInPicture.playerLayer.player.map { LegibleText.of($0).setPictureInPicture(false) }
         guard pictureInPicture === self.pictureInPicture else { return }
         if controller?.presentingViewController != nil {
             onPresentation?(.fullscreen)

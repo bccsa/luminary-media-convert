@@ -36,6 +36,9 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
     private var settleCheck: DispatchWorkItem?
     private var heldPicture: UIView?
     private var readyObservation: NSKeyValueObservation?
+    /// The subtitles, over the page: in the band it leaves under the picture, or over the picture's foot.
+    private var subtitles: SubtitleLabel?
+    private var subtitleWatch: (text: LegibleText, token: UUID)?
     /// What the web view looked like before it was made see-through.
     private var restore: (opaque: Bool, background: UIColor?, scrollBackground: UIColor?)?
 
@@ -108,6 +111,7 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
                 DispatchQueue.main.async { self?.layout() }
             }
         }
+        watchSubtitles(of: player, in: container)
         layout()
         makeTransparent(webView)
         let onScreen = view.frame.intersects(webView.frame)
@@ -147,6 +151,43 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
             width: frame.width, height: frame.height
         )
         heldPicture?.frame = view.frame
+        layoutSubtitles(picture: view.frame)
+    }
+
+    private func watchSubtitles(of player: AVPlayer, in container: UIView) {
+        let label = subtitles ?? SubtitleLabel()
+        if label.superview !== container { container.addSubview(label) }
+        container.bringSubviewToFront(label)
+        subtitles = label
+        let text = LegibleText.of(player)
+        guard subtitleWatch?.text !== text else { return }
+        subtitleWatch.map { $0.text.stopObserving($0.token) }
+        let token = text.observe { [weak self] lines in
+            self?.subtitles?.text = lines
+            self?.layout()
+        }
+        subtitleWatch = (text, token)
+    }
+
+    /// In a band of its own the words read at a phone's size; over the picture they follow its size. None over a
+    /// small picture in front, nor while something else holds the picture.
+    private func layoutSubtitles(picture: CGRect) {
+        guard let label = subtitles, let frame else { return }
+        let empty = label.text?.isEmpty ?? true
+        label.isHidden = frame.front || suspended || empty
+        guard !label.isHidden else { return }
+        let band = CGFloat(frame.captionHeight)
+        let inset: CGFloat = 12
+        let width = max(picture.width - 2 * inset, 0)
+        if band > 0 {
+            label.font = .systemFont(ofSize: 16, weight: .semibold)
+            let fit = label.sizeThatFits(CGSize(width: width, height: band))
+            label.frame = CGRect(x: picture.minX + inset, y: picture.maxY + 6, width: width, height: min(fit.height, band - 6))
+        } else {
+            label.font = .systemFont(ofSize: max(12, min(20, picture.height * 0.075)), weight: .semibold)
+            let fit = label.sizeThatFits(CGSize(width: width, height: picture.height))
+            label.frame = CGRect(x: picture.minX + inset, y: picture.maxY - picture.height * 0.06 - fit.height, width: width, height: fit.height)
+        }
     }
 
     /// From the inline layer: the picture continues in its own window, and the page goes on.
@@ -223,6 +264,7 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
 
     public func setSuspended(_ suspended: Bool) {
         self.suspended = suspended
+        if suspended { subtitles?.isHidden = true }
         guard let layer = videoView?.playerLayer else { return }
         guard !suspended else {
             layer.player = nil
@@ -262,6 +304,10 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
     }
 
     private func tearDown() {
+        subtitleWatch.map { $0.text.stopObserving($0.token) }
+        subtitleWatch = nil
+        subtitles?.removeFromSuperview()
+        subtitles = nil
         pictureInPicture = nil
         routePicker?.removeFromSuperview()
         routePicker = nil
@@ -285,12 +331,21 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
 #if canImport(UIKit)
 extension LuminaryInlinePresenter: AVPictureInPictureControllerDelegate {
     /// Said once the picture is in its own window, not when it was asked for: it can still refuse.
+    public func pictureInPictureControllerWillStartPictureInPicture(_ controller: AVPictureInPictureController) {
+        controller.playerLayer.player.map { LegibleText.of($0).setPictureInPicture(true) }
+    }
+
     public func pictureInPictureControllerDidStartPictureInPicture(_ controller: AVPictureInPictureController) {
         onPictureInPicture?(true)
     }
 
     public func pictureInPictureControllerDidStopPictureInPicture(_ controller: AVPictureInPictureController) {
+        controller.playerLayer.player.map { LegibleText.of($0).setPictureInPicture(false) }
         onPictureInPicture?(false)
+    }
+
+    public func pictureInPictureController(_ controller: AVPictureInPictureController, failedToStartPictureInPictureWithError error: Error) {
+        controller.playerLayer.player.map { LegibleText.of($0).setPictureInPicture(false) }
     }
 }
 #endif
