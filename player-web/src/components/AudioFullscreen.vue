@@ -8,7 +8,7 @@ import NowPlayingLyrics from './NowPlayingLyrics.vue';
 import type { LyricCue } from '../ui/lyrics';
 import { skipIcon } from '../ui/controlsHtml';
 import type { ScrubPosition } from '../ui/audioFullscreen';
-import { SLEEP_MINUTES, SPEED_OPTIONS, chapterWindow, formatMinutes, sleepMinutesLeft } from '../ui/audioFullscreen';
+import { SLEEP_MINUTES, SPEED_OPTIONS, formatMinutes, sleepMinutesLeft } from '../ui/audioFullscreen';
 
 /**
  * The screen fullscreen becomes when only sound is playing: a now-playing screen, not a picture with controls.
@@ -67,6 +67,8 @@ const props = defineProps<{
     stageAspect?: number;
     /** Room under the picture for the host's subtitles. */
     captionBand?: boolean;
+    /** The words being said now, under the picture, where the host shows subtitles itself. */
+    caption?: string;
     /** The host draws the picture behind the page, where the stage is: nothing of the screen may cover it there. */
     stageHole?: boolean;
     /** The screen's colour in place of the cover blurred: a small picture (a ThumbHash) that is soft once stretched. */
@@ -224,7 +226,10 @@ const skip = (seconds: number): void => emit('seek', Math.min(knownDuration.valu
 
 const browseOpen = ref(false);
 const uid = `lmpl-afs-${Math.random().toString(36).slice(2, 9)}`;
-function openChapters(): void {
+/** The tab the panel opens on; the host's default when none is asked for. */
+const browseTab = ref<'chapters' | 'upnext' | undefined>(undefined);
+function openChapters(tab?: 'chapters'): void {
+    browseTab.value = tab;
     if (props.chaptersSheet) {
         menu.value = null;
         browseOpen.value = true;
@@ -241,8 +246,6 @@ function pickUpNext(id: string): void {
     browseOpen.value = false;
 }
 
-const showChapterList = computed(() => props.chapters.length > 1);
-const windowRows = computed(() => chapterWindow(props.chapters, props.chapterIndex));
 
 /**
  * `m:ss`, or `h:mm:ss` for every time once `guide` (the length) reaches an hour, and minutes padded
@@ -374,7 +377,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
         :class="[
             `lmpl-afs-${appearance}`,
             {
-                'lmpl-afs-nolist': !showChapterList && !lyricsBeside,
+                'lmpl-afs-nolist': !lyricsBeside,
                 'lmpl-afs-video': isVideo,
                 'lmpl-afs-hole': isVideo && stageHole,
                 'lmpl-afs-captions': isVideo && captionBand,
@@ -415,6 +418,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
             >
                 <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
             </button>
+            <span class="lmpl-afs-toptitle" data-test="afsTopTitle">{{ title }}</span>
             <span class="lmpl-afs-eyebrow">{{ eyebrow }}</span>
             <div v-if="slots['top-end']" class="lmpl-afs-topend" data-test="afsTopEnd"><slot name="top-end"></slot></div>
             <span v-else class="lmpl-afs-iconbtn lmpl-afs-spacer" aria-hidden="true"></span>
@@ -424,6 +428,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
             <div ref="stageEl" class="lmpl-afs-art" :class="{ 'lmpl-afs-art-lyrics': lyricsInStage }" data-test="afsStage">
                 <!-- The host's player stays mounted with sound alone, only hidden, so switching never stops playback. -->
                 <div v-if="slots.stage" v-show="isVideo" class="lmpl-afs-stage" data-test="afsStageSlot"><slot name="stage"></slot></div>
+                <p v-if="isVideo && caption" class="lmpl-afs-caption" data-test="afsCaption">{{ caption }}</p>
                 <!-- A drag along the picture's foot scrubs like the bar, for a thumb that lands short of it. -->
                 <div
                     v-if="isVideo && knownDuration && !isLive"
@@ -465,7 +470,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                     <p v-if="subtitle" class="lmpl-afs-subtitle">{{ subtitle }}</p>
                 </div>
 
-                <!-- Wide: the lyrics when they are on, beside the cover; else the chapters, a list that follows the audio. -->
+                <!-- Wide: the lyrics, when they are on, beside the cover. -->
                 <div v-if="lyricsBeside" class="lmpl-afs-sidelyrics" data-test="afsSideLyrics">
                     <NowPlayingLyrics
                         :lines="lyricLines"
@@ -476,19 +481,6 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                         @seek="emit('seek', $event)"
                     />
                 </div>
-                <ol v-else-if="showChapterList" class="lmpl-afs-chapters" data-test="afsChapters">
-                    <li v-for="row in windowRows" :key="row.index">
-                        <button
-                            type="button"
-                            class="lmpl-afs-chapter"
-                            :aria-current="row.index === chapterIndex ? 'true' : undefined"
-                            @click="emit('seek-chapter', row.chapter)"
-                        >
-                            <span class="lmpl-afs-chapter-title">{{ row.chapter.title }}</span>
-                            <span class="lmpl-afs-chapter-time">{{ clock(row.chapter.startTime, timeGuide) }}</span>
-                        </button>
-                    </li>
-                </ol>
 
                 <div class="lmpl-afs-controls">
                     <div class="lmpl-afs-timeline">
@@ -683,12 +675,23 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                             <slot name="cast"></slot>
 
                             <button
+                                v-if="chapters.length > 1"
+                                type="button"
+                                class="lmpl-afs-iconbtn"
+                                :aria-label="messages.chapters"
+                                data-test="afsChaptersButton"
+                                @click="openChapters('chapters')"
+                            >
+                                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" /></svg>
+                            </button>
+
+                            <button
                                 v-if="hasBrowse"
                                 type="button"
                                 class="lmpl-afs-iconbtn"
                                                                 :aria-label="messages.browse"
                                 data-test="afsBrowse"
-                                @click="openChapters"
+                                @click="openChapters()"
                             >
                                 <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" /></svg>
                             </button>
@@ -701,6 +704,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
         <!-- Chapters and up next, over this screen: the web player's own panel. A pick goes there and it closes. -->
         <BrowsePanel
             v-if="browseOpen"
+            :initial-tab="browseTab"
             :chapters="chapters"
             :current-chapter="chapterIndex"
             :up-next="upNext"

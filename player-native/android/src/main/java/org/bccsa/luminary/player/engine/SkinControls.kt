@@ -89,6 +89,10 @@ internal class SkinControls(
     private val onBrowseSelect: ((String) -> Unit)? = null,
     /** The strip near the end: the id of the video picked, or null when the viewer closes it. */
     private val onNextUp: ((String?) -> Unit)? = null,
+    /** What plays, named at the top left; nothing there when blank. */
+    title: String? = null,
+    /** Who it is by, small under the title. */
+    subtitle: String? = null,
     private val onLeave: () -> Unit,
 ) : FrameLayout(context), Player.Listener {
     private val main = Handler(Looper.getMainLooper())
@@ -122,6 +126,10 @@ internal class SkinControls(
     private val label = TextView(context)
     private val chapterNow = TextView(context)
     private val fade = FadeDrawable()
+    private val topBar = FrameLayout(context)
+    private val heading = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+    private val titleView = TextView(context)
+    private val subtitleView = TextView(context)
 
     private var volumeBeforeMute = 1f
     /** The right-hand time shows the whole length instead of what is left, as the web's does when pressed. */
@@ -235,13 +243,36 @@ internal class SkinControls(
         actionsRow.addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
         actionsRow.addView(castButton.tap { onCast?.invoke() })
         actionsRow.addView(pipButton.tap { onPictureInPicture?.invoke() })
-        actionsRow.addView(exitButton.tap { onLeave() })
         column.addView(actionsRow)
         column.background = fade
         // The timeline lifts out of the column onto the roster; a view moved outside its parent is clipped.
         column.clipChildren = false
         column.clipToPadding = false
 
+        // The top line: what plays at the left, leaving full-screen at the right, over a fade from the top edge.
+        titleView.apply {
+            text = title.orEmpty()
+            setTextColor(Color.WHITE)
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            setShadowLayer(dpf(2f), 0f, dpf(1f), 0xB3000000.toInt())
+        }
+        subtitleView.apply {
+            text = subtitle.orEmpty()
+            setTextColor(0x99FFFFFF.toInt())
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            setShadowLayer(dpf(2f), 0f, dpf(1f), 0xB3000000.toInt())
+            visibility = if (subtitle.isNullOrBlank()) GONE else VISIBLE
+        }
+        heading.addView(titleView)
+        heading.addView(subtitleView)
+        heading.visibility = if (title.isNullOrBlank()) GONE else VISIBLE
+        topBar.background = TopFadeDrawable()
+        topBar.addView(heading, LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.TOP or Gravity.START))
+        topBar.addView(exitButton.tap { onLeave() }, LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.TOP or Gravity.END))
+        panel.addView(topBar, LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.TOP))
         panel.addView(roster, LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.BOTTOM))
         panel.addView(column, LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.BOTTOM))
         label.apply {
@@ -1282,10 +1313,18 @@ internal class SkinControls(
                 gravity = Gravity.CENTER_VERTICAL
             }
         }
-        listOf(muteButton, qualityButton, audioButton, rateButton, subtitlesButton, browseButton, castButton, pipButton, exitButton).forEach {
+        listOf(muteButton, qualityButton, audioButton, rateButton, subtitlesButton, browseButton, castButton, pipButton).forEach {
             it.iconDp = 22f * s
             it.lp(px(40f), px(40f), margin = 1)
         }
+        exitButton.iconDp = 22f * s
+        // Its padding keeps the glyph on the line of the timeline's right end.
+        exitButton.layoutParams = LayoutParams(px(40f), px(40f), Gravity.TOP or Gravity.END).apply { marginEnd = -px(8f) }
+        titleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 17f * s)
+        subtitleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12f * s)
+        topBar.setPadding(edgePx(), px(12f), edgePx(), px(36f))
+        // Clear of the exit button, which shares the line.
+        heading.layoutParams = LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.TOP or Gravity.START).apply { marginEnd = px(56f) }
         timeline.lp(px(30f))
         timeline.scale = s
         listOf(elapsed, remaining).forEach {
@@ -1413,6 +1452,32 @@ internal class SkinControls(
 
 /** The skip button's glyph: a circular arrow with the interval written in it; the arrow, never the number, mirrors. */
 private class Skip(val seconds: Int, val forward: Boolean)
+
+/** The dark fade under the top line: dark at the top edge, gone by its foot. */
+private class TopFadeDrawable : Drawable() {
+    private val paint = Paint()
+    override fun onBoundsChange(bounds: Rect) {
+        paint.shader = LinearGradient(
+            0f, bounds.top.toFloat(), 0f, bounds.bottom.toFloat(),
+            intArrayOf(0x80000000.toInt(), 0x33000000, 0x00000000),
+            floatArrayOf(0f, 0.5f, 1f),
+            Shader.TileMode.CLAMP,
+        )
+    }
+
+    override fun draw(canvas: Canvas) = canvas.drawRect(bounds, paint)
+
+    override fun setAlpha(alpha: Int) {
+        paint.alpha = alpha
+    }
+
+    override fun setColorFilter(colorFilter: ColorFilter?) {
+        paint.colorFilter = colorFilter
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity() = PixelFormat.TRANSLUCENT
+}
 
 /** The dark fade the controls sit on: opaque at the bottom edge, gone by the top of the column. */
 private class FadeDrawable : Drawable() {

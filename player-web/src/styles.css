@@ -257,6 +257,57 @@
     pointer-events: none !important;
 }
 
+/* The top line, fullscreen only: what plays at the left and leaving at the right, over a fade from the top edge. */
+.lmpl-topline {
+    position: absolute;
+    inset: 0 0 auto;
+    display: none;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: calc(16px * var(--lmpl-s));
+    padding: calc(12px * var(--lmpl-s)) var(--lmpl-edge) calc(36px * var(--lmpl-s));
+    background: linear-gradient(to bottom, rgb(0 0 0 / 0.5), rgb(0 0 0 / 0.2) 50%, transparent);
+    pointer-events: none;
+}
+
+.lmpl-root.lmpl-is-fullscreen .lmpl-topline {
+    display: flex;
+}
+
+.lmpl-heading {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.lmpl-heading-title {
+    overflow: hidden;
+    font-size: calc(17px * var(--lmpl-s));
+    font-weight: 600;
+    line-height: 1.25;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.lmpl-heading-sub {
+    overflow: hidden;
+    font-size: calc(12px * var(--lmpl-s));
+    color: rgb(255 255 255 / 0.7);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.lmpl-topline .lmpl-topline-exit {
+    flex: none;
+    margin-inline-end: calc(-8px * var(--lmpl-s));
+    pointer-events: auto;
+}
+
+/* Leaving fullscreen is at the top then, not twice. */
+.lmpl-root.lmpl-is-fullscreen.lmpl-has-heading .lmpl-remote .media-fullscreen-button {
+    display: none;
+}
+
 .lmpl-cluster,
 .lmpl-bottom {
     pointer-events: auto;
@@ -506,15 +557,16 @@
  * trigger itself in that case; these classes say the same from the player's own state, so the layout
  * does not depend on it.
  */
-.lmpl-root:not(.lmpl-has-quality-choice) .lmpl-opt-quality,
-.lmpl-root:not(.lmpl-has-audio-choice) .lmpl-opt-audio,
-.lmpl-root:not(.lmpl-has-subtitles) .lmpl-opt-captions {
+/* Read from any ancestor carrying the class, not the first `.lmpl-root`: a host may wrap the player in a root of its own. */
+.lmpl-opt-quality:not(.lmpl-has-quality-choice *),
+.lmpl-opt-audio:not(.lmpl-has-audio-choice *),
+.lmpl-opt-captions:not(.lmpl-has-subtitles *) {
     display: none !important;
 }
 
 /* Chapters and up next are browsed in fullscreen, and only when there is something to browse. */
-.lmpl-root:not(.lmpl-has-browse) .lmpl-opt-browse,
-.lmpl-root:not(.lmpl-is-fullscreen) .lmpl-opt-browse {
+.lmpl-opt-browse:not(.lmpl-has-browse *),
+.lmpl-opt-browse:not(.lmpl-is-fullscreen *) {
     display: none !important;
 }
 
@@ -1011,15 +1063,15 @@
     font-weight: 700;
 }
 
-.lmpl-chapter-title {
-    flex: 1;
-    min-width: 0;
+.lmpl-chapter-time {
+    font-variant-numeric: tabular-nums;
 }
 
-.lmpl-chapter-time {
-    flex: none;
-    font-variant-numeric: tabular-nums;
-    color: rgb(255 255 255 / 0.65);
+/* A chapter wears the same tile as an up next row, with an icon where the picture is. */
+.lmpl-chapter-tile {
+    display: grid;
+    place-items: center;
+    color: rgb(255 255 255 / 0.8);
 }
 
 .lmpl-upnext-thumb {
@@ -1291,6 +1343,19 @@
     opacity: 0.9;
 }
 
+/* The title beside the chevron, where the screen is wide and the column has no need to say it again. */
+.lmpl-afs-toptitle {
+    display: none;
+    flex: 1;
+    min-width: 0;
+    margin-inline-start: 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: calc(17px * var(--lmpl-s));
+    font-weight: 700;
+}
+
 .lmpl-afs-iconbtn {
     position: relative;
     display: inline-flex;
@@ -1421,68 +1486,6 @@
 .lmpl-afs-subtitle {
     margin: 2px 0 0;
     font-size: calc(13px * var(--lmpl-s));
-    opacity: 0.75;
-}
-
-.lmpl-afs-chapter:focus-visible {
-    outline: 2px solid #fff;
-    outline-offset: 2px;
-}
-
-.lmpl-afs-chapters {
-    display: none;
-    flex: 1;
-    flex-direction: column;
-    gap: 2px;
-    min-height: 0;
-    margin: 0;
-    padding: 0;
-    overflow: hidden;
-    list-style: none;
-    /* Fades out at the foot, where the list goes on; the head stays clear, since the playing chapter may be its first. */
-    -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 78%, transparent);
-    mask-image: linear-gradient(to bottom, #000 0, #000 78%, transparent);
-}
-
-.lmpl-afs-chapter {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    width: 100%;
-    padding: 7px 4px;
-    border: 0;
-    border-radius: 8px;
-    background: none;
-    color: rgb(255 255 255 / 0.55);
-    font: inherit;
-    font-size: calc(17px * var(--lmpl-s));
-    font-weight: 600;
-    text-align: left;
-    cursor: pointer;
-}
-
-.lmpl-afs-chapter:hover {
-    color: #fff;
-}
-
-.lmpl-afs-chapter[aria-current='true'] {
-    color: #fff;
-    font-size: calc(23px * var(--lmpl-s));
-}
-
-.lmpl-afs-chapter-title {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.lmpl-afs-chapter-time {
-    align-self: center;
-    flex: none;
-    font-size: 0.7em;
-    font-weight: 400;
-    font-variant-numeric: tabular-nums;
     opacity: 0.75;
 }
 
@@ -1725,7 +1728,8 @@
     width: 100cqw;
     aspect-ratio: var(--lmpl-stage-ar, 16 / 9);
     max-height: 46cqh;
-    overflow: hidden;
+    /* Visible, so the words under the picture can hang from its foot; the stage clips the picture. */
+    overflow: visible;
     background: #000;
 }
 /* The picture sits at the top of its place and the host's subtitles under it, in a band the size of two lines. */
@@ -1733,13 +1737,48 @@
     aspect-ratio: auto;
     height: calc(100cqw / var(--lmpl-stage-ar, 16 / 9) + 64px);
 }
+.lmpl-afs-captions .lmpl-afs-art {
+    background: transparent;
+}
+/* The black is the picture's, not the band's: the subtitles rest on the screen's own colour. */
+/* The words under the picture, centred, two lines at most. They hang from the picture's foot, so the picture keeps its place. */
+.lmpl-afs-caption {
+    position: absolute;
+    inset: 100% 0 auto;
+    margin: 8px 0 0;
+    padding: 0 16px;
+    max-height: calc(2.6em);
+    overflow: hidden;
+    font-size: calc(15px * var(--lmpl-s));
+    font-weight: 500;
+    line-height: 1.3;
+    text-align: center;
+    text-shadow: 0 1px 2px rgb(0 0 0 / 0.6);
+    white-space: pre-line;
+}
+
 .lmpl-afs-captions .lmpl-afs-stage {
     bottom: 64px;
+    overflow: hidden;
+    background: #000;
+    border-radius: inherit;
 }
 .lmpl-afs-stage,
 .lmpl-afs-stage > * {
     position: absolute;
     inset: 0;
+}
+
+.lmpl-afs-stage {
+    overflow: hidden;
+    border-radius: inherit;
+}
+
+/* The host's player fills the picture's place, whatever shape that is, rather than keeping its own 16:9 and leaving a
+   bare strip under a 4:3 or square video. */
+.lmpl-afs-stage .lmpl-root {
+    height: 100%;
+    aspect-ratio: auto;
 }
 
 /* A picture the platform draws behind the page shows only where nothing of the screen covers it: the screen's
@@ -1786,6 +1825,8 @@
     height: min(78cqw, 42cqh);
 }
 .lmpl-afs-lyrics {
+    /* The lines' offsets are read from here, to put the one being sung in the middle. */
+    position: relative;
     box-sizing: border-box;
     height: 100%;
     margin: 0;
@@ -1814,7 +1855,8 @@
 }
 .lmpl-afs-lyric {
     display: block;
-    width: 100%;
+    /* Room for the line being sung, which grows by a little from its left edge. */
+    width: 94%;
     padding: 6px 0;
     border: 0;
     color: inherit;
@@ -1894,8 +1936,13 @@
         margin-top: 12px;
     }
 
-    .lmpl-afs-chapters {
-        display: flex;
+    .lmpl-afs-toptitle {
+        display: block;
+    }
+
+    .lmpl-afs-eyebrow,
+    .lmpl-afs-titles {
+        display: none;
     }
 
     .lmpl-afs-bottomrow {
@@ -1932,13 +1979,22 @@
         gap: clamp(14px, 2.4cqh, 28px);
     }
 
+    /* With the lyrics beside the cover the column takes the screen's height, so the words scroll inside it
+       above the controls instead of running off the screen. */
+    .lmpl-afs-info:has(.lmpl-afs-sidelyrics) {
+        align-self: stretch;
+    }
+
     .lmpl-afs-controls {
         margin-top: clamp(16px, 4cqh, 44px);
     }
 
+    /* The transport and the tools each take a line of their own, centred under the timeline. */
     .lmpl-afs-bottomrow {
-        flex-wrap: wrap;
-        gap: 8px 24px;
+        flex-direction: column;
+        align-items: stretch;
+        justify-content: center;
+        gap: 14px;
     }
 
     /* The tools grow with the window, more slowly than the transport, so they still fit beside it. */

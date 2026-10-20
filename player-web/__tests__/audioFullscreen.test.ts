@@ -62,16 +62,18 @@ describe('AudioFullscreen — what it shows', () => {
         expect(bare.find('.lmpl-afs-cover-empty').exists()).toBe(true);
     });
 
-    it('has no chapter list without chapters', () => {
+    it('has no chapters button without chapters', () => {
         const wrapper = mountScreen({ chapters: [], chapterIndex: -1 });
-        expect(find(wrapper, 'afsChapters').exists()).toBe(false);
+        expect(find(wrapper, 'afsChaptersButton').exists()).toBe(false);
     });
 
-    it('lists a window of chapters around the playing one, marking it', () => {
-        const wrapper = mountScreen();
-        const rows = find(wrapper, 'afsChapters').findAll('button');
-        expect(rows.map((r) => r.find('.lmpl-afs-chapter-title').text())).toEqual(['Chapter 2', 'Chapter 3', 'Chapter 4', 'Chapter 5']);
-        expect(wrapper.find('[aria-current=true] .lmpl-afs-chapter-title').text()).toBe('Chapter 3');
+    it('opens the chapters from their own button, as rows like up next, marking the playing one', async () => {
+        const wrapper = mountScreen({ chaptersSheet: true });
+        await find(wrapper, 'afsChaptersButton').trigger('click');
+        const rows = wrapper.findAll('.lmpl-chapter');
+        expect(rows).toHaveLength(chapters.length);
+        expect(rows[0]!.find('.lmpl-upnext-title').text()).toBe('Chapter 1');
+        expect(wrapper.find('.lmpl-chapter[aria-current=true] .lmpl-upnext-title').text()).toBe('Chapter 3');
     });
 
     it('wears the cover as a colour over the whole screen, in light and in dark', () => {
@@ -188,9 +190,10 @@ describe('AudioFullscreen — what it asks for', () => {
     });
 
     it('asks to go to the chapter that is chosen', async () => {
-        const wrapper = mountScreen();
-        await find(wrapper, 'afsChapters').findAll('button')[3]!.trigger('click');
-        expect(wrapper.emitted('seek-chapter')![0]).toEqual([chapters[4]]);
+        const wrapper = mountScreen({ chaptersSheet: true });
+        await find(wrapper, 'afsChaptersButton').trigger('click');
+        await wrapper.findAll('.lmpl-chapter')[3]!.trigger('click');
+        expect(wrapper.emitted('seek-chapter')![0]).toEqual([chapters[3]]);
     });
 
     it('opens the speed menu, asks for a speed, and closes', async () => {

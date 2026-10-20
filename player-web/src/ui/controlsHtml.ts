@@ -183,6 +183,19 @@ function remote(): string {
     );
 }
 
+/** What plays, at the top left, and leaving fullscreen at the top right. Fullscreen only: see `styles.css`. */
+function topLine(heading: { title: string; subtitle?: string }): string {
+    return (
+        '<div class="lmpl-topline">' +
+        '<div class="lmpl-heading">' +
+        `<span class="lmpl-heading-title">${escapeHtml(heading.title)}</span>` +
+        (heading.subtitle ? `<span class="lmpl-heading-sub">${escapeHtml(heading.subtitle)}</span>` : '') +
+        '</div>' +
+        `<media-fullscreen-button class="media-button lmpl-icon-btn media-fullscreen-button lmpl-topline-exit">${icon('fullscreen-enter', 'media-fullscreen-button-enter-icon')}${icon('fullscreen-exit', 'media-fullscreen-button-exit-icon')}</media-fullscreen-button>` +
+        '</div>'
+    );
+}
+
 /** Pause/play in the middle, the skip buttons flanking it. */
 function centreCluster(options: ControlsHtmlOptions): string {
     return (
@@ -260,12 +273,14 @@ const DEFAULT_LABELS: ControlsHtmlLabels = {
 export function buildControlsHtml(
     options: ControlsHtmlOptions,
     id: string,
-    given: Partial<ControlsHtmlLabels> = {}
+    given: Partial<ControlsHtmlLabels> = {},
+    heading?: { title: string; subtitle?: string }
 ): string {
     const labels = { ...DEFAULT_LABELS, ...given };
     return (
         '<media-controls-backdrop class="video-controls-backdrop"></media-controls-backdrop>' +
         '<media-controls-content class="lmpl-controls-content">' +
+        (heading?.title ? topLine(heading) : '') +
         centreCluster(options) +
         bottomBar(options, id, labels) +
         '</media-controls-content>'
