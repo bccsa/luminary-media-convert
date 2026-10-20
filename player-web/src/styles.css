@@ -1972,16 +1972,41 @@
         display: inline-flex;
     }
 
+    /* The sound's screen on its side has no switch to the picture at the top: turning the phone upright brings it back. */
+    .lmpl-afs:not(.lmpl-afs-video) .lmpl-afs-topend [role='group'] {
+        display: none;
+    }
+
+    /* The transport and the tools stand on the title's left edge, as the column's other lines do. */
+    .lmpl-afs-transport,
+    .lmpl-afs-tools {
+        justify-content: flex-start;
+    }
+
+    .lmpl-afs-tools {
+        gap: 10px;
+        margin-inline-start: calc(-8px * var(--lmpl-s));
+    }
+
+    /* The tools are smaller and quieter here, under the transport that leads. */
+    .lmpl-root .lmpl-afs-tools .lmpl-afs-iconbtn {
+        width: calc(38px * var(--lmpl-s));
+        height: calc(38px * var(--lmpl-s));
+        opacity: 0.85;
+    }
+
+    .lmpl-root .lmpl-afs-tools .lmpl-afs-iconbtn svg,
+    .lmpl-root .lmpl-afs-tools .lmpl-afs-iconbtn .media-button-icon {
+        width: calc(20px * var(--lmpl-s));
+        height: calc(20px * var(--lmpl-s));
+    }
+
     /* The transport and the tools each take a line of their own, centred, so a row of six tools cannot run off the side. */
     .lmpl-afs-bottomrow {
         flex-direction: column;
         align-items: stretch;
         justify-content: center;
         row-gap: 10px;
-    }
-
-    .lmpl-afs-tools {
-        gap: 2px;
     }
 }
 
@@ -2010,8 +2035,8 @@
     }
 
     .lmpl-root .lmpl-afs-tools .lmpl-afs-iconbtn {
-        width: calc(40px * var(--lmpl-s));
-        height: calc(40px * var(--lmpl-s));
+        width: calc(36px * var(--lmpl-s));
+        height: calc(36px * var(--lmpl-s));
     }
 
     .lmpl-afs-transport {
