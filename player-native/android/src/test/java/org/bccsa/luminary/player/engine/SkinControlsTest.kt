@@ -398,6 +398,25 @@ class SkinControlsTest {
     private val opener = "Chapters and up next"
 
     @Test
+    fun `a pick shows the spinner from the tap, while the page prepares the video, and only for a while`() {
+        val picked = mutableListOf<String>()
+        val controls = browseControls(picked = picked)
+        controls.find(opener)!!.performClick()
+        controls.anyView("Up next").performClick()
+        controls.find("Part 2, Season 1")!!.performClick()
+
+        assertEquals(listOf("p2"), picked)
+        assertEquals(View.VISIBLE, controls.anyView("Loading").visibility)
+        // The same item playing on is not the pick arriving.
+        player.play()
+        idle(500)
+        assertEquals(View.VISIBLE, controls.anyView("Loading").visibility)
+        // Nothing came: the controls are back.
+        idle(15_000)
+        assertEquals(View.GONE, controls.anyView("Loading").visibility)
+    }
+
+    @Test
     fun `the panel button is there only while there is something to list`() {
         assertNull(browseControls(browse = null).find(opener))
         assertNull(browseControls(browse = Browse(emptyList(), emptyList())).find(opener))

@@ -45,7 +45,10 @@ public final class LuminaryFullscreenPresenter: NSObject, FullscreenPresenter {
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
 
         let controller = FullscreenViewController(player: player, commands: commands, texts: texts, clock: clock)
-        controller.modalPresentationStyle = .fullScreen
+        // Over the page rather than in its place: a presentation that takes the page's view out of the window has
+        // WebKit suspend it, and the page's work for the next video (a pick from up next) would wait for the return.
+        controller.modalPresentationStyle = .overFullScreen
+        controller.modalPresentationCapturesStatusBarAppearance = true
         controller.loadViewIfNeeded()
         controller.videoView.playerLayer.player = player
         controller.onLeave = { [weak self, weak controller] in
