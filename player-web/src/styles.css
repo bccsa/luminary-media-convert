@@ -2010,45 +2010,77 @@
     }
 }
 
-/* A desktop window: the picture and the rest are one composition in the middle, not pinned to the two edges, with the
-   controls under the chapters instead of at the foot of the screen. */
+/* A desktop window: the cover on the left with the lyrics beside it when they are on, the timeline across the width, and one
+   dock along the foot: what plays at the left, the transport in the middle, the tools at the right. The column's own boxes
+   dissolve, so each part takes its place on the main grid. The lyrics' room is a row of the grid, bounded by the dock. */
 @container lmpl-afs (min-aspect-ratio: 6/5) and (min-width: 900px) {
     .lmpl-afs-main {
         box-sizing: border-box;
         align-self: center;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr) auto auto;
+        column-gap: clamp(32px, 5cqw, 96px);
+        row-gap: clamp(10px, 2cqh, 22px);
         width: 100%;
         max-width: max(1240px, 90cqw);
-        gap: clamp(36px, 5cqw, 96px);
         padding-inline: clamp(32px, 5cqw, 96px);
     }
 
-    .lmpl-afs-art {
-        width: min(38cqw, 74cqh, 960px);
-    }
-
-    .lmpl-afs-info {
-        align-self: center;
-        flex: 1 1 0;
-        min-width: 0;
-        gap: clamp(14px, 2.4cqh, 28px);
-    }
-
-    /* With the lyrics beside the cover the column takes the screen's height, so the words scroll inside it
-       above the controls instead of running off the screen. */
-    .lmpl-afs-info:has(.lmpl-afs-sidelyrics) {
-        align-self: stretch;
-    }
-
-    .lmpl-afs-controls {
-        margin-top: clamp(16px, 4cqh, 44px);
-    }
-
-    /* The transport and the tools each take a line of their own, centred under the timeline. */
+    .lmpl-afs-info,
+    .lmpl-afs-controls,
     .lmpl-afs-bottomrow {
-        flex-direction: column;
-        align-items: stretch;
-        justify-content: center;
-        gap: 14px;
+        display: contents;
+    }
+
+    .lmpl-afs-art {
+        grid-column: 1;
+        grid-row: 1;
+        align-self: center;
+        justify-self: center;
+        width: min(100%, 56cqh, 640px);
+    }
+
+    /* No lyrics: the cover stands in the middle. */
+    .lmpl-afs-nolist .lmpl-afs-art {
+        grid-column: 1 / -1;
+    }
+
+    .lmpl-afs-sidelyrics {
+        grid-column: 2 / 4;
+        grid-row: 1;
+        align-self: stretch;
+        min-height: 0;
+    }
+
+    .lmpl-afs-timeline {
+        grid-column: 1 / -1;
+        grid-row: 2;
+    }
+
+    .lmpl-afs-toptitle {
+        display: none;
+    }
+
+    .lmpl-afs-titles {
+        display: block;
+        grid-column: 1;
+        grid-row: 3;
+        align-self: center;
+        justify-self: start;
+        min-width: 0;
+    }
+
+    .lmpl-afs-transport {
+        grid-column: 2;
+        grid-row: 3;
+    }
+
+    .lmpl-afs-tools {
+        grid-column: 3;
+        grid-row: 3;
+        justify-self: end;
+        justify-content: flex-end;
     }
 
     /* The tools grow with the window, more slowly than the transport, so they still fit beside it. */
