@@ -2177,11 +2177,22 @@
     gap: 0;
 }
 .lmpl-root .lmpl-afs.lmpl-afs-fill .lmpl-afs-art {
+    align-self: stretch;
     width: 100%;
     max-width: none;
     height: 100%;
+    max-height: none;
     margin: 0;
     aspect-ratio: auto;
     border-radius: 0;
     box-shadow: none;
+}
+/* No band under the picture for the host's subtitles: the player in the stage draws its own. */
+.lmpl-root .lmpl-afs.lmpl-afs-fill .lmpl-afs-stage {
+    bottom: 0;
+    border-radius: 0;
+    box-shadow: none;
+}
+.lmpl-root .lmpl-afs.lmpl-afs-fill .lmpl-afs-caption {
+    display: none;
 }
