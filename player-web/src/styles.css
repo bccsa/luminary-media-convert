@@ -1850,7 +1850,8 @@
     flex: 1;
     height: auto;
     min-height: 0;
-    padding: 18% 0;
+    /* From the screen's height: a percentage here would be of the column's width, and push the words under the controls. */
+    padding: 10cqh 0;
 }
 .lmpl-afs-lyrics::-webkit-scrollbar {
     display: none;
@@ -1957,6 +1958,40 @@
 
     .lmpl-afs-tools {
         gap: 2px;
+    }
+}
+
+/* A phone on its side is short: the controls take less, so what is beside the cover (the lyrics) keeps its room. */
+@container lmpl-afs (min-aspect-ratio: 6/5) and (max-height: 440px) {
+    .lmpl-afs-info {
+        gap: 4px;
+    }
+
+    .lmpl-afs-controls {
+        gap: 4px;
+    }
+
+    .lmpl-afs-bottomrow {
+        row-gap: 2px;
+    }
+
+    .lmpl-afs-playbtn {
+        width: calc(52px * var(--lmpl-s));
+        height: calc(52px * var(--lmpl-s));
+    }
+
+    .lmpl-afs-skip {
+        width: calc(40px * var(--lmpl-s));
+        height: calc(40px * var(--lmpl-s));
+    }
+
+    .lmpl-root .lmpl-afs-tools .lmpl-afs-iconbtn {
+        width: calc(40px * var(--lmpl-s));
+        height: calc(40px * var(--lmpl-s));
+    }
+
+    .lmpl-afs-transport {
+        gap: 18px;
     }
 }
 
