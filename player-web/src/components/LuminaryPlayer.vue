@@ -276,6 +276,8 @@ function onEngineTextTrackChange(): void {
     const instance = controller.value;
     const tracks = mediaEl.value?.textTracks;
     if (isYouTube.value || !instance || !tracks) return;
+    // The sound alone hands the engine no subtitles: their absence is not the viewer turning them off (the lyrics keep theirs).
+    if (!Array.from(tracks).some((track) => track.kind === 'subtitles')) return;
     let showing: string | null = null;
     for (const track of tracks) {
         if (track.kind === 'subtitles' && track.mode === 'showing') {
@@ -1233,6 +1235,20 @@ function readSubtitleCues(): void {
     }
 }
 
+/**
+ * The whole track read from the stream, preferred over the engine's: the sound alone carries no subtitles to the
+ * engine, and the engine holds only the segments it has buffered. Sidecar tracks are not read there, so they keep
+ * the engine's.
+ */
+const streamCues = shallowRef<readonly LyricCue[]>([]);
+watch([controller, () => state.value.subtitleTracks, () => state.value.activeSubtitleTrackId], ([owner, , id]) => {
+    streamCues.value = [];
+    if (!owner || !id) return;
+    void owner.readSubtitleCues(id).then((lines) => {
+        if (controller.value === owner && state.value.activeSubtitleTrackId === id) streamCues.value = lines;
+    });
+});
+
 /** hls.js adds a stream's cues as the video plays, after a lift: each one is placed as it comes up. */
 function onCueChange(event: Event): void {
     const track = event.target as TextTrack;
@@ -1375,7 +1391,7 @@ defineExpose({
     setVolume,
     /** The subtitles' words that are on, timed; empty with none on. */
     get subtitleCues() {
-        return subtitleCues.value;
+        return streamCues.value.length ? streamCues.value : subtitleCues.value;
     },
 });
 </script>
