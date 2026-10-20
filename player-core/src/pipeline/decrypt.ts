@@ -114,18 +114,3 @@ export async function decryptLmcenc(
     const plain = await impl.decrypt({ name: 'AES-CBC', iv }, key, ciphertext);
     return new Uint8Array(plain);
 }
-
-/**
- * Decrypt one HLS `METHOD=AES-128` resource: AES-128-CBC over the whole of it, PKCS#7-padded, with the
- * session key and the IV its `#EXT-X-KEY` gives (or implies).
- */
-export async function decryptAes128Cbc(
-    bytes: Uint8Array,
-    keyHex: string,
-    iv: Uint8Array,
-    subtle?: SubtleLike,
-): Promise<Uint8Array> {
-    const impl = resolveSubtle(subtle);
-    const key = await importDecryptKey(impl, keyHex);
-    return new Uint8Array(await impl.decrypt({ name: 'AES-CBC', iv }, key, bytes));
-}
