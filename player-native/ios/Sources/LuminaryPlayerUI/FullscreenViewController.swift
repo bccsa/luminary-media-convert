@@ -483,6 +483,8 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         observations = [
             player.observe(\.isExternalPlaybackActive) { [weak self] _, _ in DispatchQueue.main.async { self?.refresh() } },
             player.observe(\.timeControlStatus) { [weak self] _, _ in DispatchQueue.main.async { self?.refresh() } },
+            // A swapped-in item becomes ready while paused, when no time passes to redraw the controls.
+            player.observe(\.currentItem?.status) { [weak self] _, _ in DispatchQueue.main.async { self?.refresh() } },
             player.observe(\.rate) { [weak self] player, _ in
                 DispatchQueue.main.async {
                     if player.rate > 0 { self?.rate = roundedRate(Double(player.rate)) }
@@ -523,6 +525,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         var next = FullscreenControlsState()
         next.playing = commands.playbackWanted()
         next.waiting = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+        next.loading = item == nil || item?.status == .unknown
         next.live = duration.isIndefinite
         next.awaitingDuration = !duration.isIndefinite && !(duration.isNumeric && duration.seconds > 0)
         next.duration = duration.isNumeric ? duration.seconds : 0
