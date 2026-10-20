@@ -8,6 +8,7 @@ import NowPlayingLyrics from './NowPlayingLyrics.vue';
 import type { LyricCue } from '../ui/lyrics';
 import { skipIcon } from '../ui/controlsHtml';
 import type { ScrubPosition } from '../ui/audioFullscreen';
+import { formatChapterOf } from '../ui/chapterBar';
 import { SLEEP_MINUTES, SPEED_OPTIONS, formatMinutes, sleepMinutesLeft } from '../ui/audioFullscreen';
 
 /**
@@ -121,12 +122,17 @@ const lyricsOpen = ref(false);
 const showLyrics = computed(() => lyricsOpen.value && !isVideo.value && lyricLines.value.length > 0);
 /** Wider than tall by the layout's own measure (`min-aspect-ratio: 6/5`), as the styles lay it out. */
 const wide = ref(false);
+/** A computer's window: wide and at least 900 px across, which the styles lay out as a dock under the cover. */
+const desktop = ref(false);
 function measureWide(): void {
     const root = rootEl.value;
-    if (root && root.clientHeight > 0) wide.value = root.clientWidth * 5 >= root.clientHeight * 6;
+    if (!root || root.clientHeight <= 0) return;
+    wide.value = root.clientWidth * 5 >= root.clientHeight * 6;
+    desktop.value = wide.value && root.clientWidth >= 900;
 }
-const lyricsInStage = computed(() => showLyrics.value && !wide.value);
-const lyricsBeside = computed(() => showLyrics.value && wide.value);
+// The words take the cover's place on a phone, held upright or on its side; beside the cover on a computer.
+const lyricsInStage = computed(() => showLyrics.value && !desktop.value);
+const lyricsBeside = computed(() => showLyrics.value && desktop.value);
 // The picture puts them away. Words still on their way (another language being read) keep them asked for.
 watch(isVideo, (video) => {
     if (video) lyricsOpen.value = false;
@@ -432,7 +438,6 @@ const washSrc = computed(() => props.wash || cover.value?.src);
             >
                 <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
             </button>
-            <span class="lmpl-afs-toptitle" data-test="afsTopTitle">{{ title }}</span>
             <span class="lmpl-afs-eyebrow">{{ eyebrow }}</span>
             <div v-if="slots['top-end']" class="lmpl-afs-topend" data-test="afsTopEnd"><slot name="top-end"></slot></div>
             <span v-else class="lmpl-afs-iconbtn lmpl-afs-spacer" aria-hidden="true"></span>
@@ -482,6 +487,9 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                 <div class="lmpl-afs-titles">
                     <h2 class="lmpl-afs-title" data-test="afsTitle">{{ title }}</h2>
                     <p v-if="subtitle" class="lmpl-afs-subtitle">{{ subtitle }}</p>
+                    <span v-if="chapters.length > 1 && chapterIndex >= 0" class="lmpl-afs-chip" data-test="afsChapterChip">
+                        <i aria-hidden="true"></i>{{ formatChapterOf(messages.chapterOf, chapterIndex + 1, chapters.length) }} · {{ chapters[chapterIndex]?.title }}
+                    </span>
                 </div>
 
                 <!-- Wide: the lyrics, when they are on, beside the cover. -->

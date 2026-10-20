@@ -149,9 +149,23 @@ describe('the now-playing view for a host', () => {
             expect(wrapper.emitted('seek')).toEqual([[10]]);
         });
 
-        it('puts the lyrics beside the cover, where the chapters are, on a wide screen', async () => {
+        it('puts the lyrics in the cover\'s place on a phone on its side', async () => {
             const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(844);
             const height = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(390);
+            try {
+                const wrapper = mountView({ lyrics });
+                await find(wrapper, 'afsLyricsToggle').trigger('click');
+                expect(find(wrapper, 'afsStage').find("[data-test='afsLyrics']").exists()).toBe(true);
+                expect(wrapper.find("[data-test='afsSideLyrics']").exists()).toBe(false);
+            } finally {
+                width.mockRestore();
+                height.mockRestore();
+            }
+        });
+
+        it('puts the lyrics beside the cover on a computer', async () => {
+            const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1280);
+            const height = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(720);
             try {
                 const wrapper = mountView({ lyrics });
                 await find(wrapper, 'afsLyricsToggle').trigger('click');

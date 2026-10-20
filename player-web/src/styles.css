@@ -1343,19 +1343,6 @@
     opacity: 0.9;
 }
 
-/* The title beside the chevron, where the screen is wide and the column has no need to say it again. */
-.lmpl-afs-toptitle {
-    display: none;
-    flex: 1;
-    min-width: 0;
-    margin-inline-start: 8px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: calc(17px * var(--lmpl-s));
-    font-weight: 700;
-}
-
 .lmpl-afs-iconbtn {
     position: relative;
     display: inline-flex;
@@ -1481,6 +1468,28 @@
     font-size: calc(19px * var(--lmpl-s));
     font-weight: 700;
     line-height: 1.25;
+}
+
+/* Where the playhead is among the chapters, under what plays; shown where the screen is wide. */
+.lmpl-afs-chip {
+    display: none;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    max-width: 100%;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgb(255 255 255 / 0.1);
+    font-size: calc(12px * var(--lmpl-s));
+    white-space: nowrap;
+}
+
+.lmpl-afs-chip i {
+    flex: none;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #5cc6c2;
 }
 
 .lmpl-afs-subtitle {
@@ -1936,10 +1945,11 @@
         border-radius: 14px;
     }
 
+    /* The words take the cover's place, and its height, so they have the room the cover had and more. */
     .lmpl-afs-art.lmpl-afs-art-lyrics {
-        align-self: center;
-        width: min(42cqw, 70cqh);
-        height: min(62cqh, 42cqw);
+        align-self: stretch;
+        width: min(46cqw, 520px);
+        height: auto;
     }
 
     .lmpl-afs-info {
@@ -1954,13 +1964,12 @@
         margin-top: 12px;
     }
 
-    .lmpl-afs-toptitle {
+    .lmpl-afs-titles {
         display: block;
     }
 
-    .lmpl-afs-eyebrow,
-    .lmpl-afs-titles {
-        display: none;
+    .lmpl-afs-chip {
+        display: inline-flex;
     }
 
     /* The transport and the tools each take a line of their own, centred, so a row of six tools cannot run off the side. */
@@ -2056,10 +2065,6 @@
     .lmpl-afs-timeline {
         grid-column: 1 / -1;
         grid-row: 2;
-    }
-
-    .lmpl-afs-toptitle {
-        display: none;
     }
 
     .lmpl-afs-titles {
