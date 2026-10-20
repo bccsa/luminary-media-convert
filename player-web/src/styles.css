@@ -1005,7 +1005,8 @@
     background: rgb(255 255 255 / 0.1);
 }
 
-.lmpl-chapter[aria-current='true'] {
+.lmpl-chapter[aria-current='true'],
+.lmpl-upnext[aria-current='true'] {
     background: rgb(255 255 255 / 0.14);
     font-weight: 700;
 }
@@ -1610,16 +1611,22 @@
 .lmpl-afs-tools {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: center;
+    gap: 10px;
 }
 
+/* A tool with a menu shrinks like the bare buttons beside it, so a crowded row stays evenly spaced. */
 .lmpl-afs-tool {
     position: relative;
+    display: flex;
+    flex: 0 1 auto;
+    min-width: 0;
 }
 
-/* The row under the transport is thumb-sized: a larger target, and a larger glyph in it. */
+/* The row under the transport is thumb-sized: a larger target, and a larger glyph in it. Sized by its width (no
+   basis of its own), so a bare button and one in a tool wrapper grow and shrink alike. */
 .lmpl-root .lmpl-afs-tools .lmpl-afs-iconbtn {
-    flex: 0 1 calc(52px * var(--lmpl-s));
+    flex: 0 1 auto;
     width: calc(52px * var(--lmpl-s));
     height: calc(52px * var(--lmpl-s));
     color: rgb(255 255 255 / 0.82);

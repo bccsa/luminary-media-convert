@@ -151,7 +151,7 @@ defineExpose({ hasFocus });
                 <template v-for="row in upNextRows" :key="row.item.id">
                     <li v-if="row.heading" class="lmpl-browse-heading" role="presentation">{{ row.heading }}</li>
                     <li>
-                        <button type="button" class="lmpl-browse-row lmpl-upnext" @click="emit('pick-upnext', row.item.id)">
+                        <button type="button" class="lmpl-browse-row lmpl-upnext" :aria-current="row.item.current ? 'true' : undefined" @click="row.item.current || emit('pick-upnext', row.item.id)">
                             <span class="lmpl-upnext-thumb">
                                 <img v-if="row.item.imageUrl" :src="row.item.imageUrl" alt="" loading="lazy" draggable="false" />
                             </span>

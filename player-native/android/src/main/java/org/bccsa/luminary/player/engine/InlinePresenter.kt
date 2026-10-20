@@ -127,7 +127,7 @@ class InlinePresenter(
             tracking = web
         }
         observeRotation()
-        stack(container, web, view, frame.front)
+        stack(web, view, frame.front)
         layout()
         makeTransparent(web)
         view.player = if (suspended) null else player
@@ -211,12 +211,13 @@ class InlinePresenter(
         subtitles.bringToFront()
     }
 
-    /** Behind the web view, where the page cuts a hole for it, or over it for a small picture. */
-    private fun stack(container: ViewGroup, web: View, view: PlayerView, front: Boolean) {
-        val inFront = container.indexOfChild(view) > container.indexOfChild(web)
-        if (front == inFront) return
-        container.removeView(view)
-        if (front) container.addView(view) else container.addView(view, container.indexOfChild(web))
+    /**
+     * Behind the web view, where the page cuts a hole for it, or over it for a small picture. Raised, not
+     * moved in the child order: taking a SurfaceView out of the window destroys its surface, and the new one
+     * stays black until a frame is drawn into it.
+     */
+    private fun stack(web: View, view: PlayerView, front: Boolean) {
+        view.z = if (front) web.z + 1f else web.z
     }
 
     private fun makeVideoView(container: ViewGroup, web: View): PlayerView {
