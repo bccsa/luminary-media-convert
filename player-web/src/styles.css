@@ -1827,7 +1827,7 @@
     white-space: pre-line;
     opacity: 0.36;
     cursor: pointer;
-    transition: opacity 0.3s, transform 0.3s;
+    transition: opacity 0.15s, transform 0.15s;
     transform-origin: left center;
 }
 .lmpl-afs-lyric.lmpl-afs-lyric-now {

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { h, nextTick } from 'vue';
 import AudioFullscreen from '../src/components/AudioFullscreen.vue';
@@ -73,6 +73,45 @@ describe('lyrics', () => {
 
         await lines[2]!.trigger('click');
         expect(wrapper.emitted('seek')).toEqual([[18]]);
+    });
+
+    describe('between the player\'s reports of the time', () => {
+        beforeEach(() => vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame', 'performance'] }));
+        afterEach(() => vi.useRealTimers());
+        const lit = (wrapper: ReturnType<typeof mount>) =>
+            wrapper.findAll('[data-lyric]').findIndex((line) => line.attributes('aria-current') === 'true');
+
+        it('lights the next line on time while playing, at the playback speed', async () => {
+            const wrapper = mount(NowPlayingLyrics, { props: { lines: lyrics, currentTime: 13.9, label: 'Lyrics', playing: true, rate: 1 } });
+            expect(lit(wrapper)).toBe(0);
+            vi.advanceTimersByTime(150);
+            await nextTick();
+            expect(lit(wrapper)).toBe(1);
+        });
+
+        it('waits for the player while paused, and never runs on past a stall', async () => {
+            const wrapper = mount(NowPlayingLyrics, { props: { lines: lyrics, currentTime: 13.9, label: 'Lyrics', playing: false } });
+            vi.advanceTimersByTime(500);
+            await nextTick();
+            expect(lit(wrapper)).toBe(0);
+
+            await wrapper.setProps({ playing: true, currentTime: 16.5 });
+            vi.advanceTimersByTime(5000);
+            await nextTick();
+            // A second at most past the last report: line 1, not line 2 at 18.
+            expect(lit(wrapper)).toBe(1);
+        });
+
+        it('does not step back a line for a report a moment late, and follows a seek back', async () => {
+            const wrapper = mount(NowPlayingLyrics, { props: { lines: lyrics, currentTime: 13.9, label: 'Lyrics', playing: true, rate: 1 } });
+            vi.advanceTimersByTime(200);
+            await nextTick();
+            expect(lit(wrapper)).toBe(1);
+            await wrapper.setProps({ currentTime: 13.95 });
+            expect(lit(wrapper)).toBe(1);
+            await wrapper.setProps({ currentTime: 11 });
+            expect(lit(wrapper)).toBe(0);
+        });
     });
 });
 
