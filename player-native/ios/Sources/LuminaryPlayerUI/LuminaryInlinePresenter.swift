@@ -39,6 +39,7 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
     private var readyObservation: NSKeyValueObservation?
     /// The subtitles, over the page: in the band it leaves under the picture, or over the picture's foot.
     private var subtitles: SubtitleLabel?
+    private var expandBadge: ExpandBadge?
     private var subtitleWatch: (text: LegibleText, token: UUID)?
     /// What the web view looked like before it was made see-through.
     private var restore: (opaque: Bool, background: UIColor?, scrollBackground: UIColor?)?
@@ -155,6 +156,24 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
         )
         heldPicture?.frame = view.frame
         layoutSubtitles(picture: view.frame)
+        layoutBadge(picture: view.frame)
+    }
+
+    /// Over a picture in front the page's own chevron is hidden, so the same badge is drawn here, where it stands.
+    private func layoutBadge(picture: CGRect) {
+        guard let frame, frame.badge, frame.front, !suspended, let container = videoView?.superview else {
+            expandBadge?.isHidden = true
+            return
+        }
+        let badge = expandBadge ?? ExpandBadge()
+        if badge.superview !== container { container.addSubview(badge) }
+        container.bringSubviewToFront(badge)
+        expandBadge = badge
+        badge.isHidden = false
+        badge.frame = CGRect(
+            x: picture.minX + ExpandBadge.inset.x, y: picture.minY + ExpandBadge.inset.y,
+            width: ExpandBadge.size, height: ExpandBadge.size
+        )
     }
 
     private func watchSubtitles(of player: AVPlayer, in container: UIView) {
@@ -293,7 +312,10 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
 
     public func setSuspended(_ suspended: Bool) {
         self.suspended = suspended
-        if suspended { subtitles?.isHidden = true }
+        if suspended {
+            subtitles?.isHidden = true
+            expandBadge?.isHidden = true
+        }
         guard let layer = videoView?.playerLayer else { return }
         guard !suspended else {
             layer.player = nil
@@ -338,6 +360,8 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
         subtitleWatch = nil
         subtitles?.removeFromSuperview()
         subtitles = nil
+        expandBadge?.removeFromSuperview()
+        expandBadge = nil
         pictureInPicture = nil
         routePicker?.removeFromSuperview()
         routePicker = nil

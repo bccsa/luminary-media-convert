@@ -13,12 +13,16 @@ public struct InlineFrame: Equatable, Sendable {
     public let captionHeight: Double
     /// Something of the page covers the picture's place (a sheet, a menu): no subtitles are drawn there.
     public let captionsHidden: Bool
+    /// The page asks for its way up on the picture: a small chevron in the top-left corner, drawn here since the
+    /// page cannot draw over a picture in front of it. Taps go through to the page underneath.
+    public let badge: Bool
 
     public init(
         x: Double, y: Double, width: Double, height: Double,
-        front: Bool = false, captionHeight: Double = 0, captionsHidden: Bool = false
+        front: Bool = false, captionHeight: Double = 0, captionsHidden: Bool = false, badge: Bool = false
     ) {
         self.front = front
+        self.badge = badge
         self.captionHeight = captionHeight
         self.captionsHidden = captionsHidden
         self.x = x

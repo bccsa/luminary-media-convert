@@ -370,7 +370,10 @@ onMounted(() => {
         emit('ended');
     });
     on('timeupdate', () => emit('timeupdate', media.currentTime || 0, media.duration || 0));
-    on('loadedmetadata', () => emit('loadedmetadata'));
+    on('loadedmetadata', () => {
+        readPictureInPicture();
+        emit('loadedmetadata');
+    });
     on('loadeddata', applyPreferredLanguage);
 
     keepAlive = createKeepAlive(keepAliveEl.value);
@@ -1149,8 +1152,17 @@ onBeforeUnmount(() => clearTimeout(switchingLimit));
  * loading, which a poster nobody has pressed play on does too.
  */
 const busy = computed(() => switching.value || (mediaWaiting.value && state.value.playing));
-/** The now-playing screen draws its own spinner. */
-const showsBusy = computed(() => busy.value && !audioFullscreen.value && state.value.lifecycle !== 'error');
+/**
+ * Only where the player's own controls are: the now-playing screen, and a host driving a bare frame from its own
+ * controls, show it in their own play button.
+ */
+const showsBusy = computed(
+    () =>
+        busy.value &&
+        !audioFullscreen.value &&
+        state.value.lifecycle !== 'error' &&
+        (mergedControls.value.windowedControls || isFullscreen.value)
+);
 /**
  * A finite video whose length is not known yet: skipping, speed and the timeline wait for it, so a source that turns
  * out to be live does not show them for a moment and take them away.
@@ -1185,18 +1197,34 @@ const castAvailable = ref(false);
 let castObserver: MutationObserver | null = null;
 const castButtons = (): HTMLElement[] =>
     Array.from(containerEl.value?.querySelectorAll<HTMLElement>('media-cast-button, media-airplay-button') ?? []);
-// Picture in picture, likewise: the skin's button knows whether the browser can do it for this video.
+// Picture in picture, asked of the browser for the element's own <video>: the skin's button reads it of the custom
+// element, which has no such method, and so says unavailable where the browser can.
 const canPictureInPicture = ref(false);
-const pipButton = (): HTMLElement | null => containerEl.value?.querySelector<HTMLElement>('media-pip-button') ?? null;
+type PresentableVideo = HTMLVideoElement & {
+    webkitSupportsPresentationMode?: (mode: string) => boolean;
+    webkitSetPresentationMode?: (mode: string) => void;
+};
+function readPictureInPicture(): void {
+    const video = innerVideo() as PresentableVideo | null;
+    canPictureInPicture.value =
+        !!video &&
+        !isAudioOnly.value &&
+        ((document.pictureInPictureEnabled && !video.disablePictureInPicture) ||
+            video.webkitSupportsPresentationMode?.('picture-in-picture') === true);
+}
+// A switch to sound alone, or back to the picture, changes the answer.
+watch(isAudioOnly, readPictureInPicture);
 function readCastAvailable(): void {
     castAvailable.value = castButtons().some((button) => button.getAttribute('data-availability') === 'available');
-    canPictureInPicture.value = pipButton()?.getAttribute('data-availability') === 'available';
 }
 function showCastPicker(): void {
     castButtons().find((button) => button.getAttribute('data-availability') === 'available')?.click();
 }
 function startPictureInPicture(): void {
-    pipButton()?.click();
+    const video = innerVideo() as PresentableVideo | null;
+    if (!video) return;
+    if (document.pictureInPictureEnabled && !video.disablePictureInPicture) void video.requestPictureInPicture().catch(() => {});
+    else video.webkitSetPresentationMode?.('picture-in-picture');
 }
 
 function readControlsShown(): void {
