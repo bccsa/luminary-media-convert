@@ -239,6 +239,8 @@ export interface InlineFrame {
     captionHeight?: number;
     /** Native leaves the subtitles undrawn, while something of the page covers the picture's place. */
     captionsHidden?: boolean;
+    /** Native draws the page's chevron at the top-left of a picture in front, which the page cannot draw over. */
+    badge?: boolean;
 }
 
 export interface BridgeInfo {

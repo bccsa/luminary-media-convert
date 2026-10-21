@@ -157,6 +157,16 @@ struct BridgeTypesTests {
             return
         }
         #expect(flagged.captionHeight == 64 && flagged.captionsHidden)
+        #expect(!plain.badge)
+
+        var badged = frame
+        badged["front"] = .bool(true)
+        badged["badge"] = .bool(true)
+        guard case .setInlineFrame(_, let withBadge?) = try BridgeCall.decode("setInlineFrame", ["playerId": .string("p"), "frame": .object(badged)]) else {
+            Issue.record("not a frame")
+            return
+        }
+        #expect(withBadge.front && withBadge.badge)
     }
 
     @Test("counts that fit decode as they are")

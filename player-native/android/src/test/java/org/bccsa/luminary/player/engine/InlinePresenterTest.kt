@@ -66,6 +66,25 @@ class InlinePresenterTest {
     }
 
     @Test
+    fun `a small picture in front carries the page's chevron at its top-left, and only when asked`() {
+        presenter.setFrame(InlineFrame(20.0, 600.0, 114.0, 64.0, front = true, badge = true), player)
+        val view = presenter.view!!
+        val badge = (0 until container.childCount).map { container.getChildAt(it) }.filterIsInstance<ExpandBadge>().single()
+
+        assertEquals(View.VISIBLE, badge.visibility)
+        assertEquals(view.x + 6 * density, badge.x, 0.5f)
+        assertEquals(view.y + 10 * density, badge.y, 0.5f)
+        assertTrue("over the picture", badge.z > view.z)
+        assertTrue("taps go through to the page", !badge.isClickable)
+
+        presenter.setFrame(InlineFrame(20.0, 600.0, 114.0, 64.0, front = true), player)
+        assertEquals(View.GONE, badge.visibility)
+
+        presenter.setFrame(null, player)
+        assertTrue((0 until container.childCount).none { container.getChildAt(it) is ExpandBadge })
+    }
+
+    @Test
     fun `a new frame moves the same view`() {
         presenter.setFrame(InlineFrame(0.0, 0.0, 100.0, 100.0), player)
         val view = presenter.view

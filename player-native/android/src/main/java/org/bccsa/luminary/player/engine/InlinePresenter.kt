@@ -43,6 +43,7 @@ class InlinePresenter(
     private var videoView: PlayerView? = null
     /** The subtitles, over the page: in the room the page leaves under the picture, or over the picture's foot. */
     private var subtitleView: View? = null
+    private var expandBadge: ExpandBadge? = null
     private var frame: InlineFrame? = null
     private var suspended = false
     private var player: Player? = null
@@ -146,6 +147,7 @@ class InlinePresenter(
     /** Full-screen or picture in picture holds the picture: the inline view has none. */
     fun setSuspended(suspended: Boolean) {
         this.suspended = suspended
+        if (suspended) expandBadge?.visibility = View.GONE
         val view = videoView ?: return
         if (suspended) {
             view.player = null
@@ -177,6 +179,31 @@ class InlinePresenter(
         view.x = web.x + (frame.x * density).toFloat()
         view.y = web.y + (frame.y * density).toFloat()
         layoutSubtitles(frame, web, density)
+        layoutBadge(frame, web, view, density)
+    }
+
+    /** Over a picture in front the page's own chevron is hidden, so the same badge is drawn here, where it stands. */
+    private fun layoutBadge(frame: InlineFrame, web: View, view: PlayerView, density: Float) {
+        if (!frame.badge || !frame.front || suspended) {
+            expandBadge?.visibility = View.GONE
+            return
+        }
+        val container = view.parent as? ViewGroup ?: return
+        val badge = expandBadge ?: ExpandBadge(web.context).also {
+            container.addView(it, ViewGroup.LayoutParams(1, 1))
+            expandBadge = it
+        }
+        val side = (ExpandBadge.SIZE_DP * density).toInt()
+        val params = badge.layoutParams
+        if (params.width != side || params.height != side) {
+            params.width = side
+            params.height = side
+            badge.layoutParams = params
+        }
+        badge.visibility = View.VISIBLE
+        badge.x = view.x + ExpandBadge.INSET_X_DP * density
+        badge.y = view.y + ExpandBadge.INSET_Y_DP * density
+        badge.z = view.z + 1f
     }
 
     /** Under the picture when the page left room there, else over its foot; none over a small picture in front or a covered place. */
@@ -287,6 +314,8 @@ class InlinePresenter(
         }
         subtitleView?.let { (it.parent as? ViewGroup)?.removeView(it) }
         subtitleView = null
+        expandBadge?.let { (it.parent as? ViewGroup)?.removeView(it) }
+        expandBadge = null
         videoView = null
         if (transparent) {
             webView()?.background = restore
