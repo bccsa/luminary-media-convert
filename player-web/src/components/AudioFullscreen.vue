@@ -90,6 +90,8 @@ const props = defineProps<{
     subtitleTracks?: readonly { id: string; label: string }[];
     activeSubtitleTrackId?: string | null;
     canPictureInPicture?: boolean;
+    /** Offers full screen with sound alone too, among the tools, for a host that has a full screen to take it to. */
+    fullscreenTool?: boolean;
     /** The words of what plays, timed: offered, with sound alone, as lyrics in the picture's place. */
     lyrics?: readonly LyricCue[];
 }>();
@@ -683,7 +685,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                             </button>
 
                             <button
-                                v-if="isVideo"
+                                v-if="isVideo || fullscreenTool"
                                 type="button"
                                 class="lmpl-afs-iconbtn"
                                 :aria-label="messages.enterFullscreen"

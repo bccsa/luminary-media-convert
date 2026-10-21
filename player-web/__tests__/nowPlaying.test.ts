@@ -209,6 +209,13 @@ describe('the now-playing view for a host', () => {
             expect(find(wrapper, 'afsSubtitles').exists()).toBe(false);
             expect(find(wrapper, 'afsFullscreen').exists()).toBe(false);
         });
+
+        it('offers full screen among the tools when the host has one to take the sound to', async () => {
+            const wrapper = mountView({ fullscreenTool: true });
+            await find(wrapper, 'afsFullscreen').trigger('click');
+            expect(wrapper.emitted('fullscreen')).toHaveLength(1);
+            expect(find(wrapper, 'afsSleep').exists()).toBe(true);
+        });
     });
 
     describe('filling the window', () => {
