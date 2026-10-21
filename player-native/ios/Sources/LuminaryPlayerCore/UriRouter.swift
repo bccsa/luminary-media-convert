@@ -69,6 +69,15 @@ public final class UriRouter: NSObject, AVAssetResourceLoaderDelegate, @unchecke
         return .failed(code: "not-found")
     }
 
+    /// One read of a live address, resolved as the player's own request would be; the completion
+    /// runs on the fetch's queue, and the returned closure abandons the read.
+    func readLive(
+        _ spec: BridgeLiveSpec,
+        completion: @escaping @Sendable (Result<String, LiveFailure>) -> Void
+    ) -> @Sendable () -> Void {
+        LiveResolver.resolve(spec, fetch: fetch, completion: completion)
+    }
+
     // MARK: AVAssetResourceLoaderDelegate
 
     public func resourceLoader(
@@ -214,22 +223,41 @@ private struct AVLoadingRequest: LoadingRequest {
         return (data.requestedOffset, data.requestsAllDataToEndOfResource ? nil : data.requestedLength)
     }
 
+    /// AVFoundation raises on a request finished twice or after it was cancelled (a replaced item
+    /// cancels what it had in flight), so an answer to one that is over is dropped.
+    private var isOver: Bool { request.isFinished || request.isCancelled }
+
     func setContentInformation(contentType: String, contentLength: Int64) {
-        guard let info = request.contentInformationRequest else { return }
-        info.contentType = contentType
+        guard !isOver, let info = request.contentInformationRequest else { return }
+        info.contentType = Self.allowed(contentType, in: info)
         info.contentLength = contentLength
         info.isByteRangeAccessSupported = false
     }
 
+    /// AVFoundation raises when the type is not one it listed for this request, so a type outside
+    /// the list becomes the listed one that it conforms to, or the list's first.
+    private static func allowed(_ contentType: String, in info: AVAssetResourceLoadingContentInformationRequest) -> String {
+        guard #available(iOS 16.0, macOS 13.0, *) else { return contentType }
+        guard let listed = info.allowedContentTypes, !listed.isEmpty, !listed.contains(contentType) else { return contentType }
+        if let type = UTType(contentType),
+           let match = listed.first(where: { UTType($0).map(type.conforms(to:)) == true }) {
+            return match
+        }
+        return listed[0]
+    }
+
     func respond(with data: Data) {
+        guard !isOver else { return }
         request.dataRequest?.respond(with: data)
     }
 
     func finish() {
+        guard !isOver else { return }
         request.finishLoading()
     }
 
     func finish(with error: Error) {
+        guard !isOver else { return }
         request.finishLoading(with: error)
     }
 }

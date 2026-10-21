@@ -54,6 +54,7 @@ import {
 } from '../ui/scrubPreview';
 import ScrubThumbnail from './ScrubThumbnail.vue';
 import ScrubRoster from './ScrubRoster.vue';
+import ScrubPicture from './ScrubPicture.vue';
 import NextUpThumb from './NextUpThumb.vue';
 import AudioFullscreen from './AudioFullscreen.vue';
 import BrowsePanel from './BrowsePanel.vue';
@@ -756,7 +757,7 @@ function endScrub(event?: PointerEvent): void {
     // A press that opened the roster leaves it open: the viewer lifted a finger to look, not to be done.
     const roster = scrub.value?.roster;
     if (roster && event?.type === 'pointerup') {
-        pin.value = { bottom: roster.bottom, labelBottom: roster.labelBottom, gap: roster.gap };
+        pin.value = { bottom: roster.bottom, labelBottom: roster.labelBottom, gap: roster.gap, markerX: roster.markerX };
         pinAnchor.value = scrub.value?.time ?? null;
         armAnchorTimeout();
     }
@@ -839,34 +840,6 @@ function updateScrub(event: PointerEvent): void {
     };
 }
 
-/**
- * The scrubbed frame drawn over the whole picture. A crop of a sheet cannot be `cover`ed directly, so the
- * element is the crop's own size and scaled up to the frame, as the hover thumbnail is scaled to its width.
- */
-function pictureStyle(cue: ThumbnailSpriteCue): Record<string, string> {
-    if (!cue.w || !cue.h) {
-        return {
-            width: '100%',
-            height: '100%',
-            backgroundImage: `url("${cue.spriteUrl}")`,
-            backgroundSize: 'contain',
-            backgroundPosition: 'center',
-            backgroundRepeat: 'no-repeat',
-        };
-    }
-    const frame = containerEl.value?.getBoundingClientRect();
-    const scale = frame ? Math.min(frame.width / cue.w, frame.height / cue.h) : 1;
-    return {
-        width: `${cue.w}px`,
-        height: `${cue.h}px`,
-        backgroundImage: `url("${cue.spriteUrl}")`,
-        backgroundPosition: `-${cue.x}px -${cue.y}px`,
-        backgroundRepeat: 'no-repeat',
-        transform: `scale(${scale})`,
-        transformOrigin: 'center',
-    };
-}
-
 /** The frame laid over the picture: the one a held press names, or the one a pinned roster is dragged to. */
 const pictureCue = computed(() => {
     if (!mergedControls.value.scrubPicture) return null;
@@ -923,12 +896,12 @@ function buildRoster(
 // --- pinned roster ------------------------------------------------------------
 
 /**
- * A roster left open after the press ends. It is centred on the playhead and follows playback, and it can
+ * A roster left open after the press ends. Its marker stays where the press lifted and it follows playback, and it can
  * itself be dragged, the slow and precise way through the video (the timeline is the fast one): the strip moves with the finger,
  * the picture shows the frame it is passing, and the video goes there when the finger comes up. A tap on a
  * frame goes to that frame. It stays until closed — a press outside it, a new source, or a change of layout.
  */
-const pin = shallowRef<{ bottom: number; labelBottom: number; gap: number } | null>(null);
+const pin = shallowRef<{ bottom: number; labelBottom: number; gap: number; markerX: number } | null>(null);
 
 /** How far a finger may wander and still be tapping a frame rather than dragging the strip: a fingertip is not a pin. */
 const PIN_TAP_SLOP_PX = 10;
@@ -993,7 +966,7 @@ const pinnedView = computed(() => {
     const drag = pinDrag.value;
     const time = drag?.time ?? pinAnchor.value ?? pinNow.value;
     const step = rosterFineStep(duration);
-    const built = buildRoster(instance, time, width / 2, width, duration, step, placed.gap);
+    const built = buildRoster(instance, time, placed.markerX, width, duration, step, placed.gap);
     if (!built) return null;
     return {
         ...built,
@@ -1625,9 +1598,7 @@ defineExpose({
                 </AudioFullscreen>
 
                 <!-- While held, the frame being scrubbed over the picture: a fast-forward, VHS style. -->
-                <div v-if="pictureCue" class="lmpl-scrub-picture" aria-hidden="true">
-                    <div class="lmpl-scrub-picture-frame" :style="pictureStyle(pictureCue)"></div>
-                </div>
+                <ScrubPicture v-if="pictureCue" :cue="pictureCue" aria-hidden="true" />
 
                 <div
                     v-if="scrub && !scrub.roster"

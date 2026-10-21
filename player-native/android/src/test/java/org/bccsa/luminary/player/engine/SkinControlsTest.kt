@@ -20,6 +20,7 @@ import java.time.Duration
 import org.bccsa.luminary.player.Browse
 import org.bccsa.luminary.player.BrowseChapter
 import org.bccsa.luminary.player.BrowseItem
+import org.bccsa.luminary.player.Thumbnails
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -600,5 +601,85 @@ class SkinControlsTest {
         // 40% of a phone held upright is too narrow to read: a readable minimum, and never the whole screen.
         assertEquals(320f, sheetWidthDp(360), 1f)
         assertEquals(300 * 0.92f, sheetWidthDp(300), 1f)
+    }
+
+    // The scrubbed frame over the picture.
+
+    private val framesVtt = "WEBVTT\n\n00:00:00.000 --> 00:00:02.500\nsprite_0.webp#xywh=0,0,160,90\n"
+
+    /** The VTT is read on a worker thread, so wait for its cues to land. */
+    private fun readyFrames(): Thumbnails {
+        val frames = Thumbnails { url -> if (url.endsWith(".vtt")) framesVtt.toByteArray() else null }
+        frames.load("https://cdn.example.com/thumbs/thumbnails.vtt", null)
+        repeat(200) {
+            if (frames.ready) return frames
+            Thread.sleep(5)
+            idle(5)
+        }
+        error("the frames never arrived")
+    }
+
+    /** The timeline's own reports, which are private to the controls. */
+    private fun SkinControls.holdScrub(fraction: Double, x: Float) {
+        javaClass.getDeclaredMethod("scrubbed", Double::class.javaPrimitiveType, Float::class.javaPrimitiveType)
+            .apply { isAccessible = true }
+            .invoke(this, fraction, x)
+    }
+
+    private fun SkinControls.releaseScrub(fraction: Double, commit: Boolean) {
+        javaClass.getDeclaredMethod("scrubEnded", Double::class.javaPrimitiveType, Boolean::class.javaPrimitiveType)
+            .apply { isAccessible = true }
+            .invoke(this, fraction, commit)
+    }
+
+    private fun SkinControls.pictureView(): View =
+        ArrayList<View>().also { collect(this, it) }.first { it.javaClass.simpleName == "PictureView" }
+
+    private fun SkinControls.pictureCue(): Any? =
+        pictureView().javaClass.getDeclaredField("cue").apply { isAccessible = true }.get(pictureView())
+
+    @Test
+    fun `the scrubbed frame is hidden at rest`() {
+        val controls = SkinControls(activity, player, SkinOptions(), thumbnails = readyFrames()) { left++ }
+            .also { activity.setContentView(it) }
+
+        assertEquals(View.GONE, controls.pictureView().visibility)
+    }
+
+    @Test
+    fun `the scrubbed frame shows while the timeline is held, and clears when it is let go`() {
+        val controls = SkinControls(activity, player, SkinOptions(), thumbnails = readyFrames()) { left++ }
+            .also { activity.setContentView(it) }
+
+        controls.holdScrub(0.1, 50f)
+        assertEquals(View.VISIBLE, controls.pictureView().visibility)
+
+        controls.releaseScrub(0.1, true)
+        assertEquals(View.GONE, controls.pictureView().visibility)
+    }
+
+    @Test
+    fun `no scrubbed frame without frames`() {
+        val controls = controls()
+
+        controls.holdScrub(0.1, 50f)
+
+        assertEquals(View.GONE, controls.pictureView().visibility)
+    }
+
+    @Test
+    fun `past the end of a partial storyboard the frame keeps its last cue`() {
+        val controls = SkinControls(activity, player, SkinOptions(), thumbnails = readyFrames()) { left++ }
+            .also { activity.setContentView(it) }
+
+        // 0.3 s, on the only cue the storyboard has.
+        controls.holdScrub(0.01, 50f)
+        val onCue = controls.pictureCue()
+        assertNotNull(onCue)
+
+        // 27 s, past the 2.5 s the storyboard covers.
+        controls.holdScrub(0.9, 50f)
+        assertEquals(onCue, controls.pictureCue())
+        assertEquals(View.VISIBLE, controls.pictureView().visibility)
     }
 }

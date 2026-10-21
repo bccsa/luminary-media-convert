@@ -480,7 +480,12 @@ export class PlayerController implements PlayerControllerApi {
      */
     thumbnailAt(timeSec: number): ThumbnailSpriteCue | null {
         if (this.thumbnailCues.length === 0) return null;
-        return findThumbnailCue(this.thumbnailCues, timeSec) ?? null;
+        const cue = findThumbnailCue(this.thumbnailCues, timeSec);
+        if (!cue) return null;
+        // A frame is sampled at its cue's start, so the second half of a cue is nearer the next frame than its own.
+        const span = cue.endTime - cue.startTime;
+        const next = span > 0 ? findThumbnailCue(this.thumbnailCues, cue.endTime) : undefined;
+        return next && timeSec - cue.startTime > span / 2 ? next : cue;
     }
 
     // -----------------------------------------------------------------------

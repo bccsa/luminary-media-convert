@@ -58,11 +58,12 @@ class ExoEngineFullscreenTest {
         override val lifecycle: Lifecycle get() = registry
     }
     private var skipForward = 10.0
+    private val clock = VirtualClock()
 
     private val registry by lazy {
         PlayerRegistry(
             BridgeCapabilities(variantSwitching = true),
-            VirtualClock(),
+            clock,
             HttpUpstream(OkHttpClient()),
             EngineFactory { router, clock, options ->
                 ExoEngine(context, router, clock, options, presenter, player, app.lifecycle).also { engine = it }
@@ -298,15 +299,31 @@ class ExoEngineFullscreenTest {
     }
 
     @Test
-    fun `in the background the video track goes, and it comes back with the app`() {
+    fun `in the background the video track goes once the app has been away a while, and comes back with the app`() {
         create()
         load(audioOnly = false)
 
         app.registry.currentState = Lifecycle.State.CREATED
-        assertTrue("backgrounded: sound only", engine!!.videoDisabled)
+        assertFalse("a short switch keeps the picture buffered", engine!!.videoDisabled)
+        clock.advance(29.0)
+        assertFalse(engine!!.videoDisabled)
+        clock.advance(1.0)
+        assertTrue("backgrounded for long: sound only", engine!!.videoDisabled)
 
         app.registry.currentState = Lifecycle.State.RESUMED
         assertFalse("back in front: the picture again", engine!!.videoDisabled)
+    }
+
+    @Test
+    fun `a return before the delay keeps the video track, and the delay does not fire later`() {
+        create()
+        load(audioOnly = false)
+
+        app.registry.currentState = Lifecycle.State.CREATED
+        app.registry.currentState = Lifecycle.State.RESUMED
+        clock.advance(60.0)
+
+        assertFalse(engine!!.videoDisabled)
     }
 
     @Test

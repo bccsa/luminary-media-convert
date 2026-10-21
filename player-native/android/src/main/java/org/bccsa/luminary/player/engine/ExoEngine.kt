@@ -123,16 +123,28 @@ class ExoEngine(
 
     private val appContext = context.applicationContext
 
-    /** In the background only the sound is wanted: the video track goes, and its downloads with it. */
+    /** The video track's pending removal; a return before it fires keeps the picture's buffer. */
+    private var videoOffTimer: Cancellable? = null
+
+    /**
+     * In the background only the sound is wanted: the video track goes, and its downloads with it, once the app
+     * has been away for [BACKGROUND_VIDEO_OFF_SECONDS]. Removing it at once stalls the picture on return.
+     */
     private val appVisibility = object : DefaultLifecycleObserver {
         override fun onStart(owner: LifecycleOwner) {
+            videoOffTimer?.cancel()
+            videoOffTimer = null
             // The phone's picture stays off while the TV has it.
             if (castPlayer == null) setVideoDisabled(false)
             setAppSuspended(false)
         }
 
         override fun onStop(owner: LifecycleOwner) {
-            setVideoDisabled(true)
+            videoOffTimer?.cancel()
+            videoOffTimer = clock.schedule(BACKGROUND_VIDEO_OFF_SECONDS) {
+                videoOffTimer = null
+                setVideoDisabled(true)
+            }
             setAppSuspended(true)
         }
     }
@@ -560,6 +572,8 @@ class ExoEngine(
     }
 
     override fun destroy() {
+        videoOffTimer?.cancel()
+        videoOffTimer = null
         runCatching { cast?.stop() }
         castPlayer?.removeListener(castForwarder)
         castPlayer = null
@@ -890,6 +904,8 @@ class ExoEngine(
 
         private const val TAG = "LuminaryCast"
         const val POLL_PERIOD = 0.25
+        /** How long the app may be in the background before its video track, and downloads, are dropped. */
+        const val BACKGROUND_VIDEO_OFF_SECONDS = 30.0
         const val DEFAULT_SKIP_SECONDS = 10
 
         /** A media session's id must be unique in the process, and a player may be created again. */

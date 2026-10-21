@@ -41,6 +41,13 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     private var routeDetector: AVRouteDetector?
     private var routeObservation: NSKeyValueObservation?
     private var externalPlaybackObservation: NSKeyValueObservation?
+    /// Answers for the `luminary://` playlists and key while AirPlay is active: the receiver
+    /// fetches the stream itself and cannot reach them.
+    private var castServer: CastServer?
+    /// The server's address, once it listens: the item is built from it for as long as AirPlay holds.
+    private var castBase: String?
+    /// AirPlay reporting inactive for a moment is not the end of a session: a swap of the item does it.
+    private var endCastingTimer: Cancellable?
     #endif
     private var lastStatus: AVPlayer.TimeControlStatus = .paused
     private var rate = 1.0
@@ -195,7 +202,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         #if os(iOS)
         player.allowsExternalPlayback = true
         externalPlaybackObservation = player.observe(\.isExternalPlaybackActive, options: [.new]) { [weak self] _, _ in
-            DispatchQueue.main.async { self?.reportAirPlay() }
+            DispatchQueue.main.async { self?.externalPlaybackChanged() }
         }
         #endif
         // Video goes on as audio in the background, and into picture in picture where it can.
@@ -283,7 +290,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         reportedAudio = nil
         reportedSubtitle = ChangeReport(nil)
 
-        let asset = AVURLAsset(url: url)
+        let asset = AVURLAsset(url: castURL(for: url) ?? url)
         asset.resourceLoader.setDelegate(router, queue: router.queue)
         let item = AVPlayerItem(asset: asset)
         self.item = item
@@ -427,6 +434,63 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         _ = inline?.showRoutePicker()
     }
 
+    // MARK: AirPlay session
+
+    /// The master on the phone's own server, which a receiver can reach; nil while playing locally.
+    private func castURL(for url: URL) -> URL? {
+        #if os(iOS)
+        guard let castBase else { return nil }
+        return URL(string: rewriteForCast(url.absoluteString, base: castBase))
+        #else
+        return nil
+        #endif
+    }
+
+    private func externalPlaybackChanged() {
+        reportAirPlay()
+        #if os(iOS)
+        if player.isExternalPlaybackActive {
+            endCastingTimer?.cancel()
+            endCastingTimer = nil
+            startCasting()
+        } else if castServer != nil, endCastingTimer == nil {
+            endCastingTimer = clock.schedule(1.5) { [weak self] in
+                self?.endCastingTimer = nil
+                if self?.player.isExternalPlaybackActive == false { self?.endCasting() }
+            }
+        }
+        #endif
+    }
+
+    #if os(iOS)
+    /// The receiver is given the master from the phone's server, at the place it had got to.
+    private func startCasting() {
+        guard castServer == nil, masterUri != nil, let address = CastServer.lanAddress() else { return }
+        let server = CastServer(router: router, address: address)
+        castServer = server
+        server.start { [weak self, weak server] base in
+            DispatchQueue.main.async {
+                guard let self, let server, self.castServer === server else { return }
+                guard let base else {
+                    self.castServer = nil
+                    return
+                }
+                self.castBase = base
+                self.reattach()
+            }
+        }
+    }
+
+    /// Back to the local item, where the receiver had got to.
+    private func endCasting() {
+        guard let server = castServer else { return }
+        castServer = nil
+        castBase = nil
+        server.stop()
+        if masterUri != nil { reattach() }
+    }
+    #endif
+
     private func reportAirPlay(resend: Bool = false) {
         #if os(iOS)
         let available = routeDetector?.multipleRoutesDetected ?? false
@@ -565,6 +629,11 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         routeDetector = nil
         routeObservation?.invalidate()
         routeObservation = nil
+        endCastingTimer?.cancel()
+        endCastingTimer = nil
+        castServer?.stop()
+        castServer = nil
+        castBase = nil
         #endif
         unobservePlayer()
         detachItem()

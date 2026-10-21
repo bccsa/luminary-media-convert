@@ -54,6 +54,7 @@ import org.bccsa.luminary.player.Browse
 import org.bccsa.luminary.player.BrowseChapter
 import org.bccsa.luminary.player.BrowseItem
 import org.bccsa.luminary.player.Roster
+import org.bccsa.luminary.player.ThumbnailCue
 import org.bccsa.luminary.player.Thumbnails
 
 /**
@@ -126,6 +127,7 @@ internal class SkinControls(
     private val column = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
     private val centre = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
     private val roster = RosterView(context)
+    private val picture = PictureView(context).apply { visibility = GONE }
     private val label = TextView(context)
     private val chapterNow = TextView(context)
     private val fade = FadeDrawable()
@@ -197,6 +199,8 @@ internal class SkinControls(
         panel.setBackgroundColor(Color.TRANSPARENT)
         panel.clipToPadding = false
         panel.clipChildren = false
+        // Under the panel, so the controls and the roster stay on top of the frame.
+        addView(picture, LayoutParams(MATCH_PARENT, MATCH_PARENT))
         addView(panel, LayoutParams(MATCH_PARENT, MATCH_PARENT))
 
         // Middle: the skips either side of play / pause; a spinner stands in for play while waiting.
@@ -324,17 +328,20 @@ internal class SkinControls(
         column.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> if (shown) liftSubtitles(true) }
         thumbnails?.onChange = {
             roster.invalidate()
+            picture.invalidate()
             if (rosterOpen) updateRoster(rosterTime)
         }
         roster.onSlide = { time ->
             pauseForScrub()
             sliding = time
             updateRoster(time)
+            showPicture(time)
             refresh()
         }
         roster.onSlideEnd = { commit ->
             sliding?.let { if (commit) player.seekTo((it * 1000).roundToLong()) }
             sliding = null
+            hidePicture()
             resumeFromScrub()
             refresh()
             scheduleHide()
@@ -760,7 +767,9 @@ internal class SkinControls(
     private fun scrubbed(fraction: Double, x: Float) {
         pauseForScrub()
         if (rosterWanted() && !rosterOpen) openRoster()
-        if (rosterOpen) updateRoster(fraction * (player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0L) / 1000.0, x)
+        val seconds = fraction * (player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0L) / 1000.0
+        if (rosterOpen) updateRoster(seconds, x)
+        showPicture(seconds)
         refresh()
     }
 
@@ -771,6 +780,7 @@ internal class SkinControls(
             if (duration != null) player.seekTo((duration * fraction).roundToLong())
         }
         resumeFromScrub()
+        hidePicture()
         // The roster stays until a press lands outside it and the timeline.
         refresh()
         scheduleHide()
@@ -816,6 +826,7 @@ internal class SkinControls(
         timeline.onRoster = false
         roster.animate().cancel()
         roster.visibility = GONE
+        hidePicture()
         for (part in listOf(actionsRow, centre)) {
             part.animate().cancel()
             part.visibility = VISIBLE
@@ -850,6 +861,23 @@ internal class SkinControls(
             bottomMargin = (panel.height - panel.paddingBottom - lifted + dpf(LABEL_GAP_DP * scale)).roundToInt()
         }
         label.requestLayout()
+    }
+
+    /** The frame over the picture, while the timeline or the strip is held: nothing shows at rest. */
+    private fun showPicture(seconds: Double) {
+        val frames = thumbnails
+        val duration = player.duration.takeIf { it != C.TIME_UNSET && it > 0 }
+        if (frames == null || duration == null || !frames.ready) {
+            hidePicture()
+            return
+        }
+        picture.show(frames, seconds, duration / 1000.0)
+        picture.visibility = VISIBLE
+    }
+
+    private fun hidePicture() {
+        picture.reset()
+        picture.visibility = GONE
     }
 
     private fun panelLocationX() = IntArray(2).also { panel.getLocationInWindow(it) }[0]
@@ -1354,6 +1382,8 @@ internal class SkinControls(
         scale = when {
             widthDp >= 1400f -> 1.6f
             widthDp >= 900f -> 1.25f
+            // A phone on its side: the same controls would be small for the arm's length it is held at.
+            widthDp >= 600f -> 1.2f
             else -> 1f
         }
         val s = scale
@@ -1387,8 +1417,8 @@ internal class SkinControls(
             it.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13f * s)
             it.minWidth = dpf(40f * s).toInt()
         }
-        elapsed.layoutParams = LinearLayout.LayoutParams(WRAP_CONTENT, px(30f)).apply { marginEnd = px(12f) }
-        remaining.layoutParams = LinearLayout.LayoutParams(WRAP_CONTENT, px(30f)).apply { marginStart = px(12f) }
+        elapsed.layoutParams = LinearLayout.LayoutParams(WRAP_CONTENT, px(30f)).apply { marginEnd = px(8f) }
+        remaining.layoutParams = LinearLayout.LayoutParams(WRAP_CONTENT, px(30f)).apply { marginStart = px(8f) }
         chapterNow.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13f * s)
         chapterNow.layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = px(2f) }
         timelineRow.layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, px(30f))
@@ -1443,6 +1473,8 @@ internal class SkinControls(
         val dp = when {
             widthDp >= 1400f -> (w * 0.06f).coerceIn(56f, 200f)
             widthDp >= 900f -> (w * 0.05f).coerceIn(32f, 110f)
+            // Nearer the sides on a phone's width, for a longer timeline.
+            widthDp >= 600f -> (w * 0.03f).coerceIn(20f, 32f)
             else -> (w * 0.05f).coerceIn(20f, 64f)
         }
         return dpf(dp).roundToInt()
@@ -1696,6 +1728,49 @@ private class Timeline(
         }
         invalidate()
         return true
+    }
+}
+
+/**
+ * The scrubbed frame filling the picture while the timeline is held, drawn over black so the platform's
+ * video behind is hidden. Between cues, and while a sheet is still arriving, the last frame stays up.
+ */
+private class PictureView(context: Context) : View(context) {
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private var frames: Thumbnails? = null
+    private var cue: ThumbnailCue? = null
+    /** The last cue whose sheet has arrived, with that sheet. */
+    private var shown: Pair<ThumbnailCue, Bitmap>? = null
+
+    fun show(frames: Thumbnails, time: Double, duration: Double) {
+        this.frames = frames
+        frames.cueAt(min(time, duration - 0.001))?.let { cue = it }
+        invalidate()
+    }
+
+    fun reset() {
+        frames = null
+        cue = null
+        shown = null
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        paint.color = Color.BLACK
+        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), paint)
+        val frames = frames ?: return
+        cue?.let { current -> frames.sheet(current)?.let { shown = current to it } }
+        val (frame, sheet) = shown ?: return
+        // A cue with no crop is the whole sheet.
+        val src = if (frame.w > 0 && frame.h > 0) {
+            Rect(frame.x, frame.y, frame.x + frame.w, frame.y + frame.h)
+        } else {
+            Rect(0, 0, sheet.width, sheet.height)
+        }
+        val scale = min(width / src.width().toFloat(), height / src.height().toFloat())
+        val w = src.width() * scale
+        val h = src.height() * scale
+        val dst = RectF((width - w) / 2, (height - h) / 2, (width + w) / 2, (height + h) / 2)
+        canvas.drawBitmap(sheet, src, dst, paint)
     }
 }
 

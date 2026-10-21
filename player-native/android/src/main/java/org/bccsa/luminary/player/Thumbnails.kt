@@ -128,7 +128,13 @@ class Thumbnails(private val read: (String) -> ByteArray? = ::fetch) {
         }
     }
 
-    fun cueAt(time: Double): ThumbnailCue? = ThumbnailVtt.find(cues, time)
+    /** A frame is sampled at its cue's start, so the second half of a cue is nearer the next frame than its own. */
+    fun cueAt(time: Double): ThumbnailCue? {
+        val cue = ThumbnailVtt.find(cues, time) ?: return null
+        val span = cue.end - cue.start
+        val next = if (span > 0) ThumbnailVtt.find(cues, cue.end) else null
+        return if (next != null && time - cue.start > span / 2) next else cue
+    }
 
     /** The first frame's crop shape, which every frame of an encode shares; null until there are frames. */
     fun sample(): ThumbnailCue? = cues.firstOrNull { it.w > 0 && it.h > 0 }

@@ -137,13 +137,18 @@ describe('the now-playing view for a host', () => {
     });
 
     describe('with sound alone', () => {
-        it('offers lyrics when there are words, and shows them in the cover\'s place', async () => {
-            const wrapper = mountView({ lyrics });
+        it('shows the line being said under the cover, and the scrolling lyrics in its place when expanded', async () => {
+            const tracks = [{ id: 'en', label: 'English' }];
+            const wrapper = mountView({ lyrics, subtitleTracks: tracks, activeSubtitleTrackId: null });
+            expect(find(wrapper, 'afsCueLine').exists()).toBe(false);
+            await wrapper.setProps({ activeSubtitleTrackId: 'en' });
+            expect(find(wrapper, 'afsCueLine').exists()).toBe(true);
             expect(find(wrapper, 'afsCover').exists()).toBe(true);
-            await find(wrapper, 'afsLyricsToggle').trigger('click');
+            expect(find(wrapper, 'afsLyrics').exists()).toBe(false);
+
+            await find(wrapper, 'afsLyricsExpand').trigger('click');
             expect(find(wrapper, 'afsLyrics').exists()).toBe(true);
             expect(find(wrapper, 'afsCover').exists()).toBe(false);
-            expect(find(wrapper, 'afsLyricsToggle').attributes('aria-pressed')).toBe('true');
 
             await find(wrapper, 'afsLyrics').findAll('[data-lyric]')[0]!.trigger('click');
             expect(wrapper.emitted('seek')).toEqual([[10]]);
@@ -153,8 +158,8 @@ describe('the now-playing view for a host', () => {
             const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(844);
             const height = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(390);
             try {
-                const wrapper = mountView({ lyrics });
-                await find(wrapper, 'afsLyricsToggle').trigger('click');
+                const wrapper = mountView({ lyrics, subtitleTracks: [{ id: 'en', label: 'English' }], activeSubtitleTrackId: 'en' });
+                await find(wrapper, 'afsLyricsExpand').trigger('click');
                 expect(find(wrapper, 'afsStage').find("[data-test='afsLyrics']").exists()).toBe(true);
                 expect(wrapper.find("[data-test='afsSideLyrics']").exists()).toBe(false);
             } finally {
@@ -163,7 +168,7 @@ describe('the now-playing view for a host', () => {
             }
         });
 
-        it('offers the lyrics in each language the post has, and shows the one chosen', async () => {
+        it('offers off and each language the post has in one menu, and shows the one chosen', async () => {
             const tracks = [
                 { id: 'en', label: 'English' },
                 { id: 'fr', label: 'Français' },
@@ -171,21 +176,22 @@ describe('the now-playing view for a host', () => {
             const wrapper = mountView({ lyrics, subtitleTracks: tracks, activeSubtitleTrackId: 'en' });
             await find(wrapper, 'afsLyricsLanguage').trigger('click');
             const items = wrapper.findAll('[role="menuitemradio"]');
-            expect(items.map((item) => item.text())).toEqual(['English', 'Français']);
-            await items[1]!.trigger('click');
+            expect(items.map((item) => item.text())).toEqual([DEFAULT_MESSAGES.subtitlesOff, 'English', 'Français']);
+            await items[2]!.trigger('click');
             expect(wrapper.emitted('subtitle-track')).toEqual([['fr']]);
-            expect(find(wrapper, 'afsLyrics').exists()).toBe(true);
 
-            // The French words on their way: the lyrics stay asked for, and come back with them.
+            // The French words on their way: the line waits for them.
             await wrapper.setProps({ lyrics: [], activeSubtitleTrackId: 'fr' });
-            expect(find(wrapper, 'afsLyrics').exists()).toBe(false);
+            expect(find(wrapper, 'afsCueLine').exists()).toBe(false);
             await wrapper.setProps({ lyrics });
-            expect(find(wrapper, 'afsLyrics').exists()).toBe(true);
+            expect(find(wrapper, 'afsCueLine').exists()).toBe(true);
         });
 
-        it('has no lyrics language to choose with words in one language only', () => {
-            const wrapper = mountView({ lyrics, subtitleTracks: [{ id: 'en', label: 'English' }] });
-            expect(find(wrapper, 'afsLyricsLanguage').exists()).toBe(false);
+        it('turns the lyrics off from the same menu', async () => {
+            const wrapper = mountView({ lyrics, subtitleTracks: [{ id: 'en', label: 'English' }], activeSubtitleTrackId: 'en' });
+            await find(wrapper, 'afsLyricsLanguage').trigger('click');
+            await find(wrapper, 'afsLyricsOff').trigger('click');
+            expect(wrapper.emitted('subtitle-track')).toEqual([[null]]);
         });
 
         it('turns its play button while the player gets ready, and still takes a press', async () => {
@@ -204,7 +210,7 @@ describe('the now-playing view for a host', () => {
 
         it('has no lyrics button for a post without words, and keeps the sleep timer', () => {
             const wrapper = mountView();
-            expect(find(wrapper, 'afsLyricsToggle').exists()).toBe(false);
+            expect(find(wrapper, 'afsLyricsLanguage').exists()).toBe(false);
             expect(find(wrapper, 'afsSleep').exists()).toBe(true);
             expect(find(wrapper, 'afsSubtitles').exists()).toBe(false);
             expect(find(wrapper, 'afsFullscreen').exists()).toBe(false);
@@ -243,7 +249,7 @@ describe('the now-playing view for a host', () => {
         it("has a video's tools: subtitles and picture in picture, without the sleep timer or lyrics", async () => {
             const wrapper = mountView(video);
             expect(find(wrapper, 'afsSleep').exists()).toBe(false);
-            expect(find(wrapper, 'afsLyricsToggle').exists()).toBe(false);
+            expect(find(wrapper, 'afsLyricsLanguage').exists()).toBe(false);
 
             await find(wrapper, 'afsSubtitles').trigger('click');
             await wrapper.findAll('[role=menuitemradio]').find((item) => item.text() === 'Français')!.trigger('click');
@@ -267,13 +273,12 @@ describe('the now-playing view for a host', () => {
             expect(find(wrapper, 'afsCover').exists()).toBe(false);
         });
 
-        it('closes the lyrics when the picture comes back', async () => {
-            const wrapper = mountView({ lyrics });
-            await find(wrapper, 'afsLyricsToggle').trigger('click');
+        it('puts the lyrics away while the picture shows', async () => {
+            const wrapper = mountView({ lyrics, subtitleTracks: [{ id: 'en', label: 'English' }], activeSubtitleTrackId: 'en' });
+            await find(wrapper, 'afsLyricsExpand').trigger('click');
+            expect(find(wrapper, 'afsLyrics').exists()).toBe(true);
             await wrapper.setProps({ stage: 'video' });
-            await wrapper.setProps({ stage: 'cover' });
             expect(find(wrapper, 'afsLyrics').exists()).toBe(false);
-            expect(find(wrapper, 'afsCover').exists()).toBe(true);
         });
 
         it('says when its stage moves, so a picture drawn behind the page is placed again', async () => {

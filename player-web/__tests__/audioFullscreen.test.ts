@@ -68,14 +68,14 @@ describe('AudioFullscreen — what it shows', () => {
         expect(find(mountScreen({ chapters: [], chapterIndex: -1 }), 'afsChapterChip').exists()).toBe(false);
     });
 
-    it('has no chapters button without chapters', () => {
-        const wrapper = mountScreen({ chapters: [], chapterIndex: -1 });
-        expect(find(wrapper, 'afsChaptersButton').exists()).toBe(false);
+    it('has no chapters or up next button without either', () => {
+        const wrapper = mountScreen({ chapters: [], chapterIndex: -1, hasBrowse: false });
+        expect(find(wrapper, 'afsBrowse').exists()).toBe(false);
     });
 
     it('opens the chapters from their own button, as rows like up next, marking the playing one', async () => {
         const wrapper = mountScreen({ chaptersSheet: true });
-        await find(wrapper, 'afsChaptersButton').trigger('click');
+        await find(wrapper, 'afsBrowse').trigger('click');
         const rows = wrapper.findAll('.lmpl-chapter');
         expect(rows).toHaveLength(chapters.length);
         expect(rows[0]!.find('.lmpl-upnext-title').text()).toBe('Chapter 1');
@@ -197,7 +197,7 @@ describe('AudioFullscreen — what it asks for', () => {
 
     it('asks to go to the chapter that is chosen', async () => {
         const wrapper = mountScreen({ chaptersSheet: true });
-        await find(wrapper, 'afsChaptersButton').trigger('click');
+        await find(wrapper, 'afsBrowse').trigger('click');
         await wrapper.findAll('.lmpl-chapter')[3]!.trigger('click');
         expect(wrapper.emitted('seek-chapter')![0]).toEqual([chapters[3]]);
     });

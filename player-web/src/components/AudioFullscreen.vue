@@ -5,7 +5,7 @@ import { formatSeconds, type PlayerMessages } from '../messages';
 import type { PlayerUpNextItem } from '../upNext';
 import BrowsePanel from './BrowsePanel.vue';
 import NowPlayingLyrics from './NowPlayingLyrics.vue';
-import type { LyricCue } from '../ui/lyrics';
+import { activeLyric, type LyricCue } from '../ui/lyrics';
 import { skipIcon } from '../ui/controlsHtml';
 import type { ScrubPosition } from '../ui/audioFullscreen';
 import { formatChapterOf } from '../ui/chapterBar';
@@ -123,15 +123,14 @@ const isVideo = computed(() => props.stage === 'video');
 const subtitleTracks = computed(() => props.subtitleTracks ?? []);
 const lyricLines = computed(() => props.lyrics ?? []);
 
-// The words are shown while they are asked for, and only with sound alone and words to show.
-const lyricsOpen = ref(false);
-const showLyrics = computed(() => lyricsOpen.value && !isVideo.value && lyricLines.value.length > 0);
+// With sound alone the subtitles are the lyrics: they show while a language is on, and "off" puts them away.
+const lyricsOn = computed(() => !isVideo.value && !!props.activeSubtitleTrackId && lyricLines.value.length > 0);
+// The cover stays in view: the line being said sits under it, and the scrolling lyrics take its place only when asked for.
+const lyricsExpanded = ref(false);
+const showLyrics = computed(() => lyricsOn.value && lyricsExpanded.value);
+const cueLine = computed(() => lyricLines.value[activeLyric(lyricLines.value, props.currentTime)]?.text ?? '');
 // In the cover's place, in a window of any shape, as on a phone.
 const lyricsInStage = showLyrics;
-// The picture puts them away. Words still on their way (another language being read) keep them asked for.
-watch(isVideo, (video) => {
-    if (video) lyricsOpen.value = false;
-});
 
 type MenuId = 'speed' | 'language' | 'sleep' | 'subtitles' | 'quality';
 const menu = ref<MenuId | null>(null);
@@ -320,11 +319,6 @@ function chooseSubtitles(id: string | null): void {
     emit('subtitle-track', id);
     closeMenu();
 }
-/** With the sound alone the subtitles are the lyrics: choosing their language shows them. */
-function chooseLyrics(id: string): void {
-    lyricsOpen.value = true;
-    chooseSubtitles(id);
-}
 
 // The stage's band, for a picture drawn behind the page: the screen's colour is cut out there (see .lmpl-afs-hole).
 const stageEl = ref<HTMLElement | null>(null);
@@ -435,43 +429,59 @@ const washSrc = computed(() => props.wash || cover.value?.src);
         </div>
 
         <div class="lmpl-afs-main">
-            <div ref="stageEl" class="lmpl-afs-art" :class="{ 'lmpl-afs-art-lyrics': lyricsInStage }" data-test="afsStage">
-                <!-- The host's player stays mounted with sound alone, only hidden, so switching never stops playback. -->
-                <div v-if="slots.stage" v-show="isVideo" class="lmpl-afs-stage" data-test="afsStageSlot"><slot name="stage"></slot></div>
-                <p v-if="isVideo && caption" class="lmpl-afs-caption" data-test="afsCaption">{{ caption }}</p>
-                <!-- A drag along the picture's foot scrubs like the bar, for a thumb that lands short of it. -->
-                <div
-                    v-if="isVideo && knownDuration && !isLive"
-                    class="lmpl-afs-scrubzone"
-                    data-test="afsScrubZone"
-                    @pointerdown="onBarDown"
-                    @pointermove="onBarMove"
-                    @pointerup="onBarUp"
-                    @pointercancel="onBarUp"
-                ></div>
-                <NowPlayingLyrics
-                    v-if="lyricsInStage"
-                    :lines="lyricLines"
-                    :current-time="currentTime"
-                    :playing="playing"
-                    :rate="playbackRate"
-                    :label="messages.lyrics"
-                    @seek="emit('seek', $event)"
-                />
-                <img
-                    v-else-if="!isVideo && cover?.src"
-                    class="lmpl-afs-cover"
-                    :src="cover.src"
-                    :srcset="'srcset' in cover ? cover.srcset : undefined"
-                    :sizes="'srcset' in cover && cover.srcset ? artworkSizes : undefined"
-                    alt=""
-                    draggable="false"
-                    data-test="afsCover"
-                    @error="coverFailed = true"
-                />
-                <div v-else-if="!isVideo" class="lmpl-afs-cover lmpl-afs-cover-empty" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" width="40%" height="40%" fill="currentColor"><path d="M19.952 1.651a.75.75 0 0 1 .298.599V16.303a3 3 0 0 1-2.176 2.884l-1.32.377a2.553 2.553 0 1 1-1.403-4.909l2.311-.66a1.5 1.5 0 0 0 1.088-1.442V6.994l-9 2.572v9.737a3 3 0 0 1-2.176 2.884l-1.32.377a2.553 2.553 0 1 1-1.403-4.909l2.311-.66a1.5 1.5 0 0 0 1.088-1.442V5.25a.75.75 0 0 1 .544-.721l10.5-3a.75.75 0 0 1 .658.122Z" /></svg>
+            <div class="lmpl-afs-artwrap" :class="{ 'lmpl-afs-artwrap-lyrics': lyricsInStage }">
+                <div ref="stageEl" class="lmpl-afs-art" :class="{ 'lmpl-afs-art-lyrics': lyricsInStage }" data-test="afsStage">
+                    <!-- The host's player stays mounted with sound alone, only hidden, so switching never stops playback. -->
+                    <div v-if="slots.stage" v-show="isVideo" class="lmpl-afs-stage" data-test="afsStageSlot"><slot name="stage"></slot></div>
+                    <p v-if="isVideo && caption" class="lmpl-afs-caption" data-test="afsCaption">{{ caption }}</p>
+                    <!-- A drag along the picture's foot scrubs like the bar, for a thumb that lands short of it. -->
+                    <div
+                        v-if="isVideo && knownDuration && !isLive"
+                        class="lmpl-afs-scrubzone"
+                        data-test="afsScrubZone"
+                        @pointerdown="onBarDown"
+                        @pointermove="onBarMove"
+                        @pointerup="onBarUp"
+                        @pointercancel="onBarUp"
+                    ></div>
+                    <NowPlayingLyrics
+                        v-if="lyricsInStage"
+                        :lines="lyricLines"
+                        :current-time="currentTime"
+                        :playing="playing"
+                        :rate="playbackRate"
+                        :label="messages.lyrics"
+                        @seek="emit('seek', $event)"
+                    />
+                    <img
+                        v-else-if="!isVideo && cover?.src"
+                        class="lmpl-afs-cover"
+                        :src="cover.src"
+                        :srcset="'srcset' in cover ? cover.srcset : undefined"
+                        :sizes="'srcset' in cover && cover.srcset ? artworkSizes : undefined"
+                        alt=""
+                        draggable="false"
+                        data-test="afsCover"
+                        @error="coverFailed = true"
+                    />
+                    <div v-else-if="!isVideo" class="lmpl-afs-cover lmpl-afs-cover-empty" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" width="40%" height="40%" fill="currentColor"><path d="M19.952 1.651a.75.75 0 0 1 .298.599V16.303a3 3 0 0 1-2.176 2.884l-1.32.377a2.553 2.553 0 1 1-1.403-4.909l2.311-.66a1.5 1.5 0 0 0 1.088-1.442V6.994l-9 2.572v9.737a3 3 0 0 1-2.176 2.884l-1.32.377a2.553 2.553 0 1 1-1.403-4.909l2.311-.66a1.5 1.5 0 0 0 1.088-1.442V5.25a.75.75 0 0 1 .544-.721l10.5-3a.75.75 0 0 1 .658.122Z" /></svg>
+                    </div>
                 </div>
+                    <div v-if="lyricsOn" class="lmpl-afs-cueline" data-test="afsCueLine">
+                        <span class="lmpl-afs-cuegap" aria-hidden="true"></span>
+                        <p class="lmpl-afs-cue" data-test="afsCue" @click="lyricsExpanded = !lyricsExpanded">{{ lyricsExpanded ? '' : cueLine }}</p>
+                        <button
+                            type="button"
+                            class="lmpl-afs-iconbtn lmpl-afs-cuebtn"
+                            :aria-label="messages.lyrics"
+                            :aria-pressed="lyricsExpanded"
+                            data-test="afsLyricsExpand"
+                            @click="lyricsExpanded = !lyricsExpanded"
+                        >
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path :d="lyricsExpanded ? 'M20 9h-5V4M4 15h5v5M15 9l5-5M9 15l-5 5' : 'M15 4h5v5M9 20H4v-5M20 4l-6 6M4 20l6-6'" /></svg>
+                        </button>
+                    </div>
             </div>
 
             <div class="lmpl-afs-info">
@@ -624,33 +634,22 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                                 </div>
                             </div>
 
-                            <button
-                                v-if="!isVideo && lyricLines.length > 0"
-                                type="button"
-                                class="lmpl-afs-iconbtn"
-                                :class="{ 'lmpl-afs-on': showLyrics }"
-                                :aria-label="messages.lyrics"
-                                :aria-pressed="showLyrics"
-                                data-test="afsLyricsToggle"
-                                @click="lyricsOpen = !lyricsOpen"
-                            >
-                                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 10h10M4 14h16M4 18h7" /><circle cx="18" cy="18" r="2" /></svg>
-                            </button>
-
-                            <div v-if="!isVideo && subtitleTracks.length > 1" class="lmpl-afs-tool">
+                            <div v-if="!isVideo && subtitleTracks.length > 0" class="lmpl-afs-tool">
                                 <button
                                     type="button"
                                     class="lmpl-afs-iconbtn"
-                                    :aria-label="messages.lyricsLanguage"
+                                    :class="{ 'lmpl-afs-on': showLyrics }"
+                                    :aria-label="messages.lyrics"
                                     :aria-expanded="menu === 'subtitles'"
                                     aria-haspopup="menu"
                                     data-test="afsLyricsLanguage"
                                     @click="toggleMenu('subtitles')"
                                 >
-                                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5" /><path d="M7 14h4M13 14h4M7 10.5h2M11 10.5h6" /></svg>
+                                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 10h10M4 14h16M4 18h7" /><circle cx="18" cy="18" r="2" /></svg>
                                 </button>
-                                <div v-if="menu === 'subtitles'" class="lmpl-afs-menu" role="menu" :aria-label="messages.lyricsLanguage">
-                                    <button v-for="track in subtitleTracks" :key="track.id" type="button" role="menuitemradio" :aria-checked="track.id === activeSubtitleTrackId" class="lmpl-afs-menuitem" @click="chooseLyrics(track.id)">{{ track.label }}</button>
+                                <div v-if="menu === 'subtitles'" class="lmpl-afs-menu" role="menu" :aria-label="messages.lyrics">
+                                    <button type="button" role="menuitemradio" :aria-checked="!activeSubtitleTrackId" class="lmpl-afs-menuitem" data-test="afsLyricsOff" @click="chooseSubtitles(null)">{{ messages.subtitlesOff }}</button>
+                                    <button v-for="track in subtitleTracks" :key="track.id" type="button" role="menuitemradio" :aria-checked="track.id === activeSubtitleTrackId" class="lmpl-afs-menuitem" @click="chooseSubtitles(track.id)">{{ track.label }}</button>
                                 </div>
                             </div>
 
@@ -695,18 +694,9 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                                 <media-icon name="fullscreen-enter" class="media-button-icon"></media-icon>
                             </button>
 
-                            <slot name="cast"></slot>
+                            <slot name="audio-tool"></slot>
 
-                            <button
-                                v-if="chapters.length > 1"
-                                type="button"
-                                class="lmpl-afs-iconbtn"
-                                :aria-label="messages.chapters"
-                                data-test="afsChaptersButton"
-                                @click="openChapters('chapters')"
-                            >
-                                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 6h10M10 12h10M10 18h10" /><rect x="3.5" y="4.5" width="3" height="3" rx="0.8" /><rect x="3.5" y="10.5" width="3" height="3" rx="0.8" fill="currentColor" /><rect x="3.5" y="16.5" width="3" height="3" rx="0.8" /></svg>
-                            </button>
+                            <slot name="cast"></slot>
 
                             <button
                                 v-if="hasBrowse"

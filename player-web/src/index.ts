@@ -66,6 +66,7 @@ export {
 } from './ui/scrubPreview';
 export { default as ScrubThumbnail } from './components/ScrubThumbnail.vue';
 export { default as ScrubRoster } from './components/ScrubRoster.vue';
+export { default as ScrubPicture } from './components/ScrubPicture.vue';
 export { installAutoHide, AUTO_HIDE_MS, type ControlsStore } from './ui/autoHide';
 export { buildControlsHtml, type ControlsHtmlLabels, type ControlsHtmlOptions } from './ui/controlsHtml';
 export { isVideoJsElement } from './elements';
