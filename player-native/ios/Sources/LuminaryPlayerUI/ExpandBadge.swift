@@ -12,7 +12,6 @@ final class ExpandBadge: UIView {
         super.init(frame: frame)
         isUserInteractionEnabled = false
         backgroundColor = UIColor.black.withAlphaComponent(0.55)
-        layer.cornerRadius = Self.size / 2
         let chevron = UIImageView(
             image: UIImage(
                 systemName: "chevron.up",
@@ -21,9 +20,17 @@ final class ExpandBadge: UIView {
         )
         chevron.tintColor = .white
         chevron.contentMode = .center
-        chevron.frame = CGRect(x: 0, y: 0, width: Self.size, height: Self.size)
-        chevron.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         addSubview(chevron)
+        self.chevron = chevron
+    }
+
+    private var chevron: UIImageView?
+
+    // The badge is made at no size and given its own later: the chevron is centred on whatever it is given.
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        chevron?.frame = bounds
+        layer.cornerRadius = min(bounds.width, bounds.height) / 2
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
