@@ -24,6 +24,7 @@ import {
     type ServeStrategy,
     type SubtitleTrack,
 } from '../types.js';
+import { collapseAudioGroups } from './audio-groups.js';
 import {
     buildAudioOnlyMaster,
     canRenderAudioOnly,
@@ -203,9 +204,12 @@ export async function loadMaster(
 /** Pure derivation half of {@link loadMaster}; exported for fixture specs. */
 export function describeMaster(
     url: string,
-    text: string,
+    served: string,
     wasEncrypted = false,
 ): MasterInfo {
+    // Every engine plays what is derived from here, so a language served twice
+    // (a stereo and a mono group) is offered once on all of them.
+    const text = collapseAudioGroups(served);
     // Parsed once, and every question below asked of the one model. It was
     // five parses, one of them building a whole audio-only master only to
     // compare it with null.
