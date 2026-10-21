@@ -173,6 +173,11 @@ final class GlyphButton: UIControl {
     }
     private var skipGlyph: (seconds: Int, forward: Bool)?
 
+    /// How far right the icon sits from the middle, as a fraction of its box's width.
+    var iconShift: CGFloat = 0 {
+        didSet { if iconShift != oldValue { setNeedsLayout() } }
+    }
+
     private func rebuild() {
         icon.sublayers?.forEach { $0.removeFromSuperlayer() }
         seconds.isHidden = true
@@ -217,7 +222,8 @@ final class GlyphButton: UIControl {
     override func layoutSubviews() {
         super.layoutSubviews()
         icon.frame = CGRect(
-            x: (bounds.width - iconSize) / 2, y: (bounds.height - iconSize) / 2, width: iconSize, height: iconSize
+            x: (bounds.width - iconSize) / 2 + iconShift * iconSize, y: (bounds.height - iconSize) / 2,
+            width: iconSize, height: iconSize
         )
         let side = min(bounds.width, bounds.height) - 2
         backing.path = CGPath(ellipseIn: CGRect(x: (bounds.width - side) / 2, y: (bounds.height - side) / 2, width: side, height: side), transform: nil)

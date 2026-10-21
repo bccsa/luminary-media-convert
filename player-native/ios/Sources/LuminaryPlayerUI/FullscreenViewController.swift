@@ -345,13 +345,13 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         }
         roster.onPan = { [weak self] dx, state in self?.pinPanned(dx, state) }
 
-        exitButton.layers = V10Icons.fullscreenExit
+        exitButton.layers = BrowseIcons.close
         exitButton.accessibilityLabel = texts.exitFullscreen
         pipButton.layers = V10Icons.pip
         pipButton.accessibilityLabel = texts.pictureInPicture
-        audioButton.layers = V10Icons.language
+        audioButton.layers = PlayerIcons.audioLanguage
         audioButton.accessibilityLabel = texts.audioMenu
-        subtitlesButton.layers = V10Icons.captions
+        subtitlesButton.layers = PlayerIcons.captionsCc
         subtitlesButton.accessibilityLabel = texts.subtitlesMenu
         qualityButton.layers = V10Icons.quality
         qualityButton.accessibilityLabel = texts.qualityMenu
@@ -613,6 +613,8 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         self.layout = layout
 
         playPause.layers = layout.showsPause ? V10Icons.pause : V10Icons.play
+        // A triangle's weight sits left of its box's middle, so play is nudged right to look centred.
+        playPause.iconShift = layout.showsPause ? 0 : 0.08
         playPause.accessibilityLabel = layout.showsPause ? texts.pause : texts.play
         playPause.isHidden = layout.showsSpinner
         spinner.isHidden = !layout.showsSpinner
@@ -624,6 +626,8 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         skipForward.accessibilityLabel = layout.skipForward.map(texts.skipForward)
         audioButton.isHidden = !layout.showsAudioMenu
         subtitlesButton.isHidden = !layout.showsSubtitlesMenu
+        let subtitleOn = subtitles.map { $0.item === item && $0.item.currentMediaSelection.selectedMediaOption(in: $0.group) != nil } ?? false
+        subtitlesButton.layers = subtitleOn ? PlayerIcons.captionsCcOn : PlayerIcons.captionsCc
         let showsQuality = qualities?.item === item && qualities?.heights.isEmpty == false
         let qualityChanged = qualityButton.isHidden == showsQuality
         qualityButton.isHidden = !showsQuality
@@ -1191,11 +1195,13 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         let off = FullscreenMenu.Item(title: texts.subtitlesOff, selected: selected == nil) { [weak self] in
             item.select(nil, in: subtitles.group)
             self?.closeMenu()
+            self?.refresh()
         }
         return [off] + subtitles.options.map { option in
             .init(title: option.playlistName, selected: option == selected) { [weak self] in
                 item.select(option, in: subtitles.group)
                 self?.closeMenu()
+                self?.refresh()
             }
         }
     }

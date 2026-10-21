@@ -110,14 +110,14 @@ internal class SkinControls(
     private val back: Icon?
     private val forward: Icon?
     private val qualityButton = Icon(context, V10Icons.quality)
-    private val audioButton = Icon(context, SettingIcons.language)
+    private val audioButton = Icon(context, SettingIcons.audioLanguage)
     private val pipButton = Icon(context, V10Icons.pip)
     private val castButton = Icon(context, V10Icons.cast)
-    private val subtitlesButton = Icon(context, V10Icons.captions)
+    private val subtitlesButton = Icon(context, SettingIcons.captionsCc)
     private val browseButton = Icon(context, BrowseIcons.list)
     private val rateButton = Icon(context, V10Icons.speed)
     private val muteButton = Icon(context, V10Icons.volumeHigh)
-    private val exitButton = Icon(context, V10Icons.fullscreenExit)
+    private val exitButton = Icon(context, BrowseIcons.close)
 
     private val elapsed = timeView(Gravity.START or Gravity.CENTER_VERTICAL)
     private val remaining = timeView(Gravity.END or Gravity.CENTER_VERTICAL)
@@ -441,6 +441,8 @@ internal class SkinControls(
     private fun refresh() {
         val showPlay = Util.shouldShowPlayButton(player)
         play.layers = if (showPlay) V10Icons.play else V10Icons.pause
+        // A triangle's weight sits left of its box's middle, so play is nudged right to look centred.
+        play.iconShift = if (showPlay) 0.08f else 0f
         play.contentDescription = if (showPlay) texts.play else texts.pause
 
         // A video picked to play next is on its way from the tap until it plays, while the page prepares it.
@@ -459,7 +461,10 @@ internal class SkinControls(
         // With one tier there is nothing to choose.
         qualityButton.visibility = if (qualityChoicesOf(player.currentTracks, heldQuality(player)).size > 1) VISIBLE else GONE
         // The skin shows its captions button only when the source has subtitles.
-        subtitlesButton.visibility = if (subtitleChoicesOf(player.currentTracks).isNotEmpty()) VISIBLE else GONE
+        val subtitleChoices = subtitleChoicesOf(player.currentTracks)
+        subtitlesButton.visibility = if (subtitleChoices.isNotEmpty()) VISIBLE else GONE
+        val subtitleOn = C.TRACK_TYPE_TEXT !in player.trackSelectionParameters.disabledTrackTypes && subtitleChoices.any { it.selected }
+        subtitlesButton.layers = if (subtitleOn) SettingIcons.captionsCcOn else SettingIcons.captionsCc
 
         val speed = player.playbackParameters.speed
         rateButton.label = "${formatRate(speed)}x"
@@ -1128,7 +1133,7 @@ internal class SkinControls(
             elevation = dpf(12f)
             isClickable = true
             ViewCompat.setAccessibilityPaneTitle(this, texts.browse)
-            setPadding(0, inset.top, inset.right, inset.bottom)
+            setPadding(0, min(inset.top, topClear), inset.right, inset.bottom)
         }
         val header = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1516,7 +1521,8 @@ internal class SkinControls(
         }
         inset = Insets.of(left, top, right, bottom)
         layoutEdges()
-        browseSheet?.setPadding(0, top, right, bottom)
+        // As the top line: the hidden status bar's height counts in [safe], but only a cutout covers the sheet's top.
+        browseSheet?.setPadding(0, min(top, topClear), right, bottom)
     }
 
     /** Tapping a control closes an open menu, as the skin's menus close when they lose focus. */
@@ -1915,6 +1921,13 @@ private class Icon(context: Context, layers: List<V10Icons.Layer>?, private val 
             invalidate()
         }
     var skipDp = 32f
+    /** How far right the icon sits from the middle, as a fraction of its box's width. */
+    var iconShift = 0f
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
 
     private var paths: List<Triple<Path, Float, Float>>? = null
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -1967,7 +1980,7 @@ private class Icon(context: Context, layers: List<V10Icons.Layer>?, private val 
         fill.setShadowLayer(size * 0.05f, 0f, size * 0.04f, 0x99000000.toInt())
         stroke.setShadowLayer(size * 0.05f, 0f, size * 0.04f, 0x99000000.toInt())
         canvas.save()
-        canvas.translate(cx - size / 2, cy - size / 2)
+        canvas.translate(cx - size / 2 + iconShift * size, cy - size / 2)
         canvas.scale(unit, unit)
         for ((path, alpha, strokeWidth) in built) {
             if (strokeWidth > 0f) {

@@ -224,6 +224,14 @@ describe('the now-playing view for a host', () => {
         });
     });
 
+    describe("the host's way on, under the title", () => {
+        it('shows what the host puts under the title, and nothing without it', () => {
+            const withLink = mountView({}, { 'under-title': () => h('button', { 'data-test': 'hostLink' }, 'Read') });
+            expect(withLink.find('.lmpl-afs-undertitle').find("[data-test='hostLink']").exists()).toBe(true);
+            expect(mountView().find('.lmpl-afs-undertitle').exists()).toBe(false);
+        });
+    });
+
     describe('filling the window', () => {
         it('lets the picture take the whole screen with the picture, and keeps the screen as it is with the sound', () => {
             const video = mountView({ stage: 'video', fill: true }, { stage: () => h('div') });
