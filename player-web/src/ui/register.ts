@@ -67,11 +67,11 @@ import {
 } from '@videojs/html/icons';
 
 /**
- * The language that is heard: headphones with an A. The bare language glyph read as a text tool to people who had
- * not met it, so the sound's own sign is drawn with it.
+ * The language that is heard: headphones. The language glyph read as a text tool to people who had not met it, so
+ * the sound's own sign stands for it.
  */
 const AUDIO_LANGUAGE_PATHS =
-    '<path d="M2.5 11.5V9a6.5 6.5 0 0 1 13 0v2.5"/><path d="M2.5 11.25A1.25 1.25 0 0 1 3.75 10H5v5H3.75a1.25 1.25 0 0 1-1.25-1.25z"/><path d="M15.5 11.25A1.25 1.25 0 0 0 14.25 10H13v5h1.25a1.25 1.25 0 0 0 1.25-1.25z"/><path d="M7.3 14.5 9 9.8l1.7 4.7M7.9 12.9h2.2"/>';
+    '<path d="M2.5 11.5V9a6.5 6.5 0 0 1 13 0v2.5"/><path d="M2.5 11.25A1.25 1.25 0 0 1 3.75 10H5v5H3.75a1.25 1.25 0 0 1-1.25-1.25z"/><path d="M15.5 11.25A1.25 1.25 0 0 0 14.25 10H13v5h1.25a1.25 1.25 0 0 0 1.25-1.25z"/>';
 const LANGUAGE_ICON =
     '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
     AUDIO_LANGUAGE_PATHS +

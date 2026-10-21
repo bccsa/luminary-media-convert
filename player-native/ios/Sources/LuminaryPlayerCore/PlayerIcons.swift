@@ -1,12 +1,11 @@
 /// Glyphs the Video.js 10 skin has no counterpart for, drawn on ``V10Icons``' 18-unit grid in the same layers. The
 /// same paths as Android's `SettingIcons`.
 public enum PlayerIcons {
-    /// Headphones with an "A": the choice of a spoken language.
+    /// Headphones: the choice of the language that is heard.
     public static let audioLanguage: [V10Icons.Layer] = [
         .init(path: "M2.5 11.5V9a6.5 6.5 0 0 1 13 0v2.5", alpha: 1, strokeWidth: 1.35),
         .init(path: "M2.5 11.25A1.25 1.25 0 0 1 3.75 10H5v5H3.75a1.25 1.25 0 0 1-1.25-1.25z", alpha: 1, strokeWidth: 1.35),
         .init(path: "M15.5 11.25A1.25 1.25 0 0 0 14.25 10H13v5h1.25a1.25 1.25 0 0 0 1.25-1.25z", alpha: 1, strokeWidth: 1.35),
-        .init(path: "M7.3 14.5 9 9.8l1.7 4.7M7.9 12.9h2.2", alpha: 1, strokeWidth: 1.35),
     ]
 
     /// "CC" in an outlined box (Video.js's compat set): no subtitles showing.

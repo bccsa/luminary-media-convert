@@ -2,7 +2,7 @@ package org.bccsa.luminary.player.engine
 
 /** Glyphs the Video.js skin has no counterpart for, drawn on [V10Icons]' 18-unit grid in the same layers. */
 internal object SettingIcons {
-    /** Headphones with an "A": the choice of a spoken language. */
+    /** Headphones: the choice of the language that is heard. */
     val audioLanguage = listOf(
         V10Icons.Layer(
             "M2.5 11.5V9a6.5 6.5 0 0 1 13 0v2.5",
@@ -16,11 +16,6 @@ internal object SettingIcons {
         ),
         V10Icons.Layer(
             "M15.5 11.25A1.25 1.25 0 0 0 14.25 10H13v5h1.25a1.25 1.25 0 0 0 1.25-1.25z",
-            1f,
-            1.35f,
-        ),
-        V10Icons.Layer(
-            "M7.3 14.5 9 9.8l1.7 4.7M7.9 12.9h2.2",
             1f,
             1.35f,
         ),
