@@ -18,12 +18,17 @@ enum Skin {
     /// The skip circles' centres sit this far either side of the play button's.
     static let skipOffset: CGFloat = play / 2 + clusterGap + skip / 2
     static let skipLift: CGFloat = 0
-    /// `--lmpl-s`: one up to 900 pt wide, then 1.25, then 1.6, so the controls are not a stamp on an iPad.
-    static func scale(forWidth width: CGFloat) -> CGFloat { width >= 1400 ? 1.6 : width >= 900 ? 1.25 : 1 }
+    /// `--lmpl-s`: one up to 600 pt wide, then 1.2 (a phone on its side, held at arm's length), 1.25 from 900 and
+    /// 1.6 from 1400, so the controls are not a stamp on an iPad.
+    static func scale(forWidth width: CGFloat) -> CGFloat {
+        width >= 1400 ? 1.6 : width >= 900 ? 1.25 : width >= 600 ? 1.2 : 1
+    }
     /// `--lmpl-edge`: how far the controls keep in from the sides.
     static func edge(forWidth width: CGFloat) -> CGFloat {
         if width >= 1400 { return min(max(width * 0.06, 56), 200) }
         if width >= 900 { return min(max(width * 0.05, 32), 110) }
+        // Nearer the sides on a phone's width on its side, for a longer timeline.
+        if width >= 600 { return min(max(width * 0.03, 20), 32) }
         return min(max(width * 0.05, 20), 64)
     }
     /// The bottom row's buttons, before scaling.
@@ -345,6 +350,68 @@ final class FullscreenMenu: UIView {
 /// those further from it falling away into the dark, so it reads as a lens on the playhead. Drawn
 /// from ``Thumbnails``' sheets; a frame whose sheet has not arrived is left dark. The same strip as
 /// Android's `RosterView`.
+/// The scrubbed frame filling the picture while the timeline or the strip is held, drawn over black so the video
+/// behind is hidden. Between cues, and while a sheet is still arriving, the last frame stays up.
+final class ScrubPictureView: UIView {
+    private var frames: Thumbnails?
+    private var cue: ThumbnailCue?
+    /// The last cue whose sheet has arrived, with that sheet.
+    private var shown: (cue: ThumbnailCue, sheet: CGImage)?
+    private var decoded: [String: CGImage] = [:]
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .black
+        isOpaque = true
+        isUserInteractionEnabled = false
+        contentMode = .redraw
+        isHidden = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    func show(_ frames: Thumbnails, time: Double, duration: Double) {
+        if frames !== self.frames { decoded.removeAll() }
+        self.frames = frames
+        if let found = frames.cue(at: min(time, duration - 0.001)) { cue = found }
+        isHidden = false
+        setNeedsDisplay()
+    }
+
+    func reset() {
+        frames = nil
+        cue = nil
+        shown = nil
+        isHidden = true
+    }
+
+    private func image(for cue: ThumbnailCue, in frames: Thumbnails) -> CGImage? {
+        if let image = decoded[cue.url] { return image }
+        guard let data = frames.sheet(for: cue), let image = UIImage(data: data)?.cgImage else { return nil }
+        if decoded.count > 8 { decoded.removeAll() }
+        decoded[cue.url] = image
+        return image
+    }
+
+    override func draw(_ rect: CGRect) {
+        guard let frames else { return }
+        if let cue, let sheet = image(for: cue, in: frames) { shown = (cue, sheet) }
+        guard let (frame, sheet) = shown else { return }
+        // A cue with no crop is the whole sheet.
+        let crop = frame.w > 0 && frame.h > 0
+            ? sheet.cropping(to: CGRect(x: frame.x, y: frame.y, width: frame.w, height: frame.h))
+            : sheet
+        guard let crop else { return }
+        let source = CGSize(width: crop.width, height: crop.height)
+        let fit = min(bounds.width / source.width, bounds.height / source.height)
+        let size = CGSize(width: source.width * fit, height: source.height * fit)
+        UIImage(cgImage: crop).draw(in: CGRect(
+            x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2, width: size.width, height: size.height
+        ))
+    }
+}
+
 final class RosterView: UIView {
     private var frames: Thumbnails?
     private var time: Double = 0

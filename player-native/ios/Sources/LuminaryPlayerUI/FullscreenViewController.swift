@@ -34,6 +34,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     private let visibility: FullscreenControlsVisibility
 
     private let controls = UIView()
+    private let scrubPicture = ScrubPictureView()
     /// The subtitles, drawn here rather than by the player: over the picture's foot, lifted over the timeline while
     /// the controls show.
     private let subtitleLabel = SubtitleLabel()
@@ -283,6 +284,8 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
             self.view.setNeedsLayout()
         }
 
+        // Over the picture and its words while the timeline is held, under the controls and the strip.
+        view.addSubview(scrubPicture)
         controls.backgroundColor = .clear
         view.addSubview(controls)
         controls.addSubview(fade)
@@ -335,6 +338,8 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         roster.configure(commands.thumbnails)
         commands.thumbnails?.onChange = { [weak self] in
             guard let self else { return }
+            // A sheet arrived: the frame held up over the picture can be drawn now.
+            if !self.scrubPicture.isHidden { self.scrubPicture.setNeedsDisplay() }
             if let fraction = self.rosterFraction { self.updateRoster(fraction) }
             if self.rosterPinned { self.updatePinned() }
         }
@@ -415,6 +420,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         videoView.frame = view.bounds
+        scrubPicture.frame = view.bounds
         controls.frame = view.bounds
         let area = view.bounds.inset(by: view.safeAreaInsets)
         let centre = CGPoint(x: area.midX, y: area.midY)
@@ -693,12 +699,14 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
             } else {
                 hideRoster()
             }
+            hidePicture()
             resumeFromScrub()
         } else {
             if scrubbing == nil { pauseForScrub() }
             scrubbing = position
             if rosterPinned { closePin() }
             if commands.thumbnails?.ready == true { updateRoster(fraction) }
+            showPicture(position)
         }
         refresh()
     }
@@ -818,7 +826,21 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         pinAnchorTimeout?.cancel()
         roster.isUserInteractionEnabled = false
         hideRoster()
+        hidePicture()
         visibility.pinned = false
+    }
+
+    /// The frame over the picture while the timeline or the strip is held: nothing shows at rest.
+    private func showPicture(_ time: Double) {
+        guard let frames = commands.thumbnails, frames.ready, state.duration > 0 else {
+            hidePicture()
+            return
+        }
+        scrubPicture.show(frames, time: time, duration: state.duration)
+    }
+
+    private func hidePicture() {
+        scrubPicture.reset()
     }
 
     /// Keeps the strip at `time` while the video gets there.
@@ -867,7 +889,9 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
                 startTime: drag.startTime, dx: Double(dx), pointsPerSecond: Double(perSecond), duration: state.duration
             )
             pinDrag = (drag.startTime, time, drag.moved || abs(dx) > 4)
+            showPicture(time)
         case .ended:
+            hidePicture()
             guard let drag = pinDrag else { return }
             pinDrag = nil
             if drag.moved {
@@ -877,6 +901,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
             resumeFromScrub()
         default:
             pinDrag = nil
+            hidePicture()
             resumeFromScrub()
         }
         updatePinned()

@@ -189,10 +189,14 @@ public final class Thumbnails: @unchecked Sendable {
         }
     }
 
+    /// A frame is sampled at its cue's start, so the second half of a cue is nearer the next frame than its own.
     public func cue(at time: Double) -> ThumbnailCue? {
         lock.lock()
         defer { lock.unlock() }
-        return ThumbnailVtt.find(cues, time: time)
+        guard let cue = ThumbnailVtt.find(cues, time: time) else { return nil }
+        let span = cue.end - cue.start
+        guard span > 0, time - cue.start > span / 2, let next = ThumbnailVtt.find(cues, time: cue.end) else { return cue }
+        return next
     }
 
     /// The first frame's crop shape, which every frame of an encode shares; nil until there are frames.

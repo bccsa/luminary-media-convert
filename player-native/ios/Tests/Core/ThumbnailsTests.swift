@@ -120,6 +120,16 @@ struct ThumbnailsTests {
         #expect(asked.urls == ["https://cdn.example.com/t/thumbnails.vtt", "https://cdn.example.com/t/sprite_0.webp"])
     }
 
+    @Test("past the middle of a cue the next frame is the nearer one, as a frame is sampled at its cue's start")
+    func nearerFrame() {
+        let thumbnails = Thumbnails { url, done in done(url.hasSuffix(".vtt") ? Data(vtt.utf8) : nil) }
+        thumbnails.load(url: "https://cdn.example.com/t/thumbnails.vtt", keyHex: nil)
+        #expect(thumbnails.cue(at: 0.4)?.x == 0)
+        #expect(thumbnails.cue(at: 0.6)?.x == 160)
+        // The last of a run with nothing straight after it keeps its own frame.
+        #expect(thumbnails.cue(at: 2.2)?.x == 160)
+    }
+
     @Test("a source without frames, or a failed read, leaves none")
     func noFrames() {
         let none = Thumbnails { _, done in done(nil) }
