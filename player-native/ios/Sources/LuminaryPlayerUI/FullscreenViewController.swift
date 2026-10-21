@@ -322,7 +322,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         remainingLabel.isUserInteractionEnabled = true
         remainingLabel.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(toggleTotal)))
         controls.addSubview(remainingLabel)
-        chapterLabel.font = .systemFont(ofSize: 13, weight: .medium)
+        chapterLabel.font = PlayerFont.weight(.medium, size: 13)
         chapterLabel.textColor = .white
         chapterLabel.lineBreakMode = .byTruncatingTail
         chapterLabel.layer.shadowColor = UIColor.black.cgColor
@@ -455,7 +455,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         let restingY = rowY - rowHeight
         let timelineY = restingY - (rosterUp ? rosterHeight(area.width) - Skin.trackInset * scale : 0)
         for label in [timeLabel, remainingLabel] {
-            label.font = .monospacedDigitSystemFont(ofSize: 13 * scale, weight: .medium)
+            label.font = PlayerFont.monospacedDigits(size: 13 * scale, weight: .medium)
             label.sizeToFit()
         }
         let elapsedWidth = max(timeLabel.bounds.width, 40 * scale)
@@ -469,7 +469,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         )
         progress.scale = scale
         // The chapter line sits just over the timeline, the width of the column.
-        chapterLabel.font = .systemFont(ofSize: 13 * scale, weight: .medium)
+        chapterLabel.font = PlayerFont.weight(.medium, size: 13 * scale)
         let chapterHeight = chapterLabel.font.lineHeight.rounded(.up)
         chapterLabel.frame = CGRect(
             x: area.minX + edge, y: timelineY - 2 * scale - chapterHeight, width: max(area.width - 2 * edge, 0), height: chapterHeight
@@ -963,8 +963,8 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         let side = Skin.rowButton * scale
         let top = area.minY + 12 * scale
         exitButton.frame = CGRect(x: area.maxX - edge + 8 * scale - side + 1, y: top, width: side, height: side)
-        headingTitle.font = .systemFont(ofSize: 17 * scale, weight: .bold)
-        headingSubtitle.font = .systemFont(ofSize: 12 * scale, weight: .regular)
+        headingTitle.font = PlayerFont.weight(.bold, size: 17 * scale)
+        headingSubtitle.font = PlayerFont.weight(.regular, size: 12 * scale)
         let left = area.minX + edge
         let width = max(exitButton.frame.minX - 16 * scale - left, 0)
         let titleHeight = headingTitle.font.lineHeight.rounded(.up)
@@ -993,7 +993,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         let area = view.bounds.inset(by: view.safeAreaInsets)
         let scale = Skin.scale(forWidth: area.width)
         let width = min(area.width * 0.8, 900)
-        subtitleLabel.font = .systemFont(ofSize: 18 * scale, weight: .semibold)
+        subtitleLabel.font = PlayerFont.weight(.semibold, size: 18 * scale)
         let fit = subtitleLabel.sizeThatFits(CGSize(width: width, height: area.height / 2))
         let bottom = controlsShown ? min(chapterLabel.frame.minY, progress.frame.minY) - 10 * scale : area.maxY - 16 * scale
         subtitleLabel.frame = CGRect(x: area.midX - width / 2, y: bottom - fit.height, width: width, height: fit.height)

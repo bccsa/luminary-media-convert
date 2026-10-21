@@ -221,10 +221,10 @@ class InlinePresenter(
             if (room > 0) {
                 text.setFixedTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
                 // On the page's own colour the words need no box of their own, only a shadow to keep them readable.
-                text.setStyle(CaptionStyleCompat(Color.WHITE, Color.TRANSPARENT, Color.TRANSPARENT, CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW, Color.BLACK, null))
+                text.setStyle(CaptionStyleCompat(Color.WHITE, Color.TRANSPARENT, Color.TRANSPARENT, CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW, Color.BLACK, PlayerFont.semibold(text.context)))
             } else {
                 text.setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION)
-                text.setStyle(CaptionStyleCompat.DEFAULT)
+                text.setStyle(PlayerFont.captions(text.context, CaptionStyleCompat.DEFAULT))
             }
         }
         val height = if (room > 0) room else (frame.height * density).toInt().coerceAtLeast(1)

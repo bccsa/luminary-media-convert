@@ -249,6 +249,7 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
             useController = false
             setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
             setKeepContentOnPlayerReset(keepLastFrame)
+            subtitleView?.setStyle(PlayerFont.captions(activity))
             this.player = player
         }
         val controls = SkinControls(

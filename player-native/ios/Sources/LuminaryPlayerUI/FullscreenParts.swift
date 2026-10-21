@@ -51,9 +51,9 @@ enum Skin {
     static let trackColor = UIColor(white: 1, alpha: 0.26)
     static let loadedColor = UIColor(white: 1, alpha: 0.4)
     static let fadeLocations: [NSNumber] = [0, 0.55, 1]
-    static let text = UIFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+    static let text = PlayerFont.monospacedDigits(size: 13, weight: .regular)
     /// video.js's rate label: 1.5 em of 0.875 rem.
-    static let rateText = UIFont.systemFont(ofSize: 21)
+    static let rateText = PlayerFont.regular(size: 21)
     static let showDuration: TimeInterval = 0.1
     static let hideDuration: TimeInterval = 0.5
 }
@@ -64,7 +64,7 @@ final class PillLabel: UILabel {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        font = .systemFont(ofSize: 14, weight: .medium)
+        font = PlayerFont.weight(.medium, size: 14)
         textColor = .white
         textAlignment = .center
         backgroundColor = UIColor(red: 20 / 255, green: 20 / 255, blue: 24 / 255, alpha: 0.72)
@@ -193,7 +193,7 @@ final class GlyphButton: UIControl {
             icon.addSublayer(shape(arc, unit: unit, alpha: 1, stroke: 1.8))
             icon.addSublayer(shape(head, unit: unit, alpha: 1, stroke: 1.8))
             seconds.text = "\(skip.seconds)"
-            seconds.font = .systemFont(ofSize: (skip.seconds >= 100 ? 6 : 7.5) * unit, weight: .bold)
+            seconds.font = PlayerFont.weight(.bold, size: (skip.seconds >= 100 ? 6 : 7.5) * unit)
             seconds.isHidden = false
         }
         setNeedsLayout()
@@ -314,7 +314,7 @@ final class FullscreenMenu: UIView {
         if let title {
             let heading = UILabel(frame: CGRect(x: Self.pad + 10, y: top, width: Self.width - 2 * Self.pad - 20, height: Self.headerHeight))
             heading.attributedText = NSAttributedString(string: title.uppercased(), attributes: [
-                .font: UIFont.systemFont(ofSize: 11, weight: .bold),
+                .font: PlayerFont.weight(.bold, size: 11),
                 .kern: 0.66,
                 .foregroundColor: UIColor(white: 1, alpha: 0.6),
             ])
@@ -329,7 +329,7 @@ final class FullscreenMenu: UIView {
             button.contentHorizontalAlignment = .left
             button.contentEdgeInsets = UIEdgeInsets(top: 10, left: 10, bottom: 10, right: 36)
             button.setTitle(item.title, for: .normal)
-            button.titleLabel?.font = item.selected ? .boldSystemFont(ofSize: 14) : .systemFont(ofSize: 14)
+            button.titleLabel?.font = item.selected ? PlayerFont.weight(.bold, size: 14) : PlayerFont.regular(size: 14)
             button.titleLabel?.lineBreakMode = .byTruncatingTail
             button.setTitleColor(.white, for: .normal)
             button.layer.cornerRadius = 9
