@@ -222,6 +222,16 @@ describe('the now-playing view for a host', () => {
             expect(wrapper.emitted('fullscreen')).toHaveLength(1);
             expect(find(wrapper, 'afsSleep').exists()).toBe(true);
         });
+
+        it('leaves the host full screen by an X at the top once it is open, in the tool\'s place', async () => {
+            const wrapper = mountView({ fullscreenTool: true, fullscreenActive: true });
+            expect(find(wrapper, 'afsFullscreen').exists()).toBe(false);
+            const close = find(wrapper, 'afsCloseFullscreen');
+            expect(close.attributes('aria-label')).toBe('Exit full screen');
+            expect(close.find('media-icon').attributes('name')).toBe('close');
+            await close.trigger('click');
+            expect(wrapper.emitted('fullscreen')).toHaveLength(1);
+        });
     });
 
     describe("the host's way on, under the title", () => {
