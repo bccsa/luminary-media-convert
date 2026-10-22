@@ -203,11 +203,11 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
         let inset: CGFloat = 12
         let width = max(picture.width - 2 * inset, 0)
         if band > 0 {
-            label.font = .systemFont(ofSize: 16, weight: .semibold)
+            label.font = PlayerFont.weight(.semibold, size: 16)
             let fit = label.sizeThatFits(CGSize(width: width, height: band))
             label.frame = CGRect(x: picture.minX + inset, y: picture.maxY + 6, width: width, height: min(fit.height, band - 6))
         } else {
-            label.font = .systemFont(ofSize: max(12, min(20, picture.height * 0.075)), weight: .semibold)
+            label.font = PlayerFont.weight(.semibold, size: max(12, min(20, picture.height * 0.075)))
             let fit = label.sizeThatFits(CGSize(width: width, height: picture.height))
             label.frame = CGRect(x: picture.minX + inset, y: picture.maxY - picture.height * 0.06 - fit.height, width: width, height: fit.height)
         }

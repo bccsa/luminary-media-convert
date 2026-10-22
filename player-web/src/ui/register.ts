@@ -44,10 +44,10 @@ import '@videojs/html/ui/audio-track-radio-group';
 import '@videojs/html/ui/playback-rate-radio-group';
 import '@videojs/html/ui/captions-radio-group';
 
+import { captionsOffIcon, captionsOnIcon } from '@videojs/html/icons/compat';
 import {
     airPlayEnterIcon,
     airPlayExitIcon,
-    captionsOffIcon,
     checkIcon,
     castEnterIcon,
     castExitIcon,
@@ -66,16 +66,30 @@ import {
     volumeOffIcon,
 } from '@videojs/html/icons';
 
-/** The Heroicons "language" glyph, which the rest of Luminary uses for choosing a language. */
+/**
+ * The language that is heard: headphones. The language glyph read as a text tool to people who had not met it, so
+ * the sound's own sign stands for it.
+ */
+const AUDIO_LANGUAGE_PATHS =
+    '<path d="M2.5 11.5V9a6.5 6.5 0 0 1 13 0v2.5"/><path d="M2.5 11.25A1.25 1.25 0 0 1 3.75 10H5v5H3.75a1.25 1.25 0 0 1-1.25-1.25z"/><path d="M15.5 11.25A1.25 1.25 0 0 0 14.25 10H13v5h1.25a1.25 1.25 0 0 0 1.25-1.25z"/>';
 const LANGUAGE_ICON =
-    '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m10.5 21 5.25-11.25L21 21m-9-3h7.5M3 5.621a48.474 48.474 0 0 1 6-.371m0 0c1.12 0 2.233.038 3.334.114M9 5.25V3m3.334 2.364C11.176 10.658 7.69 15.08 3 17.502m9.334-12.138c.896.061 1.785.147 2.666.257m-4.589 8.495a18.023 18.023 0 0 1-3.827-5.802"/></svg>';
+    '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    AUDIO_LANGUAGE_PATHS +
+    '</svg>';
+
+/** Leaving full screen: an X, which people find where a corners glyph was missed. */
+const CLOSE_ICON =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4.5 4.5l9 9M13.5 4.5l-9 9"/></svg>';
 
 /** The icon names `controlsHtml.ts` writes as `<media-icon name="…">`. */
 registerIcons('default', {
     'airplay-enter': airPlayEnterIcon,
     'airplay-exit': airPlayExitIcon,
+    // "CC", as YouTube draws it: outlined while off, filled while a track is on.
     'captions-off': captionsOffIcon,
+    'captions-on': captionsOnIcon,
     check: checkIcon,
+    close: CLOSE_ICON,
     'cast-enter': castEnterIcon,
     'cast-exit': castExitIcon,
     'fullscreen-enter': fullscreenEnterIcon,

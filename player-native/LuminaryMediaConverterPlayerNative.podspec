@@ -14,6 +14,8 @@ Pod::Spec.new do |s|
   s.author = 'BCC South Africa'
   s.source = { :git => 'https://github.com/bccsa/luminary-media-convert.git', :tag => s.version.to_s }
   s.source_files = 'ios/Sources/**/*.swift'
+  # Inter, the web player's typeface, with its licence.
+  s.resource_bundles = { 'LuminaryPlayerFonts' => ['ios/Sources/LuminaryPlayerUI/Fonts/*'] }
   s.ios.deployment_target = '15.0'
   s.dependency 'Capacitor'
   s.swift_version = '5.9'

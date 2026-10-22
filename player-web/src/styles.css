@@ -1803,8 +1803,14 @@
 /* A ThumbHash is a few pixels: stretched over the screen it is already soft, so it needs no blur, which is what an
    old phone pays for most. */
 .lmpl-afs-wash.lmpl-afs-wash-hash {
-    filter: saturate(1.3);
+    filter: saturate(1.6);
     transform: scale(1.1);
+    opacity: 1;
+}
+/* A ThumbHash is already soft and dark enough at its edges: a lighter scrim lets its colour show, still dark enough
+   at the foot, where the controls are, for white text. */
+.lmpl-afs-bg-hash::after {
+    background: linear-gradient(to bottom, rgb(8 10 14 / 0.28), rgb(8 10 14 / 0.66));
 }
 
 /* Video: the host's picture in the cover's place, from edge to edge of the screen. */
@@ -2336,4 +2342,48 @@
 }
 .lmpl-root .lmpl-afs.lmpl-afs-fill .lmpl-afs-caption {
     display: none;
+}
+
+/* The play triangle's weight sits left of its box: moved right so it looks centred in its circle. Pause stays. */
+.lmpl-root .lmpl-play .media-play-button-play-icon {
+    translate: 8% 0;
+}
+
+/* Subtitles: one of the two CC glyphs, by whether a track is on. */
+.lmpl-root:not(.lmpl-captions-on) .lmpl-cc-on,
+.lmpl-root.lmpl-captions-on .lmpl-cc-off {
+    display: none;
+}
+
+/* The host's own way on from what plays, under the title: a quiet pill. */
+.lmpl-afs-undertitle {
+    display: flex;
+    margin-top: 10px;
+}
+.lmpl-afs-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: 999px;
+    background: rgb(255 255 255 / 0.14);
+    color: #fff;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+}
+.lmpl-afs-pill:hover {
+    background: rgb(255 255 255 / 0.22);
+}
+.lmpl-afs-pill:focus-visible {
+    outline: 2px solid #fff;
+    outline-offset: 2px;
+}
+.lmpl-afs-pill svg {
+    width: 18px;
+    height: 18px;
+    flex: none;
 }

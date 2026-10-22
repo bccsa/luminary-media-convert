@@ -1478,6 +1478,7 @@ defineExpose({
             'lmpl-has-quality-choice': state.qualities.length > 1,
             'lmpl-has-audio-choice': state.audioTracks.length > 1,
             'lmpl-has-subtitles': state.subtitleTracks.length > 0,
+            'lmpl-captions-on': !!state.activeSubtitleTrackId,
             'lmpl-has-thumbs': state.thumbnailsReady,
             'lmpl-has-browse': hasBrowse,
             'lmpl-has-heading': !!nowPlaying?.title,

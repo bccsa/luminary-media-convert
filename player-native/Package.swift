@@ -27,6 +27,8 @@ let package = Package(
             name: "LuminaryPlayerUI",
             dependencies: ["LuminaryPlayerCore"],
             path: "ios/Sources/LuminaryPlayerUI",
+            // Inter, the web player's typeface, with its licence.
+            resources: [.process("Fonts")],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(

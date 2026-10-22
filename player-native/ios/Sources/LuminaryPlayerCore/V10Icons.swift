@@ -33,10 +33,6 @@ public enum V10Icons {
         Layer(path: "M12.5 9.5a3.5 3.5 0 1 1 0 7h-7a3.5 3.5 0 1 1 0-7zm-2 1.5a2 2 0 1 0 0 4h2a2 2 0 1 0 0-4z", alpha: 1, strokeWidth: 0),
         Layer(path: "M12.5 1.5a3.5 3.5 0 1 1 0 7h-7a3.5 3.5 0 1 1 0-7zM5.5 3a2 2 0 1 0 0 4h2a2 2 0 1 0 0-4z", alpha: 0.5, strokeWidth: 0),
     ]
-    /// The Heroicons "language" glyph: the choice of a language, the same one the page and Android draw.
-    public static let language: [Layer] = [
-        Layer(path: "m7.875 15.75 3.938-8.438L15.75 15.75m-6.75-2.25h5.625M2.25 4.216a36.355 36.355 0 0 1 4.5-.278m0 0c.84 0 1.675.028 2.501.086M6.75 3.938V2.25m2.501 1.773C8.382 7.993 5.768 11.31 2.25 13.127m7-9.104c.672.046 1.339.11 1.999.193m-3.442 6.371a13.517 13.517 0 0 1-2.87-4.351", alpha: 1, strokeWidth: 1.125),
-    ]
     public static let speech: [Layer] = [
         Layer(path: "M6 12a5 5 0 0 1 4.511 2.843c.273.57-.203 1.157-.835 1.157H2.325c-.633 0-1.109-.587-.836-1.157A5 5 0 0 1 6.001 12M8.5 8.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0", alpha: 1, strokeWidth: 0),
         Layer(path: "M14.5 2A1.5 1.5 0 0 1 16 3.5v2A1.5 1.5 0 0 1 14.5 7H12l-1.146 1.146A.5.5 0 0 1 10 7.793v-.88A1.5 1.5 0 0 1 9 5.5v-2A1.5 1.5 0 0 1 10.5 2z", alpha: 0.5, strokeWidth: 0),
