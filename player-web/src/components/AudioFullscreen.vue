@@ -361,11 +361,14 @@ function chooseSubtitles(id: string | null): void {
 const stageEl = ref<HTMLElement | null>(null);
 const holeTop = ref(0);
 const holeBottom = ref(0);
+/** The foot of the picture's place (cover or video, with its subtitles band): the chapters sheet comes up to it. */
+const artBottom = ref(0);
 function measureHole(): void {
     const root = rootEl.value;
     const stageBox = stageEl.value;
     if (!root || !stageBox) return;
     const top = stageBox.getBoundingClientRect().top - root.getBoundingClientRect().top;
+    artBottom.value = Math.round(top + stageBox.offsetHeight);
     // The room for subtitles under the picture is the page's, not part of the picture's hole.
     const bottom = top + stageBox.offsetHeight - (isVideo.value && props.captionBand ? 64 : 0);
     if (top === holeTop.value && bottom === holeBottom.value) return;
@@ -432,6 +435,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
             '--lmpl-chapter-mask': chapterMask || undefined,
             '--lmpl-hole-top': `${holeTop}px`,
             '--lmpl-hole-bottom': `${holeBottom}px`,
+            '--lmpl-art-bottom': artBottom ? `${artBottom}px` : undefined,
             '--lmpl-stage-ar': stageAspect && stageAspect > 0 ? String(stageAspect) : undefined,
         }"
         data-test="audioFullscreen"

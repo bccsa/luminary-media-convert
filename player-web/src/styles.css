@@ -2345,16 +2345,26 @@
    it comes up from the foot instead, in the same dress. */
 @container lmpl-afs (max-aspect-ratio: 6/5) {
     .lmpl-root .lmpl-afs .lmpl-browse {
-        top: auto;
+        /* From the picture's foot down, so it never covers what plays, and one top for both tabs; on a short screen it
+           still keeps near half. */
+        top: min(var(--lmpl-art-bottom, 36%), 52%);
         left: 0;
         width: 100%;
         min-width: 0;
         max-width: none;
-        /* One height for both tabs, so switching between chapters and up next does not move the sheet's top. */
-        height: 64%;
+        padding-top: 0;
         padding-right: 0;
         border-radius: 18px 18px 0 0;
         box-shadow: 0 -8px 24px rgb(0 0 0 / 0.4);
+    }
+
+    /* A sheet from the foot: a slim line of tabs, the list taking the rest. */
+    .lmpl-root .lmpl-afs .lmpl-browse-head {
+        padding-top: 2px;
+    }
+
+    .lmpl-root .lmpl-afs .lmpl-browse-tab {
+        padding-block: 8px;
     }
 }
 
