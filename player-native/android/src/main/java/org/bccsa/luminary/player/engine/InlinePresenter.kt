@@ -178,8 +178,28 @@ class InlinePresenter(
         }
         view.x = web.x + (frame.x * density).toFloat()
         view.y = web.y + (frame.y * density).toFloat()
+        roundCorners(view, if (frame.front) (frame.radius * density).toFloat() else 0f)
         layoutSubtitles(frame, web, density)
         layoutBadge(frame, web, view, density)
+    }
+
+    /** A picture in front fits the page's rounded card; behind the page, the page's own corners shape it. */
+    private fun roundCorners(view: PlayerView, radius: Float) {
+        if (radius <= 0f) {
+            view.clipToOutline = false
+            view.videoSurfaceView?.clipToOutline = false
+            return
+        }
+        val outline = object : android.view.ViewOutlineProvider() {
+            override fun getOutline(v: View, out: android.graphics.Outline) = out.setRoundRect(0, 0, v.width, v.height, radius)
+        }
+        view.outlineProvider = outline
+        view.clipToOutline = true
+        // The picture's own surface, which the view's clip does not reach on its own.
+        view.videoSurfaceView?.let {
+            it.outlineProvider = outline
+            it.clipToOutline = true
+        }
     }
 
     /** Over a picture in front the page's own chevron is hidden, so the same badge is drawn here, where it stands. */

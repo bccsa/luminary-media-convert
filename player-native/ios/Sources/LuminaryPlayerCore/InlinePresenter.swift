@@ -16,13 +16,16 @@ public struct InlineFrame: Equatable, Sendable {
     /// The page asks for its way up on the picture: a small chevron in the top-left corner, drawn here since the
     /// page cannot draw over a picture in front of it. Taps go through to the page underneath.
     public let badge: Bool
+    /// The corners of a picture in front, so it fits a rounded card the page draws around it.
+    public let radius: Double
 
     public init(
         x: Double, y: Double, width: Double, height: Double,
-        front: Bool = false, captionHeight: Double = 0, captionsHidden: Bool = false, badge: Bool = false
+        front: Bool = false, captionHeight: Double = 0, captionsHidden: Bool = false, badge: Bool = false, radius: Double = 0
     ) {
         self.front = front
         self.badge = badge
+        self.radius = radius
         self.captionHeight = captionHeight
         self.captionsHidden = captionsHidden
         self.x = x
