@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue';
-import type { Chapter } from '@luminary-media-converter/player-core';
+import type { Chapter, ThumbnailSpriteCue } from '@luminary-media-converter/player-core';
 import type { PlayerMessages } from '../messages';
 import { formatClock } from '../ui/scrubPreview';
 import { withSectionHeadings, type PlayerUpNextItem } from '../upNext';
@@ -23,6 +23,8 @@ const props = defineProps<{
     idPrefix: string;
     /** The tab to open on, when it has anything to show. */
     initialTab?: 'chapters' | 'upnext';
+    /** The scrub preview's frame at a time, once its thumbnails are in: each chapter shows the one near its start. */
+    thumbnailAt?: (seconds: number) => ThumbnailSpriteCue | null;
 }>();
 
 const emit = defineEmits<{
@@ -50,6 +52,28 @@ const tabId = (tab: Tab): string => `${baseId}-tab-${tab}`;
 
 /** Start times share one format, so a long video's list lines up. */
 const haveHours = computed(() => props.chapters.some((chapter) => chapter.startTime >= 3600));
+
+/**
+ * A chapter's picture: the preview frame just after its start (the very start can be the frame before the cut), cut
+ * out of its sprite sheet and scaled to the tile. A sheet's whole size is not in a cue, so the crop is drawn at its
+ * own size and the whole scaled, as the scrub preview does.
+ */
+const chapterFrames = computed(() =>
+    props.chapters.map((chapter) => {
+        const cue = props.thumbnailAt?.(chapter.startTime + 0.5) ?? null;
+        if (!cue) return null;
+        if (!cue.w || !cue.h) {
+            return { backgroundImage: `url("${cue.spriteUrl}")`, backgroundSize: 'cover', backgroundPosition: 'center', inset: '0' };
+        }
+        return {
+            width: `${cue.w}px`,
+            height: `${cue.h}px`,
+            backgroundImage: `url("${cue.spriteUrl}")`,
+            backgroundPosition: `-${cue.x}px -${cue.y}px`,
+            '--lmpl-cue-w': String(cue.w),
+        };
+    })
+);
 
 function selectTab(tab: Tab, focus = false): void {
     requested.value = tab;
@@ -145,7 +169,8 @@ defineExpose({ hasFocus });
                         @click="emit('pick-chapter', chapter)"
                     >
                         <span class="lmpl-upnext-thumb lmpl-chapter-tile" aria-hidden="true">
-                            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 6h10M10 12h10M10 18h10" /><rect x="3.5" y="4.5" width="3" height="3" rx="0.8" /><rect x="3.5" y="10.5" width="3" height="3" rx="0.8" fill="currentColor" /><rect x="3.5" y="16.5" width="3" height="3" rx="0.8" /></svg>
+                            <span v-if="chapterFrames[index]" class="lmpl-chapter-frame" :style="chapterFrames[index]!" data-test="chapterFrame"></span>
+                            <svg v-else viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 6h10M10 12h10M10 18h10" /><rect x="3.5" y="4.5" width="3" height="3" rx="0.8" /><rect x="3.5" y="10.5" width="3" height="3" rx="0.8" fill="currentColor" /><rect x="3.5" y="16.5" width="3" height="3" rx="0.8" /></svg>
                         </span>
                         <span class="lmpl-upnext-text">
                             <span class="lmpl-upnext-title">{{ chapter.title }}</span>

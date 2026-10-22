@@ -1070,9 +1070,20 @@
 
 /* A chapter wears the same tile as an up next row, with an icon where the picture is. */
 .lmpl-chapter-tile {
+    position: relative;
     display: grid;
     place-items: center;
     color: rgb(255 255 255 / 0.8);
+}
+
+/* The frame at its own size, scaled to the tile's width (120 at the panel's scale). */
+.lmpl-chapter-frame {
+    position: absolute;
+    top: 0;
+    left: 0;
+    background-repeat: no-repeat;
+    transform: scale(calc(120 * var(--lmpl-s, 1) / var(--lmpl-cue-w, 120)));
+    transform-origin: top left;
 }
 
 .lmpl-upnext-thumb {
@@ -2339,7 +2350,8 @@
         width: 100%;
         min-width: 0;
         max-width: none;
-        max-height: 70%;
+        /* One height for both tabs, so switching between chapters and up next does not move the sheet's top. */
+        height: 64%;
         padding-right: 0;
         border-radius: 18px 18px 0 0;
         box-shadow: 0 -8px 24px rgb(0 0 0 / 0.4);

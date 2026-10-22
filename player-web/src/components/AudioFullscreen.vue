@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useSlots, watch } from 'vue';
-import type { Chapter, SleepTimerOption, SleepTimerState } from '@luminary-media-converter/player-core';
+import type { Chapter, SleepTimerOption, SleepTimerState, ThumbnailSpriteCue } from '@luminary-media-converter/player-core';
 import { formatSeconds, type PlayerMessages } from '../messages';
 import type { PlayerUpNextItem } from '../upNext';
 import BrowsePanel from './BrowsePanel.vue';
@@ -96,6 +96,8 @@ const props = defineProps<{
     fullscreenActive?: boolean;
     /** The words of what plays, timed: offered, with sound alone, as lyrics in the picture's place. */
     lyrics?: readonly LyricCue[];
+    /** The preview frame at a time, once the thumbnails are in: the chapters' pictures. */
+    thumbnailAt?: (seconds: number) => ThumbnailSpriteCue | null;
 }>();
 
 const emit = defineEmits<{
@@ -777,6 +779,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
             :up-next="upNext"
             :messages="messages"
             :id-prefix="uid"
+            :thumbnail-at="thumbnailAt"
             data-test="afsSheet"
             @close="browseOpen = false"
             @pick-chapter="pickChapter"
