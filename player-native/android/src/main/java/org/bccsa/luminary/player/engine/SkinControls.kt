@@ -329,6 +329,7 @@ internal class SkinControls(
         thumbnails?.onChange = {
             roster.invalidate()
             picture.invalidate()
+            refreshChapterPictures()
             if (rosterOpen) updateRoster(rosterTime)
         }
         roster.onSlide = { time ->
@@ -1048,6 +1049,26 @@ internal class SkinControls(
 
     private class ChapterRow(val row: View, val title: TextView, val marker: View)
 
+    /** Each chapter's picture and the time its frame is taken at, filled as the frames' sheets come in. */
+    private var chapterPictures: List<Pair<ImageView, Double>> = emptyList()
+
+    /** Fills the chapters' pictures whose frames are in; a sheet still on its way asks again when it arrives. */
+    private fun refreshChapterPictures() {
+        val frames = thumbnails ?: return
+        if (!frames.ready) return
+        for ((picture, time) in chapterPictures) {
+            if (picture.drawable != null) continue
+            val cue = frames.cueAt(time) ?: continue
+            val sheet = frames.sheet(cue) ?: continue
+            val crop = if (cue.w > 0 && cue.h > 0 && cue.x + cue.w <= sheet.width && cue.y + cue.h <= sheet.height) {
+                android.graphics.Bitmap.createBitmap(sheet, cue.x, cue.y, cue.w, cue.h)
+            } else {
+                sheet
+            }
+            picture.setImageBitmap(crop)
+        }
+    }
+
     /** True while the panel is open. */
     val hasBrowseOpen: Boolean get() = browseOpen
 
@@ -1095,6 +1116,7 @@ internal class SkinControls(
         browseSheet = null
         browseScroll = null
         chapterRows = emptyList()
+        chapterPictures = emptyList()
         currentChapter = -1
         scheduleHide()
         return true
@@ -1216,6 +1238,7 @@ internal class SkinControls(
         fun px(dp: Float) = dpf(dp * scale).roundToInt()
         val guide = max(chapters.maxOfOrNull { it.end } ?: 0.0, player.duration.takeIf { it != C.TIME_UNSET }?.div(1000.0) ?: 0.0)
         currentChapter = chapterIndex(chapters, player.currentPosition / 1000.0)
+        val pictures = mutableListOf<Pair<ImageView, Double>>()
         chapterRows = chapters.mapIndexed { index, chapter ->
             val now = index == currentChapter
             val marker = Icon(context, V10Icons.play).apply {
@@ -1236,6 +1259,24 @@ internal class SkinControls(
                 minimumHeight = px(48f)
                 setPadding(px(8f), px(10f), px(12f), px(10f))
                 background = rowBackground(now)
+                // With frames, the chapter's picture leads the row as an up-next item's does.
+                if (thumbnails != null) {
+                    val picture = ImageView(context).apply {
+                        scaleType = ImageView.ScaleType.CENTER_CROP
+                        background = GradientDrawable().apply { setColor(0xFF151518.toInt()) }
+                        clipToOutline = true
+                        outlineProvider = object : ViewOutlineProvider() {
+                            override fun getOutline(view: View, outline: android.graphics.Outline) =
+                                outline.setRoundRect(0, 0, view.width, view.height, dpf(8f * scale))
+                        }
+                    }
+                    addView(
+                        picture,
+                        LinearLayout.LayoutParams(px(UP_NEXT_PICTURE_DP), px(UP_NEXT_PICTURE_DP * 9f / 16f)).apply { marginEnd = px(12f) },
+                    )
+                    // The very start can be the frame before the cut.
+                    pictures += picture to chapter.start + 0.5
+                }
                 addView(marker, LinearLayout.LayoutParams(px(18f), px(18f)))
                 addView(title, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { marginStart = px(6f) })
                 addView(
@@ -1259,6 +1300,8 @@ internal class SkinControls(
             into.addView(row, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = px(2f) })
             ChapterRow(row, title, marker)
         }
+        chapterPictures = pictures
+        refreshChapterPictures()
     }
 
     /** Follows the playhead from chapter to chapter while the panel is open. */

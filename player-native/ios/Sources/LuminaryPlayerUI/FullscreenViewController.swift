@@ -342,6 +342,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
             if !self.scrubPicture.isHidden { self.scrubPicture.setNeedsDisplay() }
             if let fraction = self.rosterFraction { self.updateRoster(fraction) }
             if self.rosterPinned { self.updatePinned() }
+            self.panel?.refreshChapterPictures()
         }
         roster.onPan = { [weak self] dx, state in self?.pinPanned(dx, state) }
 
@@ -1044,6 +1045,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         closePin()
         hideRoster()
         let panel = BrowsePanel(frame: view.bounds)
+        panel.frames = commands.thumbnails
         panel.onClose = { [weak self] in self?.closeBrowse() }
         panel.onChapter = { [weak self] chapter in
             guard let self else { return }

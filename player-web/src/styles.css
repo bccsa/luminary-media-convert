@@ -1070,9 +1070,20 @@
 
 /* A chapter wears the same tile as an up next row, with an icon where the picture is. */
 .lmpl-chapter-tile {
+    position: relative;
     display: grid;
     place-items: center;
     color: rgb(255 255 255 / 0.8);
+}
+
+/* The frame at its own size, scaled to the tile's width (120 at the panel's scale). */
+.lmpl-chapter-frame {
+    position: absolute;
+    top: 0;
+    left: 0;
+    background-repeat: no-repeat;
+    transform: scale(calc(120 * var(--lmpl-s, 1) / var(--lmpl-cue-w, 120)));
+    transform-origin: top left;
 }
 
 .lmpl-upnext-thumb {
@@ -1615,6 +1626,13 @@
 }
 
 /* The seek bar: thick and round, with no thumb, as the controls' own; cut at the chapters by the mask when wide. */
+/* A finger's height to press, past the bar's own: the layout keeps the bar's. */
+.lmpl-afs-bar::before {
+    content: '';
+    position: absolute;
+    inset: calc(-7px * var(--lmpl-s)) 0;
+}
+
 .lmpl-afs-bar {
     position: relative;
     flex: 1;
@@ -2327,15 +2345,26 @@
    it comes up from the foot instead, in the same dress. */
 @container lmpl-afs (max-aspect-ratio: 6/5) {
     .lmpl-root .lmpl-afs .lmpl-browse {
-        top: auto;
+        /* From the picture's foot down, so it never covers what plays, and one top for both tabs; on a short screen it
+           still keeps near half. */
+        top: min(var(--lmpl-art-bottom, 36%), 52%);
         left: 0;
         width: 100%;
         min-width: 0;
         max-width: none;
-        max-height: 70%;
+        padding-top: 0;
         padding-right: 0;
         border-radius: 18px 18px 0 0;
         box-shadow: 0 -8px 24px rgb(0 0 0 / 0.4);
+    }
+
+    /* A sheet from the foot: a slim line of tabs, the list taking the rest. */
+    .lmpl-root .lmpl-afs .lmpl-browse-head {
+        padding-top: 2px;
+    }
+
+    .lmpl-root .lmpl-afs .lmpl-browse-tab {
+        padding-block: 8px;
     }
 }
 
@@ -2417,7 +2446,21 @@
 /* The host's own way on from what plays, under the title: a quiet pill. */
 .lmpl-afs-undertitle {
     display: flex;
+    align-items: center;
     margin-top: 10px;
+}
+
+/* At the line's right end, the glyphs on the line of the seek bar's end (a button's 44 is wider than its glyph). */
+.lmpl-afs-picturetools {
+    display: flex;
+    gap: 4px;
+    margin-inline: auto calc(-8px * var(--lmpl-s));
+}
+
+.lmpl-root .lmpl-afs-picturetools .lmpl-afs-iconbtn svg,
+.lmpl-root .lmpl-afs-picturetools .lmpl-afs-iconbtn .media-button-icon {
+    width: calc(28px * var(--lmpl-s));
+    height: calc(28px * var(--lmpl-s));
 }
 .lmpl-afs-pill {
     display: inline-flex;

@@ -3,7 +3,9 @@ import { nextTick } from 'vue';
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils';
 import { createInitialState, type PlayerControllerApi, type PlayerState } from '@luminary-media-converter/player-core';
 import LuminaryPlayer from '../src/components/LuminaryPlayer.vue';
+import BrowsePanel from '../src/components/BrowsePanel.vue';
 import type { PlayerUpNextItem } from '../src/upNext';
+import { DEFAULT_MESSAGES } from '../src/messages';
 
 // The Video.js elements need a real browser; as inert tags the panel, which is plain Vue, is what is tested.
 vi.mock('../src/ui/register', () => ({}));
@@ -232,5 +234,39 @@ describe('LuminaryPlayer browse panel', () => {
         await flushPromises();
         expect(tabs[1]!.getAttribute('aria-selected')).toBe('true');
         expect(document.activeElement).toBe(tabs[1]);
+    });
+});
+
+const PANEL_CHAPTERS = [
+    { startTime: 0, endTime: 60, title: 'Opening' },
+    { startTime: 60, endTime: 120, title: 'Sermon' },
+];
+
+const mountPanel = (props: Record<string, unknown> = {}) =>
+    mount(BrowsePanel, {
+        props: { chapters: PANEL_CHAPTERS, currentChapter: 0, messages: DEFAULT_MESSAGES, idPrefix: 'test', ...props },
+    });
+
+describe('BrowsePanel — the chapters', () => {
+    it("shows each chapter's preview frame from just after its start, cut out of the sprite sheet", () => {
+        const asked: number[] = [];
+        const wrapper = mountPanel({
+            thumbnailAt: (seconds: number) => {
+                asked.push(seconds);
+                return { start: seconds, end: seconds + 5, spriteUrl: 'https://cdn/s.jpg', x: 160, y: 90, w: 160, h: 90 };
+            },
+        });
+        const frames = wrapper.findAll("[data-test='chapterFrame']");
+        expect(frames).toHaveLength(2);
+        expect(asked).toEqual([0.5, 60.5]);
+        const style = frames[0]!.attributes('style');
+        expect(style).toContain('s.jpg');
+        expect(style).toContain('-160px -90px');
+    });
+
+    it('keeps the chapter symbol while there are no thumbnails', () => {
+        const wrapper = mountPanel();
+        expect(wrapper.find("[data-test='chapterFrame']").exists()).toBe(false);
+        expect(wrapper.findAll('.lmpl-chapter-tile svg')).toHaveLength(2);
     });
 });
