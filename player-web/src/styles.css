@@ -1615,6 +1615,13 @@
 }
 
 /* The seek bar: thick and round, with no thumb, as the controls' own; cut at the chapters by the mask when wide. */
+/* A finger's height to press, past the bar's own: the layout keeps the bar's. */
+.lmpl-afs-bar::before {
+    content: '';
+    position: absolute;
+    inset: calc(-7px * var(--lmpl-s)) 0;
+}
+
 .lmpl-afs-bar {
     position: relative;
     flex: 1;
@@ -2417,7 +2424,21 @@
 /* The host's own way on from what plays, under the title: a quiet pill. */
 .lmpl-afs-undertitle {
     display: flex;
+    align-items: center;
     margin-top: 10px;
+}
+
+/* At the line's right end, the glyphs on the line of the seek bar's end (a button's 44 is wider than its glyph). */
+.lmpl-afs-picturetools {
+    display: flex;
+    gap: 4px;
+    margin-inline: auto calc(-8px * var(--lmpl-s));
+}
+
+.lmpl-root .lmpl-afs-picturetools .lmpl-afs-iconbtn svg,
+.lmpl-root .lmpl-afs-picturetools .lmpl-afs-iconbtn .media-button-icon {
+    width: calc(28px * var(--lmpl-s));
+    height: calc(28px * var(--lmpl-s));
 }
 .lmpl-afs-pill {
     display: inline-flex;

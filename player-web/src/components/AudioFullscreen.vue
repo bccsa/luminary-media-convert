@@ -122,6 +122,10 @@ const emit = defineEmits<{
 
 const slots = useSlots();
 const isVideo = computed(() => props.stage === 'video');
+/** Picture in picture and full screen, whichever apply, beside the line above the seek bar. */
+const pictureTools = computed(
+    () => (isVideo.value && !!props.canPictureInPicture) || ((isVideo.value || !!props.fullscreenTool) && !props.fullscreenActive)
+);
 const subtitleTracks = computed(() => props.subtitleTracks ?? []);
 const lyricLines = computed(() => props.lyrics ?? []);
 
@@ -192,8 +196,31 @@ function onPointerdown(event: PointerEvent): void {
 
 // The bar follows the finger while it is held and asks for the seek once, when it is let go.
 const dragTime = ref<number | null>(null);
+/**
+ * Where a seek was asked for, held until the player reports a time near it: the player's time lags the seek, and
+ * the bar would flick back to where it was before going where it was let go.
+ */
+const seekTarget = ref<number | null>(null);
+let seekHold: ReturnType<typeof setTimeout> | undefined;
+function holdSeek(time: number): void {
+    seekTarget.value = time;
+    clearTimeout(seekHold);
+    seekHold = setTimeout(() => (seekTarget.value = null), SEEK_HOLD_MS);
+}
+/** Long enough for a slow seek to land; a seek the player never makes lets the bar go back after it. */
+const SEEK_HOLD_MS = 2000;
+watch(
+    () => props.currentTime,
+    (time) => {
+        if (seekTarget.value !== null && Math.abs(time - seekTarget.value) < 1.5) {
+            seekTarget.value = null;
+            clearTimeout(seekHold);
+        }
+    }
+);
+onBeforeUnmount(() => clearTimeout(seekHold));
 const barEl = ref<HTMLElement | null>(null);
-const shownTime = computed(() => dragTime.value ?? props.currentTime);
+const shownTime = computed(() => dragTime.value ?? seekTarget.value ?? props.currentTime);
 const knownDuration = computed(() => (Number.isFinite(props.duration) && props.duration > 0 ? props.duration : 0));
 const isLive = computed(() => props.live === true || props.duration === Infinity);
 const pct = (seconds: number): string => `${knownDuration.value ? Math.min(100, Math.max(0, (seconds / knownDuration.value) * 100)) : 0}%`;
@@ -223,6 +250,7 @@ function onBarMove(event: PointerEvent): void {
 }
 function onBarUp(): void {
     if (dragTime.value === null) return;
+    holdSeek(dragTime.value);
     emit('seek', dragTime.value);
     dragTime.value = null;
     emit('scrub', null);
@@ -231,9 +259,14 @@ function onBarKey(event: KeyboardEvent): void {
     const step = event.key === 'ArrowLeft' || event.key === 'ArrowDown' ? -5 : event.key === 'ArrowRight' || event.key === 'ArrowUp' ? 5 : 0;
     if (!step || !knownDuration.value) return;
     event.preventDefault();
-    emit('seek', Math.min(knownDuration.value, Math.max(0, props.currentTime + step)));
+    seekTo(Math.min(knownDuration.value, Math.max(0, shownTime.value + step)));
 }
-const skip = (seconds: number): void => emit('seek', Math.min(knownDuration.value || Infinity, Math.max(0, props.currentTime + seconds)));
+function seekTo(time: number): void {
+    holdSeek(time);
+    emit('seek', time);
+}
+// From where the bar shows, so presses in a row add up before the player has caught up with the first.
+const skip = (seconds: number): void => seekTo(Math.min(knownDuration.value || Infinity, Math.max(0, shownTime.value + seconds)));
 
 const browseOpen = ref(false);
 watch([menu, browseOpen], ([open, panel]) => emit('covered', open !== null || panel));
@@ -508,7 +541,32 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                         <i aria-hidden="true"></i>{{ formatChapterOf(messages.chapterOf, chapterIndex + 1, chapters.length) }} · {{ chapters[chapterIndex]?.title }}
                     </span>
                     <!-- Under the title, the host's own way on from what plays (back to its page, say). -->
-                    <div v-if="slots['under-title']" class="lmpl-afs-undertitle"><slot name="under-title"></slot></div>
+                    <div v-if="slots['under-title'] || pictureTools" class="lmpl-afs-undertitle">
+                        <slot name="under-title"></slot>
+                        <!-- What acts on the picture, on the right just above the seek bar: in the thumb's reach, out of the tools' row. -->
+                        <div v-if="pictureTools" class="lmpl-afs-picturetools" data-test="afsPictureTools">
+                            <button
+                                v-if="isVideo && canPictureInPicture"
+                                type="button"
+                                class="lmpl-afs-iconbtn"
+                                :aria-label="messages.pictureInPicture"
+                                data-test="afsPictureInPicture"
+                                @click="emit('picture-in-picture')"
+                            >
+                                <media-icon name="pip-enter" class="media-button-icon"></media-icon>
+                            </button>
+                            <button
+                                v-if="(isVideo || fullscreenTool) && !fullscreenActive"
+                                type="button"
+                                class="lmpl-afs-iconbtn"
+                                :aria-label="messages.enterFullscreen"
+                                data-test="afsFullscreen"
+                                @click="emit('fullscreen')"
+                            >
+                                <media-icon name="fullscreen-enter" class="media-button-icon"></media-icon>
+                            </button>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="lmpl-afs-controls">
@@ -689,28 +747,6 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                                     <button v-for="track in subtitleTracks" :key="track.id" type="button" role="menuitemradio" :aria-checked="track.id === activeSubtitleTrackId" class="lmpl-afs-menuitem" @click="chooseSubtitles(track.id)">{{ track.label }}</button>
                                 </div>
                             </div>
-
-                            <button
-                                v-if="isVideo && canPictureInPicture"
-                                type="button"
-                                class="lmpl-afs-iconbtn"
-                                :aria-label="messages.pictureInPicture"
-                                data-test="afsPictureInPicture"
-                                @click="emit('picture-in-picture')"
-                            >
-                                <media-icon name="pip-enter" class="media-button-icon"></media-icon>
-                            </button>
-
-                            <button
-                                v-if="(isVideo || fullscreenTool) && !fullscreenActive"
-                                type="button"
-                                class="lmpl-afs-iconbtn"
-                                :aria-label="messages.enterFullscreen"
-                                data-test="afsFullscreen"
-                                @click="emit('fullscreen')"
-                            >
-                                <media-icon name="fullscreen-enter" class="media-button-icon"></media-icon>
-                            </button>
 
                             <slot name="audio-tool"></slot>
 

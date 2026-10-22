@@ -142,18 +142,19 @@ describe('AudioFullscreen — the transport', () => {
         expect(find(wrapper, 'afsPlay').attributes('aria-label')).toBe('Pause');
     });
 
-    it('skips back and forward from where the playhead is, within the length', async () => {
+    it('skips back and forward from where the bar shows, within the length, so presses in a row add up', async () => {
         const wrapper = mountScreen({ currentTime: 5 });
         await find(wrapper, 'afsSkipBack').trigger('click');
         await find(wrapper, 'afsSkipForward').trigger('click');
-        expect(wrapper.emitted('seek')).toEqual([[0], [15]]);
+        await find(wrapper, 'afsSkipForward').trigger('click');
+        expect(wrapper.emitted('seek')).toEqual([[0], [10], [20]]);
     });
 
     it('seeks with the arrow keys, five seconds at a time', async () => {
         const wrapper = mountScreen();
         await find(wrapper, 'afsBar').trigger('keydown', { key: 'ArrowRight' });
         await find(wrapper, 'afsBar').trigger('keydown', { key: 'ArrowLeft' });
-        expect(wrapper.emitted('seek')).toEqual([[155], [145]]);
+        expect(wrapper.emitted('seek')).toEqual([[155], [150]]);
     });
 
     it('follows the finger along the bar, and asks for the seek once, when it is let go', async () => {
@@ -166,7 +167,25 @@ describe('AudioFullscreen — the transport', () => {
         expect(wrapper.emitted('seek')).toBeUndefined();
         await bar.trigger('pointerup', { pointerId: 1 });
         expect(wrapper.emitted('seek')).toEqual([[360]]);
-        expect(find(wrapper, 'afsElapsed').text()).toBe('2:30');
+        // Held where it was let go while the player catches up, rather than flicking back to 2:30.
+        expect(find(wrapper, 'afsElapsed').text()).toBe('6:00');
+        await wrapper.setProps({ currentTime: 359.5 });
+        await wrapper.setProps({ currentTime: 362 });
+        expect(find(wrapper, 'afsElapsed').text()).toBe('6:02');
+    });
+
+    it('lets go of a seek the player never makes, after a moment', async () => {
+        vi.useFakeTimers();
+        try {
+            const wrapper = mountScreen();
+            await find(wrapper, 'afsSkipForward').trigger('click');
+            expect(find(wrapper, 'afsElapsed').text()).toBe('2:40');
+            vi.advanceTimersByTime(2000);
+            await wrapper.vm.$nextTick();
+            expect(find(wrapper, 'afsElapsed').text()).toBe('2:30');
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });
 
