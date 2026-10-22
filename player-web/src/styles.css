@@ -2065,14 +2065,24 @@
     }
 }
 
-/* Narrow and tall: the picture and what plays share the room above the controls. */
+/*
+ * Narrow and tall: what plays and its controls keep one place, low on the screen, and the picture is centred in the
+ * room above them. A cover and a video are not the same height, so rows spread around the picture would move
+ * whenever sound and picture are switched.
+ */
 @container lmpl-afs (max-aspect-ratio: 6/5) {
     .lmpl-afs-main {
         justify-content: space-evenly;
     }
 
+    .lmpl-afs-main > .lmpl-afs-artwrap,
+    .lmpl-afs-video .lmpl-afs-main > .lmpl-afs-artwrap > .lmpl-afs-art {
+        margin-block: auto;
+    }
+
     .lmpl-afs-info {
         flex: none;
+        margin-bottom: 6cqh;
     }
 }
 
