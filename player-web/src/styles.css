@@ -2084,6 +2084,13 @@
         flex: none;
         margin-bottom: 6cqh;
     }
+
+    /* A tall video (4:3, with the band for its subtitles) can want more room than is left above the rows: it gives way,
+       and the picture sits within it, rather than pushing the rows down. */
+    .lmpl-afs-video .lmpl-afs-art {
+        flex: 0 1 auto;
+        min-height: 0;
+    }
 }
 
 /* Wide: the picture on the left, the chapters, the timeline and the controls on the right. */

@@ -352,6 +352,8 @@ onMounted(() => {
     for (const part of root.querySelectorAll(':scope > .lmpl-afs-top, :scope > .lmpl-afs-main, :scope > .lmpl-afs-main > *')) {
         holeObserver.observe(part);
     }
+    // The picture sits in a group of its own, so its own changes (its shape, once the video's is known) are watched too.
+    if (stageEl.value) holeObserver.observe(stageEl.value);
 });
 watch([isVideo, () => props.stageHole], async () => {
     await nextTick();
