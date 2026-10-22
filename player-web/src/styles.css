@@ -1293,6 +1293,40 @@
     container: lmpl-afs / size;
 }
 
+/*
+ * The X that leaves the host's full screen: where a video's full screen has its own, top right, its glyph on the line
+ * of the timeline's right end. On a phone on its side the sizes are the video's there, scaled by 1.2.
+ */
+.lmpl-afs-close {
+    --lmpl-close-s: 1;
+    --lmpl-close-edge: 20px;
+    position: absolute;
+    top: calc(env(safe-area-inset-top, 0px) + 12px * var(--lmpl-close-s));
+    right: calc(env(safe-area-inset-right, 0px) + var(--lmpl-close-edge) - 8px * var(--lmpl-close-s));
+    z-index: 3;
+    display: grid;
+    place-items: center;
+    width: calc(40px * var(--lmpl-close-s));
+    height: calc(40px * var(--lmpl-close-s));
+    padding: 0;
+    border: 0;
+    color: inherit;
+    background: none;
+    cursor: pointer;
+}
+
+.lmpl-afs-close .media-button-icon {
+    width: calc(22px * var(--lmpl-close-s));
+    height: calc(22px * var(--lmpl-close-s));
+}
+
+@container lmpl-afs (min-aspect-ratio: 6/5) and (max-height: 440px) {
+    .lmpl-afs-close {
+        --lmpl-close-s: 1.2;
+        --lmpl-close-edge: clamp(20px, 3cqw, 32px);
+    }
+}
+
 .lmpl-afs-bg {
     position: absolute;
     inset: 0;

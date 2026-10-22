@@ -92,7 +92,7 @@ const props = defineProps<{
     canPictureInPicture?: boolean;
     /** Offers full screen with sound alone too, among the tools, for a host that has a full screen to take it to. */
     fullscreenTool?: boolean;
-    /** The host's full screen is open: the same tool closes it, with the X a video's full screen leaves by. */
+    /** The host's full screen is open: it is left by an X where a video's full screen has its own, top right. */
     fullscreenActive?: boolean;
     /** The words of what plays, timed: offered, with sound alone, as lyrics in the picture's place. */
     lyrics?: readonly LyricCue[];
@@ -415,6 +415,16 @@ const washSrc = computed(() => props.wash || cover.value?.src);
 
         <slot name="roster"></slot>
 
+        <button
+            v-if="fullscreenActive"
+            type="button"
+            class="lmpl-afs-close"
+            :aria-label="messages.exitFullscreen"
+            data-test="afsCloseFullscreen"
+            @click="emit('fullscreen')"
+        >
+            <media-icon name="close" class="media-button-icon"></media-icon>
+        </button>
         <div class="lmpl-afs-top">
             <button
                 type="button"
@@ -688,14 +698,14 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                             </button>
 
                             <button
-                                v-if="isVideo || fullscreenTool"
+                                v-if="(isVideo || fullscreenTool) && !fullscreenActive"
                                 type="button"
                                 class="lmpl-afs-iconbtn"
-                                :aria-label="fullscreenActive ? messages.exitFullscreen : messages.enterFullscreen"
+                                :aria-label="messages.enterFullscreen"
                                 data-test="afsFullscreen"
                                 @click="emit('fullscreen')"
                             >
-                                <media-icon :name="fullscreenActive ? 'close' : 'fullscreen-enter'" class="media-button-icon"></media-icon>
+                                <media-icon name="fullscreen-enter" class="media-button-icon"></media-icon>
                             </button>
 
                             <slot name="audio-tool"></slot>
