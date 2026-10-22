@@ -1928,14 +1928,8 @@
 .lmpl-afs-hole .lmpl-afs-bg-low {
     clip-path: inset(var(--lmpl-hole-bottom) 0 0 0);
 }
-.lmpl-afs-bg-shift {
-    position: absolute;
-    inset: 0;
-}
-/* One flat tint on both sides of the picture, so the two parts of the wash meet it alike. */
-.lmpl-afs-hole .lmpl-afs-bg::after {
-    background: rgb(8 10 14 / 0.74);
-}
+/* The scrim is the sound's, as on the web: both parts of the wash span the whole screen, so its gradient meets itself
+   across the picture. */
 .lmpl-afs-hole .lmpl-afs-art {
     background: transparent;
 }
@@ -2060,14 +2054,31 @@
     }
 }
 
-/* Narrow and tall: the picture and what plays share the room above the controls. */
+/*
+ * Narrow and tall: what plays and its controls keep one place, low on the screen, and the picture is centred in the
+ * room above them. A cover and a video are not the same height, so rows spread around the picture would move
+ * whenever sound and picture are switched.
+ */
 @container lmpl-afs (max-aspect-ratio: 6/5) {
     .lmpl-afs-main {
         justify-content: space-evenly;
     }
 
+    .lmpl-afs-main > .lmpl-afs-artwrap,
+    .lmpl-afs-video .lmpl-afs-main > .lmpl-afs-artwrap > .lmpl-afs-art {
+        margin-block: auto;
+    }
+
     .lmpl-afs-info {
         flex: none;
+        margin-bottom: 6cqh;
+    }
+
+    /* A tall video (4:3, with the band for its subtitles) can want more room than is left above the rows: it gives way,
+       and the picture sits within it, rather than pushing the rows down. */
+    .lmpl-afs-video .lmpl-afs-art {
+        flex: 0 1 auto;
+        min-height: 0;
     }
 }
 
