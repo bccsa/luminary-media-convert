@@ -1805,6 +1805,14 @@
     gap: 12px;
 }
 
+/* Its strokes cross only the middle of their box, so the box is drawn larger to stand as tall as the glyph beside it. */
+.lmpl-afs-close .media-button-icon,
+.lmpl-afs-close svg {
+    display: block;
+    width: 28px;
+    height: 28px;
+}
+
 /*
  * On a phone on its side the X sits as a video's full screen has its own: 12 below the safe area and its glyph on the
  * line of the timeline's right end, with the video's sizes there (scaled by 1.2). What stands beside it takes the same.
@@ -1823,6 +1831,12 @@
     .lmpl-afs-fullscreen-open .lmpl-afs-topend > .lmpl-afs-iconbtn > * {
         width: 26.4px;
         height: 26.4px;
+    }
+
+    .lmpl-afs-fullscreen-open .lmpl-afs-topend > .lmpl-afs-close > .media-button-icon,
+    .lmpl-afs-fullscreen-open .lmpl-afs-topend > .lmpl-afs-close svg {
+        width: 32px;
+        height: 32px;
     }
 }
 
