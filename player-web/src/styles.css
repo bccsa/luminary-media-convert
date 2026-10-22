@@ -2107,15 +2107,18 @@
         display: none;
     }
 
-    /* The transport and the tools stand on the title's left edge, as the column's other lines do. */
-    .lmpl-afs-transport,
-    .lmpl-afs-tools {
+    /* The transport stands on the title's left edge, as the column's other lines do; the tools sit opposite it. */
+    .lmpl-afs-transport {
+        flex: none;
         justify-content: flex-start;
     }
 
     .lmpl-afs-tools {
-        gap: 10px;
-        margin-inline-start: calc(-8px * var(--lmpl-s));
+        flex: 0 1 auto;
+        min-width: 0;
+        gap: 6px;
+        justify-content: flex-end;
+        margin-inline-end: calc(-8px * var(--lmpl-s));
     }
 
     /* The tools are smaller and quieter here, under the transport that leads. */
@@ -2131,12 +2134,17 @@
         height: calc(26px * var(--lmpl-s));
     }
 
-    /* The transport and the tools each take a line of their own, centred, so a row of six tools cannot run off the side. */
+    /* The transport and the tools share one line, the tools shrinking before they run off the side. */
     .lmpl-afs-bottomrow {
-        flex-direction: column;
-        align-items: stretch;
-        justify-content: center;
-        row-gap: 10px;
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+        column-gap: 12px;
+    }
+
+    /* Room at the screen's edge for the bar's end: a thumb on the edge also opens the system gestures. */
+    .lmpl-afs-main {
+        padding-inline: max(40px, env(safe-area-inset-left)) max(48px, env(safe-area-inset-right));
     }
 }
 
