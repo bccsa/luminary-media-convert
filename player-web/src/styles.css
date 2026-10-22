@@ -1932,15 +1932,8 @@
     position: absolute;
     inset: 0;
 }
-/* One flat tint on both sides of the picture, so the two parts of the wash meet it alike. */
-.lmpl-afs-hole .lmpl-afs-bg::after {
-    background: rgb(8 10 14 / 0.74);
-}
-/* The post's own colour keeps the sound's lighter scrim with the picture too, as on the web: both parts of the wash
-   span the whole screen, so the gradient meets itself across the picture. */
-.lmpl-afs-hole .lmpl-afs-bg-hash::after {
-    background: linear-gradient(to bottom, rgb(8 10 14 / 0.28), rgb(8 10 14 / 0.66));
-}
+/* The scrim is the sound's, as on the web: both parts of the wash span the whole screen, so its gradient meets itself
+   across the picture. */
 .lmpl-afs-hole .lmpl-afs-art {
     background: transparent;
 }
