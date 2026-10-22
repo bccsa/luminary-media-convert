@@ -1800,6 +1800,46 @@
     gap: 6px;
 }
 
+/* The X that leaves the host's full screen ends the top line, with a finger's width between it and what stands beside it. */
+.lmpl-afs-fullscreen-open .lmpl-afs-topend {
+    gap: 12px;
+}
+
+/* Its strokes cross only the middle of their box, so the box is drawn larger to stand as tall as the glyph beside it. */
+.lmpl-afs-close .media-button-icon,
+.lmpl-afs-close svg {
+    display: block;
+    width: 28px;
+    height: 28px;
+}
+
+/*
+ * On a phone on its side the X sits as a video's full screen has its own: 12 below the safe area and its glyph on the
+ * line of the timeline's right end, with the video's sizes there (scaled by 1.2). What stands beside it takes the same.
+ */
+@container lmpl-afs (min-aspect-ratio: 6/5) and (max-height: 440px) {
+    .lmpl-afs.lmpl-afs-fullscreen-open .lmpl-afs-top {
+        padding-top: calc(env(safe-area-inset-top, 0px) + 14.4px);
+        padding-right: calc(env(safe-area-inset-right, 0px) + clamp(20px, 3cqw, 32px) - 9.6px);
+    }
+
+    .lmpl-afs-fullscreen-open .lmpl-afs-topend > .lmpl-afs-iconbtn {
+        width: 48px;
+        height: 48px;
+    }
+
+    .lmpl-afs-fullscreen-open .lmpl-afs-topend > .lmpl-afs-iconbtn > * {
+        width: 26.4px;
+        height: 26.4px;
+    }
+
+    .lmpl-afs-fullscreen-open .lmpl-afs-topend > .lmpl-afs-close > .media-button-icon,
+    .lmpl-afs-fullscreen-open .lmpl-afs-topend > .lmpl-afs-close svg {
+        width: 32px;
+        height: 32px;
+    }
+}
+
 /* A ThumbHash is a few pixels: stretched over the screen it is already soft, so it needs no blur, which is what an
    old phone pays for most. */
 .lmpl-afs-wash.lmpl-afs-wash-hash {
