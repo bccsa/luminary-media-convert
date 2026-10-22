@@ -146,6 +146,8 @@ export const NativeLuminaryPlayer = defineComponent({
         captionsHidden: { type: Boolean, default: false },
         /** With `inline: 'front'`, the page's chevron drawn on the picture, which the page itself cannot draw over. */
         inlineBadge: { type: Boolean, default: false },
+        /** With `inline: 'front'`, the picture's corners in CSS pixels, to fit a rounded card around it. */
+        inlineRadius: { type: Number, default: 0 },
         /** Controls to switch off, as `player-web`'s `controls` prop. */
         controls: { type: Object as PropType<Partial<NativeLuminaryPlayerControls>>, default: undefined },
         /** The plugin to drive; the Capacitor one unless a host supplies another. */
@@ -303,9 +305,9 @@ export const NativeLuminaryPlayer = defineComponent({
             const rect = el?.getBoundingClientRect();
             const frame =
                 rect && rect.width > 0 && rect.height > 0 && !state.value.isAudioOnly
-                    ? { x: rect.left, y: rect.top, width: rect.width, height: rect.height, ...(props.inline === 'front' ? { front: true } : {}), ...(props.captionBand > 0 && props.inline !== 'front' ? { captionHeight: props.captionBand } : {}), ...(props.captionsHidden ? { captionsHidden: true } : {}), ...(props.inlineBadge && props.inline === 'front' ? { badge: true } : {}) }
+                    ? { x: rect.left, y: rect.top, width: rect.width, height: rect.height, ...(props.inline === 'front' ? { front: true } : {}), ...(props.captionBand > 0 && props.inline !== 'front' ? { captionHeight: props.captionBand } : {}), ...(props.captionsHidden ? { captionsHidden: true } : {}), ...(props.inlineBadge && props.inline === 'front' ? { badge: true } : {}), ...(props.inlineRadius > 0 && props.inline === 'front' ? { radius: props.inlineRadius } : {}) }
                     : null;
-            const key = frame ? `${frame.x},${frame.y},${frame.width},${frame.height},${frame.front === true},${frame.captionHeight ?? 0},${frame.captionsHidden === true},${frame.badge === true}` : '';
+            const key = frame ? `${frame.x},${frame.y},${frame.width},${frame.height},${frame.front === true},${frame.captionHeight ?? 0},${frame.captionsHidden === true},${frame.badge === true},${frame.radius ?? 0}` : '';
             if (key === sentFrame) return;
             sentFrame = key;
             adapter.setInlineFrame(frame);
@@ -379,6 +381,7 @@ export const NativeLuminaryPlayer = defineComponent({
         watch(() => state.value.isAudioOnly, queueFrame);
         watch(() => props.captionsHidden, queueFrame);
         watch(() => props.inlineBadge, queueFrame);
+        watch(() => props.inlineRadius, queueFrame);
 
         onBeforeUnmount(() => {
             frameWatchers.splice(0).forEach((stop) => stop());

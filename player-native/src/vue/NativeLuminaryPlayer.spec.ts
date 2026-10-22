@@ -537,6 +537,20 @@ describe('NativeLuminaryPlayer', () => {
             expect(wrapper.get('.native-luminary-player').attributes('style')).toContain('background: transparent');
         });
 
+        it('rounds a picture in front to the card the page draws around it, and only one in front', async () => {
+            const { plugin, wrapper } = await mountPlayer({ inline: 'front', inlineRadius: 14, plugin: new FakePlugin({ inlineVideo: true }) });
+            await ready(plugin);
+            await flush();
+            expect(frames(plugin)).toEqual([{ x: 0, y: 72, width: 390, height: 219, front: true, radius: 14 }]);
+
+            // Out of the bar, the picture changes size, which is what makes it measured again.
+            await wrapper.setProps({ inline: true });
+            vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ ...RECT, top: 100, y: 100 } as DOMRect);
+            window.dispatchEvent(new Event('resize'));
+            await flush();
+            expect(frames(plugin).at(-1)).toEqual({ x: 0, y: 100, width: 390, height: 219 });
+        });
+
         it('says it again only when the frame moves', async () => {
             const { plugin } = await mountPlayer({ inline: true, plugin: new FakePlugin({ inlineVideo: true }) });
             await ready(plugin);

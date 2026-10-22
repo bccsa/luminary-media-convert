@@ -154,7 +154,13 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
             x: webView.frame.minX + frame.x, y: webView.frame.minY + frame.y,
             width: frame.width, height: frame.height
         )
+        // A picture in front fits the page's rounded card; behind the page, the page's own corners shape it.
+        let radius = frame.front ? CGFloat(frame.radius) : 0
+        view.layer.cornerRadius = radius
+        view.clipsToBounds = radius > 0
         heldPicture?.frame = view.frame
+        heldPicture?.layer.cornerRadius = radius
+        heldPicture?.clipsToBounds = radius > 0
         layoutSubtitles(picture: view.frame)
         layoutBadge(picture: view.frame)
     }
