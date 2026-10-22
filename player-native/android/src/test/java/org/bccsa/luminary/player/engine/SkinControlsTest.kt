@@ -278,7 +278,7 @@ class SkinControlsTest {
     }
 
     @Test
-    fun `the skip circles sit 100 dp either side of the middle of play, on its centre line`() {
+    fun `the skip circles sit 100 dp either side of the middle of play, on its centre line, scaled with the controls`() {
         val controls = controls()
         val density = activity.resources.displayMetrics.density
         val width = (800 * density).toInt()
@@ -306,9 +306,9 @@ class SkinControlsTest {
         val (forwardX, forwardY) = controls.find("Skip forward 10 seconds")!!.centre()
         val (playX, playY) = controls.find("Play")!!.centre()
 
-        // Half of play (40), the 32 between, and half of a skip (28).
-        assertEquals(playX - 100 * density, backX, 1f)
-        assertEquals(playX + 100 * density, forwardX, 1f)
+        // Half of play (40), the 32 between, and half of a skip (28), at the 1.2 of a phone on its side.
+        assertEquals(playX - 120 * density, backX, 1f)
+        assertEquals(playX + 120 * density, forwardX, 1f)
         assertEquals(playY, backY, 1f)
         assertEquals(playY, forwardY, 1f)
     }
@@ -581,7 +581,7 @@ class SkinControlsTest {
     }
 
     @Test
-    fun `the panel is one wide sheet on a portrait phone and about 40 percent of a landscape screen`() {
+    fun `the panel is nearly all of a portrait phone and near half of a landscape screen, never too narrow to read`() {
         val density = activity.resources.displayMetrics.density
         fun sheetWidthDp(widthDp: Int): Float {
             val controls = browseControls()
@@ -597,10 +597,12 @@ class SkinControlsTest {
             return layer.getChildAt(1).layoutParams.width / density
         }
 
-        assertEquals(800 * 0.4f, sheetWidthDp(800), 1f)
-        // 40% of a phone held upright is too narrow to read: a readable minimum, and never the whole screen.
-        assertEquals(320f, sheetWidthDp(360), 1f)
-        assertEquals(300 * 0.92f, sheetWidthDp(300), 1f)
+        // Near half of a wide screen.
+        assertEquals(1600 * 0.46f, sheetWidthDp(1600), 1f)
+        // A phone on its side: the readable minimum, 380 dp at its 1.2 scale.
+        assertEquals(380 * 1.2f, sheetWidthDp(800), 1f)
+        // Upright, the minimum would be the whole screen: never more than 92% of it.
+        assertEquals(360 * 0.92f, sheetWidthDp(360), 1f)
     }
 
     // The scrubbed frame over the picture.

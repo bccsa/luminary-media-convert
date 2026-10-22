@@ -373,15 +373,16 @@ internal class SkinControls(
         super.onDetachedFromWindow()
     }
 
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-        super.onSizeChanged(w, h, oldw, oldh)
-        val dp = w / resources.displayMetrics.density
+    // The scale follows the width before the children are measured, so a turn lays them out once, at their new size.
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val dp = MeasureSpec.getSize(widthMeasureSpec) / resources.displayMetrics.density
         if (dp != widthDp) {
             widthDp = dp
             applyScale()
             // Not inside this layout pass: the sheet is rebuilt for the new width.
             if (browseOpen) post { if (browseOpen) renderBrowse(keepScroll = true) }
         }
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
     }
 
     // Touch: only what the controls did not take.
