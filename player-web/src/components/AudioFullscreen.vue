@@ -409,11 +409,9 @@ const washSrc = computed(() => props.wash || cover.value?.src);
             <img v-if="washSrc" class="lmpl-afs-wash" :class="{ 'lmpl-afs-wash-hash': wash }" :src="washSrc" alt="" draggable="false" data-test="afsWash" />
         </div>
 
-        <!-- A picture drawn behind the page: the wash is cut at the picture and the lower part carries on from the upper. -->
+        <!-- A picture drawn behind the page: the wash is cut out where the picture is, and is the sound's everywhere else. -->
         <div v-if="isVideo && stageHole && washSrc" class="lmpl-afs-bg lmpl-afs-bg-low" :class="{ 'lmpl-afs-bg-hash': wash }" aria-hidden="true">
-            <div class="lmpl-afs-bg-shift" :style="{ transform: `translateY(${holeBottom - holeTop}px)` }">
-                <img class="lmpl-afs-wash" :class="{ 'lmpl-afs-wash-hash': wash }" :src="washSrc" alt="" draggable="false" />
-            </div>
+            <img class="lmpl-afs-wash" :class="{ 'lmpl-afs-wash-hash': wash }" :src="washSrc" alt="" draggable="false" />
         </div>
 
         <slot name="roster"></slot>

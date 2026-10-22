@@ -1928,10 +1928,6 @@
 .lmpl-afs-hole .lmpl-afs-bg-low {
     clip-path: inset(var(--lmpl-hole-bottom) 0 0 0);
 }
-.lmpl-afs-bg-shift {
-    position: absolute;
-    inset: 0;
-}
 /* The scrim is the sound's, as on the web: both parts of the wash span the whole screen, so its gradient meets itself
    across the picture. */
 .lmpl-afs-hole .lmpl-afs-art {
