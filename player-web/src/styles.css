@@ -1465,6 +1465,11 @@
     gap: 16px;
 }
 
+/* A video has no line under its picture: the group steps aside so the picture sizes against the screen as before. */
+.lmpl-afs-video .lmpl-afs-artwrap {
+    display: contents;
+}
+
 /* The lyrics take the cover's room, and the group with them. */
 .lmpl-afs-artwrap.lmpl-afs-artwrap-lyrics {
     align-self: stretch;

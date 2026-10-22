@@ -12,6 +12,10 @@ import java.net.SocketException
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Collections
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
@@ -20,7 +24,8 @@ import java.util.concurrent.Semaphore
 /**
  * A minimal HTTP server on the phone for the length of a cast. A Cast receiver fetches the stream
  * itself, and the playlists and key it needs live in memory behind `luminary://`: this answers for
- * them, with the playlists' addresses rewritten (see [rewriteForCast]). Segments are not served here.
+ * them, with the playlists' addresses rewritten (see [rewriteForCast]). Encrypted segments are read from where they
+ * are and served decrypted (see [decryptedForCast]); the rest the receiver fetches itself.
  *
  * Everything is behind a per-session [token], and only what [router] already holds for the current
  * load can be asked for: a request is mapped to a bridge address, and the router either has it or
@@ -33,7 +38,14 @@ class CastServer(
     /** The Wi-Fi address to listen on, never a wildcard: see [lanAddress]. */
     private val address: InetAddress,
     val token: String = newToken(),
+    /** Reads the encrypted segments that are served decrypted. */
+    private val client: OkHttpClient = OkHttpClient(),
 ) : AutoCloseable {
+    /** The encrypted segments the playlists served so far name, by the number their plain address carries. */
+    private val segments = ConcurrentHashMap<Int, CastSegment>()
+    private val segmentIds = ConcurrentHashMap<String, Int>()
+    private val nextSegment = AtomicInteger()
+
     private var server: ServerSocket? = null
     private var executor: ExecutorService? = null
     private val connections = Collections.synchronizedSet(HashSet<Socket>())
@@ -126,6 +138,9 @@ class CastServer(
             Log.w(TAG, "$method request with a wrong token from the receiver or a neighbour")
             return respond(output, 404, "Not Found", cors = true)
         }
+        SEGMENT_PATH.matchEntire(path.removePrefix(prefix))?.let {
+            return plainSegment(output, method == "HEAD", segments[it.groupValues[1].toInt()], headers["range"])
+        }
         val uri = bridgeUriOf(path.removePrefix(prefix)) ?: return respond(output, 404, "Not Found", cors = true)
 
         // Only the part after the token is logged; the token itself never is.
@@ -160,7 +175,10 @@ class CastServer(
         is UriRouter.Route.Served ->
             if (isText(route.contentType)) {
                 val text = String(route.bytes, Charsets.UTF_8).let { if (pin != null) pinVariant(it, pin) else it }
-                Answer.Body(rewriteForCast(text, base).toByteArray(Charsets.UTF_8), route.contentType)
+                val plain = decryptedForCast(text, ::plainAddress)
+                // What kind of encryption a playlist declares, never the key or its address.
+                Log.d(TAG, "playlist keys=${text.lines().filter { it.startsWith("#EXT-X-KEY") }.map { it.substringBefore(",URI").substringBefore(",IV") }.distinct()} bridgeKey=${text.contains(KEY_URI)} decrypted=${plain != text}")
+                Answer.Body(rewriteForCast(plain, base).toByteArray(Charsets.UTF_8), route.contentType)
             } else {
                 Answer.Body(route.bytes, route.contentType)
             }
@@ -170,6 +188,40 @@ class CastServer(
             Answer.Upstream
         }
         is UriRouter.Route.Failed, UriRouter.Route.Unanswered -> Answer.Missing
+    }
+
+    /** The address a receiver gets for an encrypted segment: the phone's, where it is served decrypted. */
+    private fun plainAddress(segment: CastSegment): String {
+        val key = "${segment.url}|${segment.offset}|${segment.length}|${segment.iv?.joinToString("") { "%02x".format(it) }}"
+        val id = segmentIds.computeIfAbsent(key) { nextSegment.incrementAndGet().also { segments[it] = segment } }
+        return "$base/d/$id"
+    }
+
+    /** One segment, read from where it is, decrypted with the key the player holds, and sent whole. */
+    private fun plainSegment(output: OutputStream, headOnly: Boolean, segment: CastSegment?, range: String?) {
+        if (segment == null) return respond(output, 404, "Not Found", cors = true)
+        val key = if (segment.iv == null) ByteArray(0) else (router.route(KEY_URI) as? UriRouter.Route.Served)?.bytes
+            ?: return respond(output, 404, "Not Found", cors = true)
+        val request = Request.Builder().url(segment.url).apply {
+            if (segment.offset != null && segment.length != null) {
+                header("Range", "bytes=${segment.offset}-${segment.offset + segment.length - 1}")
+            }
+        }.build()
+        val plain = try {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) null else response.body?.bytes()
+            }?.let { if (segment.iv == null) it else decryptSegment(it, key, segment.iv) }
+        } catch (failure: IOException) {
+            null
+        } finally {
+            key.fill(0)
+        }
+        if (plain == null) {
+            Log.w(TAG, "GET /d -> 502 (the segment could not be read or decrypted)")
+            return respond(output, 502, "Bad Gateway", cors = true)
+        }
+        Log.d(TAG, "GET /d range=$range -> ${plain.size} bytes, starts \"${plain.take(8).drop(4).map { it.toInt().toChar() }.filter { it.isLetter() }.joinToString("")}\"")
+        send(output, headOnly, plain, SEGMENT_TYPE, range)
     }
 
     private fun send(output: OutputStream, headOnly: Boolean, bytes: ByteArray, type: String, range: String?) {
@@ -236,6 +288,8 @@ class CastServer(
 
     companion object {
         private const val TAG = "LuminaryCast"
+        private val SEGMENT_PATH = Regex("/d/(\\d+)")
+        private const val SEGMENT_TYPE = "video/mp4"
         private val VARIANT_ID = Regex("\\d+_\\d+")
 
         private const val WORKERS = 4

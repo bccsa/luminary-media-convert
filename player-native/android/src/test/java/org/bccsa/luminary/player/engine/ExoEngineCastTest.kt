@@ -100,12 +100,12 @@ class ExoEngineCastTest {
     }
 
     @Test
-    fun `a source with an init segment offers casting, a transport-stream one does not`() {
+    fun `casting is offered for every source, whatever its segments are`() {
         load("fmp4")
         assertEquals(JsonPrimitive(true), changes().last()["available"])
 
         load("ts", TS_PLAYLIST)
-        assertEquals(JsonPrimitive(false), changes().last()["available"])
+        assertEquals(JsonPrimitive(true), changes().last()["available"])
     }
 
     @Test

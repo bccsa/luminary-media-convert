@@ -69,8 +69,12 @@ class CastServerTest {
     }
 
     @Test
-    fun `the key a media playlist names is served from the phone, and the key itself raw`() {
-        request("/a/1/1.m3u8").use { assertTrue(it.body!!.string().contains("URI=\"$base/key\"")) }
+    fun `an encrypted media playlist is served plain, its segments from the phone, and the key itself raw`() {
+        request("/a/1/1.m3u8").use {
+            val text = it.body!!.string()
+            assertTrue(!text.contains("EXT-X-KEY"))
+            assertTrue(text.contains("$base/d/1"))
+        }
         request("/key").use { response ->
             assertEquals(200, response.code)
             assertEquals("application/octet-stream", response.header("Content-Type"))

@@ -128,10 +128,12 @@ class ExoEngineCastHandoffTest {
         assertEquals(200, code)
         assertFalse(master.contains("luminary://"))
         assertTrue(master.contains(url.substringBefore("/a/1/3.m3u8") + "/a/1/1.m3u8"))
-        // And the key a playlist names, from the same place.
+        // An encrypted playlist reaches the TV plain, its segments served from the same place, and the key is there still.
+        val base = url.substringBefore("/a/1/3.m3u8")
         val media = fetch(url.replace("/a/1/3.m3u8", "/a/1/1.m3u8")).second
-        val keyUrl = Regex("URI=\"([^\"]+/key)\"").find(media)!!.groupValues[1]
-        assertEquals(200, fetch(keyUrl).first)
+        assertFalse(media.contains("EXT-X-KEY"))
+        assertTrue(media.contains("$base/d/"))
+        assertEquals(200, fetch("$base/key").first)
     }
 
     @Test

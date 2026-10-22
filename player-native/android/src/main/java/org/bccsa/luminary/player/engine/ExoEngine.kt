@@ -259,6 +259,11 @@ class ExoEngine(
                 }
 
                 override fun message(text: String) = castMessage(text)
+
+                override fun receiverFailed() {
+                    Log.w("LuminaryCast", "the receiver stopped on an error; playback comes home")
+                    endCasting()
+                }
             })
         }
         // A new surface in the page has nothing drawn in it, and a finished item draws nothing by itself.

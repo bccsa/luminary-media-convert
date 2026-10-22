@@ -7,6 +7,14 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import androidx.media3.cast.CastPlayer
+import androidx.media3.cast.DefaultMediaItemConverter
+import androidx.media3.cast.MediaItemConverter
+import androidx.media3.common.MediaItem
+import com.google.android.gms.cast.HlsSegmentFormat
+import com.google.android.gms.cast.HlsVideoSegmentFormat
+import com.google.android.gms.cast.MediaQueueItem
+import com.google.android.gms.cast.MediaStatus
+import com.google.android.gms.cast.framework.media.RemoteMediaClient
 import androidx.media3.cast.SessionAvailabilityListener
 import androidx.media3.common.Player
 import androidx.mediarouter.app.MediaRouteChooserDialog
@@ -36,6 +44,9 @@ interface CastSupport {
 
         /** A message from our own receiver, on [CAST_NAMESPACE]. */
         fun message(text: String) {}
+
+        /** The receiver stopped on an error: the viewer is better served by the phone than by a TV that shows nothing. */
+        fun receiverFailed() {}
     }
 
     /** Starts watching for receivers; the listener is told as soon as the SDK is ready, and on every change. */
@@ -81,7 +92,7 @@ class GoogleCastSupport(private val context: Context, private val activity: () -
                 // Listeners are told of changes; the state as it is now is told here.
                 watcher.onCastStateChanged(castContext.castState)
 
-                val receiver = CastPlayer(castContext)
+                val receiver = CastPlayer(castContext, Fmp4MediaItemConverter)
                 castPlayer = receiver
                 receiver.setSessionAvailabilityListener(object : SessionAvailabilityListener {
                     override fun onCastSessionAvailable() {
@@ -100,6 +111,19 @@ class GoogleCastSupport(private val context: Context, private val activity: () -
     }
 
     private fun listenForMessages(castContext: CastContext, listener: CastSupport.Listener) {
+        // Why the receiver stops is only said here, in its status.
+        runCatching {
+            val client = castContext.sessionManager.currentCastSession?.remoteMediaClient
+            client?.registerCallback(object : RemoteMediaClient.Callback() {
+                override fun onStatusUpdated() {
+                    val status = client.mediaStatus ?: return
+                    Log.d(TAG, "receiver status playerState=${status.playerState} idleReason=${status.idleReason}")
+                    if (status.playerState == MediaStatus.PLAYER_STATE_IDLE && status.idleReason == MediaStatus.IDLE_REASON_ERROR) {
+                        main.post { listener.receiverFailed() }
+                    }
+                }
+            })
+        }
         runCatching {
             castContext.sessionManager.currentCastSession?.setMessageReceivedCallbacks(CAST_NAMESPACE) { _, _, text ->
                 main.post { listener.message(text) }
@@ -163,4 +187,21 @@ class GoogleCastSupport(private val context: Context, private val activity: () -
             return flag && GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(context) == ConnectionResult.SUCCESS
         }
     }
+}
+
+/**
+ * Every stream is fragmented MP4, and its segments are encrypted, so the receiver cannot sniff their
+ * format: it has to be told, or it fetches the playlists and gives up.
+ */
+private object Fmp4MediaItemConverter : MediaItemConverter {
+    private val default = DefaultMediaItemConverter()
+
+    override fun toMediaQueueItem(mediaItem: MediaItem): MediaQueueItem = default.toMediaQueueItem(mediaItem).also { queued ->
+        queued.media?.writer?.apply {
+            setHlsSegmentFormat(HlsSegmentFormat.FMP4)
+            setHlsVideoSegmentFormat(HlsVideoSegmentFormat.FMP4)
+        }
+    }
+
+    override fun toMediaItem(item: MediaQueueItem): MediaItem = default.toMediaItem(item)
 }
