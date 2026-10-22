@@ -15,7 +15,6 @@ import android.graphics.RectF
 import android.graphics.Region
 import android.text.TextUtils
 import android.graphics.Shader
-import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
@@ -110,14 +109,14 @@ internal class SkinControls(
     private val back: Icon?
     private val forward: Icon?
     private val qualityButton = Icon(context, V10Icons.quality)
-    private val audioButton = Icon(context, SettingIcons.language)
+    private val audioButton = Icon(context, SettingIcons.audioLanguage)
     private val pipButton = Icon(context, V10Icons.pip)
     private val castButton = Icon(context, V10Icons.cast)
-    private val subtitlesButton = Icon(context, V10Icons.captions)
+    private val subtitlesButton = Icon(context, SettingIcons.captionsCc)
     private val browseButton = Icon(context, BrowseIcons.list)
     private val rateButton = Icon(context, V10Icons.speed)
     private val muteButton = Icon(context, V10Icons.volumeHigh)
-    private val exitButton = Icon(context, V10Icons.fullscreenExit)
+    private val exitButton = Icon(context, BrowseIcons.close)
 
     private val elapsed = timeView(Gravity.START or Gravity.CENTER_VERTICAL)
     private val remaining = timeView(Gravity.END or Gravity.CENTER_VERTICAL)
@@ -237,7 +236,7 @@ internal class SkinControls(
         }
         chapterNow.apply {
             setTextColor(Color.WHITE)
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            typeface = PlayerFont.medium(context)
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
             setShadowLayer(dpf(2f), 0f, dpf(1f), 0xB3000000.toInt())
@@ -264,13 +263,14 @@ internal class SkinControls(
         titleView.apply {
             text = title.orEmpty()
             setTextColor(Color.WHITE)
-            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            typeface = PlayerFont.bold(context)
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
             setShadowLayer(dpf(2f), 0f, dpf(1f), 0xB3000000.toInt())
         }
         subtitleView.apply {
             text = subtitle.orEmpty()
+            typeface = PlayerFont.regular(context)
             setTextColor(0x99FFFFFF.toInt())
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
@@ -288,7 +288,7 @@ internal class SkinControls(
         panel.addView(column, LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.BOTTOM))
         label.apply {
             setTextColor(Color.WHITE)
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            typeface = PlayerFont.medium(context)
             gravity = Gravity.CENTER
             elevation = dpf(6f)
             visibility = GONE
@@ -441,6 +441,8 @@ internal class SkinControls(
     private fun refresh() {
         val showPlay = Util.shouldShowPlayButton(player)
         play.layers = if (showPlay) V10Icons.play else V10Icons.pause
+        // A triangle's weight sits left of its box's middle, so play is nudged right to look centred.
+        play.iconShift = if (showPlay) 0.08f else 0f
         play.contentDescription = if (showPlay) texts.play else texts.pause
 
         // A video picked to play next is on its way from the tap until it plays, while the page prepares it.
@@ -459,7 +461,10 @@ internal class SkinControls(
         // With one tier there is nothing to choose.
         qualityButton.visibility = if (qualityChoicesOf(player.currentTracks, heldQuality(player)).size > 1) VISIBLE else GONE
         // The skin shows its captions button only when the source has subtitles.
-        subtitlesButton.visibility = if (subtitleChoicesOf(player.currentTracks).isNotEmpty()) VISIBLE else GONE
+        val subtitleChoices = subtitleChoicesOf(player.currentTracks)
+        subtitlesButton.visibility = if (subtitleChoices.isNotEmpty()) VISIBLE else GONE
+        val subtitleOn = C.TRACK_TYPE_TEXT !in player.trackSelectionParameters.disabledTrackTypes && subtitleChoices.any { it.selected }
+        subtitlesButton.layers = if (subtitleOn) SettingIcons.captionsCcOn else SettingIcons.captionsCc
 
         val speed = player.playbackParameters.speed
         rateButton.label = "${formatRate(speed)}x"
@@ -599,7 +604,7 @@ internal class SkinControls(
                 TextView(context).apply {
                     text = texts.upNext
                     setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16f * scale)
-                    typeface = Typeface.DEFAULT_BOLD
+                    typeface = PlayerFont.bold(context)
                     setTextColor(Color.WHITE)
                     setShadowLayer(dpf(2f), 0f, dpf(1f), 0x80000000.toInt())
                 },
@@ -640,7 +645,7 @@ internal class SkinControls(
                         TextView(context).apply {
                             text = section.uppercase()
                             setTextSize(TypedValue.COMPLEX_UNIT_DIP, 10f * scale)
-                            typeface = Typeface.DEFAULT_BOLD
+                            typeface = PlayerFont.bold(context)
                             letterSpacing = 0.06f
                             setTextColor(0xBFFFFFFF.toInt())
                             maxLines = 1
@@ -652,7 +657,7 @@ internal class SkinControls(
                     TextView(context).apply {
                         text = item.title
                         setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13f * scale)
-                        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                        typeface = PlayerFont.medium(context)
                         setTextColor(Color.WHITE)
                         maxLines = 2
                         ellipsize = TextUtils.TruncateAt.END
@@ -967,7 +972,7 @@ internal class SkinControls(
             TextView(context).apply {
                 text = title.uppercase()
                 setTextSize(TypedValue.COMPLEX_UNIT_DIP, 11f * scale)
-                typeface = Typeface.DEFAULT_BOLD
+                typeface = PlayerFont.bold(context)
                 letterSpacing = 0.06f
                 setTextColor(0x99FFFFFF.toInt())
                 setPadding(dpf(10f * scale).toInt(), dpf(6f * scale).toInt(), dpf(10f * scale).toInt(), dpf(4f * scale).toInt())
@@ -989,7 +994,7 @@ internal class SkinControls(
                             text = name
                             setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14f * scale)
                             setTextColor(Color.WHITE)
-                            if (selected) typeface = Typeface.DEFAULT_BOLD
+                            typeface = if (selected) PlayerFont.bold(context) else PlayerFont.regular(context)
                         },
                         LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f),
                     )
@@ -1128,7 +1133,7 @@ internal class SkinControls(
             elevation = dpf(12f)
             isClickable = true
             ViewCompat.setAccessibilityPaneTitle(this, texts.browse)
-            setPadding(0, inset.top, inset.right, inset.bottom)
+            setPadding(0, min(inset.top, topClear), inset.right, inset.bottom)
         }
         val header = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1142,7 +1147,7 @@ internal class SkinControls(
                 TextView(context).apply {
                     text = label
                     setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15f * scale)
-                    typeface = if (selected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+                    typeface = if (selected) PlayerFont.bold(context) else PlayerFont.regular(context)
                     setTextColor(if (selected) Color.WHITE else 0x99FFFFFF.toInt())
                     setPadding(px(12f), px(12f), px(12f), px(8f))
                 },
@@ -1220,7 +1225,7 @@ internal class SkinControls(
                 text = chapter.title
                 setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15f * scale)
                 setTextColor(Color.WHITE)
-                typeface = if (now) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+                typeface = if (now) PlayerFont.bold(context) else PlayerFont.regular(context)
                 maxLines = 2
             }
             val time = formatTime(chapter.start, guide)
@@ -1237,7 +1242,8 @@ internal class SkinControls(
                         text = time
                         setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13f * scale)
                         setTextColor(0x99FFFFFF.toInt())
-                        fontFeatureSettings = "tnum"
+                        typeface = PlayerFont.regular(context)
+                        PlayerFont.tabular(this)
                     },
                     LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { marginStart = px(12f) },
                 )
@@ -1264,7 +1270,7 @@ internal class SkinControls(
             val now = i == index
             row.row.background = rowBackground(now)
             row.row.isSelected = now
-            row.title.typeface = if (now) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+            row.title.typeface = if (now) PlayerFont.bold(context) else PlayerFont.regular(context)
             row.marker.visibility = if (now) VISIBLE else INVISIBLE
         }
     }
@@ -1278,7 +1284,7 @@ internal class SkinControls(
                     TextView(context).apply {
                         text = item.section.uppercase()
                         setTextSize(TypedValue.COMPLEX_UNIT_DIP, 11f * scale)
-                        typeface = Typeface.DEFAULT_BOLD
+                        typeface = PlayerFont.bold(context)
                         letterSpacing = 0.06f
                         setTextColor(0x99FFFFFF.toInt())
                         setPadding(px(8f), if (index == 0) px(4f) else px(14f), px(8f), px(6f))
@@ -1303,7 +1309,7 @@ internal class SkinControls(
                     TextView(context).apply {
                         text = item.title
                         setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14f * scale)
-                        typeface = Typeface.DEFAULT_BOLD
+                        typeface = PlayerFont.bold(context)
                         setTextColor(Color.WHITE)
                         maxLines = 2
                     },
@@ -1313,6 +1319,7 @@ internal class SkinControls(
                         TextView(context).apply {
                             text = subtitle
                             setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12f * scale)
+                            typeface = PlayerFont.regular(context)
                             setTextColor(0x99FFFFFF.toInt())
                             maxLines = 2
                         },
@@ -1516,7 +1523,8 @@ internal class SkinControls(
         }
         inset = Insets.of(left, top, right, bottom)
         layoutEdges()
-        browseSheet?.setPadding(0, top, right, bottom)
+        // As the top line: the hidden status bar's height counts in [safe], but only a cutout covers the sheet's top.
+        browseSheet?.setPadding(0, min(top, topClear), right, bottom)
     }
 
     /** Tapping a control closes an open menu, as the skin's menus close when they lose focus. */
@@ -1530,8 +1538,8 @@ internal class SkinControls(
 
     private fun timeView(gravity: Int) = TextView(context).apply {
         setTextColor(Color.WHITE)
-        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-        fontFeatureSettings = "tnum"
+        typeface = PlayerFont.medium(context)
+        PlayerFont.tabular(this)
         this.gravity = gravity
         setShadowLayer(dpf(2f), 0f, dpf(1f), 0x99000000.toInt())
     }
@@ -1915,6 +1923,13 @@ private class Icon(context: Context, layers: List<V10Icons.Layer>?, private val 
             invalidate()
         }
     var skipDp = 32f
+    /** How far right the icon sits from the middle, as a fraction of its box's width. */
+    var iconShift = 0f
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
 
     private var paths: List<Triple<Path, Float, Float>>? = null
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -1927,7 +1942,7 @@ private class Icon(context: Context, layers: List<V10Icons.Layer>?, private val 
     private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.CENTER
-        typeface = Typeface.DEFAULT_BOLD
+        typeface = PlayerFont.bold(context)
     }
 
     fun lp(width: Int, height: Int, margin: Int = 0) {
@@ -1967,7 +1982,7 @@ private class Icon(context: Context, layers: List<V10Icons.Layer>?, private val 
         fill.setShadowLayer(size * 0.05f, 0f, size * 0.04f, 0x99000000.toInt())
         stroke.setShadowLayer(size * 0.05f, 0f, size * 0.04f, 0x99000000.toInt())
         canvas.save()
-        canvas.translate(cx - size / 2, cy - size / 2)
+        canvas.translate(cx - size / 2 + iconShift * size, cy - size / 2)
         canvas.scale(unit, unit)
         for ((path, alpha, strokeWidth) in built) {
             if (strokeWidth > 0f) {

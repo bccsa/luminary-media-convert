@@ -400,7 +400,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
         @click="onClick"
     >
         <!-- The picture, blurred, as the screen's colour: lighter in `light`, darker in `dark`. -->
-        <div class="lmpl-afs-bg" aria-hidden="true">
+        <div class="lmpl-afs-bg" :class="{ 'lmpl-afs-bg-hash': wash }" aria-hidden="true">
             <img v-if="washSrc" class="lmpl-afs-wash" :class="{ 'lmpl-afs-wash-hash': wash }" :src="washSrc" alt="" draggable="false" data-test="afsWash" />
         </div>
 
@@ -491,6 +491,8 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                     <span v-if="chapters.length > 1 && chapterIndex >= 0" class="lmpl-afs-chip" data-test="afsChapterChip">
                         <i aria-hidden="true"></i>{{ formatChapterOf(messages.chapterOf, chapterIndex + 1, chapters.length) }} · {{ chapters[chapterIndex]?.title }}
                     </span>
+                    <!-- Under the title, the host's own way on from what plays (back to its page, say). -->
+                    <div v-if="slots['under-title']" class="lmpl-afs-undertitle"><slot name="under-title"></slot></div>
                 </div>
 
                 <div class="lmpl-afs-controls">
@@ -606,7 +608,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                                     data-test="afsLanguage"
                                     @click="toggleMenu('language')"
                                 >
-                                    <svg viewBox="0 0 18 18" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.125" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7.875 15.75 3.938-8.438L15.75 15.75m-6.75-2.25h5.625M2.25 4.216a36.355 36.355 0 0 1 4.5-.278m0 0c.84 0 1.675.028 2.501.086M6.75 3.938V2.25m2.501 1.773C8.382 7.993 5.768 11.31 2.25 13.127m7-9.104c.672.046 1.339.11 1.999.193m-3.442 6.371a13.517 13.517 0 0 1-2.87-4.351" /></svg>
+                                    <media-icon name="language" class="media-button-icon"></media-icon>
                                 </button>
                                 <div v-if="menu === 'language'" class="lmpl-afs-menu" role="menu" :aria-label="messages.audioMenuLabel">
                                     <button v-for="track in audioTracks" :key="track.id" type="button" role="menuitemradio" :aria-checked="track.id === activeAudioTrackId" class="lmpl-afs-menuitem" @click="chooseTrack(track.id)">{{ track.label }}</button>
@@ -664,7 +666,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                                     data-test="afsSubtitles"
                                     @click="toggleMenu('subtitles')"
                                 >
-                                    <media-icon name="captions-off" class="media-button-icon"></media-icon>
+                                    <media-icon :name="activeSubtitleTrackId ? 'captions-on' : 'captions-off'" class="media-button-icon"></media-icon>
                                 </button>
                                 <div v-if="menu === 'subtitles'" class="lmpl-afs-menu" role="menu" :aria-label="messages.subtitlesMenuLabel">
                                     <button type="button" role="menuitemradio" :aria-checked="!activeSubtitleTrackId" class="lmpl-afs-menuitem" data-test="afsSubtitlesOff" @click="chooseSubtitles(null)">{{ messages.subtitlesOff }}</button>

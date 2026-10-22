@@ -86,7 +86,11 @@ function setting(kind: Setting, id: string, title: string): string {
     const menuId = `${id}-${kind}`;
     return (
         `<button commandfor="${menuId}" class="media-button lmpl-icon-btn lmpl-opt lmpl-opt-${kind}" type="button">` +
-        `<media-icon name="${iconName}" class="media-button-icon-base media-settings-menu-trigger-icon"></media-icon>` +
+        (kind === 'captions'
+            ? // Outlined while off, filled while a track is on: the player marks which on its root.
+              '<media-icon name="captions-off" class="media-button-icon-base media-settings-menu-trigger-icon lmpl-cc-off"></media-icon>' +
+              '<media-icon name="captions-on" class="media-button-icon-base media-settings-menu-trigger-icon lmpl-cc-on"></media-icon>'
+            : `<media-icon name="${iconName}" class="media-button-icon-base media-settings-menu-trigger-icon"></media-icon>`) +
         // Visually hidden: the button is an icon, and this is its name for a screen reader.
         `<span class="media-settings-menu-trigger-label">${escapeHtml(title)}</span>` +
         '</button>' +
@@ -191,7 +195,8 @@ function topLine(heading: { title: string; subtitle?: string }): string {
         `<span class="lmpl-heading-title">${escapeHtml(heading.title)}</span>` +
         (heading.subtitle ? `<span class="lmpl-heading-sub">${escapeHtml(heading.subtitle)}</span>` : '') +
         '</div>' +
-        `<media-fullscreen-button class="media-button lmpl-icon-btn media-fullscreen-button lmpl-topline-exit">${icon('fullscreen-enter', 'media-fullscreen-button-enter-icon')}${icon('fullscreen-exit', 'media-fullscreen-button-exit-icon')}</media-fullscreen-button>` +
+        // Only shown in full screen, so it is the way out: an X, as people look for one there.
+        `<media-fullscreen-button class="media-button lmpl-icon-btn media-fullscreen-button lmpl-topline-exit">${icon('close', 'lmpl-topline-exit-icon')}</media-fullscreen-button>` +
         '</div>'
     );
 }

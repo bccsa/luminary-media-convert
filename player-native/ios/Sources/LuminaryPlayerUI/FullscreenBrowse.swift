@@ -25,7 +25,7 @@ enum BrowseSkin {
 /// A section name: small, bold capitals, spaced out a little.
 private func sectionText(_ text: String, size: CGFloat, color: UIColor) -> NSAttributedString {
     NSAttributedString(string: text.uppercased(), attributes: [
-        .font: UIFont.systemFont(ofSize: size, weight: .bold),
+        .font: PlayerFont.weight(.bold, size: size),
         .kern: size * 0.06,
         .foregroundColor: color,
     ])
@@ -230,7 +230,7 @@ final class BrowsePanel: UIView {
         let button = UIButton(type: .custom)
         let selected = which == tab
         button.setTitle(title, for: .normal)
-        button.titleLabel?.font = .systemFont(ofSize: 15 * scale, weight: selected ? .bold : .regular)
+        button.titleLabel?.font = PlayerFont.weight(selected ? .bold : .regular, size: 15 * scale)
         button.setTitleColor(selected ? .white : BrowseSkin.secondary, for: .normal)
         button.contentEdgeInsets = UIEdgeInsets(top: 12, left: 12, bottom: 8, right: 12)
         if selected {
@@ -265,7 +265,7 @@ final class BrowsePanel: UIView {
             title.numberOfLines = 2
             let time = UILabel()
             time.text = formatTime(chapter.start, guide: guide)
-            time.font = .monospacedDigitSystemFont(ofSize: 13 * scale, weight: .regular)
+            time.font = PlayerFont.monospacedDigits(size: 13 * scale, weight: .regular)
             time.textColor = BrowseSkin.secondary
             time.tag = 1
             for part in [marker, title, time] as [UIView] { row.addSubview(part) }
@@ -282,7 +282,7 @@ final class BrowsePanel: UIView {
 
     private func style(_ row: (row: UIControl, title: UILabel, marker: GlyphButton), now: Bool) {
         row.row.backgroundColor = now ? BrowseSkin.selectedRow : .clear
-        row.title.font = .systemFont(ofSize: 15 * scale, weight: now ? .bold : .regular)
+        row.title.font = PlayerFont.weight(now ? .bold : .regular, size: 15 * scale)
         row.marker.isHidden = !now
         if now { row.row.accessibilityTraits.insert(.selected) } else { row.row.accessibilityTraits.remove(.selected) }
     }
@@ -311,7 +311,7 @@ final class BrowsePanel: UIView {
             }
             let title = UILabel()
             title.text = item.title
-            title.font = .systemFont(ofSize: 14 * scale, weight: .bold)
+            title.font = PlayerFont.weight(.bold, size: 14 * scale)
             title.textColor = .white
             title.numberOfLines = 2
             title.tag = 4
@@ -320,7 +320,7 @@ final class BrowsePanel: UIView {
             if let subtitle = item.subtitle, !subtitle.isEmpty {
                 let words = UILabel()
                 words.text = subtitle
-                words.font = .systemFont(ofSize: 12 * scale)
+                words.font = PlayerFont.regular(size: 12 * scale)
                 words.textColor = BrowseSkin.secondary
                 words.numberOfLines = 2
                 words.tag = 5
@@ -422,7 +422,7 @@ final class NextUpStrip: UIView {
         self.cardHeight = cardHeight
         super.init(frame: .zero)
         heading.text = texts.upNext
-        heading.font = .systemFont(ofSize: 16 * scale, weight: .bold)
+        heading.font = PlayerFont.weight(.bold, size: 16 * scale)
         heading.textColor = .white
         heading.layer.shadowColor = UIColor.black.cgColor
         heading.layer.shadowOpacity = 0.5
@@ -519,7 +519,7 @@ private final class CaptionView: UIView {
             addSubview(section)
         }
         title.text = name
-        title.font = .systemFont(ofSize: 13 * scale, weight: .medium)
+        title.font = PlayerFont.weight(.medium, size: 13 * scale)
         title.textColor = .white
         title.numberOfLines = 2
         addSubview(title)
