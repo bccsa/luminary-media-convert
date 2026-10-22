@@ -92,6 +92,8 @@ const props = defineProps<{
     canPictureInPicture?: boolean;
     /** Offers full screen with sound alone too, among the tools, for a host that has a full screen to take it to. */
     fullscreenTool?: boolean;
+    /** The host's full screen is open: the same tool closes it, with the X a video's full screen leaves by. */
+    fullscreenActive?: boolean;
     /** The words of what plays, timed: offered, with sound alone, as lyrics in the picture's place. */
     lyrics?: readonly LyricCue[];
 }>();
@@ -689,11 +691,11 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                                 v-if="isVideo || fullscreenTool"
                                 type="button"
                                 class="lmpl-afs-iconbtn"
-                                :aria-label="messages.enterFullscreen"
+                                :aria-label="fullscreenActive ? messages.exitFullscreen : messages.enterFullscreen"
                                 data-test="afsFullscreen"
                                 @click="emit('fullscreen')"
                             >
-                                <media-icon name="fullscreen-enter" class="media-button-icon"></media-icon>
+                                <media-icon :name="fullscreenActive ? 'close' : 'fullscreen-enter'" class="media-button-icon"></media-icon>
                             </button>
 
                             <slot name="audio-tool"></slot>
