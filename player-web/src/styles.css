@@ -1293,40 +1293,6 @@
     container: lmpl-afs / size;
 }
 
-/*
- * The X that leaves the host's full screen: where a video's full screen has its own, top right, its glyph on the line
- * of the timeline's right end. On a phone on its side the sizes are the video's there, scaled by 1.2.
- */
-.lmpl-afs-close {
-    --lmpl-close-s: 1;
-    --lmpl-close-edge: 20px;
-    position: absolute;
-    top: calc(env(safe-area-inset-top, 0px) + 12px * var(--lmpl-close-s));
-    right: calc(env(safe-area-inset-right, 0px) + var(--lmpl-close-edge) - 8px * var(--lmpl-close-s));
-    z-index: 3;
-    display: grid;
-    place-items: center;
-    width: calc(40px * var(--lmpl-close-s));
-    height: calc(40px * var(--lmpl-close-s));
-    padding: 0;
-    border: 0;
-    color: inherit;
-    background: none;
-    cursor: pointer;
-}
-
-.lmpl-afs-close .media-button-icon {
-    width: calc(22px * var(--lmpl-close-s));
-    height: calc(22px * var(--lmpl-close-s));
-}
-
-@container lmpl-afs (min-aspect-ratio: 6/5) and (max-height: 440px) {
-    .lmpl-afs-close {
-        --lmpl-close-s: 1.2;
-        --lmpl-close-edge: clamp(20px, 3cqw, 32px);
-    }
-}
-
 .lmpl-afs-bg {
     position: absolute;
     inset: 0;
@@ -1832,6 +1798,32 @@
     flex: none;
     align-items: center;
     gap: 6px;
+}
+
+/* The X that leaves the host's full screen ends the top line, with a finger's width between it and what stands beside it. */
+.lmpl-afs-fullscreen-open .lmpl-afs-topend {
+    gap: 12px;
+}
+
+/*
+ * On a phone on its side the X sits as a video's full screen has its own: 12 below the safe area and its glyph on the
+ * line of the timeline's right end, with the video's sizes there (scaled by 1.2). What stands beside it takes the same.
+ */
+@container lmpl-afs (min-aspect-ratio: 6/5) and (max-height: 440px) {
+    .lmpl-afs.lmpl-afs-fullscreen-open .lmpl-afs-top {
+        padding-top: calc(env(safe-area-inset-top, 0px) + 14.4px);
+        padding-right: calc(env(safe-area-inset-right, 0px) + clamp(20px, 3cqw, 32px) - 9.6px);
+    }
+
+    .lmpl-afs-fullscreen-open .lmpl-afs-topend > .lmpl-afs-iconbtn {
+        width: 48px;
+        height: 48px;
+    }
+
+    .lmpl-afs-fullscreen-open .lmpl-afs-topend > .lmpl-afs-iconbtn > * {
+        width: 26.4px;
+        height: 26.4px;
+    }
 }
 
 /* A ThumbHash is a few pixels: stretched over the screen it is already soft, so it needs no blur, which is what an

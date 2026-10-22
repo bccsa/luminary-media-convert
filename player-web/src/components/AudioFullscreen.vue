@@ -388,6 +388,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                 'lmpl-afs-fill': fill && isVideo,
                 'lmpl-afs-hole': isVideo && stageHole,
                 'lmpl-afs-captions': isVideo && captionBand,
+                'lmpl-afs-fullscreen-open': fullscreenActive,
             },
         ]"
         :style="{
@@ -415,16 +416,6 @@ const washSrc = computed(() => props.wash || cover.value?.src);
 
         <slot name="roster"></slot>
 
-        <button
-            v-if="fullscreenActive"
-            type="button"
-            class="lmpl-afs-close"
-            :aria-label="messages.exitFullscreen"
-            data-test="afsCloseFullscreen"
-            @click="emit('fullscreen')"
-        >
-            <media-icon name="close" class="media-button-icon"></media-icon>
-        </button>
         <div class="lmpl-afs-top">
             <button
                 type="button"
@@ -436,7 +427,20 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                 <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
             </button>
             <span class="lmpl-afs-eyebrow">{{ eyebrow }}</span>
-            <div v-if="slots['top-end']" class="lmpl-afs-topend" data-test="afsTopEnd"><slot name="top-end"></slot></div>
+            <div v-if="slots['top-end'] || fullscreenActive" class="lmpl-afs-topend" data-test="afsTopEnd">
+                <slot name="top-end"></slot>
+                <!-- Last in the line, at the screen's corner: where a video's full screen has its own X. -->
+                <button
+                    v-if="fullscreenActive"
+                    type="button"
+                    class="lmpl-afs-iconbtn lmpl-afs-close"
+                    :aria-label="messages.exitFullscreen"
+                    data-test="afsCloseFullscreen"
+                    @click="emit('fullscreen')"
+                >
+                    <media-icon name="close" class="media-button-icon"></media-icon>
+                </button>
+            </div>
             <span v-else class="lmpl-afs-iconbtn lmpl-afs-spacer" aria-hidden="true"></span>
         </div>
 
