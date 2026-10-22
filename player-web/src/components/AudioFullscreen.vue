@@ -408,7 +408,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
         </div>
 
         <!-- A picture drawn behind the page: the wash is cut at the picture and the lower part carries on from the upper. -->
-        <div v-if="isVideo && stageHole && washSrc" class="lmpl-afs-bg lmpl-afs-bg-low" aria-hidden="true">
+        <div v-if="isVideo && stageHole && washSrc" class="lmpl-afs-bg lmpl-afs-bg-low" :class="{ 'lmpl-afs-bg-hash': wash }" aria-hidden="true">
             <div class="lmpl-afs-bg-shift" :style="{ transform: `translateY(${holeBottom - holeTop}px)` }">
                 <img class="lmpl-afs-wash" :class="{ 'lmpl-afs-wash-hash': wash }" :src="washSrc" alt="" draggable="false" />
             </div>

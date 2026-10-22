@@ -1936,6 +1936,11 @@
 .lmpl-afs-hole .lmpl-afs-bg::after {
     background: rgb(8 10 14 / 0.74);
 }
+/* The post's own colour keeps the sound's lighter scrim with the picture too, as on the web: both parts of the wash
+   span the whole screen, so the gradient meets itself across the picture. */
+.lmpl-afs-hole .lmpl-afs-bg-hash::after {
+    background: linear-gradient(to bottom, rgb(8 10 14 / 0.28), rgb(8 10 14 / 0.66));
+}
 .lmpl-afs-hole .lmpl-afs-art {
     background: transparent;
 }
