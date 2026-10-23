@@ -2323,6 +2323,8 @@
         min-width: 0;
         max-width: none;
         max-height: 70%;
+        /* Raised from the foot, it sits clear of the top inset the side panel keeps. */
+        padding-top: 0;
         padding-right: 0;
         border-radius: 18px 18px 0 0;
         box-shadow: 0 -8px 24px rgb(0 0 0 / 0.4);
