@@ -73,39 +73,35 @@ a player that disagreed with it would be the only dark thing on a light page.
 
 ## Consuming this from bccsa/luminary
 
-There is no registry publish. The encoder repo is added to the app as a **git
-submodule** and the three packages it needs are installed by file reference.
-npm dedupes the `"*"` ranges between them, so the app gets one copy of each.
+There is no registry publish. This repository is a **git submodule** of
+[bccsa/luminary](https://github.com/bccsa/luminary), at `luminary-media-convert/`
+in its root, and both of that repo's front-ends — `app/` and `cms/` — depend on
+this package alone:
 
-```bash
-# in the luminary app repo
-git submodule add https://github.com/…/luminary-media-convert vendor/luminary-media-convert
-git submodule update --init --recursive
-
-# build the submodule's libraries FIRST — the file installs below resolve
-# `dist/`, which is gitignored and therefore absent on a fresh clone
-cd vendor/luminary-media-convert
-npm install
-npm run build:libs
-cd ../..
-
-npm install \
-  file:vendor/luminary-media-convert/hls \
-  file:vendor/luminary-media-convert/player-core \
-  file:vendor/luminary-media-convert/player-web-legacy
+```json
+"@luminary-media-converter/player-web-legacy": "file:../luminary-media-convert/player-web-legacy"
 ```
 
-Then swap the app's `VideoPlayer.vue` internals for `LuminaryPlayer`, passing
-`hlsUrl` as `masterUrl` and the saved `hlsKey` as `keyHex`.
+`player-core` and `hls-core` are not named by the consumer. They are this
+package's own dependencies and resolve through the submodule's workspace links
+underneath it, so the consumer gets one copy of each without asking. The same
+goes for `video.js`, `videojs-mobile-ui` and `videojs-youtube` — they are
+`dependencies` here, not the app's. **The pins are exact on purpose** (8.23.4 /
+1.1.1 / 3.0.1) — see the key-delivery note below.
 
-**Every submodule update repeats the build step.** `dist/` is not committed, so
-`git submodule update` alone leaves the app importing a package with no build
-output — which surfaces as a module-resolution error, not as stale code.
+The libraries have to be built before the consumer installs, because a `file:`
+dependency resolves to `dist/` and `dist/` is not committed. The build order,
+why it is `ci:libs` rather than a plain `npm ci`, and the Vue-deduping a
+symlinked peer dependency needs are in the root README, under
+[Consuming the player libraries](../README.md#consuming-the-player-libraries).
 
-The app keeps its own `video.js`, `videojs-mobile-ui` and `videojs-youtube`
-dependencies: they are `dependencies` here at the same pinned versions, so npm
-resolves one copy. **The pins are exact on purpose** (8.23.4 / 1.1.1 / 3.0.1) —
-see the key-delivery note below.
+**Every submodule bump repeats the build step**, for the same reason: `git
+submodule update` moves the sources and leaves the old `dist/` where it is.
+
+In the app, the component is wrapped by
+`app/src/components/content/VideoPlayer.vue`, which builds `source` from the
+document's `hlsUrl` — resolved against its media bucket — as `masterUrl`, and
+the key it fetches for encrypted media as `keyHex`.
 
 ## Known limitations
 
