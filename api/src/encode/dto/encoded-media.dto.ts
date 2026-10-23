@@ -93,7 +93,8 @@ export class AudioTrackDto {
 
 export class AudioSourceRequestDto {
     @ApiProperty({
-        description: 'Absolute path of an audio or video file on this machine.',
+        description:
+            'Absolute path of an audio or video file on this machine, or an http(s) link to one or to an HLS playlist.',
     })
     @IsString()
     @IsNotEmpty()

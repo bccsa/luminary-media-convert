@@ -32,7 +32,6 @@ import {
     readMaybeEncrypted,
 } from './lmcenc.js';
 import { hasAllowedExtension } from './media-extensions.js';
-import { ProbeService, type AudioTrackInfo } from './probe.service.js';
 import { S3Service } from './s3.service.js';
 import { SegmentPipelineService } from './segment-pipeline.service.js';
 import { SessionService, type Session } from './session.service.js';
@@ -43,11 +42,33 @@ import {
     type RenditionTarget,
 } from './add-audio-track.plan.js';
 
-/** A file the editor picked to take a new audio track from. */
+/** An audio stream in a source, as the editor chooses between them. */
+export interface SourceAudioTrack {
+    index: number;
+    codec?: string;
+    channels?: number;
+    sampleRate?: number;
+    language?: string;
+    name?: string;
+}
+
+/** A file or link the editor gave to take a new audio track from. */
 export interface AudioSource {
     durationSec: number;
-    audioTracks: AudioTrackInfo[];
+    audioTracks: SourceAudioTrack[];
 }
+
+/** A source's audio streams, and where the encode reads each one from. */
+interface ResolvedSource extends AudioSource {
+    inputs: { input: string; audioIndex: number }[];
+}
+
+/** An http(s) link rather than a path on this machine. */
+const isLink = (source: string): boolean => /^https?:\/\//i.test(source);
+
+/** An HLS playlist link: its audio renditions are listed from the playlist itself. */
+const isHlsLink = (source: string): boolean =>
+    isLink(source) && /\.m3u8$/i.test(new URL(source).pathname);
 
 export interface AddAudioTrackRequest {
     path: string;
@@ -106,8 +127,7 @@ export class AddAudioTrackService {
         private readonly sessionService: SessionService,
         private readonly s3EtagService: S3EtagService,
         private readonly segmentPipelineService: SegmentPipelineService,
-        private readonly encryptionService: EncryptionService,
-        private readonly probeService: ProbeService
+        private readonly encryptionService: EncryptionService
     ) {}
 
     /** The job on this session, while it runs and after it ended. */
@@ -120,18 +140,12 @@ export class AddAudioTrackService {
         return this.jobs.get(sessionId)?.state === 'running';
     }
 
-    /** The picked file's audio tracks, for the editor to choose one. */
+    /** The audio tracks of a picked file or a pasted link, for the editor to choose one. */
     async probeSource(sessionId: string, path: string): Promise<AudioSource> {
         this.editSession(sessionId);
         this.assertReadableSource(path);
-        const probe = await this.probeService.probe(path);
-        if (probe.audioTracks.length === 0) {
-            throw new BadRequestException('This file has no audio');
-        }
-        return {
-            durationSec: probe.format?.duration ?? 0,
-            audioTracks: probe.audioTracks,
-        };
+        const { durationSec, audioTracks } = await this.resolveSource(path);
+        return { durationSec, audioTracks };
     }
 
     /** Starts adding the track; its progress is read with {@link job}. */
@@ -155,9 +169,12 @@ export class AddAudioTrackService {
                 'The offset must be a number of seconds'
             );
         }
-        const probe = await this.probeService.probe(req.path);
-        if (!probe.audioTracks[req.sourceTrackIndex]) {
-            throw new BadRequestException('That file has no such audio track');
+        const source = await this.resolveSource(req.path);
+        const input = source.inputs[req.sourceTrackIndex];
+        if (!input) {
+            throw new BadRequestException(
+                'That source has no such audio track'
+            );
         }
         // Checked now, on the master as it is, rather than after the encode and
         // the upload: a track the video already has, or a master changed since
@@ -202,7 +219,7 @@ export class AddAudioTrackService {
             ...label,
         };
         this.jobs.set(sessionId, job);
-        void this.run(session, { ...req, ...label }, job).catch(
+        void this.run(session, { ...req, ...label, ...input }, job).catch(
             (err: Error) => {
                 job.state = 'failed';
                 job.error = err.message;
@@ -216,7 +233,7 @@ export class AddAudioTrackService {
 
     private async run(
         session: Session,
-        req: AddAudioTrackRequest,
+        req: AddAudioTrackRequest & { input: string; audioIndex: number },
         job: AddAudioTrackJob
     ): Promise<void> {
         const s3 = session.config.s3;
@@ -287,8 +304,8 @@ export class AddAudioTrackService {
             pipeline.start();
             await this.encode(
                 buildAddAudioArgs({
-                    inputPath: req.path,
-                    sourceTrackIndex: req.sourceTrackIndex,
+                    inputPath: req.input,
+                    sourceTrackIndex: req.audioIndex,
                     offsetSec: req.offsetSec,
                     durationSec: existing.durationSec,
                     segmentDurationSec: existing.segmentDurationSec,
@@ -568,7 +585,177 @@ export class AddAudioTrackService {
         return session;
     }
 
+    /**
+     * A source's audio streams and where each is read from. An HLS link's are
+     * its master's audio renditions, named as it names them, each read from its
+     * own playlist; anything else's are its audio streams, as FFmpeg sees them.
+     */
+    private async resolveSource(source: string): Promise<ResolvedSource> {
+        if (isHlsLink(source)) return this.resolveHlsLink(source);
+        const probe = await this.probeAudio(source);
+        if (probe.audio.length === 0) {
+            throw new BadRequestException(
+                isLink(source)
+                    ? 'This link has no audio'
+                    : 'This file has no audio'
+            );
+        }
+        return {
+            durationSec: probe.durationSec,
+            audioTracks: probe.audio.map((track, index) => ({
+                index,
+                ...track,
+            })),
+            inputs: probe.audio.map((_, audioIndex) => ({
+                input: source,
+                audioIndex,
+            })),
+        };
+    }
+
+    private async resolveHlsLink(link: string): Promise<ResolvedSource> {
+        let body: Buffer;
+        try {
+            const res = await fetch(link, {
+                signal: AbortSignal.timeout(20_000),
+            });
+            if (!res.ok) throw new Error(`it answered ${res.status}`);
+            body = Buffer.from(await res.arrayBuffer());
+        } catch (err) {
+            throw new BadRequestException(
+                `The link could not be read: ${(err as Error).message}`
+            );
+        }
+        if (isLmcencPayload(body)) {
+            throw new BadRequestException(
+                'This link is a video encrypted by Luminary Media Convert. Adding audio from one ' +
+                    'needs its key, which is not supported yet: use a file, or an unencrypted link.'
+            );
+        }
+        const text = body.toString('utf-8');
+        // A media playlist is one stream already.
+        if (!text.includes('#EXT-X-STREAM-INF')) {
+            const probe = await this.probeAudio(link);
+            return {
+                durationSec: probe.durationSec,
+                audioTracks: probe.audio.map((track, index) => ({
+                    index,
+                    ...track,
+                })),
+                inputs: probe.audio.map((_, audioIndex) => ({
+                    input: link,
+                    audioIndex,
+                })),
+            };
+        }
+        const master = parseMasterPlaylist(text);
+        const renditions = master.media.filter(
+            (m) => m.type === 'AUDIO' && m.uri
+        );
+        if (renditions.length > 0) {
+            const inputs = renditions.map((r) => ({
+                input: new URL(r.uri!, link).href,
+                audioIndex: 0,
+            }));
+            const probe = await this.probeAudio(inputs[0].input);
+            return {
+                durationSec: probe.durationSec,
+                audioTracks: renditions.map((r, index) => ({
+                    index,
+                    ...(r.language ? { language: r.language } : {}),
+                    name: r.name,
+                    ...(probe.audio[0]?.codec
+                        ? { codec: probe.audio[0].codec }
+                        : {}),
+                })),
+                inputs,
+            };
+        }
+        // Audio muxed into the video: it is read from the first variant.
+        const variant = master.variants[0];
+        if (!variant)
+            throw new BadRequestException('This link lists no streams');
+        const input = new URL(variant.uri, link).href;
+        const probe = await this.probeAudio(input);
+        if (probe.audio.length === 0)
+            throw new BadRequestException('This link has no audio');
+        return {
+            durationSec: probe.durationSec,
+            audioTracks: probe.audio.map((track, index) => ({
+                index,
+                ...track,
+            })),
+            inputs: probe.audio.map((_, audioIndex) => ({ input, audioIndex })),
+        };
+    }
+
+    /**
+     * A source's audio streams and length from its header alone. The encoder's
+     * own probe also measures bitrates, which on a link can mean reading the
+     * whole stream; nothing here needs them.
+     */
+    private async probeAudio(input: string): Promise<{
+        durationSec: number;
+        audio: Omit<SourceAudioTrack, 'index'>[];
+    }> {
+        let out: string;
+        try {
+            out = await run(ffprobeBin(), [
+                '-v',
+                'error',
+                ...(isLink(input) ? ['-rw_timeout', '20000000'] : []),
+                '-show_entries',
+                'stream=codec_type,codec_name,channels,sample_rate:stream_tags=language,title:format=duration',
+                '-of',
+                'json',
+                input,
+            ]);
+        } catch {
+            throw new BadRequestException(
+                isLink(input)
+                    ? 'The link could not be read as audio or video'
+                    : 'The file could not be read as audio or video'
+            );
+        }
+        const data = JSON.parse(out) as {
+            format?: { duration?: string };
+            streams?: {
+                codec_type?: string;
+                codec_name?: string;
+                channels?: number;
+                sample_rate?: string;
+                tags?: { language?: string; title?: string };
+            }[];
+        };
+        return {
+            durationSec: Number(data.format?.duration) || 0,
+            audio: (data.streams ?? [])
+                .filter((st) => st.codec_type === 'audio')
+                .map((st) => ({
+                    ...(st.codec_name ? { codec: st.codec_name } : {}),
+                    ...(st.channels ? { channels: st.channels } : {}),
+                    ...(st.sample_rate
+                        ? { sampleRate: Number(st.sample_rate) }
+                        : {}),
+                    // `und` is FFmpeg saying the source never said.
+                    ...(st.tags?.language && st.tags.language !== 'und'
+                        ? { language: st.tags.language }
+                        : {}),
+                    ...(st.tags?.title ? { name: st.tags.title } : {}),
+                })),
+        };
+    }
+
+    /** A path on this machine, or an http(s) link. */
     private assertReadableSource(path: string): void {
+        if (isLink(path)) {
+            try {
+                new URL(path);
+            } catch {
+                throw new BadRequestException('That is not a valid link');
+            }
+            return;
+        }
         if (!isAbsolute(path) || !existsSync(path)) {
             throw new BadRequestException('No file at that path');
         }

@@ -71,6 +71,26 @@ describe('AddAudioTrackForm', () => {
         ).toBe('eng');
     });
 
+    it('reads a pasted link, in the desktop app too', async () => {
+        (window as { luminary?: unknown }).luminary = {
+            showOpenDialog: vi.fn(),
+        };
+        const wrapper = mountForm();
+        expect(wrapper.find('[data-test="chooseAudioFile"]').exists()).toBe(
+            true
+        );
+        await wrapper
+            .find('[data-test="audioFilePath"]')
+            .setValue('https://cdn.example.com/dub/master.m3u8');
+        await wrapper.find('form').trigger('submit');
+        await flushPromises();
+        expect(probe).toHaveBeenCalledWith(
+            'sess-1',
+            'sess_token',
+            'https://cdn.example.com/dub/master.m3u8'
+        );
+    });
+
     it('uses the desktop file dialog where there is one', async () => {
         (window as { luminary?: unknown }).luminary = {
             showOpenDialog: vi.fn().mockResolvedValue('/media/dub.wav'),
@@ -97,6 +117,11 @@ describe('AddAudioTrackForm', () => {
         ).toBeDefined();
 
         await wrapper.find('[data-test="audioSourceTrack"]').setValue('1');
+        // The second stream's own language replaces the first's suggestion.
+        expect(
+            (wrapper.find('[data-test="language"]').element as HTMLInputElement)
+                .value
+        ).toBe('fra');
         await wrapper.find('[data-test="language"]').setValue('fra');
         await wrapper.find('[data-test="newTrackName"]').setValue('Français');
         await wrapper.find('[data-test="newTrackOffset"]').setValue('-2.5');

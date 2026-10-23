@@ -1,10 +1,11 @@
 <script setup lang="ts">
 /**
- * Adds an audio track to the existing video from a file on this machine: the
- * file is chosen, one of its audio streams picked, and the new track named and
- * placed on the video's timeline. The encode itself runs in the encoder.
+ * Adds an audio track to the existing video from a file on this machine or a
+ * link (an audio or video file, or an HLS playlist): one of its audio streams
+ * is picked, and the new track named and placed on the video's timeline. The
+ * encode itself runs in the encoder.
  */
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { LanguageSelect } from '@luminary-media-converter/encode-config';
 import { addAudioTrack, probeAudioSource } from '../../api';
 import type { AddAudioTrackJob, AudioSource } from '../../types';
@@ -53,6 +54,14 @@ async function choose(next: string): Promise<void> {
         reading.value = false;
     }
 }
+
+// The stream picked says its language more often than not: offered until the editor types their own.
+watch(sourceTrackIndex, (index, before) => {
+    const tracks = source.value?.audioTracks ?? [];
+    const previous = tracks[before]?.language ?? '';
+    if (language.value === previous)
+        language.value = tracks[index]?.language ?? '';
+});
 
 async function browse(): Promise<void> {
     const picked = await desktop.value?.showOpenDialog();
@@ -132,17 +141,21 @@ async function add(): Promise<void> {
             >
                 Choose file…
             </button>
+            <!-- A link works in the desktop app too; a typed path is what a browser has instead of the dialog. -->
             <form
-                v-else
                 class="flex min-w-0 flex-1 gap-2"
                 @submit.prevent="choose(typedPath.trim())"
             >
                 <input
                     v-model="typedPath"
                     type="text"
-                    placeholder="/path/to/audio.wav"
+                    :placeholder="
+                        desktop
+                            ? 'or paste a link: https://…/audio.mp3, …/master.m3u8'
+                            : 'A file path or a link: https://…/audio.mp3, …/master.m3u8'
+                    "
                     class="min-w-0 flex-1 rounded border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-900"
-                    aria-label="Path of the audio file"
+                    aria-label="Path or link of the audio"
                     data-test="audioFilePath"
                 />
                 <button
