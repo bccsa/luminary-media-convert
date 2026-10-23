@@ -14,7 +14,7 @@ import type {
     AudioTrackEdit,
     EncodedMedia,
 } from '../../types';
-import AddAudioTrackForm from './AddAudioTrackForm.vue';
+import AddAudioTrackModal from './AddAudioTrackModal.vue';
 
 const props = defineProps<{
     sessionId: string;
@@ -70,14 +70,25 @@ const adding = computed(() =>
     media.value?.adding?.state === 'running' ? media.value.adding : null
 );
 const lastAdd = computed(() => media.value?.adding);
-const showAddForm = ref(false);
+/** The dialog that adds a track. */
+const addOpen = ref(false);
 
 const PHASES: Record<string, string> = {
     reading: 'Reading the video',
     encoding: 'Encoding',
     uploading: 'Uploading',
-    saving: 'Adding it to the video',
+    saving: 'Adding it',
 };
+
+/** The progress the adding row shows, as the chapter rows show a duration. */
+const addingLabel = computed(() => {
+    const job = adding.value;
+    if (!job) return '';
+    const phase = PHASES[job.phase] ?? job.phase;
+    return job.phase === 'encoding' || job.phase === 'uploading'
+        ? `${phase} ${job.progress}%`
+        : `${phase}…`;
+});
 
 /** Read again every second while a track is being added, until it is done. */
 let poll: ReturnType<typeof setInterval> | undefined;
@@ -108,7 +119,6 @@ watch(adding, (running) => (running ? startPolling() : undefined));
 onBeforeUnmount(stopPolling);
 
 function onAddStarted(job: AddAudioTrackJob): void {
-    showAddForm.value = false;
     if (media.value) media.value = { ...media.value, adding: job };
     startPolling();
 }
@@ -161,20 +171,40 @@ watch(() => [props.sessionId, props.sessionToken] as const, load, {
 </script>
 
 <template>
+    <!-- The chapter list's card, so the two tabs read as one editor. -->
     <div
-        class="flex min-h-0 flex-1 flex-col gap-2"
+        class="mt-3.5 flex min-h-0 flex-auto flex-col overflow-hidden rounded-[10px] border border-sky-200 bg-white/96 px-5 pt-2 pb-4 shadow-[0_1px_2px_rgb(9_9_11/0.04),0_0_0_1px_rgb(9_9_11/0.06)] dark:border-sky-400/12 dark:bg-[rgba(30,41,55,0.82)] dark:shadow-[0_0_0_1px_rgb(255_255_255/0.06),0_8px_30px_rgb(0_0_0/0.25)]"
         data-test="audioTracksPanel"
     >
-        <div class="flex items-center justify-between gap-2">
-            <p class="text-xs text-slate-500 dark:text-slate-400">
-                The language and name each audio track is offered under.
-            </p>
-            <div class="flex shrink-0 items-center gap-2">
-                <span
-                    v-if="savedAt && edits.length === 0"
-                    class="text-xs text-slate-500 dark:text-slate-400"
-                    >Saved</span
+        <div
+            class="m-0 mb-2.5 flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-sky-200 pt-0.5 pb-2 dark:border-sky-400/12"
+        >
+            <div class="flex min-w-0 flex-wrap items-baseline gap-2">
+                <h3
+                    class="m-0 text-[0.9375rem] font-semibold tracking-[-0.02em] text-zinc-900 dark:text-slate-200"
                 >
+                    Audio tracks
+                </h3>
+                <span class="text-xs text-slate-500 dark:text-slate-400">
+                    <template v-if="rows.length > 0">
+                        {{ rows.length }} track{{
+                            rows.length !== 1 ? 's' : ''
+                        }}
+                    </template>
+                    <template v-else-if="media">No tracks</template>
+                    <template v-if="savedAt && edits.length === 0">
+                        · Saved</template
+                    >
+                </span>
+            </div>
+            <div class="ml-auto flex items-center gap-1.5">
+                <span
+                    v-if="edits.length > 0"
+                    class="chapter-unsaved-pill"
+                    title="Changes stay here until you save them."
+                >
+                    Unsaved
+                </span>
                 <button
                     v-if="edits.length > 0"
                     type="button"
@@ -183,6 +213,20 @@ watch(() => [props.sessionId, props.sessionToken] as const, load, {
                     @click="discard"
                 >
                     Discard
+                </button>
+                <button
+                    type="button"
+                    class="chapter-toolbar-muted"
+                    :disabled="!media || !!adding || loading"
+                    :title="
+                        adding
+                            ? 'A track is being added'
+                            : 'Add a track from a file or a link'
+                    "
+                    data-test="showAddAudioTrack"
+                    @click="addOpen = true"
+                >
+                    + Add track
                 </button>
                 <button
                     type="button"
@@ -196,98 +240,130 @@ watch(() => [props.sessionId, props.sessionToken] as const, load, {
             </div>
         </div>
 
-        <p v-if="loading" class="text-sm text-slate-500">Reading the video…</p>
-        <p
-            v-else-if="media && rows.length === 0"
-            class="text-sm text-slate-500"
-        >
-            This video has no separate audio tracks to name.
+        <p v-if="loading" class="px-2 text-xs text-slate-500">
+            Reading the video…
         </p>
-        <table v-else-if="rows.length > 0" class="w-full text-sm">
-            <thead>
-                <tr
-                    class="text-left text-xs text-slate-500 dark:text-slate-400"
-                >
-                    <th class="pb-1 font-medium">Language</th>
-                    <th class="pb-1 font-medium">Name</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr
-                    v-for="row in rows"
-                    :key="`${row.track.language}|${row.track.name}`"
-                >
-                    <td class="w-32 py-1 pr-2">
-                        <LanguageSelect
-                            v-model="row.language"
-                            :aria-label="`Language of ${row.track.name}`"
-                        />
-                    </td>
-                    <td class="py-1">
-                        <input
-                            v-model="row.name"
-                            type="text"
-                            maxlength="100"
-                            class="w-full rounded border border-slate-300 bg-white px-2 py-1 dark:border-slate-600 dark:bg-slate-900"
-                            :aria-label="`Name of ${row.track.name}`"
-                        />
-                    </td>
-                </tr>
-            </tbody>
-        </table>
 
         <div
-            v-if="adding"
-            class="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900 dark:border-sky-900/60 dark:bg-sky-950/40 dark:text-sky-200"
-            data-test="addingAudioTrack"
+            v-else-if="rows.length > 0 || adding"
+            class="flex min-h-0 flex-1 flex-col overflow-y-auto"
         >
-            <p class="font-medium">
-                Adding “{{ adding.name || 'the new track' }}”
-                {{ adding.language ? `(${adding.language})` : '' }}…
+            <div
+                v-for="(row, i) in rows"
+                :key="`${row.track.language}|${row.track.name}`"
+                class="flex text-xs gap-2 px-2 py-2.5 m-0 rounded-md items-center border-b border-sky-200 dark:border-sky-400/12 last:border-b-0"
+            >
+                <span
+                    class="shrink-0 rounded-full text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 w-6 h-6 p-0 inline-flex items-center justify-center text-[0.625rem] font-semibold"
+                    >{{ i + 1 }}</span
+                >
+                <div class="w-28 shrink-0">
+                    <LanguageSelect
+                        v-model="row.language"
+                        :aria-label="`Language of ${row.track.name}`"
+                    />
+                </div>
+                <input
+                    v-model="row.name"
+                    type="text"
+                    maxlength="100"
+                    class="min-w-0 flex-auto font-[inherit] text-xs text-zinc-900 dark:text-slate-200 bg-white dark:bg-[#0c1222] border border-sky-200 dark:border-sky-400/12 rounded-md outline-none px-2.5 py-1.5 min-h-7 h-7 transition-[border-color] duration-[120ms] focus:border-sky-600 dark:focus:border-sky-400"
+                    :aria-label="`Name of ${row.track.name}`"
+                />
+                <span
+                    v-if="row.track.default"
+                    class="shrink-0 rounded-full text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 px-2 py-[0.2rem] text-[0.6875rem] font-medium text-center"
+                    title="Played when a viewer's language matches no track"
+                    >Default</span
+                >
+            </div>
+            <!-- The track being added, in its place in the list, until it is in. -->
+            <div
+                v-if="adding"
+                class="flex text-xs gap-2 px-2 py-2.5 m-0 rounded-md items-center border-b border-sky-200 dark:border-sky-400/12 last:border-b-0 opacity-70"
+                data-test="addingAudioTrack"
+            >
+                <span
+                    class="shrink-0 rounded-full text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 w-6 h-6 p-0 inline-flex items-center justify-center text-[0.625rem] font-semibold"
+                    >+</span
+                >
+                <span
+                    class="w-28 shrink-0 px-1 font-mono text-slate-500 dark:text-slate-400"
+                    >{{ adding.language }}</span
+                >
+                <span
+                    class="min-w-0 flex-auto truncate text-zinc-900 dark:text-slate-200"
+                    >{{ adding.name || 'New track' }}</span
+                >
+                <span
+                    class="shrink-0 rounded-full text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 px-2 py-[0.2rem] text-[0.6875rem] font-medium text-center inline-flex items-center gap-1.5"
+                >
+                    <svg
+                        class="h-3 w-3 animate-spin"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="3"
+                        stroke-linecap="round"
+                        aria-hidden="true"
+                    >
+                        <path d="M12 3a9 9 0 1 1-9 9" />
+                    </svg>
+                    {{ addingLabel }}
+                </span>
+            </div>
+        </div>
+
+        <!-- As the chapter list says it has none yet. -->
+        <div
+            v-else-if="media"
+            class="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-8 text-center"
+        >
+            <div
+                class="flex h-11 w-11 items-center justify-center rounded-full border border-neutral-200 bg-neutral-50 text-slate-500 dark:border-slate-600/55 dark:bg-slate-900/45 dark:text-slate-400"
+                aria-hidden="true"
+            >
+                <svg
+                    class="h-5 w-5"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.75"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                >
+                    <path d="M9 18V5l12-2v13" />
+                    <circle cx="6" cy="18" r="3" />
+                    <circle cx="18" cy="16" r="3" />
+                </svg>
+            </div>
+            <p
+                class="m-0 text-[0.8125rem] font-semibold text-zinc-900 dark:text-slate-200"
+            >
+                No separate audio tracks
             </p>
-            <p>
-                {{ PHASES[adding.phase] ?? adding.phase }}
-                {{
-                    adding.phase === 'encoding' || adding.phase === 'uploading'
-                        ? `${adding.progress}%`
-                        : ''
-                }}
+            <p
+                class="m-0 text-xs leading-[1.45] text-slate-500 dark:text-slate-400"
+            >
+                This video carries its sound inside its picture, so its tracks
+                cannot be named or added to here.
             </p>
         </div>
+
         <p
-            v-else-if="lastAdd?.state === 'failed'"
-            class="text-xs text-red-600 dark:text-red-400"
+            v-if="!adding && lastAdd?.state === 'failed'"
+            class="mt-2 text-xs text-red-600 dark:text-red-400"
             data-test="addAudioTrackFailed"
         >
             The track “{{ lastAdd.name }}” was not added: {{ lastAdd.error }}
         </p>
         <p
-            v-else-if="lastAdd?.state === 'done'"
-            class="text-xs text-slate-500 dark:text-slate-400"
+            v-else-if="!adding && lastAdd?.state === 'done'"
+            class="mt-2 text-xs text-slate-500 dark:text-slate-400"
         >
             “{{ lastAdd.name }}” was added.
         </p>
-
-        <AddAudioTrackForm
-            v-if="showAddForm && media && !adding"
-            :session-id="sessionId"
-            :session-token="sessionToken"
-            :etag="media.etag"
-            @started="onAddStarted"
-            @cancel="showAddForm = false"
-        />
-        <div v-else-if="media && !adding && !loading">
-            <button
-                type="button"
-                class="chapter-toolbar-muted"
-                data-test="showAddAudioTrack"
-                @click="showAddForm = true"
-            >
-                + Add audio track
-            </button>
-        </div>
-
-        <p v-if="error" class="text-xs text-red-600 dark:text-red-400">
+        <p v-if="error" class="mt-2 text-xs text-red-600 dark:text-red-400">
             {{ error }}
             <button
                 v-if="isConflict"
@@ -298,5 +374,14 @@ watch(() => [props.sessionId, props.sessionToken] as const, load, {
                 Show it as it is now
             </button>
         </p>
+
+        <AddAudioTrackModal
+            v-if="media"
+            v-model:open="addOpen"
+            :session-id="sessionId"
+            :session-token="sessionToken"
+            :etag="media.etag"
+            @started="onAddStarted"
+        />
     </div>
 </template>

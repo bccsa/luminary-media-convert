@@ -24,11 +24,17 @@ vi.mock('@luminary-media-converter/encode-config', () => ({
     }),
 }));
 
-import AddAudioTrackForm from './AddAudioTrackForm.vue';
+import AddAudioTrackModal from './AddAudioTrackModal.vue';
 
 const mountForm = () =>
-    mount(AddAudioTrackForm, {
-        props: { sessionId: 'sess-1', sessionToken: 'sess_token', etag: 'v1' },
+    mount(AddAudioTrackModal, {
+        props: {
+            open: true,
+            sessionId: 'sess-1',
+            sessionToken: 'sess_token',
+            etag: 'v1',
+        },
+        global: { stubs: { teleport: true } },
     });
 
 beforeEach(() => {
@@ -44,7 +50,7 @@ beforeEach(() => {
     add.mockResolvedValue({ state: 'running' });
 });
 
-describe('AddAudioTrackForm', () => {
+describe('AddAudioTrackModal', () => {
     it("reads a typed path's audio streams and offers the one it states as the language", async () => {
         const wrapper = mountForm();
         await wrapper
@@ -58,13 +64,10 @@ describe('AddAudioTrackForm', () => {
             'sess_token',
             '/media/dub.mkv'
         );
-        const options = wrapper.findAll(
-            '[data-test="audioSourceTrack"] option'
-        );
-        expect(options.map((o) => o.text())).toEqual([
-            'Track 1 · eng · 2 ch',
-            'Track 2 · fra · Dub · 2 ch',
-        ]);
+        const picker = wrapper.findComponent({ name: 'FormSelect' });
+        expect(
+            (picker.props('options') as { label: string }[]).map((o) => o.label)
+        ).toEqual(['Track 1 · eng · 2 ch', 'Track 2 · fra · Dub · 2 ch']);
         expect(
             (wrapper.find('[data-test="language"]').element as HTMLInputElement)
                 .value
@@ -116,7 +119,10 @@ describe('AddAudioTrackForm', () => {
             wrapper.find('[data-test="addAudioTrack"]').attributes('disabled')
         ).toBeDefined();
 
-        await wrapper.find('[data-test="audioSourceTrack"]').setValue('1');
+        wrapper
+            .findComponent({ name: 'FormSelect' })
+            .vm.$emit('update:modelValue', 1);
+        await flushPromises();
         // The second stream's own language replaces the first's suggestion.
         expect(
             (wrapper.find('[data-test="language"]').element as HTMLInputElement)
@@ -137,6 +143,8 @@ describe('AddAudioTrackForm', () => {
             ifMatch: 'v1',
         });
         expect(wrapper.emitted('started')).toEqual([[{ state: 'running' }]]);
+        // It closes once the add has started: the panel shows the progress.
+        expect(wrapper.emitted('update:open')).toEqual([[false]]);
     });
 
     it('says why a file cannot be used', async () => {
@@ -148,8 +156,35 @@ describe('AddAudioTrackForm', () => {
         await wrapper.find('form').trigger('submit');
         await flushPromises();
         expect(wrapper.text()).toContain('This file has no audio');
-        expect(wrapper.find('[data-test="addAudioTrack"]').exists()).toBe(
-            false
-        );
+        expect(
+            wrapper.find('[data-test="addAudioTrack"]').attributes('disabled')
+        ).toBeDefined();
+    });
+
+    it('starts empty each time it opens', async () => {
+        const wrapper = mountForm();
+        await wrapper
+            .find('[data-test="audioFilePath"]')
+            .setValue('/media/dub.mkv');
+        await wrapper.find('form').trigger('submit');
+        await flushPromises();
+        await wrapper.setProps({ open: false });
+        await wrapper.setProps({ open: true });
+        expect(
+            (
+                wrapper.find('[data-test="audioFilePath"]')
+                    .element as HTMLInputElement
+            ).value
+        ).toBe('');
+        expect(wrapper.find('[data-test="newTrackName"]').exists()).toBe(false);
+    });
+
+    it('closes on Cancel', async () => {
+        const wrapper = mountForm();
+        const cancel = wrapper
+            .findAll('button')
+            .find((b) => b.text() === 'Cancel')!;
+        await cancel.trigger('click');
+        expect(wrapper.emitted('update:open')).toEqual([[false]]);
     });
 });

@@ -40,7 +40,7 @@ const MEDIA = {
     encrypted: false,
 };
 const names = (w: ReturnType<typeof mount>) =>
-    w.findAll('tbody input[type="text"]');
+    w.findAll('[data-test="audioTracksPanel"] input[type="text"]');
 
 beforeEach(() => {
     vi.clearAllMocks();
@@ -148,9 +148,11 @@ describe('AudioTracksPanel adding a track', () => {
         expect(
             wrapper.find('[data-test="saveAudioTracks"]').attributes('disabled')
         ).toBeDefined();
-        expect(wrapper.find('[data-test="showAddAudioTrack"]').exists()).toBe(
-            false
-        );
+        expect(
+            wrapper
+                .find('[data-test="showAddAudioTrack"]')
+                .attributes('disabled')
+        ).toBeDefined();
 
         await vi.advanceTimersByTimeAsync(1000);
         expect(wrapper.find('[data-test="addingAudioTrack"]').text()).toContain(
