@@ -2,7 +2,6 @@ package org.bccsa.luminary.player.engine
 
 import androidx.activity.ComponentActivity
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.test.utils.TestExoPlayerBuilder
 import java.net.InetAddress
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -55,7 +54,7 @@ class ExoEngineCastMenuTest {
 
     private val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup().get()
     private val upstream = FixtureUpstream("encrypted-byterange")
-    private val player: ExoPlayer = TestExoPlayerBuilder(activity).build()
+    private val player: ExoPlayer = fixturePlayer(activity)
     private val receiver = FakeReceiver()
     private val cast = FakeCast()
     private val events = mutableListOf<Pair<String, JsonObject>>()

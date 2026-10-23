@@ -11,7 +11,6 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaSession
-import androidx.media3.test.utils.TestExoPlayerBuilder
 import androidx.media3.test.utils.robolectric.TestPlayerRunHelper
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -47,7 +46,7 @@ class ExoEngineFullscreenTest {
     private val context = RuntimeEnvironment.getApplication()
     private val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup().get()
     private val upstream = FixtureUpstream("encrypted-byterange")
-    private val player: ExoPlayer = TestExoPlayerBuilder(context).build()
+    private val player: ExoPlayer = fixturePlayer(context)
     private val presenter = FullscreenPresenter { activity }
     private val events = mutableListOf<Pair<String, JsonObject>>()
     private var engine: ExoEngine? = null
@@ -330,7 +329,7 @@ class ExoEngineFullscreenTest {
     fun `destroy releases the session as well as the player`() {
         create()
         val id = engine!!.mediaSession.id
-        val other = TestExoPlayerBuilder(context).build()
+        val other = fixturePlayer(context)
 
         // Media3 refuses a second live session with the same id, which is how a leak would show.
         val clash = runCatching { MediaSession.Builder(context, other).setId(id).build() }
