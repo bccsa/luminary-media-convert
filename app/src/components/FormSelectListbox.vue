@@ -5,6 +5,13 @@
  */
 import { computed, ref, watch, nextTick, onMounted, onUnmounted, useId } from 'vue';
 
+/**
+ * An open list sits above everything, a dialog included: it is opened from
+ * inside one as often as from the page, and a list behind the dialog it was
+ * opened in cannot be used. Above the app's highest dialog layer (10050).
+ */
+const OPEN_LIST_Z = '10100';
+
 export type SelectOption = {
     value: string | number;
     label: string;
@@ -246,7 +253,7 @@ async function syncPanelPosition() {
             width: 'max-content',
             minWidth: `${triggerW}px`,
             maxWidth: 'min(calc(100vw - 1rem), 22rem)',
-            zIndex: '60',
+            zIndex: OPEN_LIST_Z,
             maxHeight: '9rem',
         };
         return;
@@ -258,7 +265,7 @@ async function syncPanelPosition() {
         top: `${Math.round(r.bottom + gap)}px`,
         left: `${Math.round(r.left)}px`,
         width: `${panelWidth}px`,
-        zIndex: '60',
+        zIndex: OPEN_LIST_Z,
         minWidth: `${panelWidth}px`,
         maxHeight: 'min(15rem, calc(100vh - 5rem))',
     };

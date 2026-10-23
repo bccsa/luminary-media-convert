@@ -75,6 +75,55 @@ export interface SessionSummary {
     sessionToken: string;
     hlsUrl?: string;
     error?: string;
+    /** `edit` for a session on a video already encoded; absent for an encode. */
+    mode?: 'edit';
+}
+
+/** An audio track of an existing video: one language and name, in however many groups. */
+export interface AudioTrack {
+    language: string;
+    name: string;
+    groups: string[];
+    default: boolean;
+}
+
+export interface AudioTrackEdit {
+    from: { language: string; name: string };
+    to: { language: string; name: string };
+}
+
+/** Where an audio track being added to an existing video has got to. */
+export interface AddAudioTrackJob {
+    state: 'running' | 'done' | 'failed';
+    phase: 'reading' | 'encoding' | 'uploading' | 'saving' | 'done';
+    /** 0–100 within the phase. */
+    progress: number;
+    language: string;
+    name: string;
+    error?: string;
+}
+
+/** What an edit session's video offers to edit, and the version read. */
+export interface EncodedMedia {
+    tracks: AudioTrack[];
+    chapterLanguages: string[];
+    etag: string;
+    encrypted: boolean;
+    /** The audio track being added, or the last one. */
+    adding?: AddAudioTrackJob;
+}
+
+/** A file picked to take a new audio track from: its audio streams. */
+export interface AudioSource {
+    durationSec: number;
+    audioTracks: {
+        index: number;
+        codec?: string;
+        channels?: number;
+        sampleRate?: number;
+        language?: string;
+        name?: string;
+    }[];
 }
 
 export interface SessionStatusResponse {
@@ -95,6 +144,8 @@ export interface SessionStatusResponse {
     title?: string;
     /** The CMS document this session's output belongs to. */
     documentId?: string;
+    /** `edit` for a session on a video already encoded; absent for an encode. */
+    mode?: 'edit';
     error?: string;
     /**
      * Something the encode did differently from what was submitted, on a

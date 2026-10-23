@@ -22,6 +22,13 @@ import {
     watch,
 } from 'vue';
 
+/**
+ * An open list sits above everything, a dialog included: it is opened from
+ * inside one as often as from the page, and a list behind the dialog it was
+ * opened in cannot be used. Above the app's highest dialog layer (10050).
+ */
+const OPEN_LIST_Z = '10100';
+
 export type SelectMenuOption = {
     value: string | number;
     label: string;
@@ -146,7 +153,7 @@ function positionPanel(): void {
         minWidth: `${r.width}px`,
         maxWidth: `${Math.max(room, r.width)}px`,
         maxHeight: `${maxHeight}px`,
-        zIndex: '60',
+        zIndex: OPEN_LIST_Z,
     };
     style.width = props.searchable
         ? `${Math.max(r.width, Math.min(wanted, room))}px`

@@ -1,5 +1,6 @@
 import {
     BadRequestException,
+    ConflictException,
     Injectable,
     Logger,
     PayloadTooLargeException,
@@ -16,9 +17,10 @@ import {
     deriveAngleName,
     type HlsParsedMaster,
 } from '@luminary-media-converter/hls-core';
-import { S3EtagService } from './s3-etag.service.js';
+import { S3EtagService, type PutOptions } from './s3-etag.service.js';
 import {
     encryptTextAsset,
+    isLmcencPayload,
     keyFromHex,
     readMaybeEncrypted,
 } from '../encode/services/lmcenc.js';
@@ -27,6 +29,12 @@ import type { HlsReadRequestDto } from './dto/read.dto.js';
 import type { HlsMutateRequestDto } from './dto/mutate.dto.js';
 import type { HlsDiscoverRequestDto } from './dto/discover.dto.js';
 import { applyOperation, type OperationContext } from './operations/index.js';
+import {
+    listAudioTracks,
+    rewriteAudioTracks,
+    type AudioTrack,
+    type AudioTrackEdit,
+} from './audio-tracks.js';
 
 export interface HlsReadResult {
     master: HlsParsedMaster;
@@ -49,11 +57,33 @@ export interface HlsDiscoverResult {
     chaptersLanguages?: string[];
 }
 
+/** What an existing video offers to edit, and the version of its master that was read. */
+export interface EncodedMedia {
+    tracks: AudioTrack[];
+    /** Languages with a chapters/<lang>.vtt beside the master. */
+    chapterLanguages: string[];
+    /** The master's ETag: a save is refused once the master has changed since. */
+    etag: string;
+    /** The master is LMCENC-wrapped, so whatever is written beside it has to be too. */
+    encrypted: boolean;
+    /** The scrub thumbnails' VTT beside the master, relative to its folder, when there is one. */
+    thumbnailsVtt?: string;
+}
+
+/**
+ * For the text files an edit rewrites. A CDN may otherwise keep serving the
+ * copy from before the edit for as long as it likes, since the encode sets no
+ * caching of its own; `no-cache` lets it keep a copy but check it first.
+ */
+export const EDITED_CACHE_CONTROL = 'no-cache';
+
 /** Validate a relaxed BCP-47 form: 2–3 char primary subtag, optional region. */
 const LANG_PATTERN = /^[a-z]{2,3}(?:-[A-Z]{2})?$/;
 const MAX_VTT_BYTES = 1024 * 1024;
 
 const OCTET_STREAM = 'application/octet-stream';
+/** Where an encode leaves its scrub thumbnails' VTT, relative to the master's folder. */
+const THUMBNAIL_VTTS = ['thumbnails/thumbnails.vtt', 'thumbnails.vtt'];
 const M3U8_CONTENT_TYPE = 'application/vnd.apple.mpegurl';
 const VTT_CONTENT_TYPE = 'text/vtt';
 
@@ -202,6 +232,95 @@ export class HlsEditService {
     }
 
     /**
+     * An existing video's audio tracks and chapter languages, read from its
+     * master at `masterKey`. `keyHex` decrypts a master that is LMCENC-wrapped;
+     * a plaintext one reads the same with or without it.
+     */
+    async readEncodedMedia(
+        s3: S3ConfigDto,
+        masterKey: string,
+        keyHex?: string
+    ): Promise<EncodedMedia> {
+        const { body, etag } = await this.s3EtagService.getObjectWithEtag(
+            s3,
+            masterKey
+        );
+        const master = parseMasterPlaylist(this.decode(body, keyHex));
+        const folderPrefix = folderOf(masterKey);
+        const keys = await this.listObjects(s3, folderPrefix);
+        const thumbnailsVtt = THUMBNAIL_VTTS.find((name) =>
+            keys.includes(folderPrefix + name)
+        );
+        return {
+            tracks: listAudioTracks(master),
+            chapterLanguages: collectChaptersLanguages(keys, folderPrefix),
+            etag,
+            encrypted: isLmcencPayload(body),
+            ...(thumbnailsVtt ? { thumbnailsVtt } : {}),
+        };
+    }
+
+    /**
+     * Changes audio tracks' languages and names in an existing video's master,
+     * and takes the `removed` ones out of it.
+     *
+     * Nothing else changes, byte for byte: segments, folders and the key stay
+     * as they are, and so does the rest of the master; a removed track's files
+     * stay in storage. The master goes back encrypted exactly when it was
+     * read encrypted, and only if it is still the version `ifMatch` names, so
+     * an edit never lands on top of one it has not seen. The first edit keeps
+     * the master as the encode wrote it at `master.m3u8.orig`, to undo by hand.
+     */
+    async saveAudioTracks(
+        s3: S3ConfigDto,
+        masterKey: string,
+        ifMatch: string,
+        edits: AudioTrackEdit[],
+        keyHex?: string,
+        removed: { language: string; name: string }[] = []
+    ): Promise<EncodedMedia> {
+        const { body, etag } = await this.s3EtagService.getObjectWithEtag(
+            s3,
+            masterKey
+        );
+        if (etag !== ifMatch) {
+            throw new ConflictException({
+                message: 'The video was changed since it was opened',
+                code: 'ETAG_MISMATCH',
+                currentEtag: etag,
+            });
+        }
+        const encrypted = isLmcencPayload(body);
+        if (encrypted && !keyHex) {
+            throw new BadRequestException(
+                'This video is encrypted: its key is needed to edit it'
+            );
+        }
+        const rewritten = rewriteAudioTracks(
+            this.decode(body, keyHex),
+            edits,
+            removed
+        );
+
+        const contentType = encrypted ? OCTET_STREAM : M3U8_CONTENT_TYPE;
+        await this.s3EtagService.putObjectIfAbsent(
+            s3,
+            `${masterKey}.orig`,
+            body,
+            contentType
+        );
+        await this.s3EtagService.putObjectIfMatch(
+            s3,
+            masterKey,
+            this.encode(rewritten, encrypted ? keyHex : undefined),
+            ifMatch,
+            contentType,
+            { cacheControl: EDITED_CACHE_CONTROL }
+        );
+        return this.readEncodedMedia(s3, masterKey, keyHex);
+    }
+
+    /**
      * Read the chapter sidecar at `{folderPrefix}chapters/{lang}.vtt`.
      * Returns null when the object does not exist.
      */
@@ -273,7 +392,8 @@ export class HlsEditService {
         folderPrefix: string,
         lang: string,
         vtt: string,
-        keyHex?: string
+        keyHex?: string,
+        options: PutOptions = {}
     ): Promise<void> {
         lang = lang.toLowerCase();
         if (!LANG_PATTERN.test(lang)) {
@@ -298,7 +418,8 @@ export class HlsEditService {
             s3,
             key,
             this.encode(vtt, keyHex),
-            keyHex ? OCTET_STREAM : VTT_CONTENT_TYPE
+            keyHex ? OCTET_STREAM : VTT_CONTENT_TYPE,
+            options
         );
     }
 
