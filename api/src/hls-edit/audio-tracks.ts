@@ -144,40 +144,115 @@ export function applyAudioTrackEdits(
 
 /**
  * `text`, a master playlist, with `edits` applied to the `NAME` and `LANGUAGE`
- * of its audio renditions and every other byte left as it was: blank lines,
- * attribute order and spelling, everything a rebuilt playlist would redraw.
+ * of its audio renditions and the `removed` tracks taken out of every group,
+ * and every other byte left as it was: blank lines, attribute order and
+ * spelling, everything a rebuilt playlist would redraw.
  *
- * The edits are checked on the parsed master first ({@link applyAudioTrackEdits}),
- * so an invalid one throws before anything is rewritten.
+ * A group whose default rendition is removed has its next one made the
+ * default, so players still have one to start with. Removing takes the track
+ * out of the master only: its files stay where they are.
+ *
+ * Everything is checked on the parsed master first, so an invalid edit or
+ * removal throws before anything is rewritten: a track that is not there, one
+ * both renamed and removed, or a group that would be left without audio.
  */
 export function rewriteAudioTracks(
     text: string,
-    edits: AudioTrackEdit[]
+    edits: AudioTrackEdit[],
+    removed: { language: string; name: string }[] = []
 ): string {
-    applyAudioTrackEdits(parseMasterPlaylist(text), edits);
+    const master = parseMasterPlaylist(text);
+    const known = new Set(
+        listAudioTracks(master).map((t) => signature(t.language, t.name))
+    );
+    const gone = new Set<string>();
+    for (const track of removed) {
+        const key = signature(track.language, track.name);
+        if (!known.has(key)) {
+            throw new BadRequestException(
+                `No audio track "${track.name}" (${track.language || 'no language'})`
+            );
+        }
+        if (
+            edits.some((e) => signature(e.from.language, e.from.name) === key)
+        ) {
+            throw new BadRequestException(
+                `Audio track "${track.name}" is both renamed and removed`
+            );
+        }
+        gone.add(key);
+    }
+    const isGone = (m: { type: string; language?: string; name: string }) =>
+        m.type === 'AUDIO' && gone.has(signature(m.language, m.name));
+    for (const groupId of new Set(
+        master.media.filter((m) => m.type === 'AUDIO').map((m) => m.groupId)
+    )) {
+        const kept = master.media.filter(
+            (m) => m.type === 'AUDIO' && m.groupId === groupId && !isGone(m)
+        );
+        if (kept.length === 0) {
+            throw new BadRequestException(
+                'A video keeps at least one audio track: add another before removing this one'
+            );
+        }
+    }
+    // Checked as the master will be once the removed tracks are out, so a
+    // track may take the name of one removed in the same save.
+    master.media = master.media.filter((m) => !isGone(m));
+    applyAudioTrackEdits(master, edits);
+
     const targets = new Map(
         edits.map((edit) => [
             signature(edit.from.language, edit.from.name),
             { language: edit.to.language.trim(), name: edit.to.name.trim() },
         ])
     );
-    return text
-        .split(/(\r?\n)/)
-        .map((line) => {
-            if (!line.startsWith(MEDIA_TAG)) return line;
-            const attributes = line.slice(MEDIA_TAG.length);
-            if (readAttribute(attributes, 'TYPE') !== 'AUDIO') return line;
-            const to = targets.get(
-                signature(
-                    readAttribute(attributes, 'LANGUAGE'),
-                    readAttribute(attributes, 'NAME') ?? ''
-                )
-            );
-            if (!to) return line;
-            const named = writeAttribute(attributes, 'NAME', to.name);
-            return MEDIA_TAG + writeAttribute(named, 'LANGUAGE', to.language);
-        })
-        .join('');
+    const parts = text.split(/(\r?\n)/);
+    const audioOf = (line: string) => {
+        if (!line.startsWith(MEDIA_TAG)) return undefined;
+        const attributes = line.slice(MEDIA_TAG.length);
+        return readAttribute(attributes, 'TYPE') === 'AUDIO'
+            ? attributes
+            : undefined;
+    };
+    const lostDefault = new Set<string>();
+    const out: string[] = [];
+    for (let i = 0; i < parts.length; i++) {
+        const attributes = audioOf(parts[i]);
+        if (attributes === undefined) {
+            out.push(parts[i]);
+            continue;
+        }
+        const key = signature(
+            readAttribute(attributes, 'LANGUAGE'),
+            readAttribute(attributes, 'NAME') ?? ''
+        );
+        if (gone.has(key)) {
+            if (readAttribute(attributes, 'DEFAULT') === 'YES') {
+                lostDefault.add(readAttribute(attributes, 'GROUP-ID') ?? '');
+            }
+            i++; // the line's own line end goes with it
+            continue;
+        }
+        const to = targets.get(key);
+        if (!to) {
+            out.push(parts[i]);
+            continue;
+        }
+        const named = writeAttribute(attributes, 'NAME', to.name);
+        out.push(MEDIA_TAG + writeAttribute(named, 'LANGUAGE', to.language));
+    }
+    if (lostDefault.size > 0) {
+        for (let i = 0; i < out.length; i++) {
+            const attributes = audioOf(out[i]);
+            const group = attributes && readAttribute(attributes, 'GROUP-ID');
+            if (!attributes || !group || !lostDefault.has(group)) continue;
+            out[i] =
+                MEDIA_TAG + writeBareAttribute(attributes, 'DEFAULT', 'YES');
+            lostDefault.delete(group);
+        }
+    }
+    return out.join('');
 }
 
 const MEDIA_TAG = '#EXT-X-MEDIA:';
@@ -199,6 +274,14 @@ function writeAttribute(list: string, name: string, value: string): string {
               (_, lead: string) => `${lead}${name}="${value}"`
           )
         : `${list},${name}="${value}"`;
+}
+
+/** Sets an enumerated attribute (`DEFAULT=YES`) in place, or adds it at the end. */
+function writeBareAttribute(list: string, name: string, value: string): string {
+    const pattern = attributePattern(name);
+    return pattern.test(list)
+        ? list.replace(pattern, (_, lead: string) => `${lead}${name}=${value}`)
+        : `${list},${name}=${value}`;
 }
 
 /** A new track's rendition in one audio group. */

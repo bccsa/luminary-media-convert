@@ -245,7 +245,11 @@ export async function listOrigins(): Promise<OriginDecisions> {
 export async function revokeOrigin(origin: string): Promise<void> {
     return requestVoid(
         `${API_BASE}/api/origins?origin=${encodeURIComponent(origin)}`,
-        { method: 'DELETE', apiKey: true, errorPrefix: 'Failed to update trusted sites' },
+        {
+            method: 'DELETE',
+            apiKey: true,
+            errorPrefix: 'Failed to update trusted sites',
+        }
     );
 }
 
@@ -312,14 +316,15 @@ export async function putAudioTracks(
     sessionId: string,
     sessionToken: string,
     ifMatch: string,
-    edits: AudioTrackEdit[]
+    edits: AudioTrackEdit[],
+    remove: AudioTrackEdit['from'][] = []
 ): Promise<EncodedMedia> {
     return requestJson(
         `${API_BASE}/api/sessions/${sessionId}/media/audio-tracks`,
         {
             method: 'PUT',
             token: sessionToken,
-            body: { ifMatch, edits },
+            body: { ifMatch, edits, remove },
             errorPrefix: 'Could not save the audio tracks',
         }
     );

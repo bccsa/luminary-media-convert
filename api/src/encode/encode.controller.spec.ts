@@ -315,16 +315,19 @@ describe('EncodeController', () => {
                     to: { language: 'fr', name: 'Français' },
                 },
             ];
+            const remove = [{ language: 'en', name: 'English' }];
             await controller.putAudioTracks(session.id, {
                 ifMatch: 'v1',
                 edits,
+                remove,
             });
             expect(hlsEditService.saveAudioTracks).toHaveBeenCalledWith(
                 expect.anything(),
                 MASTER_KEY,
                 'v1',
                 edits,
-                KEY
+                KEY,
+                remove
             );
         });
 

@@ -219,6 +219,72 @@ describe('rewriteAudioTracks', () => {
             ])
         ).toThrow(BadRequestException);
     });
+
+    const english = { language: 'en', name: 'English' };
+    const french = { language: 'fr', name: 'Francais' };
+
+    it('removes a track from every group, line end and all, and leaves every other byte', () => {
+        const out = rewriteAudioTracks(MASTER, [], [french]);
+        expect(out).toBe(
+            MASTER.split('\n')
+                .filter((line) => !line.includes('NAME="Francais"'))
+                .join('\n')
+        );
+    });
+
+    it('makes the next track the default when the default one is removed', () => {
+        const out = rewriteAudioTracks(MASTER, [], [english]);
+        const lines = out
+            .split('\n')
+            .filter((l) => l.startsWith('#EXT-X-MEDIA'));
+        expect(lines).toEqual([
+            '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud_stereo",NAME="Francais",LANGUAGE="fr",DEFAULT=YES,AUTOSELECT=YES,CHANNELS="2",URI="stream_2_Francais/playlist.m3u8"',
+            '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud_mono",NAME="Francais",LANGUAGE="fr",DEFAULT=YES,AUTOSELECT=YES,CHANNELS="1",URI="stream_4_Francais/playlist.m3u8"',
+        ]);
+        expect(listAudioTracks(parseMasterPlaylist(out))).toHaveLength(1);
+    });
+
+    it('keeps CRLF line ends when removing', () => {
+        const crlf = MASTER.replaceAll('\n', '\r\n');
+        expect(rewriteAudioTracks(crlf, [], [french])).toBe(
+            rewriteAudioTracks(MASTER, [], [french]).replaceAll('\n', '\r\n')
+        );
+    });
+
+    it('lets a track take the name of one removed in the same save', () => {
+        const out = rewriteAudioTracks(
+            MASTER,
+            [{ from: english, to: { language: 'fr', name: 'Francais' } }],
+            [french]
+        );
+        expect(listAudioTracks(parseMasterPlaylist(out))).toEqual([
+            expect.objectContaining({
+                language: 'fr',
+                name: 'Francais',
+                default: true,
+            }),
+        ]);
+    });
+
+    it('refuses removing the last track, one that is not there, or one also renamed', () => {
+        expect(() => rewriteAudioTracks(MASTER, [], [english, french])).toThrow(
+            /at least one audio track/
+        );
+        expect(() =>
+            rewriteAudioTracks(
+                MASTER,
+                [],
+                [{ language: 'de', name: 'Deutsch' }]
+            )
+        ).toThrow(BadRequestException);
+        expect(() =>
+            rewriteAudioTracks(
+                MASTER,
+                [{ from: french, to: { language: 'fr', name: 'Français' } }],
+                [french]
+            )
+        ).toThrow(/both renamed and removed/);
+    });
 });
 
 describe('addAudioTrackLines', () => {

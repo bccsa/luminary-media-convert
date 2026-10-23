@@ -82,12 +82,18 @@ describe('AudioTracksPanel', () => {
         await wrapper.find('[data-test="saveAudioTracks"]').trigger('click');
         await flushPromises();
 
-        expect(save).toHaveBeenCalledWith('sess-1', 'sess_token', 'v1', [
-            {
-                from: { language: 'fr', name: 'Francais' },
-                to: { language: 'fra', name: 'Français' },
-            },
-        ]);
+        expect(save).toHaveBeenCalledWith(
+            'sess-1',
+            'sess_token',
+            'v1',
+            [
+                {
+                    from: { language: 'fr', name: 'Francais' },
+                    to: { language: 'fra', name: 'Français' },
+                },
+            ],
+            []
+        );
         expect(wrapper.emitted('saved')).toHaveLength(1);
         expect(wrapper.text()).toContain('Saved');
     });
@@ -106,6 +112,48 @@ describe('AudioTracksPanel', () => {
         await wrapper.find('button.underline').trigger('click');
         await flushPromises();
         expect(media).toHaveBeenCalledTimes(2);
+    });
+
+    it('removes a track on save, and puts it back on discard', async () => {
+        const wrapper = mountPanel();
+        await flushPromises();
+        expect(wrapper.text()).not.toContain('Default');
+        await wrapper
+            .findAll('[data-test="removeAudioTrack"]')[1]
+            .trigger('click');
+        expect(
+            names(wrapper).map((n) => (n.element as HTMLInputElement).value)
+        ).toEqual(['Francais']);
+        expect(wrapper.text()).toContain('Unsaved');
+
+        await wrapper
+            .findAll('button')
+            .find((b) => b.text() === 'Discard')!
+            .trigger('click');
+        expect(names(wrapper)).toHaveLength(2);
+
+        await wrapper
+            .findAll('[data-test="removeAudioTrack"]')[1]
+            .trigger('click');
+        await wrapper.find('[data-test="saveAudioTracks"]').trigger('click');
+        await flushPromises();
+        expect(save).toHaveBeenCalledWith(
+            'sess-1',
+            'sess_token',
+            'v1',
+            [],
+            [{ language: 'en', name: 'English' }]
+        );
+    });
+
+    it('keeps the last track', async () => {
+        const wrapper = mountPanel();
+        await flushPromises();
+        await wrapper
+            .findAll('[data-test="removeAudioTrack"]')[0]
+            .trigger('click');
+        const [last] = wrapper.findAll('[data-test="removeAudioTrack"]');
+        expect(last.attributes('disabled')).toBeDefined();
     });
 });
 

@@ -978,7 +978,8 @@ export class EncodeController {
             masterKey,
             dto.ifMatch,
             dto.edits,
-            keyHex
+            keyHex,
+            dto.remove ?? []
         );
     }
 

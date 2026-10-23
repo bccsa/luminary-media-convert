@@ -2,8 +2,9 @@
 /**
  * The audio tracks of a post's existing video, opened by an edit session: one
  * row per track, its language and name, saved together, and a new track to add
- * from a file. Renaming changes only `LANGUAGE` and `NAME` in the master;
- * adding writes the new track beside the video and names it there.
+ * from a file. Renaming changes only `LANGUAGE` and `NAME` in the master and
+ * removing takes the track out of it; adding writes the new track beside the
+ * video and names it there.
  */
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { LanguageSelect } from '@luminary-media-converter/encode-config';
@@ -31,6 +32,8 @@ interface TrackRow {
     track: AudioTrack;
     language: string;
     name: string;
+    /** Taken out on the next save. */
+    removed: boolean;
 }
 
 const media = ref<EncodedMedia | null>(null);
@@ -46,11 +49,14 @@ function setRows(next: EncodedMedia): void {
         track,
         language: track.language,
         name: track.name,
+        removed: false,
     }));
 }
 
+const shown = computed(() => rows.value.filter((row) => !row.removed));
+
 const edits = computed<AudioTrackEdit[]>(() =>
-    rows.value
+    shown.value
         .filter(
             (row) =>
                 row.language.trim() !== row.track.language ||
@@ -61,6 +67,14 @@ const edits = computed<AudioTrackEdit[]>(() =>
             to: { language: row.language.trim(), name: row.name.trim() },
         }))
 );
+
+const removed = computed(() =>
+    rows.value
+        .filter((row) => row.removed)
+        .map((row) => ({ language: row.track.language, name: row.track.name }))
+);
+
+const changeCount = computed(() => edits.value.length + removed.value.length);
 
 /** The video changed since it was read: saving over it is refused until it is read again. */
 const isConflict = computed(() => /changed since/i.test(error.value ?? ''));
@@ -139,7 +153,7 @@ async function load(): Promise<void> {
 
 async function save(): Promise<void> {
     const token = props.sessionToken;
-    if (!token || !media.value || edits.value.length === 0) return;
+    if (!token || !media.value || changeCount.value === 0) return;
     saving.value = true;
     error.value = null;
     try {
@@ -148,7 +162,8 @@ async function save(): Promise<void> {
                 props.sessionId,
                 token,
                 media.value.etag,
-                edits.value
+                edits.value,
+                removed.value
             )
         );
         savedAt.value = new Date();
@@ -186,27 +201,27 @@ watch(() => [props.sessionId, props.sessionToken] as const, load, {
                     Audio tracks
                 </h3>
                 <span class="text-xs text-slate-500 dark:text-slate-400">
-                    <template v-if="rows.length > 0">
-                        {{ rows.length }} track{{
-                            rows.length !== 1 ? 's' : ''
+                    <template v-if="shown.length > 0">
+                        {{ shown.length }} track{{
+                            shown.length !== 1 ? 's' : ''
                         }}
                     </template>
                     <template v-else-if="media">No tracks</template>
-                    <template v-if="savedAt && edits.length === 0">
+                    <template v-if="savedAt && changeCount === 0">
                         · Saved</template
                     >
                 </span>
             </div>
             <div class="ml-auto flex items-center gap-1.5">
                 <span
-                    v-if="edits.length > 0"
+                    v-if="changeCount > 0"
                     class="chapter-unsaved-pill"
                     title="Changes stay here until you save them."
                 >
                     Unsaved
                 </span>
                 <button
-                    v-if="edits.length > 0"
+                    v-if="changeCount > 0"
                     type="button"
                     class="chapter-toolbar-muted"
                     :disabled="saving"
@@ -231,7 +246,7 @@ watch(() => [props.sessionId, props.sessionToken] as const, load, {
                 <button
                     type="button"
                     class="chapter-save-btn"
-                    :disabled="edits.length === 0 || saving || !!adding"
+                    :disabled="changeCount === 0 || saving || !!adding"
                     data-test="saveAudioTracks"
                     @click="save"
                 >
@@ -245,11 +260,11 @@ watch(() => [props.sessionId, props.sessionToken] as const, load, {
         </p>
 
         <div
-            v-else-if="rows.length > 0 || adding"
+            v-else-if="shown.length > 0 || adding"
             class="flex min-h-0 flex-1 flex-col overflow-y-auto"
         >
             <div
-                v-for="(row, i) in rows"
+                v-for="(row, i) in shown"
                 :key="`${row.track.language}|${row.track.name}`"
                 class="flex text-xs gap-2 px-2 py-2.5 m-0 rounded-md items-center border-b border-sky-200 dark:border-sky-400/12 last:border-b-0"
             >
@@ -270,12 +285,32 @@ watch(() => [props.sessionId, props.sessionToken] as const, load, {
                     class="min-w-0 flex-auto font-[inherit] text-xs text-zinc-900 dark:text-slate-200 bg-white dark:bg-[#0c1222] border border-sky-200 dark:border-sky-400/12 rounded-md outline-none px-2.5 py-1.5 min-h-7 h-7 transition-[border-color] duration-[120ms] focus:border-sky-600 dark:focus:border-sky-400"
                     :aria-label="`Name of ${row.track.name}`"
                 />
-                <span
-                    v-if="row.track.default"
-                    class="shrink-0 rounded-full text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 px-2 py-[0.2rem] text-[0.6875rem] font-medium text-center"
-                    title="Played when a viewer's language matches no track"
-                    >Default</span
+                <!-- A video keeps one track at least. -->
+                <button
+                    type="button"
+                    class="appearance-none inline-flex items-center justify-center min-w-7 min-h-7 shrink-0 rounded-md border-0 bg-transparent p-0 text-slate-500 dark:text-slate-400 cursor-pointer transition-colors duration-[120ms] hover:text-red-600 hover:bg-red-500/10 dark:hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-500"
+                    :disabled="shown.length <= 1 || saving || !!adding"
+                    :title="
+                        shown.length <= 1
+                            ? 'A video keeps at least one audio track'
+                            : `Remove ${row.track.name}`
+                    "
+                    :aria-label="`Remove ${row.track.name}`"
+                    data-test="removeAudioTrack"
+                    @click="row.removed = true"
                 >
+                    <svg
+                        class="h-4 w-4"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        aria-hidden="true"
+                    >
+                        <path d="M8 8l8 8M16 8l-8 8" />
+                    </svg>
+                </button>
             </div>
             <!-- The track being added, in its place in the list, until it is in. -->
             <div

@@ -68,6 +68,20 @@ export class AudioTracksWriteDto {
     @Type(() => AudioTrackEditDto)
     @Expose()
     edits: AudioTrackEditDto[];
+
+    @ApiPropertyOptional({
+        type: AudioTrackIdentityDto,
+        isArray: true,
+        description:
+            'Tracks to take out of the master; their files stay in storage.',
+    })
+    @IsOptional()
+    @IsArray()
+    @ArrayMaxSize(200)
+    @ValidateNested({ each: true })
+    @Type(() => AudioTrackIdentityDto)
+    @Expose()
+    remove?: AudioTrackIdentityDto[];
 }
 
 export class AudioTrackDto {

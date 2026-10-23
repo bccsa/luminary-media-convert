@@ -261,10 +261,12 @@ export class HlsEditService {
     }
 
     /**
-     * Changes audio tracks' languages and names in an existing video's master.
+     * Changes audio tracks' languages and names in an existing video's master,
+     * and takes the `removed` ones out of it.
      *
-     * Nothing but `LANGUAGE` and `NAME` changes, byte for byte: segments,
-     * folders and the key stay as they are, and so does the rest of the master. The master goes back encrypted exactly when it was
+     * Nothing else changes, byte for byte: segments, folders and the key stay
+     * as they are, and so does the rest of the master; a removed track's files
+     * stay in storage. The master goes back encrypted exactly when it was
      * read encrypted, and only if it is still the version `ifMatch` names, so
      * an edit never lands on top of one it has not seen. The first edit keeps
      * the master as the encode wrote it at `master.m3u8.orig`, to undo by hand.
@@ -274,7 +276,8 @@ export class HlsEditService {
         masterKey: string,
         ifMatch: string,
         edits: AudioTrackEdit[],
-        keyHex?: string
+        keyHex?: string,
+        removed: { language: string; name: string }[] = []
     ): Promise<EncodedMedia> {
         const { body, etag } = await this.s3EtagService.getObjectWithEtag(
             s3,
@@ -293,7 +296,11 @@ export class HlsEditService {
                 'This video is encrypted: its key is needed to edit it'
             );
         }
-        const rewritten = rewriteAudioTracks(this.decode(body, keyHex), edits);
+        const rewritten = rewriteAudioTracks(
+            this.decode(body, keyHex),
+            edits,
+            removed
+        );
 
         const contentType = encrypted ? OCTET_STREAM : M3U8_CONTENT_TYPE;
         await this.s3EtagService.putObjectIfAbsent(
