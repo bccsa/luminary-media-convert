@@ -110,6 +110,15 @@ function makeRequest(overrides: any = {}): any {
     };
 }
 
+/** The add-audio job's stand-in: idle unless a test says otherwise. */
+const makeAddAudioTrackService = () => ({
+    job: vi.fn().mockReturnValue(undefined),
+    isBusy: vi.fn().mockReturnValue(false),
+    probeSource: vi.fn(),
+    start: vi.fn(),
+});
+let addAudioTrackService: ReturnType<typeof makeAddAudioTrackService>;
+
 describe('EncodeController', () => {
     let controller: EncodeController;
     let sessionService: SessionService;
@@ -188,7 +197,8 @@ describe('EncodeController', () => {
             ingestService,
             hlsEditService,
             waveformService,
-            thumbnailService
+            thumbnailService,
+            (addAudioTrackService = makeAddAudioTrackService())
         );
     });
 
@@ -315,6 +325,56 @@ describe('EncodeController', () => {
                 'v1',
                 edits,
                 KEY
+            );
+        });
+
+        it('reports the audio track being added with the video', async () => {
+            const session = editSession(false);
+            hlsEditService.readEncodedMedia = vi
+                .fn()
+                .mockResolvedValue({ etag: 'v1' });
+            const adding = {
+                state: 'running',
+                phase: 'encoding',
+                progress: 40,
+                language: 'fra',
+                name: 'Français',
+            };
+            addAudioTrackService.job.mockReturnValue(adding);
+            expect(await controller.getEncodedMedia(session.id)).toEqual({
+                etag: 'v1',
+                adding,
+            });
+        });
+
+        it('waits to rename tracks while one is being added', async () => {
+            const session = editSession(false);
+            hlsEditService.saveAudioTracks = vi.fn();
+            addAudioTrackService.isBusy.mockReturnValue(true);
+            await expect(
+                controller.putAudioTracks(session.id, {
+                    ifMatch: 'v1',
+                    edits: [],
+                })
+            ).rejects.toThrow(ConflictException);
+            expect(hlsEditService.saveAudioTracks).not.toHaveBeenCalled();
+        });
+
+        it('starts adding a track from the file, from 0:00 unless told otherwise', async () => {
+            const session = editSession(false);
+            addAudioTrackService.start.mockResolvedValue({
+                state: 'running',
+            } as never);
+            await controller.addAudioTrack(session.id, {
+                path: '/tmp/fr.wav',
+                sourceTrackIndex: 0,
+                language: 'fra',
+                name: 'Français',
+                ifMatch: 'v1',
+            });
+            expect(addAudioTrackService.start).toHaveBeenCalledWith(
+                session.id,
+                expect.objectContaining({ offsetSec: 0, path: '/tmp/fr.wav' })
             );
         });
 
@@ -1983,7 +2043,8 @@ describe('EncodeController — source storyboard', () => {
             {} as any,
             {} as any,
             {} as any,
-            thumbnailService
+            thumbnailService,
+            (addAudioTrackService = makeAddAudioTrackService())
         );
     });
 

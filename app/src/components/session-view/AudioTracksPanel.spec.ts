@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 import { defineComponent, h } from 'vue';
 
@@ -106,5 +106,84 @@ describe('AudioTracksPanel', () => {
         await wrapper.find('button.underline').trigger('click');
         await flushPromises();
         expect(media).toHaveBeenCalledTimes(2);
+    });
+});
+
+describe('AudioTracksPanel adding a track', () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it('shows the add under way, holds renaming, and lists the track once it is in', async () => {
+        const running = {
+            state: 'running',
+            phase: 'encoding',
+            progress: 40,
+            language: 'deu',
+            name: 'Deutsch',
+        };
+        media.mockResolvedValueOnce({ ...MEDIA, adding: running });
+        media.mockResolvedValueOnce({
+            ...MEDIA,
+            adding: { ...running, phase: 'uploading', progress: 80 },
+        });
+        media.mockResolvedValue({
+            ...MEDIA,
+            etag: 'v3',
+            tracks: [
+                ...MEDIA.tracks,
+                {
+                    language: 'deu',
+                    name: 'Deutsch',
+                    groups: ['aud'],
+                    default: false,
+                },
+            ],
+            adding: { ...running, state: 'done', phase: 'done', progress: 100 },
+        });
+        const wrapper = mountPanel();
+        await flushPromises();
+        expect(wrapper.find('[data-test="addingAudioTrack"]').text()).toContain(
+            'Encoding 40%'
+        );
+        expect(
+            wrapper.find('[data-test="saveAudioTracks"]').attributes('disabled')
+        ).toBeDefined();
+        expect(wrapper.find('[data-test="showAddAudioTrack"]').exists()).toBe(
+            false
+        );
+
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(wrapper.find('[data-test="addingAudioTrack"]').text()).toContain(
+            'Uploading 80%'
+        );
+
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(wrapper.find('[data-test="addingAudioTrack"]').exists()).toBe(
+            false
+        );
+        expect(
+            names(wrapper).map((n) => (n.element as HTMLInputElement).value)
+        ).toEqual(['Francais', 'English', 'Deutsch']);
+        expect(wrapper.text()).toContain('“Deutsch” was added.');
+        expect(wrapper.emitted('saved')).toHaveLength(1);
+    });
+
+    it('says why a track was not added', async () => {
+        media.mockResolvedValue({
+            ...MEDIA,
+            adding: {
+                state: 'failed',
+                phase: 'encoding',
+                progress: 10,
+                language: 'deu',
+                name: 'Deutsch',
+                error: 'The audio could not be encoded',
+            },
+        });
+        const wrapper = mountPanel();
+        await flushPromises();
+        expect(
+            wrapper.find('[data-test="addAudioTrackFailed"]').text()
+        ).toContain('The audio could not be encoded');
     });
 });

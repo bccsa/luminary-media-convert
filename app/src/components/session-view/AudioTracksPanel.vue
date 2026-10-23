@@ -1,13 +1,20 @@
 <script setup lang="ts">
 /**
  * The audio tracks of a post's existing video, opened by an edit session: one
- * row per track, its language and name, saved together. Only `LANGUAGE` and
- * `NAME` change in the master; the video itself stays as it is.
+ * row per track, its language and name, saved together, and a new track to add
+ * from a file. Renaming changes only `LANGUAGE` and `NAME` in the master;
+ * adding writes the new track beside the video and names it there.
  */
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { LanguageSelect } from '@luminary-media-converter/encode-config';
 import { getEncodedMedia, putAudioTracks } from '../../api';
-import type { AudioTrack, AudioTrackEdit, EncodedMedia } from '../../types';
+import type {
+    AddAudioTrackJob,
+    AudioTrack,
+    AudioTrackEdit,
+    EncodedMedia,
+} from '../../types';
+import AddAudioTrackForm from './AddAudioTrackForm.vue';
 
 const props = defineProps<{
     sessionId: string;
@@ -57,6 +64,54 @@ const edits = computed<AudioTrackEdit[]>(() =>
 
 /** The video changed since it was read: saving over it is refused until it is read again. */
 const isConflict = computed(() => /changed since/i.test(error.value ?? ''));
+
+/** The track being added, while it is: renaming waits for it. */
+const adding = computed(() =>
+    media.value?.adding?.state === 'running' ? media.value.adding : null
+);
+const lastAdd = computed(() => media.value?.adding);
+const showAddForm = ref(false);
+
+const PHASES: Record<string, string> = {
+    reading: 'Reading the video',
+    encoding: 'Encoding',
+    uploading: 'Uploading',
+    saving: 'Adding it to the video',
+};
+
+/** Read again every second while a track is being added, until it is done. */
+let poll: ReturnType<typeof setInterval> | undefined;
+function stopPolling(): void {
+    if (poll) clearInterval(poll);
+    poll = undefined;
+}
+function startPolling(): void {
+    if (poll) return;
+    poll = setInterval(async () => {
+        const token = props.sessionToken;
+        if (!token) return;
+        try {
+            const next = await getEncodedMedia(props.sessionId, token);
+            if (next.adding?.state !== 'running') {
+                stopPolling();
+                setRows(next);
+                if (next.adding?.state === 'done') emit('saved');
+            } else {
+                media.value = next;
+            }
+        } catch {
+            // The next tick asks again.
+        }
+    }, 1000);
+}
+watch(adding, (running) => (running ? startPolling() : undefined));
+onBeforeUnmount(stopPolling);
+
+function onAddStarted(job: AddAudioTrackJob): void {
+    showAddForm.value = false;
+    if (media.value) media.value = { ...media.value, adding: job };
+    startPolling();
+}
 
 async function load(): Promise<void> {
     const token = props.sessionToken;
@@ -132,7 +187,7 @@ watch(() => [props.sessionId, props.sessionToken] as const, load, {
                 <button
                     type="button"
                     class="chapter-save-btn"
-                    :disabled="edits.length === 0 || saving"
+                    :disabled="edits.length === 0 || saving || !!adding"
                     data-test="saveAudioTracks"
                     @click="save"
                 >
@@ -180,6 +235,57 @@ watch(() => [props.sessionId, props.sessionToken] as const, load, {
                 </tr>
             </tbody>
         </table>
+
+        <div
+            v-if="adding"
+            class="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900 dark:border-sky-900/60 dark:bg-sky-950/40 dark:text-sky-200"
+            data-test="addingAudioTrack"
+        >
+            <p class="font-medium">
+                Adding “{{ adding.name || 'the new track' }}”
+                {{ adding.language ? `(${adding.language})` : '' }}…
+            </p>
+            <p>
+                {{ PHASES[adding.phase] ?? adding.phase }}
+                {{
+                    adding.phase === 'encoding' || adding.phase === 'uploading'
+                        ? `${adding.progress}%`
+                        : ''
+                }}
+            </p>
+        </div>
+        <p
+            v-else-if="lastAdd?.state === 'failed'"
+            class="text-xs text-red-600 dark:text-red-400"
+            data-test="addAudioTrackFailed"
+        >
+            The track “{{ lastAdd.name }}” was not added: {{ lastAdd.error }}
+        </p>
+        <p
+            v-else-if="lastAdd?.state === 'done'"
+            class="text-xs text-slate-500 dark:text-slate-400"
+        >
+            “{{ lastAdd.name }}” was added.
+        </p>
+
+        <AddAudioTrackForm
+            v-if="showAddForm && media && !adding"
+            :session-id="sessionId"
+            :session-token="sessionToken"
+            :etag="media.etag"
+            @started="onAddStarted"
+            @cancel="showAddForm = false"
+        />
+        <div v-else-if="media && !adding && !loading">
+            <button
+                type="button"
+                class="chapter-toolbar-muted"
+                data-test="showAddAudioTrack"
+                @click="showAddForm = true"
+            >
+                + Add audio track
+            </button>
+        </div>
 
         <p v-if="error" class="text-xs text-red-600 dark:text-red-400">
             {{ error }}

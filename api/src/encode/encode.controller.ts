@@ -52,9 +52,16 @@ import { EncodeConfigDto } from './dto/encode-config.dto.js';
 import { LocalFileDto } from './dto/local-file.dto.js';
 import { ChaptersWriteDto } from './dto/chapters.dto.js';
 import {
+    AddAudioTrackDto,
+    AddAudioTrackJobDto,
+    AudioSourceRequestDto,
     AudioTracksWriteDto,
     EncodedMediaDto,
 } from './dto/encoded-media.dto.js';
+import {
+    AddAudioTrackService,
+    type AudioSource,
+} from './services/add-audio-track.service.js';
 import { hasAllowedExtension } from './services/media-extensions.js';
 import {
     copyModeRejection,
@@ -122,7 +129,8 @@ export class EncodeController {
         private readonly ingestService: IngestService,
         private readonly hlsEditService: HlsEditService,
         private readonly waveformService: WaveformService,
-        private readonly thumbnailService: ThumbnailService
+        private readonly thumbnailService: ThumbnailService,
+        private readonly addAudioTrackService: AddAudioTrackService
     ) {}
 
     /**
@@ -925,7 +933,13 @@ export class EncodeController {
         @Param('sessionId') sessionId: string
     ): Promise<EncodedMediaDto> {
         const { s3, keyHex, masterKey } = this.editedVideo(sessionId);
-        return this.hlsEditService.readEncodedMedia(s3, masterKey, keyHex);
+        const media = await this.hlsEditService.readEncodedMedia(
+            s3,
+            masterKey,
+            keyHex
+        );
+        const adding = this.addAudioTrackService.job(sessionId);
+        return adding ? { ...media, adding } : media;
     }
 
     @Put(':sessionId/media/audio-tracks')
@@ -954,6 +968,11 @@ export class EncodeController {
         @Body() dto: AudioTracksWriteDto
     ): Promise<EncodedMediaDto> {
         const { s3, keyHex, masterKey } = this.editedVideo(sessionId);
+        if (this.addAudioTrackService.isBusy(sessionId)) {
+            throw new ConflictException(
+                'An audio track is being added to this video; save once it is done'
+            );
+        }
         return this.hlsEditService.saveAudioTracks(
             s3,
             masterKey,
@@ -961,6 +980,63 @@ export class EncodeController {
             dto.edits,
             keyHex
         );
+    }
+
+    @Post(':sessionId/media/audio-sources')
+    @HttpCode(HttpStatus.OK)
+    @UseGuards(AuthResolverGuard)
+    @AuthTypes('instance', 'session')
+    @ApiSecurity('apikey')
+    @ApiOperation({
+        summary: 'List the audio tracks of a file to add one from',
+        description:
+            'Only for an edit session. The file is read where it is, never copied.',
+    })
+    @ApiParam({ name: 'sessionId', description: 'Session ID' })
+    @ApiResponse({
+        status: 400,
+        description: 'No such file, or no audio in it.',
+    })
+    @ApiResponse({ status: 409, description: 'Not an edit session.' })
+    async probeAudioSource(
+        @Param('sessionId') sessionId: string,
+        @Body() dto: AudioSourceRequestDto
+    ): Promise<AudioSource> {
+        return this.addAudioTrackService.probeSource(sessionId, dto.path);
+    }
+
+    @Post(':sessionId/media/audio-tracks')
+    @HttpCode(HttpStatus.ACCEPTED)
+    @UseGuards(AuthResolverGuard)
+    @AuthTypes('instance', 'session')
+    @ApiSecurity('apikey')
+    @ApiOperation({
+        summary: 'Add an audio track to the existing video',
+        description:
+            "Only for an edit session. Encodes the file's audio track to match each " +
+            "of the video's audio groups, uploads it beside the video in folders of " +
+            'its own, then adds it to the master over the version `ifMatch` names. ' +
+            'Runs in the background: GET /api/sessions/:id/media reports it as `adding`.',
+    })
+    @ApiParam({ name: 'sessionId', description: 'Session ID' })
+    @ApiResponse({ status: 202, type: AddAudioTrackJobDto })
+    @ApiResponse({
+        status: 400,
+        description: 'The file, track, language, name or offset is invalid.',
+    })
+    @ApiResponse({
+        status: 409,
+        description: 'Not an edit session, or a track is already being added.',
+    })
+    async addAudioTrack(
+        @Param('sessionId') sessionId: string,
+        @Body() dto: AddAudioTrackDto
+    ): Promise<AddAudioTrackJobDto> {
+        this.assertEncoderAvailable();
+        return this.addAudioTrackService.start(sessionId, {
+            ...dto,
+            offsetSec: dto.offsetSec ?? 0,
+        });
     }
 
     /** Where an edit session's video is, and its key; refused for an encode. */

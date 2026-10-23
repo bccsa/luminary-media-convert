@@ -62,6 +62,33 @@ export class S3EtagService {
         return { body, etag };
     }
 
+    /** `length` bytes of the object from `offset`: an init kept inside a byte-range chunk. */
+    async getObjectRange(
+        config: S3ConfigDto,
+        key: string,
+        offset: number,
+        length: number
+    ): Promise<Buffer> {
+        const client = this.createClient(config);
+        const resp = await client.send(
+            new GetObjectCommand({
+                Bucket: config.bucket,
+                Key: key,
+                Range: `bytes=${offset}-${offset + length - 1}`,
+            })
+        );
+        return streamToBuffer(resp.Body as NodeJS.ReadableStream);
+    }
+
+    /** The object's size in bytes. */
+    async objectSize(config: S3ConfigDto, key: string): Promise<number> {
+        const client = this.createClient(config);
+        const resp = await client.send(
+            new HeadObjectCommand({ Bucket: config.bucket, Key: key })
+        );
+        return resp.ContentLength ?? 0;
+    }
+
     /**
      * Conditional PUT. Throws ConflictException (HTTP 409) when the
      * upstream ETag no longer matches `ifMatch` (412 PreconditionFailed).

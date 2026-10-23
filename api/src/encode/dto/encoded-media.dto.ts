@@ -1,11 +1,15 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Expose, Type } from 'class-transformer';
 import {
     ArrayMaxSize,
     IsArray,
+    IsInt,
     IsNotEmpty,
+    IsNumber,
+    IsOptional,
     IsString,
     MaxLength,
+    Min,
     ValidateNested,
 } from 'class-validator';
 
@@ -87,6 +91,87 @@ export class AudioTrackDto {
     default: boolean;
 }
 
+export class AudioSourceRequestDto {
+    @ApiProperty({
+        description: 'Absolute path of an audio or video file on this machine.',
+    })
+    @IsString()
+    @IsNotEmpty()
+    @MaxLength(4096)
+    @Expose()
+    path: string;
+}
+
+export class AddAudioTrackDto extends AudioSourceRequestDto {
+    @ApiProperty({
+        description:
+            "The file's audio stream to take, among its audio streams.",
+        example: 0,
+    })
+    @IsInt()
+    @Min(0)
+    @Expose()
+    sourceTrackIndex: number;
+
+    @ApiProperty({ example: 'fra' })
+    @IsString()
+    @MaxLength(16)
+    @Expose()
+    language: string;
+
+    @ApiProperty({ example: 'Français' })
+    @IsString()
+    @MaxLength(256)
+    @Expose()
+    name: string;
+
+    @ApiPropertyOptional({
+        description:
+            "Where the file starts on the video's timeline, in seconds: positive adds silence before it, negative drops its first seconds.",
+        default: 0,
+    })
+    @IsOptional()
+    @IsNumber()
+    @Expose()
+    offsetSec?: number;
+
+    @ApiProperty({
+        description: 'The etag GET /api/sessions/:id/media returned.',
+    })
+    @IsString()
+    @IsNotEmpty()
+    @Expose()
+    ifMatch: string;
+}
+
+export class AddAudioTrackJobDto {
+    @ApiProperty({ enum: ['running', 'done', 'failed'] })
+    @Expose()
+    state: 'running' | 'done' | 'failed';
+
+    @ApiProperty({
+        enum: ['reading', 'encoding', 'uploading', 'saving', 'done'],
+    })
+    @Expose()
+    phase: 'reading' | 'encoding' | 'uploading' | 'saving' | 'done';
+
+    @ApiProperty({ description: '0–100 within the phase.' })
+    @Expose()
+    progress: number;
+
+    @ApiProperty()
+    @Expose()
+    language: string;
+
+    @ApiProperty()
+    @Expose()
+    name: string;
+
+    @ApiPropertyOptional()
+    @Expose()
+    error?: string;
+}
+
 export class EncodedMediaDto {
     @ApiProperty({ type: AudioTrackDto, isArray: true })
     @Expose()
@@ -112,4 +197,11 @@ export class EncodedMediaDto {
     })
     @Expose()
     encrypted: boolean;
+
+    @ApiPropertyOptional({
+        type: AddAudioTrackJobDto,
+        description: 'The audio track being added, or the last one.',
+    })
+    @Expose()
+    adding?: AddAudioTrackJobDto;
 }

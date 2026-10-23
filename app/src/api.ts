@@ -5,6 +5,8 @@ import type {
     SessionStatusResponse,
     SessionSummary,
     AudioTrackEdit,
+    AddAudioTrackJob,
+    AudioSource,
     EncodedMedia,
 } from './types';
 
@@ -319,6 +321,50 @@ export async function putAudioTracks(
             token: sessionToken,
             body: { ifMatch, edits },
             errorPrefix: 'Could not save the audio tracks',
+        }
+    );
+}
+
+/** The audio streams of a file on this machine, to add one from. */
+export async function probeAudioSource(
+    sessionId: string,
+    sessionToken: string,
+    path: string
+): Promise<AudioSource> {
+    return requestJson(
+        `${API_BASE}/api/sessions/${sessionId}/media/audio-sources`,
+        {
+            method: 'POST',
+            token: sessionToken,
+            body: { path },
+            errorPrefix: 'Could not read that file',
+        }
+    );
+}
+
+/**
+ * Starts adding a file's audio stream to the video as a new track. It runs in
+ * the background: {@link getEncodedMedia} reports it as `adding`.
+ */
+export async function addAudioTrack(
+    sessionId: string,
+    sessionToken: string,
+    track: {
+        path: string;
+        sourceTrackIndex: number;
+        language: string;
+        name: string;
+        offsetSec: number;
+        ifMatch: string;
+    }
+): Promise<AddAudioTrackJob> {
+    return requestJson(
+        `${API_BASE}/api/sessions/${sessionId}/media/audio-tracks`,
+        {
+            method: 'POST',
+            token: sessionToken,
+            body: track,
+            errorPrefix: 'Could not add the audio track',
         }
     );
 }

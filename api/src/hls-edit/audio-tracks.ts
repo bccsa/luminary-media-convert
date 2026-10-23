@@ -31,6 +31,29 @@ const LANGUAGE = /^[a-z]{2,3}(?:-[A-Z]{2})?$/;
 const NAME_FORBIDDEN = /["\r\n]/;
 const NAME_MAX = 100;
 
+/**
+ * A track's language and name, trimmed, or a 400 saying what is wrong with
+ * them: an ISO 639 code, and a name an attribute list can carry.
+ */
+export function assertTrackLabel(
+    language: string,
+    name: string
+): { language: string; name: string } {
+    const lang = language.trim();
+    const label = name.trim();
+    if (!LANGUAGE.test(lang)) {
+        throw new BadRequestException(
+            `"${language}" is not a language code (ISO 639, e.g. "en" or "fra")`
+        );
+    }
+    if (!label || label.length > NAME_MAX || NAME_FORBIDDEN.test(label)) {
+        throw new BadRequestException(
+            `A track name needs 1 to ${NAME_MAX} characters, without quotes or line breaks`
+        );
+    }
+    return { language: lang, name: label };
+}
+
 const signature = (language: string | undefined, name: string): string =>
     `${language ?? ''}|${name}`;
 
@@ -86,19 +109,7 @@ export function applyAudioTrackEdits(
                 `Audio track "${edit.from.name}" is edited twice`
             );
         }
-        const language = edit.to.language.trim();
-        const name = edit.to.name.trim();
-        if (!LANGUAGE.test(language)) {
-            throw new BadRequestException(
-                `"${edit.to.language}" is not a language code (ISO 639, e.g. "en" or "fra")`
-            );
-        }
-        if (!name || name.length > NAME_MAX || NAME_FORBIDDEN.test(name)) {
-            throw new BadRequestException(
-                `A track name needs 1 to ${NAME_MAX} characters, without quotes or line breaks`
-            );
-        }
-        bySource.set(from, { language, name });
+        bySource.set(from, assertTrackLabel(edit.to.language, edit.to.name));
     }
 
     // Checked on the result before anything is changed: an edit that leaves a
@@ -188,4 +199,75 @@ function writeAttribute(list: string, name: string, value: string): string {
               (_, lead: string) => `${lead}${name}="${value}"`
           )
         : `${list},${name}="${value}"`;
+}
+
+/** A new track's rendition in one audio group. */
+export interface AddedRendition {
+    groupId: string;
+    /** Its media playlist, relative to the master. */
+    uri: string;
+    /** Written as `CHANNELS` when the group's other renditions state theirs. */
+    channels: number;
+}
+
+/**
+ * `text`, a master playlist, with a new audio track added to every audio group
+ * it has a rendition for: one `#EXT-X-MEDIA` line each, after the group's last
+ * one, and every other byte left as it was. The track is never the default;
+ * the players pick by language.
+ *
+ * Throws, rewriting nothing, when the language or name is invalid, a group
+ * already has a track of that language and name, or a group has no audio.
+ */
+export function addAudioTrackLines(
+    text: string,
+    label: { language: string; name: string },
+    renditions: AddedRendition[]
+): string {
+    const { language, name } = assertTrackLabel(label.language, label.name);
+    const master = parseMasterPlaylist(text);
+    for (const rendition of renditions) {
+        const group = master.media.filter(
+            (m) => m.type === 'AUDIO' && m.groupId === rendition.groupId
+        );
+        if (group.length === 0) {
+            throw new BadRequestException(
+                `The video has no audio group "${rendition.groupId}"`
+            );
+        }
+        if (
+            group.some(
+                (m) =>
+                    signature(m.language, m.name) === signature(language, name)
+            )
+        ) {
+            throw new BadRequestException(
+                `The video already has an audio track "${name}" (${language})`
+            );
+        }
+    }
+
+    const lines = text.split(/(\r?\n)/);
+    for (const rendition of renditions) {
+        let last = -1;
+        let statesChannels = false;
+        lines.forEach((line, i) => {
+            if (!line.startsWith(MEDIA_TAG)) return;
+            const attributes = line.slice(MEDIA_TAG.length);
+            if (readAttribute(attributes, 'TYPE') !== 'AUDIO') return;
+            if (readAttribute(attributes, 'GROUP-ID') !== rendition.groupId)
+                return;
+            last = i;
+            statesChannels ||=
+                readAttribute(attributes, 'CHANNELS') !== undefined;
+        });
+        const eol = lines[last + 1] ?? '\n';
+        const added =
+            `${MEDIA_TAG}TYPE=AUDIO,GROUP-ID="${rendition.groupId}",NAME="${name}",` +
+            `LANGUAGE="${language}",DEFAULT=NO,AUTOSELECT=YES,` +
+            (statesChannels ? `CHANNELS="${rendition.channels}",` : '') +
+            `URI="${rendition.uri}"`;
+        lines.splice(last + 1, 0, eol, added);
+    }
+    return lines.join('');
 }

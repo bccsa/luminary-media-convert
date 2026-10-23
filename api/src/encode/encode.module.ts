@@ -19,6 +19,7 @@ import { IngestService } from './services/ingest.service.js';
 import { SegmentPipelineService } from './services/segment-pipeline.service.js';
 import { PreviewService } from './services/preview.service.js';
 import { WaveformService } from './services/waveform.service.js';
+import { AddAudioTrackService } from './services/add-audio-track.service.js';
 
 @Module({
     // HlsEditModule is where chapter read/write lives; it imports this module in
@@ -44,6 +45,7 @@ import { WaveformService } from './services/waveform.service.js';
         SegmentPipelineService,
         PreviewService,
         WaveformService,
+        AddAudioTrackService,
     ],
     exports: [SessionService, SessionEventsService],
 })

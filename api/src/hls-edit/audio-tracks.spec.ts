@@ -5,6 +5,7 @@ import {
     parseMasterPlaylist,
 } from '@luminary-media-converter/hls-core';
 import {
+    addAudioTrackLines,
     applyAudioTrackEdits,
     listAudioTracks,
     rewriteAudioTracks,
@@ -215,6 +216,79 @@ describe('rewriteAudioTracks', () => {
         expect(() =>
             rewriteAudioTracks(WRITTEN, [
                 { ...edit, to: { language: 'French', name: 'x' } },
+            ])
+        ).toThrow(BadRequestException);
+    });
+});
+
+describe('addAudioTrackLines', () => {
+    const renditions = [
+        {
+            groupId: 'aud_stereo',
+            uri: 'stream_addab_0_Deutsch/playlist.m3u8',
+            channels: 2,
+        },
+        {
+            groupId: 'aud_mono',
+            uri: 'stream_addab_1_Deutsch/playlist.m3u8',
+            channels: 1,
+        },
+    ];
+
+    it("adds the track after each group's last rendition, and changes nothing else", () => {
+        const out = addAudioTrackLines(
+            MASTER,
+            { language: 'deu', name: 'Deutsch' },
+            renditions
+        );
+        const stereo =
+            '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud_stereo",NAME="Deutsch",LANGUAGE="deu",DEFAULT=NO,AUTOSELECT=YES,CHANNELS="2",URI="stream_addab_0_Deutsch/playlist.m3u8"';
+        const mono =
+            '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud_mono",NAME="Deutsch",LANGUAGE="deu",DEFAULT=NO,AUTOSELECT=YES,CHANNELS="1",URI="stream_addab_1_Deutsch/playlist.m3u8"';
+        const lines = MASTER.split('\n');
+        lines.splice(
+            lines.findIndex((l) => l.includes('stream_2_Francais')) + 1,
+            0,
+            stereo
+        );
+        lines.splice(
+            lines.findIndex((l) => l.includes('stream_4_Francais')) + 1,
+            0,
+            mono
+        );
+        expect(out).toBe(lines.join('\n'));
+        expect(
+            listAudioTracks(parseMasterPlaylist(out)).map((t) => t.name)
+        ).toEqual(['English', 'Francais', 'Deutsch']);
+    });
+
+    it('states CHANNELS only where the group already does', () => {
+        const bare = MASTER.replaceAll(/,CHANNELS="\d"/g, '');
+        const out = addAudioTrackLines(
+            bare,
+            { language: 'deu', name: 'Deutsch' },
+            renditions
+        );
+        expect(out).not.toContain('CHANNELS');
+    });
+
+    it.each([
+        ['a track the video already has', { language: 'fr', name: 'Francais' }],
+        [
+            'a language that is not a code',
+            { language: 'German', name: 'Deutsch' },
+        ],
+        ['an empty name', { language: 'deu', name: ' ' }],
+    ])('refuses %s', (_, label) => {
+        expect(() => addAudioTrackLines(MASTER, label, renditions)).toThrow(
+            BadRequestException
+        );
+    });
+
+    it('refuses a group the video does not have', () => {
+        expect(() =>
+            addAudioTrackLines(MASTER, { language: 'deu', name: 'Deutsch' }, [
+                { groupId: 'nope', uri: 'x/playlist.m3u8', channels: 2 },
             ])
         ).toThrow(BadRequestException);
     });
