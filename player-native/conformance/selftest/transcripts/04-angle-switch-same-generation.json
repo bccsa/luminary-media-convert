@@ -1,0 +1,267 @@
+{
+ "scenario": "04-angle-switch-same-generation.json",
+ "ops": [
+  {
+   "op": "start",
+   "capabilities": {
+    "variantSwitching": false,
+    "pictureInPicture": false,
+    "renderText": false,
+    "live": false,
+    "chunkWarming": false,
+    "backgroundAudio": false,
+    "inlineVideo": false,
+    "muting": false,
+    "subtitleSelection": false,
+    "airPlay": false,
+    "maxPlayers": 1
+   }
+  },
+  {
+   "op": "call",
+   "method": "getInfo",
+   "args": {},
+   "result": {
+    "resolved": {
+     "protocolVersion": 1,
+     "platform": "android",
+     "capabilities": {
+      "variantSwitching": false,
+      "pictureInPicture": false,
+      "renderText": false,
+      "live": false,
+      "chunkWarming": false,
+      "backgroundAudio": false,
+      "inlineVideo": false,
+      "muting": false,
+      "subtitleSelection": false,
+      "airPlay": false,
+      "maxPlayers": 1
+     }
+    }
+   }
+  },
+  {
+   "op": "call",
+   "method": "reset",
+   "args": {},
+   "result": {
+    "resolved": {}
+   }
+  },
+  {
+   "op": "call",
+   "method": "create",
+   "args": {
+    "protocolVersion": 1,
+    "skipBackSeconds": 10,
+    "skipForwardSeconds": 10
+   },
+   "result": {
+    "resolved": {
+     "playerId": "player-1"
+    }
+   }
+  },
+  {
+   "op": "call",
+   "method": "load",
+   "args": {
+    "playerId": "player-1",
+    "loadId": "load1",
+    "generation": 1,
+    "masterUri": "luminary://asset/1/2.m3u8",
+    "assets": [
+     {
+      "uri": "luminary://asset/1/1.m3u8",
+      "contentType": "application/vnd.apple.mpegurl",
+      "text": "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4.0,\nhttps://cdn.example.com/s/a0/0.m4s\n#EXT-X-ENDLIST\n"
+     },
+     {
+      "uri": "luminary://asset/1/2.m3u8",
+      "contentType": "application/vnd.apple.mpegurl",
+      "text": "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=854x480\nluminary://asset/1/1.m3u8\n"
+     }
+    ],
+    "recovery": {
+     "escalationWindowMs": 10000,
+     "maxReloadAttempts": 3,
+     "reloadDelaysMs": [
+      2000,
+      4000,
+      8000
+     ]
+    }
+   },
+   "result": {
+    "resolved": {}
+   }
+  },
+  {
+   "op": "drainEvents",
+   "events": [
+    {
+     "name": "audiotracks-updated",
+     "payload": {
+      "tracks": [],
+      "activeId": null,
+      "playerId": "player-1",
+      "loadId": "load1"
+     }
+    }
+   ]
+  },
+  {
+   "op": "call",
+   "method": "load",
+   "args": {
+    "playerId": "player-1",
+    "loadId": "load2",
+    "generation": 1,
+    "masterUri": "luminary://asset/1/4.m3u8",
+    "assets": [
+     {
+      "uri": "luminary://asset/1/3.m3u8",
+      "contentType": "application/vnd.apple.mpegurl",
+      "text": "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4.0,\nhttps://cdn.example.com/s/a1/0.m4s\n#EXT-X-ENDLIST\n"
+     },
+     {
+      "uri": "luminary://asset/1/4.m3u8",
+      "contentType": "application/vnd.apple.mpegurl",
+      "text": "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=854x480\nluminary://asset/1/3.m3u8\n"
+     }
+    ],
+    "recovery": {
+     "escalationWindowMs": 10000,
+     "maxReloadAttempts": 3,
+     "reloadDelaysMs": [
+      2000,
+      4000,
+      8000
+     ]
+    }
+   },
+   "result": {
+    "resolved": {}
+   }
+  },
+  {
+   "op": "drainEvents",
+   "events": [
+    {
+     "name": "audiotracks-updated",
+     "payload": {
+      "tracks": [],
+      "activeId": null,
+      "playerId": "player-1",
+      "loadId": "load2"
+     }
+    }
+   ]
+  },
+  {
+   "op": "call",
+   "method": "load",
+   "args": {
+    "playerId": "player-1",
+    "loadId": "load3",
+    "generation": 1,
+    "masterUri": "luminary://asset/1/5.m3u8",
+    "assets": [
+     {
+      "uri": "luminary://asset/1/5.m3u8",
+      "contentType": "application/vnd.apple.mpegurl",
+      "text": "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=854x480\nluminary://asset/1/1.m3u8\n"
+     }
+    ],
+    "recovery": {
+     "escalationWindowMs": 10000,
+     "maxReloadAttempts": 3,
+     "reloadDelaysMs": [
+      2000,
+      4000,
+      8000
+     ]
+    }
+   },
+   "result": {
+    "resolved": {}
+   }
+  },
+  {
+   "op": "drainEvents",
+   "events": [
+    {
+     "name": "audiotracks-updated",
+     "payload": {
+      "tracks": [],
+      "activeId": null,
+      "playerId": "player-1",
+      "loadId": "load3"
+     }
+    }
+   ]
+  },
+  {
+   "op": "route",
+   "uri": "luminary://asset/1/1.m3u8",
+   "result": {
+    "served": {
+     "contentType": "application/vnd.apple.mpegurl",
+     "hex": "234558544d33550a234558542d582d5441524745544455524154494f4e3a340a23455854494e463a342e302c0a68747470733a2f2f63646e2e6578616d706c652e636f6d2f732f61302f302e6d34730a234558542d582d454e444c4953540a"
+    }
+   }
+  },
+  {
+   "op": "route",
+   "uri": "luminary://asset/1/2.m3u8",
+   "result": {
+    "served": {
+     "contentType": "application/vnd.apple.mpegurl",
+     "hex": "234558544d33550a234558542d582d53545245414d2d494e463a42414e4457494454483d313030303030302c5245534f4c5554494f4e3d383534783438300a6c756d696e6172793a2f2f61737365742f312f312e6d3375380a"
+    }
+   }
+  },
+  {
+   "op": "route",
+   "uri": "luminary://asset/1/3.m3u8",
+   "result": {
+    "served": {
+     "contentType": "application/vnd.apple.mpegurl",
+     "hex": "234558544d33550a234558542d582d5441524745544455524154494f4e3a340a23455854494e463a342e302c0a68747470733a2f2f63646e2e6578616d706c652e636f6d2f732f61312f302e6d34730a234558542d582d454e444c4953540a"
+    }
+   }
+  },
+  {
+   "op": "route",
+   "uri": "luminary://asset/1/5.m3u8",
+   "result": {
+    "served": {
+     "contentType": "application/vnd.apple.mpegurl",
+     "hex": "234558544d33550a234558542d582d53545245414d2d494e463a42414e4457494454483d313030303030302c5245534f4c5554494f4e3d383534783438300a6c756d696e6172793a2f2f61737365742f312f312e6d3375380a"
+    }
+   }
+  },
+  {
+   "op": "drainEngineCalls",
+   "calls": [
+    {
+     "method": "load",
+     "masterUri": "luminary://asset/1/2.m3u8"
+    },
+    {
+     "method": "load",
+     "masterUri": "luminary://asset/1/4.m3u8"
+    },
+    {
+     "method": "load",
+     "masterUri": "luminary://asset/1/5.m3u8"
+    }
+   ]
+  },
+  {
+   "op": "drainEvents",
+   "events": []
+  }
+ ]
+}

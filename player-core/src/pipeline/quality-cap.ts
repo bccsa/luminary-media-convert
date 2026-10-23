@@ -88,7 +88,7 @@ export function listQualities(masterText: string): Quality[] {
     const byId = new Map<string, Quality>();
 
     for (const variant of parsed.variants) {
-        const quality = toQuality(variant.height, variant.bandwidth);
+        const quality = toQuality(variant.height, variant.bandwidth, variant.width);
         const existing = byId.get(quality.id);
         if (!existing || existing.bandwidth < quality.bandwidth) {
             byId.set(quality.id, quality);
@@ -102,6 +102,7 @@ export function listQualities(masterText: string): Quality[] {
 export function toQuality(
     height: number | undefined,
     bandwidth: number,
+    width?: number,
 ): Quality {
     if (height === undefined) {
         return {
@@ -113,7 +114,7 @@ export function toQuality(
                     : 'Audio',
         };
     }
-    return { id: String(height), height, bandwidth, label: `${height}p` };
+    return { id: String(height), height, ...(width ? { width } : {}), bandwidth, label: `${height}p` };
 }
 
 /** Highest quality first; resolution-less variants last. */

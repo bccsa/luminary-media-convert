@@ -35,8 +35,10 @@ export function createInitialState(): PlayerState {
         chapterTracks: [],
         activeChapterTrackId: null,
         chapters: [],
+        sleepTimer: null,
 
         isAudioOnly: false,
+        live: false,
         thumbnailsReady: false,
         error: null,
     };

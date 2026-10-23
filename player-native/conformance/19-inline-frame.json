@@ -1,0 +1,118 @@
+{
+    "name": "setInlineFrame shows the video in a frame of the web view, and hides it without one",
+    "capabilities": {
+        "inlineVideo": true
+    },
+    "steps": [
+        {
+            "drive": {
+                "start": {}
+            }
+        },
+        {
+            "call": {
+                "method": "getInfo",
+                "result": {
+                    "protocolVersion": 1
+                }
+            }
+        },
+        {
+            "call": {
+                "method": "reset"
+            }
+        },
+        {
+            "call": {
+                "method": "create",
+                "args": {
+                    "protocolVersion": 1,
+                    "skipBackSeconds": 10,
+                    "skipForwardSeconds": 10
+                },
+                "result": {
+                    "playerId": "$player"
+                }
+            }
+        },
+        {
+            "call": {
+                "method": "setInlineFrame",
+                "args": {
+                    "playerId": "$player",
+                    "frame": {
+                        "x": 0,
+                        "y": 72,
+                        "width": 390,
+                        "height": 219
+                    }
+                }
+            },
+            "only": "native"
+        },
+        {
+            "expectEngine": [
+                {
+                    "method": "setInlineFrame",
+                    "x": 0,
+                    "y": 72,
+                    "width": 390,
+                    "height": 219
+                }
+            ],
+            "only": "native"
+        },
+        {
+            "call": {
+                "method": "setInlineFrame",
+                "args": {
+                    "playerId": "$player",
+                    "frame": {
+                        "x": 0,
+                        "y": 72,
+                        "width": 0,
+                        "height": 219
+                    }
+                },
+                "rejects": "invalid-argument"
+            },
+            "only": "native"
+        },
+        {
+            "call": {
+                "method": "setInlineFrame",
+                "args": {
+                    "playerId": "$player",
+                    "frame": {
+                        "x": 0,
+                        "y": 72,
+                        "width": 390
+                    }
+                },
+                "rejects": "invalid-argument"
+            },
+            "only": "native"
+        },
+        {
+            "call": {
+                "method": "setInlineFrame",
+                "args": {
+                    "playerId": "$player"
+                }
+            },
+            "only": "native"
+        },
+        {
+            "expectEngine": [
+                {
+                    "method": "setInlineFrame"
+                }
+            ],
+            "only": "native"
+        },
+        {
+            "expectNoEvents": true,
+            "only": "native"
+        }
+    ]
+}

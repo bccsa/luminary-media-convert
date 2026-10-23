@@ -1,0 +1,182 @@
+{
+    "name": "showAirPlayPicker reaches the engine, and a change in the devices around or in casting is reported once",
+    "capabilities": {
+        "airPlay": true
+    },
+    "steps": [
+        {
+            "drive": {
+                "start": {}
+            }
+        },
+        {
+            "call": {
+                "method": "getInfo",
+                "result": {
+                    "protocolVersion": 1
+                }
+            }
+        },
+        {
+            "call": {
+                "method": "reset"
+            }
+        },
+        {
+            "call": {
+                "method": "create",
+                "args": {
+                    "protocolVersion": 1,
+                    "skipBackSeconds": 10,
+                    "skipForwardSeconds": 10
+                },
+                "result": {
+                    "playerId": "$player"
+                }
+            }
+        },
+        {
+            "call": {
+                "method": "load",
+                "args": {
+                    "playerId": "$player",
+                    "loadId": "$load1",
+                    "generation": 1,
+                    "masterUri": "luminary://asset/1/2.m3u8",
+                    "assets": [
+                        {
+                            "uri": "luminary://asset/1/1.m3u8",
+                            "contentType": "application/vnd.apple.mpegurl",
+                            "text": "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4.0,\nhttps://cdn.example.com/s/v/0.m4s\n#EXT-X-ENDLIST\n"
+                        },
+                        {
+                            "uri": "luminary://asset/1/2.m3u8",
+                            "contentType": "application/vnd.apple.mpegurl",
+                            "text": "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=854x480\nluminary://asset/1/1.m3u8\n"
+                        }
+                    ],
+                    "recovery": {
+                        "escalationWindowMs": 10000,
+                        "maxReloadAttempts": 3,
+                        "reloadDelaysMs": [
+                            2000,
+                            4000,
+                            8000
+                        ]
+                    }
+                }
+            },
+            "only": "native"
+        },
+        {
+            "event": {
+                "name": "audiotracks-updated",
+                "payload": {
+                    "playerId": "$player",
+                    "loadId": "$load1",
+                    "tracks": [],
+                    "activeId": null
+                }
+            },
+            "only": "native"
+        },
+        {
+            "call": {
+                "method": "showAirPlayPicker",
+                "args": {
+                    "playerId": "$player"
+                }
+            },
+            "only": "native"
+        },
+        {
+            "expectEngine": [
+                {
+                    "method": "load"
+                },
+                {
+                    "method": "showAirPlayPicker"
+                }
+            ],
+            "only": "native"
+        },
+        {
+            "engine": {
+                "signal": "airplay",
+                "available": true,
+                "active": false
+            },
+            "only": "native"
+        },
+        {
+            "event": {
+                "name": "airplaychange",
+                "payload": {
+                    "playerId": "$player",
+                    "available": true,
+                    "active": false
+                }
+            },
+            "only": "native"
+        },
+        {
+            "engine": {
+                "signal": "airplay",
+                "available": true,
+                "active": false
+            },
+            "only": "native",
+            "note": "Only on a change."
+        },
+        {
+            "engine": {
+                "signal": "airplay",
+                "available": true,
+                "active": true
+            },
+            "only": "native"
+        },
+        {
+            "event": {
+                "name": "airplaychange",
+                "payload": {
+                    "playerId": "$player",
+                    "available": true,
+                    "active": true
+                }
+            },
+            "only": "native"
+        },
+        {
+            "engine": {
+                "signal": "airplay",
+                "available": false,
+                "active": false
+            },
+            "only": "native"
+        },
+        {
+            "event": {
+                "name": "airplaychange",
+                "payload": {
+                    "playerId": "$player",
+                    "available": false,
+                    "active": false
+                }
+            },
+            "only": "native"
+        },
+        {
+            "call": {
+                "method": "showAirPlayPicker",
+                "args": {},
+                "rejects": "invalid-argument"
+            },
+            "only": "native"
+        },
+        {
+            "expectNoEvents": true,
+            "only": "native"
+        }
+    ]
+}

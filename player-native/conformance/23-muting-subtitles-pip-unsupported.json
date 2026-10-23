@@ -1,0 +1,71 @@
+{
+    "name": "setMuted, setSubtitleTrack and startPictureInPicture are refused as unsupported while their capability is false",
+    "steps": [
+        {
+            "drive": {
+                "start": {}
+            }
+        },
+        {
+            "call": {
+                "method": "getInfo",
+                "result": {
+                    "protocolVersion": 1
+                }
+            }
+        },
+        {
+            "call": {
+                "method": "reset"
+            }
+        },
+        {
+            "call": {
+                "method": "create",
+                "args": {
+                    "protocolVersion": 1,
+                    "skipBackSeconds": 10,
+                    "skipForwardSeconds": 10
+                },
+                "result": {
+                    "playerId": "$player"
+                }
+            }
+        },
+        {
+            "call": {
+                "method": "setMuted",
+                "args": {
+                    "playerId": "$player",
+                    "muted": true
+                },
+                "rejects": "unsupported"
+            },
+            "only": "native"
+        },
+        {
+            "call": {
+                "method": "setSubtitleTrack",
+                "args": {
+                    "playerId": "$player"
+                },
+                "rejects": "unsupported"
+            },
+            "only": "native"
+        },
+        {
+            "call": {
+                "method": "startPictureInPicture",
+                "args": {
+                    "playerId": "$player"
+                },
+                "rejects": "unsupported"
+            },
+            "only": "native"
+        },
+        {
+            "expectEngine": [],
+            "only": "native"
+        }
+    ]
+}

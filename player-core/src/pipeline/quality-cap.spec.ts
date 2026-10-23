@@ -111,9 +111,9 @@ describe('applyQualityCap', () => {
 describe('listQualities', () => {
     it('reports contract-shaped ids, sorted best first', () => {
         expect(listQualities(SIMPLE_MASTER)).toEqual([
-            { id: '1080', height: 1080, bandwidth: 5_000_000, label: '1080p' },
-            { id: '720', height: 720, bandwidth: 2_500_000, label: '720p' },
-            { id: '480', height: 480, bandwidth: 1_000_000, label: '480p' },
+            { id: '1080', height: 1080, width: 1920, bandwidth: 5_000_000, label: '1080p' },
+            { id: '720', height: 720, width: 1280, bandwidth: 2_500_000, label: '720p' },
+            { id: '480', height: 480, width: 854, bandwidth: 1_000_000, label: '480p' },
         ]);
     });
 

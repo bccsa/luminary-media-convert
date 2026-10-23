@@ -1,0 +1,93 @@
+{
+    "name": "enterFullscreen carries the texts the controls say, and none leaves native's own",
+    "steps": [
+        {
+            "drive": {
+                "start": {}
+            }
+        },
+        {
+            "call": {
+                "method": "getInfo",
+                "result": {
+                    "protocolVersion": 1
+                }
+            }
+        },
+        {
+            "call": {
+                "method": "reset"
+            }
+        },
+        {
+            "call": {
+                "method": "create",
+                "args": {
+                    "protocolVersion": 1,
+                    "skipBackSeconds": 10,
+                    "skipForwardSeconds": 10
+                },
+                "result": {
+                    "playerId": "$player"
+                }
+            }
+        },
+        {
+            "call": {
+                "method": "enterFullscreen",
+                "args": {
+                    "playerId": "$player",
+                    "texts": {
+                        "exitFullscreen": "Quitter le plein \u00e9cran",
+                        "skipBack": "Reculer de {seconds} secondes"
+                    }
+                }
+            },
+            "only": "native"
+        },
+        {
+            "call": {
+                "method": "enterFullscreen",
+                "args": {
+                    "playerId": "$player"
+                }
+            },
+            "only": "native"
+        },
+        {
+            "expectEngine": [
+                {
+                    "method": "enterFullscreen",
+                    "texts": {
+                        "exitFullscreen": "Quitter le plein \u00e9cran",
+                        "skipBack": "Reculer de {seconds} secondes"
+                    }
+                },
+                {
+                    "method": "enterFullscreen",
+                    "texts": {
+                        "$absent": true
+                    }
+                }
+            ],
+            "only": "native"
+        },
+        {
+            "call": {
+                "method": "enterFullscreen",
+                "args": {
+                    "playerId": "$player",
+                    "texts": {
+                        "exitFullscreen": 3
+                    }
+                },
+                "rejects": "invalid-argument"
+            },
+            "only": "native"
+        },
+        {
+            "expectNoEvents": true,
+            "only": "native"
+        }
+    ]
+}

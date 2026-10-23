@@ -1,0 +1,273 @@
+{
+    "name": "invalid arguments are refused, and the checks run in one order: capability, arguments, player, generation",
+    "steps": [
+        {"drive": {"start": {}}},
+        {"call": {"method": "getInfo", "result": {"protocolVersion": 1}}},
+        {"call": {"method": "reset"}},
+        {
+            "call": {
+                "method": "create",
+                "args": {"protocolVersion": 1, "skipBackSeconds": 10, "skipForwardSeconds": 10},
+                "result": {"playerId": "$player"}
+            }
+        },
+        {
+            "call": {
+                "method": "load",
+                "args": {
+                    "playerId": "$player",
+                    "loadId": "$load1",
+                    "generation": 2,
+                    "masterUri": "luminary://asset/2/2.m3u8",
+                    "assets": [
+                        {
+                            "uri": "luminary://asset/2/1.m3u8",
+                            "contentType": "application/vnd.apple.mpegurl",
+                            "text": "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4.0,\nhttps://cdn.example.com/s/v/0.m4s\n#EXT-X-ENDLIST\n"
+                        },
+                        {
+                            "uri": "luminary://asset/2/2.m3u8",
+                            "contentType": "application/vnd.apple.mpegurl",
+                            "text": "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=854x480\nluminary://asset/2/1.m3u8\n"
+                        }
+                    ],
+                    "recovery": {
+                        "escalationWindowMs": 10000,
+                        "maxReloadAttempts": 3,
+                        "reloadDelaysMs": [2000, 4000, 8000]
+                    }
+                }
+            },
+            "only": "native"
+        },
+        {
+            "event": {
+                "name": "audiotracks-updated",
+                "payload": {"playerId": "$player", "loadId": "$load1", "tracks": [], "activeId": null}
+            },
+            "only": "native"
+        },
+        {
+            "call": {
+                "method": "create",
+                "args": {"skipBackSeconds": 10, "skipForwardSeconds": 10},
+                "rejects": "invalid-argument"
+            },
+            "only": "native",
+            "note": "protocolVersion is required."
+        },
+        {
+            "call": {
+                "method": "seek",
+                "args": {"playerId": "$player", "position": "12"},
+                "rejects": "invalid-argument"
+            },
+            "only": "native",
+            "note": "A number, not a string."
+        },
+        {
+            "call": {"method": "seek", "args": {"playerId": "$player", "position": -1}, "rejects": "invalid-argument"},
+            "only": "native"
+        },
+        {
+            "call": {
+                "method": "seek",
+                "args": {"playerId": "$player", "position": 1, "exact": "yes"},
+                "rejects": "invalid-argument"
+            },
+            "only": "native"
+        },
+        {
+            "call": {"method": "setRate", "args": {"playerId": "$player", "rate": 0}, "rejects": "invalid-argument"},
+            "only": "native"
+        },
+        {
+            "call": {
+                "method": "load",
+                "args": {
+                    "playerId": "$player",
+                    "loadId": "$bad1",
+                    "generation": 3,
+                    "masterUri": "luminary://asset/3/2.m3u8",
+                    "assets": [
+                        {
+                            "uri": "luminary://asset/1/1.m3u8",
+                            "contentType": "application/vnd.apple.mpegurl",
+                            "text": "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4.0,\nhttps://cdn.example.com/s/v/0.m4s\n#EXT-X-ENDLIST\n"
+                        },
+                        {
+                            "uri": "luminary://asset/1/2.m3u8",
+                            "contentType": "application/vnd.apple.mpegurl",
+                            "text": "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=854x480\nluminary://asset/1/1.m3u8\n"
+                        }
+                    ],
+                    "recovery": {
+                        "escalationWindowMs": 10000,
+                        "maxReloadAttempts": 3,
+                        "reloadDelaysMs": [2000, 4000, 8000]
+                    },
+                    "keyHex": "0011"
+                },
+                "rejects": "invalid-argument"
+            },
+            "only": "native",
+            "note": "keyHex is 32 hex characters."
+        },
+        {
+            "call": {
+                "method": "load",
+                "args": {
+                    "playerId": "$player",
+                    "loadId": "$bad2",
+                    "generation": 3,
+                    "masterUri": "luminary://asset/3/2.m3u8",
+                    "assets": [
+                        {
+                            "uri": "luminary://asset/1/1.m3u8",
+                            "contentType": "application/vnd.apple.mpegurl",
+                            "text": "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4.0,\nhttps://cdn.example.com/s/v/0.m4s\n#EXT-X-ENDLIST\n"
+                        },
+                        {
+                            "uri": "luminary://asset/1/2.m3u8",
+                            "contentType": "application/vnd.apple.mpegurl",
+                            "text": "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=854x480\nluminary://asset/1/1.m3u8\n"
+                        }
+                    ],
+                    "recovery": {
+                        "escalationWindowMs": 10000,
+                        "maxReloadAttempts": 3,
+                        "reloadDelaysMs": [2000, 4000, 8000]
+                    }
+                },
+                "rejects": "invalid-argument"
+            },
+            "only": "native",
+            "note": "Generation 3 with assets addressed to generation 1."
+        },
+        {
+            "call": {
+                "method": "load",
+                "args": {
+                    "playerId": "$player",
+                    "loadId": "$bad3",
+                    "generation": 2.5,
+                    "masterUri": "luminary://asset/3/2.m3u8",
+                    "assets": [
+                        {
+                            "uri": "luminary://asset/1/1.m3u8",
+                            "contentType": "application/vnd.apple.mpegurl",
+                            "text": "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4.0,\nhttps://cdn.example.com/s/v/0.m4s\n#EXT-X-ENDLIST\n"
+                        },
+                        {
+                            "uri": "luminary://asset/1/2.m3u8",
+                            "contentType": "application/vnd.apple.mpegurl",
+                            "text": "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=854x480\nluminary://asset/1/1.m3u8\n"
+                        }
+                    ],
+                    "recovery": {
+                        "escalationWindowMs": 10000,
+                        "maxReloadAttempts": 3,
+                        "reloadDelaysMs": [2000, 4000, 8000]
+                    }
+                },
+                "rejects": "invalid-argument"
+            },
+            "only": "native"
+        },
+        {
+            "call": {
+                "method": "putAssets",
+                "args": {
+                    "playerId": "$player",
+                    "generation": 2,
+                    "assets": [{"uri": "luminary://asset/2/9.vtt", "contentType": "text/vtt"}]
+                },
+                "rejects": "invalid-argument"
+            },
+            "only": "native",
+            "note": "An asset without its text."
+        },
+        {
+            "call": {"method": "play", "args": {"playerId": "nobody"}, "rejects": "unknown-player"},
+            "only": "native"
+        },
+        {
+            "call": {"method": "setVariant", "args": {"playerId": "nobody"}, "rejects": "unsupported"},
+            "only": "native",
+            "note": "Capability first: the arguments of an unsupported call do not matter."
+        },
+        {
+            "call": {"method": "seek", "args": {"playerId": "nobody", "position": -1}, "rejects": "invalid-argument"},
+            "only": "native",
+            "note": "Arguments before the player."
+        },
+        {
+            "call": {
+                "method": "load",
+                "args": {
+                    "playerId": "nobody",
+                    "loadId": "$bad4",
+                    "generation": 1,
+                    "masterUri": "luminary://asset/1/2.m3u8",
+                    "assets": [
+                        {
+                            "uri": "luminary://asset/1/1.m3u8",
+                            "contentType": "application/vnd.apple.mpegurl",
+                            "text": "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4.0,\nhttps://cdn.example.com/s/v/0.m4s\n#EXT-X-ENDLIST\n"
+                        },
+                        {
+                            "uri": "luminary://asset/1/2.m3u8",
+                            "contentType": "application/vnd.apple.mpegurl",
+                            "text": "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=854x480\nluminary://asset/1/1.m3u8\n"
+                        }
+                    ],
+                    "recovery": {
+                        "escalationWindowMs": 10000,
+                        "maxReloadAttempts": 3,
+                        "reloadDelaysMs": [2000, 4000, 8000]
+                    }
+                },
+                "rejects": "unknown-player"
+            },
+            "only": "native",
+            "note": "The player before the generation."
+        },
+        {
+            "call": {
+                "method": "load",
+                "args": {
+                    "playerId": "$player",
+                    "loadId": "$bad5",
+                    "generation": 1,
+                    "masterUri": "luminary://asset/1/2.m3u8",
+                    "assets": [
+                        {
+                            "uri": "luminary://asset/1/1.m3u8",
+                            "contentType": "application/vnd.apple.mpegurl",
+                            "text": "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4.0,\nhttps://cdn.example.com/s/v/0.m4s\n#EXT-X-ENDLIST\n"
+                        },
+                        {
+                            "uri": "luminary://asset/1/2.m3u8",
+                            "contentType": "application/vnd.apple.mpegurl",
+                            "text": "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=854x480\nluminary://asset/1/1.m3u8\n"
+                        }
+                    ],
+                    "recovery": {
+                        "escalationWindowMs": 10000,
+                        "maxReloadAttempts": 3,
+                        "reloadDelaysMs": [2000, 4000, 8000]
+                    }
+                },
+                "rejects": "stale-generation"
+            },
+            "only": "native"
+        },
+        {
+            "route": {"uri": "luminary://asset/2/1.m3u8", "expect": {"contentType": "application/vnd.apple.mpegurl"}},
+            "note": "Nothing refused reached the store."
+        },
+        {"route": {"uri": "luminary://asset/1/1.m3u8", "expect": {"error": "not-found"}}},
+        {"expectNoEvents": true},
+        {"expectEngine": [{"method": "load", "masterUri": "luminary://asset/2/2.m3u8"}]}
+    ]
+}

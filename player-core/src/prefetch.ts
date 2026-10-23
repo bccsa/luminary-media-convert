@@ -19,7 +19,7 @@
  * buffer front is platform work — a JS interval is throttled or suspended once
  * the app is backgrounded, precisely when a native player keeps playing — so it
  * belongs to the adapter, specified by `PlayerAdapter.warmChunks` and
- * implemented for the web in `player-web-legacy/src/adapter/chunkWarming.ts`.
+ * implemented for the web in `player-web/src/adapter/chunkWarming.ts`.
  * `docs/chunk-warming.md` is the porting guide.
  */
 

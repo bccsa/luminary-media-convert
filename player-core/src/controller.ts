@@ -14,6 +14,7 @@ import type { SubtleLike } from './pipeline/decrypt.js';
 import { isMissing, toPlayerError } from './pipeline/fetch.js';
 import {
     DEFAULT_ANGLE_ID,
+    dedupeByName,
     loadMaster,
     mungeSource,
     type MasterInfo,
@@ -23,6 +24,8 @@ import {
 } from './pipeline/pipeline.js';
 import { sortQualities, toQuality } from './pipeline/quality-cap.js';
 import { Poller } from './poller.js';
+import { readSubtitleCues } from './pipeline/subtitle-cues.js';
+import type { LyricCue } from './lyrics.js';
 import {
     DEFAULT_LEAD_SECONDS,
     DEFAULT_WARM_BYTES,
@@ -34,8 +37,11 @@ import {
     type ThumbnailSpriteCue,
 } from '@luminary-media-converter/hls-core';
 import { StateStore, createInitialState } from './store.js';
+import { SleepTimer } from './sleepTimer.js';
+import { chapterIndexAt } from './chapters.js';
 import {
     AUDIO_ONLY_ANGLE_ID,
+    DATA_SAVER_START_BPS,
     type AdapterErrorPayload,
     type AdapterTextTrack,
     type Angle,
@@ -50,6 +56,7 @@ import {
     type Quality,
     type RecoveryPolicy,
     resolveRecoveryPolicy,
+    type SleepTimerOption,
     type ServeStrategy,
     type Unsubscribe,
 } from './types.js';
@@ -111,10 +118,18 @@ export class PlayerController implements PlayerControllerApi {
     /** Parsed scrub-preview cues for the current source; empty when there are none. */
     private thumbnailCues: ThumbnailSpriteCue[] = [];
 
+    /** The sleep timer; a minutes timer outlives a source, so it is not torn down with one. */
+    private readonly sleep = new SleepTimer(
+        () => this.adapter.pause(),
+        (sleepTimer) => this.store.setState({ sleepTimer })
+    );
+
     /** Bumped by every load(); stale async work checks it and bails. */
     private generation = 0;
     private source: PlayerSource | null = null;
     private master: MasterInfo | null = null;
+    /** Each subtitle track's lines, read once per master. */
+    private subtitleCues = new Map<string, Promise<LyricCue[]>>();
     private cache = new Map<string, string>();
     /** What this source has served; see {@link ServeMemo}. */
     private served: ServeMemo = { playlists: new Map() };
@@ -144,6 +159,13 @@ export class PlayerController implements PlayerControllerApi {
      */
     private audioChoicePending = false;
     private qualityToVariant = new Map<string, string>();
+    /**
+     * A quality chosen through {@link setQuality} on an engine that cannot pin
+     * a rendition, which the munge applies as a height cap on every attach —
+     * an angle switch and a recovery re-munge keep it. Null for `'auto'`, and
+     * cleared by `load()`, since a new source is a new decision.
+     */
+    private qualityChoice: { id: string; height: number } | null = null;
     private startPosition = 0;
     private resumePlaying = false;
     private chapterTrackPinned = false;
@@ -176,6 +198,7 @@ export class PlayerController implements PlayerControllerApi {
         const resume = source.preservePosition ? this.state.playing : false;
 
         this.teardownSource();
+        this.sleep.onNewSource();
         this.source = source;
         this.policy = resolveRecoveryPolicy(source.recovery);
         this.startPosition = preserved;
@@ -183,6 +206,7 @@ export class PlayerController implements PlayerControllerApi {
         this.chapterTrackPinned = false;
         this.chosenAudioTrackId = null;
         this.audioChoicePending = false;
+        this.qualityChoice = null;
         this.cache = new Map();
         // `teardownSource` above released every URL the last source was
         // served at, so nothing it memoized can be handed out again.
@@ -197,6 +221,7 @@ export class PlayerController implements PlayerControllerApi {
         this.store.reset({
             ...createInitialState(),
             lifecycle: 'loading',
+            sleepTimer: this.sleep.state,
             playbackRate: this.state.playbackRate,
             maxHeight: source.maxHeight,
         });
@@ -280,7 +305,12 @@ export class PlayerController implements PlayerControllerApi {
         info: MasterInfo,
     ): Promise<void> {
         this.master = info;
-        const angleId = defaultAngleId(info.angles);
+        this.subtitleCues.clear();
+        const requested = this.source?.startAngleId;
+        const angleId =
+            requested && info.angles.some((angle) => angle.id === requested)
+                ? requested
+                : defaultAngleId(info.angles);
 
         this.store.setState({
             lifecycle: 'loading',
@@ -326,7 +356,11 @@ export class PlayerController implements PlayerControllerApi {
             ? null
             : await mungeSource(
                   info,
-                  { angleId, maxHeight: this.source?.maxHeight },
+                  {
+                      angleId,
+                      maxHeight: this.source?.maxHeight,
+                      selectHeight: this.qualityChoice?.height,
+                  },
                   this.context(),
               );
         if (generation !== this.generation) return;
@@ -334,8 +368,16 @@ export class PlayerController implements PlayerControllerApi {
         // The policy is completed here rather than in the pipeline: it is the
         // controller that resolves a source's overrides, and the adapter that
         // runs the ladder on the result.
+        const dataSaver = this.source?.dataSaver === true;
+        const measured = this.source?.bandwidthEstimate;
+        const usable = measured && measured > 0 && Number.isFinite(measured) ? measured : undefined;
+        // A data saver starts low whatever the host measured: the estimate is the one input both
+        // engines already start from, so clamping it here needs no engine to know about data savers.
+        const bandwidth = dataSaver ? Math.min(usable ?? Infinity, DATA_SAVER_START_BPS) : usable;
         await this.adapter.loadSource({
             ...(source ?? munged!.source),
+            ...(bandwidth !== undefined ? { bandwidthEstimate: bandwidth } : {}),
+            ...(dataSaver ? { dataSaver } : {}),
             recovery: this.policy,
         });
         if (generation !== this.generation) return;
@@ -355,11 +397,12 @@ export class PlayerController implements PlayerControllerApi {
         this.store.setState({
             lifecycle: 'ready',
             activeAngleId: angleId,
-            activeQualityId: 'auto',
+            activeQualityId: this.qualityChoice?.id ?? 'auto',
             qualities: munged?.qualities ?? [],
             isAudioOnly:
                 munged?.isAudioOnly ??
                 (info.nativelyAudioOnly || angleId === AUDIO_ONLY_ANGLE_ID),
+            live: munged?.isLive ?? false,
             error: null,
         });
         this.refreshQualities();
@@ -378,22 +421,28 @@ export class PlayerController implements PlayerControllerApi {
         const loader = this.sidecarLoader;
         if (!loader) return;
 
-        try {
-            const { tracks, adapterTracks } = await loader.loadSubtitleTracks(
-                this.source?.sidecars?.subtitles,
-            );
-            if (generation !== this.generation) return;
-            if (adapterTracks.length > 0) {
-                this.sidecarTextTracks = adapterTracks;
-                this.adapter.setTextTracks(adapterTracks);
-                this.store.setState({
-                    subtitleTracks: [...info.subtitleTracks, ...tracks],
-                });
+        // An engine that cannot render side-loaded text gets none: the files
+        // are not fetched, and the tracks are not offered. Subtitles the master
+        // carries are the engine's own, and stay.
+        if (this.adapter.capabilities.renderText) {
+            try {
+                const { tracks, adapterTracks } =
+                    await loader.loadSubtitleTracks(
+                        this.source?.sidecars?.subtitles,
+                    );
+                if (generation !== this.generation) return;
+                if (adapterTracks.length > 0) {
+                    this.sidecarTextTracks = adapterTracks;
+                    this.adapter.setTextTracks(adapterTracks);
+                    this.store.setState({
+                        subtitleTracks: [...info.subtitleTracks, ...tracks],
+                    });
+                }
+            } catch (error) {
+                if (generation !== this.generation) return;
+                // Subtitles are an enhancement — report, but keep playing.
+                this.emitNonFatal(toPlayerError(error));
             }
-        } catch (error) {
-            if (generation !== this.generation) return;
-            // Subtitles are an enhancement — report, but keep playing.
-            this.emitNonFatal(toPlayerError(error));
         }
 
         if (generation !== this.generation) return;
@@ -431,7 +480,12 @@ export class PlayerController implements PlayerControllerApi {
      */
     thumbnailAt(timeSec: number): ThumbnailSpriteCue | null {
         if (this.thumbnailCues.length === 0) return null;
-        return findThumbnailCue(this.thumbnailCues, timeSec) ?? null;
+        const cue = findThumbnailCue(this.thumbnailCues, timeSec);
+        if (!cue) return null;
+        // A frame is sampled at its cue's start, so the second half of a cue is nearer the next frame than its own.
+        const span = cue.endTime - cue.startTime;
+        const next = span > 0 ? findThumbnailCue(this.thumbnailCues, cue.endTime) : undefined;
+        return next && timeSec - cue.startTime > span / 2 ? next : cue;
     }
 
     // -----------------------------------------------------------------------
@@ -454,6 +508,20 @@ export class PlayerController implements PlayerControllerApi {
     seek(seconds: number): void {
         this.adapter.seek(seconds);
         this.store.setState({ currentTime: seconds });
+    }
+
+    setSleepTimer(option: SleepTimerOption | null): void {
+        if (this.state.lifecycle === 'destroyed') return;
+        let chapterEnd: number | undefined;
+        if (option?.kind === 'chapter') {
+            const { chapters, currentTime, duration } = this.state;
+            const index = chapterIndexAt(chapters, currentTime);
+            if (index < 0) return;
+            chapterEnd = chapters[index + 1]?.startTime ?? (Number.isFinite(duration) && duration > 0 ? duration : undefined);
+        }
+        this.sleep.set(option, chapterEnd);
+        // A shell may keep the minutes timer beside the engine, where a suspended web view cannot stop it.
+        this.adapter.setSleepTimer?.(this.sleep.state?.kind === 'minutes' ? this.sleep.state.endsAt : null);
     }
 
     setPlaybackRate(rate: number): void {
@@ -482,10 +550,50 @@ export class PlayerController implements PlayerControllerApi {
     }
 
     setQuality(id: string | 'auto'): void {
+        if (!this.adapter.capabilities.variantSwitching) {
+            void this.capQuality(id);
+            return;
+        }
         const variantId =
             id === 'auto' ? 'auto' : (this.qualityToVariant.get(id) ?? id);
         this.adapter.setVariant(variantId);
         this.store.setState({ activeQualityId: id });
+    }
+
+    /**
+     * A quality choice for an engine that cannot pin a rendition (AVPlayer):
+     * re-munge the current angle with the chosen height as a cap, keeping
+     * position and play state, so the engine's own ABR stays at or below it.
+     * `'auto'` lifts the cap back to the source's own `maxHeight`.
+     *
+     * A resolution-less quality has no height to cap at, so choosing one does
+     * nothing.
+     */
+    private async capQuality(id: string | 'auto'): Promise<void> {
+        if (!this.master || this.state.lifecycle === 'destroyed') return;
+        let choice: { id: string; height: number } | null = null;
+        if (id !== 'auto') {
+            const height = this.state.qualities.find((q) => q.id === id)?.height;
+            if (height === undefined) return;
+            choice = { id, height };
+        }
+        if (choice?.height === this.qualityChoice?.height) return;
+
+        this.qualityChoice = choice;
+        this.store.setState({ activeQualityId: id });
+
+        const generation = this.generation;
+        const seekTo = this.adapter.getCurrentTime();
+        const resume = this.state.playing;
+        try {
+            await this.attachAngle(generation, this.state.activeAngleId, {
+                seekTo,
+                resume,
+            });
+        } catch (error) {
+            if (generation !== this.generation) return;
+            this.fail(toPlayerError(error));
+        }
     }
 
     setAudioTrack(id: string): void {
@@ -503,8 +611,27 @@ export class PlayerController implements PlayerControllerApi {
     }
 
     setSubtitleTrack(id: string | null): void {
-        this.adapter.setActiveTextTrack(id);
+        const track = id === null ? undefined : this.state.subtitleTracks.find((t) => t.id === id);
+        this.adapter.setActiveTextTrack(id, track ? { label: track.label, ...(track.lang ? { lang: track.lang } : {}) } : undefined);
         this.store.setState({ activeSubtitleTrackId: id });
+    }
+
+    readSubtitleCues(id: string): Promise<LyricCue[]> {
+        const master = this.master;
+        if (!master) return Promise.resolve([]);
+        const cached = this.subtitleCues.get(id);
+        if (cached) return cached;
+        const read = readSubtitleCues(master, id, {
+            fetchImpl: this.fetchImpl,
+            keyHex: this.source?.keyHex,
+            subtle: this.subtle,
+        }).catch(() => {
+            // A failed read is tried again the next time it is asked for.
+            if (this.subtitleCues.get(id) === read) this.subtitleCues.delete(id);
+            return [];
+        });
+        this.subtitleCues.set(id, read);
+        return read;
     }
 
     setChapterTrack(id: string | null): void {
@@ -535,6 +662,7 @@ export class PlayerController implements PlayerControllerApi {
         if (this.state.lifecycle === 'destroyed') return;
         this.generation += 1;
         this.teardownSource();
+        this.sleep.clear();
         for (const unsubscribe of this.adapterSubscriptions) unsubscribe();
         this.adapterSubscriptions.length = 0;
         this.adapter.destroy();
@@ -604,6 +732,7 @@ export class PlayerController implements PlayerControllerApi {
         this.updateChunkWarming(null);
         this.serveStrategy.release();
         this.master = null;
+        this.subtitleCues.clear();
     }
 
     private prepareChapterTracks() {
@@ -666,7 +795,9 @@ export class PlayerController implements PlayerControllerApi {
         const map = new Map<string, string>();
         const qualities: Quality[] = [];
         for (const variant of variants) {
-            const quality = toQuality(variant.height, variant.bandwidth);
+            // The engine reports no width, so the playlist's own is kept.
+            const known = this.state.qualities.find((q) => q.height === variant.height);
+            const quality = toQuality(variant.height, variant.bandwidth, known?.width);
             if (!map.has(quality.id)) qualities.push(quality);
             map.set(quality.id, variant.id);
         }
@@ -686,11 +817,13 @@ export class PlayerController implements PlayerControllerApi {
             return;
         }
 
-        const mapped = tracks.map((track) => ({
-            id: track.id,
-            lang: track.lang,
-            label: track.label,
-        }));
+        const mapped = dedupeByName(
+            tracks.map((track) => ({
+                id: track.id,
+                lang: track.lang,
+                label: track.label,
+            })),
+        );
         const chosen = this.chosenAudioTrackId;
         const chosenListed =
             chosen !== null && mapped.some((track) => track.id === chosen);
@@ -739,6 +872,7 @@ export class PlayerController implements PlayerControllerApi {
         this.adapterSubscriptions.push(
             this.adapter.on('timeupdate', ({ currentTime }) => {
                 this.store.setState({ currentTime });
+                this.sleep.onTime(currentTime);
             }),
             this.adapter.on('durationchange', ({ duration }) => {
                 this.store.setState({ duration });
@@ -747,10 +881,14 @@ export class PlayerController implements PlayerControllerApi {
                 this.store.setState({ bufferedEnd });
             }),
             this.adapter.on('playing', () => {
+                // Playing is proof the engine is working: after an error, it got there by itself (its
+                // own recovery, a retry), and an error panel left over it would misstate that.
+                const recovered = this.state.lifecycle === 'error';
                 this.store.setState({
                     playing: true,
                     ended: false,
                     stalled: false,
+                    ...(recovered ? { lifecycle: 'ready' as const, error: null } : {}),
                 });
             }),
             this.adapter.on('pause', () => {
