@@ -5,6 +5,7 @@ import {
     aspectWidthForHeight,
     fpsAdjustedBitrateKbps,
     ladderFor,
+    nextRenditionRung,
     sourceCapKbps,
     suggestLadder,
 } from './ladder';
@@ -771,5 +772,53 @@ describe('CONTENT_PRESETS', () => {
             { id: 'standard', label: 'Standard', factor: 1 },
             { id: 'high', label: 'High motion', factor: 1.3 },
         ]);
+    });
+});
+
+/**
+ * The default a hand-added rendition opens on. It used to be a fixed 854x480,
+ * which is the suggested ladder's own 480p rung on any 16:9 source — so the
+ * button's commonest use added a duplicate of a rung already there.
+ */
+describe('nextRenditionRung', () => {
+    const heightsOf = (t: VideoTrackInfo) => ladderFor(t).map((r) => r.height);
+
+    it('fills the tallest gap when the ladder is missing a rung', () => {
+        const t = track();
+        const used = heightsOf(t).filter((h) => h !== 720);
+        expect(nextRenditionRung(t, used).height).toBe(720);
+    });
+
+    it('never repeats a height already in the ladder', () => {
+        const t = track();
+        const used = heightsOf(t);
+        expect(used).not.toContain(nextRenditionRung(t, used).height);
+    });
+
+    it('steps below the lowest rung once every standard one is taken', () => {
+        // The usual case: the suggested ladder already holds every rung.
+        const t = track();
+        const used = heightsOf(t);
+        const next = nextRenditionRung(t, used);
+        expect(next.height).toBe(72);
+        expect(next.height % 2).toBe(0);
+        // Priced by pixel count against the 144p rung above it.
+        expect(next.bitrateKbps).toBe(50);
+    });
+
+    it('keeps halving until it finds a free height', () => {
+        const t = track();
+        const next = nextRenditionRung(t, [...heightsOf(t), 72, 36]);
+        expect(next.height).toBe(18);
+    });
+
+    it('stays inside the source when the source is short', () => {
+        const t = track({ width: 640, height: 360 });
+        expect(nextRenditionRung(t, []).height).toBe(360);
+        expect(nextRenditionRung(t, [360]).height).toBe(240);
+    });
+
+    it('falls back to the standard table with no track to size against', () => {
+        expect(nextRenditionRung(undefined, []).height).toBe(2160);
     });
 });

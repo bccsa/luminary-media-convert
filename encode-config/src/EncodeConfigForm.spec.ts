@@ -1534,38 +1534,45 @@ describe('EncodeConfigForm bitrate ladder', () => {
     });
 
     describe('adding and removing rungs', () => {
-        it('prices an added rung from the source 480p rung and names it for its size', async () => {
+        const ADDED_KBPS = 42;
+        const ADDED_AT_3000_KBPS = 70;
+
+        it('adds a rung the ladder does not already have, not a copy of its 480p', async () => {
+            // The button used to open on the 480p rung — to the byte the
+            // ladder's own — and two renditions of one size share a stream
+            // directory, so the later overwrote the earlier in the output.
             const wrapper = mountForm(acceptanceProbe());
+            const before = renditionsOf(wrapper).map((r) => r.height);
 
             await clickButton(wrapper, '+ Add rendition');
 
             const added = renditionsOf(wrapper)[6];
+            expect(before).not.toContain(added.height);
             expect(added).toEqual({
-                width: 854,
-                height: 480,
-                videoBitrateKbps: 535,
+                width: 128,
+                height: 72,
+                videoBitrateKbps: ADDED_KBPS,
                 copyStream: false,
                 audioGroupId: submitted(wrapper).audioGroups![0].id,
-                label: '480p',
                 vbr: true,
             });
-            // Its own suggestion joins the baseline, so the dial prices it
-            // exactly like the ladder's own 480p rung.
-            await maxField(wrapper).setValue('3000');
-            expect(kbpsOf(wrapper)).toEqual([...AT_3000, 889]);
+            // No label, like every suggested rung: the stream name falls back
+            // to the height, which is what keeps the directories apart.
+            expect(added.label).toBeUndefined();
         });
 
-        it('prices an added rung under the content preset in force', async () => {
+        it('never adds a second rung at a height already taken, however often it is clicked', async () => {
             const wrapper = mountForm(acceptanceProbe());
-            await pickContent(wrapper, 'Low motion');
-            expect(kbpsOf(wrapper)).toEqual([1083, 590, 321, 208, 113, 53]);
 
-            await clickButton(wrapper, '+ Add rendition');
+            for (let i = 0; i < 4; i++) {
+                await clickButton(wrapper, '+ Add rendition');
+            }
 
-            expect(kbpsOf(wrapper)[6]).toBe(321);
+            const heights = renditionsOf(wrapper).map((r) => r.height);
+            expect(new Set(heights).size).toBe(heights.length);
         });
 
-        it('offers the smallest rung when the source has no 480p to offer', async () => {
+        it('keeps the added rung out of the ladder it sits below when the source has no 480p', async () => {
             const wrapper = mountForm(
                 probeOf({ width: 640, height: 360, bitrateKbps: 800 })
             );
@@ -1574,10 +1581,8 @@ describe('EncodeConfigForm bitrate ladder', () => {
             await clickButton(wrapper, '+ Add rendition');
 
             expect(renditionsOf(wrapper)[3]).toMatchObject({
-                width: 256,
-                height: 144,
-                videoBitrateKbps: 174,
-                label: '144p',
+                width: 128,
+                height: 72,
             });
         });
 
@@ -1645,11 +1650,11 @@ describe('EncodeConfigForm bitrate ladder', () => {
 
             await clickButton(wrapper, '+ Add rendition');
 
-            expect(kbpsOf(wrapper)).toEqual([...AT_3000, 889]);
+            expect(kbpsOf(wrapper)).toEqual([...AT_3000, ADDED_AT_3000_KBPS]);
             expect(maxField(wrapper).element.value).toBe('3000');
         });
 
-        it('adds a rung to a pinned ladder where its twin already sits', async () => {
+        it('adds a rung to a pinned ladder at the pinned floor', async () => {
             const wrapper = mountForm(acceptanceProbe());
             await minField(wrapper).setValue('200');
             expect(kbpsOf(wrapper)).toEqual([1805, 1037, 618, 442, 294, 200]);
@@ -1657,7 +1662,7 @@ describe('EncodeConfigForm bitrate ladder', () => {
             await clickButton(wrapper, '+ Add rendition');
 
             expect(kbpsOf(wrapper)).toEqual([
-                1805, 1037, 618, 442, 294, 200, 618,
+                1805, 1037, 618, 442, 294, 200, 200,
             ]);
             expect(minField(wrapper).element.value).toBe('200');
         });
@@ -1811,17 +1816,15 @@ describe('EncodeConfigForm bitrate ladder', () => {
             expect(groups(angles(true))).toEqual(groups(angles(false)));
         });
 
-        it('adds its 480p rung, not its smallest', async () => {
-            // Looked up by height, a portrait ladder has no 480 — its 480p rung
-            // is 854 tall — so Add fell through to the 144x256 rung.
+        it('adds a free rung of its own, not a twin of one it has', async () => {
+            // A portrait ladder is keyed by its long side, so its 480p rung is
+            // 854 tall; the free height is found against that, not 480.
             const wrapper = mountForm(phone(true));
+            const before = renditionsOf(wrapper).map((r) => r.height);
             await clickButton(wrapper, '+ Add rendition');
-            expect(renditionsOf(wrapper).at(-1)).toMatchObject({
-                width: 480,
-                height: 854,
-                videoBitrateKbps: 1400,
-                label: '854p',
-            });
+            const added = renditionsOf(wrapper).at(-1)!;
+            expect(before).not.toContain(added.height);
+            expect(added.width).toBeLessThan(added.height);
         });
     });
 
