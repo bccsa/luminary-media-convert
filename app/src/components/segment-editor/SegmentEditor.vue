@@ -1503,37 +1503,71 @@ function hideThumbPreview() {
     thumbPreviewStyle.value = { display: 'none' };
 }
 
+// -------------- timeline timecode hover --------------
+
+/**
+ * Where the pointer is on the timeline, as a time — so a spot can be found by
+ * its timecode without parking the playhead on it first.
+ *
+ * Independent of the storyboard: a source with no thumbnails still has a
+ * timeline to read. When a thumbnail is showing, the readout rides above it.
+ */
+const hoverTimecode = ref<{ left: number; bottom: string; sec: number } | null>(
+    null
+);
+
+/** Half the readout's width, kept clear of both edges so it is never clipped. */
+const HOVER_TIMECODE_HALF_WIDTH_PX = 44;
+
+function hideHoverTimecode() {
+    hoverTimecode.value = null;
+}
+
 function onTimelineHoverMove(e: MouseEvent) {
-    if (!props.thumbnailVttUrl) return;
-    if (dragMode.value !== null) {
+    if (dragMode.value !== null || !timelineRef.value) {
+        hideHoverTimecode();
         hideThumbPreview();
         return;
     }
-    if (!thumbnailCues.value.length || !timelineRef.value) return;
-    const t = pxToTime(e.clientX);
-    const cue = findThumbnailCue(thumbnailCues.value, t);
-    if (!cue?.w || !cue?.h) {
-        hideThumbPreview();
-        return;
-    }
+    const sec = pxToTime(e.clientX);
     const wrap = timelineRef.value.getBoundingClientRect();
-    let left = e.clientX - wrap.left - cue.w / 2;
-    left = Math.max(0, Math.min(left, wrap.width - cue.w));
+    const cue = thumbnailCues.value.length
+        ? findThumbnailCue(thumbnailCues.value, sec)
+        : undefined;
+    const thumb = props.thumbnailVttUrl && cue?.w && cue?.h ? cue : null;
+
+    // The thumbnail sits 6px above the track in a 2px border; the readout stands
+    // 4px above whichever is topmost.
+    const clearance = thumb ? 6 + thumb.h + 4 + 4 : 6;
+    const half = Math.min(HOVER_TIMECODE_HALF_WIDTH_PX, wrap.width / 2);
+    hoverTimecode.value = {
+        left: Math.max(half, Math.min(e.clientX - wrap.left, wrap.width - half)),
+        bottom: `calc(100% + ${clearance}px)`,
+        sec,
+    };
+
+    if (!thumb) {
+        hideThumbPreview();
+        return;
+    }
+    let left = e.clientX - wrap.left - thumb.w / 2;
+    left = Math.max(0, Math.min(left, wrap.width - thumb.w));
     thumbPreviewStyle.value = {
         display: 'block',
         left: `${left}px`,
         bottom: '100%',
         marginBottom: '6px',
-        width: `${cue.w}px`,
-        height: `${cue.h}px`,
-        backgroundImage: `url(${JSON.stringify(cue.spriteUrl)})`,
-        backgroundPosition: `-${cue.x}px -${cue.y}px`,
+        width: `${thumb.w}px`,
+        height: `${thumb.h}px`,
+        backgroundImage: `url(${JSON.stringify(thumb.spriteUrl)})`,
+        backgroundPosition: `-${thumb.x}px -${thumb.y}px`,
         backgroundRepeat: 'no-repeat',
     };
 }
 
 function onTimelineHoverLeave() {
     hideThumbPreview();
+    hideHoverTimecode();
 }
 
 // -------------- thumbnail filmstrip (background of the track) --------------
@@ -2281,6 +2315,17 @@ const splitRowFrame = computed(() =>
                     class="se-thumb-preview absolute pointer-events-none z-40 border-2 border-white/90 rounded-md shadow-[0_2px_8px_rgba(0,0,0,0.45)] box-content"
                     :style="thumbPreviewStyle"
                 />
+                <div
+                    v-if="hoverTimecode"
+                    class="se-hover-timecode absolute pointer-events-none z-40 -translate-x-1/2 whitespace-nowrap rounded bg-slate-900/85 px-1.5 py-0.5 font-mono text-[11px] leading-none tabular-nums text-white shadow-[0_1px_4px_rgba(0,0,0,0.4)]"
+                    :style="{
+                        left: `${hoverTimecode.left}px`,
+                        bottom: hoverTimecode.bottom,
+                    }"
+                    data-testid="hover-timecode"
+                >
+                    {{ formatTime(hoverTimecode.sec) }}
+                </div>
                 <div
                     ref="timelineTrackRef"
                     class="se-timeline relative cursor-crosshair overflow-hidden rounded-md bg-slate-100 dark:bg-blue-950 select-none touch-pan-x"
