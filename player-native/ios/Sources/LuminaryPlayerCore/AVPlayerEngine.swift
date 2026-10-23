@@ -130,7 +130,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
             if !self.intendedPlaying && !self.pictureSizeKnown { self.turnedWhileLoading = true; return }
             guard self.videoIsLandscape || !self.pictureSizeKnown else { return }
             self.fullscreenBeforeSizeKnown = !self.pictureSizeKnown
-            self.enterFullscreen(texts: nil, browse: nil)
+            self.openFullscreen(texts: nil, browse: nil, byTurn: true)
         }
         ladder = RecoveryLadder(policy: .default, clock: clock, hooks: .init(
             // AVPlayer offers no in-place repair: the rung is skipped rather than pretended.
@@ -324,7 +324,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
             turnedWhileLoading = false
             if hasVideo {
                 fullscreenBeforeSizeKnown = !pictureSizeKnown
-                enterFullscreen(texts: nil, browse: nil)
+                openFullscreen(texts: nil, browse: nil, byTurn: true)
             }
         }
         if ended {
@@ -552,6 +552,11 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     /// Audio-only has no view: there is nothing to show full-screen. The texts are the last the
     /// host sent, so a turn of the phone that opens full-screen on its own speaks the same language.
     public func enterFullscreen(texts: [String: String]?, browse: Browse?) {
+        openFullscreen(texts: texts, browse: browse, byTurn: false)
+    }
+
+    /// `byTurn`: opened by turning the phone sideways, which turning it back upright undoes; a button's holds.
+    private func openFullscreen(texts: [String: String]?, browse: Browse?, byTurn: Bool) {
         if let texts { fullscreenTexts = FullscreenTexts(overriding: texts) }
         // The lists may arrive after full-screen opened (up next loads late): they replace what is on screen.
         if let browse {
@@ -563,6 +568,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
             player,
             commands: fullscreenCommands(),
             texts: fullscreenTexts,
+            leavesWhenUpright: byTurn,
             onLeave: { [weak self] in self?.leaveFullscreenByViewer() },
             onPresentation: { [weak self] presentation in self?.presentationDidChange(presentation) }
         )

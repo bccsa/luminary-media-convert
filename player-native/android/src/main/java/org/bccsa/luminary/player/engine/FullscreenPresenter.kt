@@ -242,6 +242,11 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         subtitle: String? = null,
         /** Keep the orientation the viewer is in: the view only carries the picture to its small window. */
         holdOrientation: Boolean = false,
+        /**
+         * Opened by turning the phone sideways, so turning it back upright leaves. Opened by the viewer's button it
+         * stays sideways whatever the phone does, until the viewer leaves.
+         */
+        leavesWhenUpright: Boolean = false,
     ): Boolean {
         if (view != null) return false
         val activity = activity() ?: return false
@@ -305,8 +310,7 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         this.controls = controls
         this.surface = surface
         view.post { armAutoEnter(activity, true) }
-        // Holding the viewer's own orientation, there is no landscape to leave when the phone is turned upright.
-        if (!holdOrientation) watchSensor(activity)
+        if (leavesWhenUpright && !holdOrientation) watchSensor(activity)
         return true
     }
 

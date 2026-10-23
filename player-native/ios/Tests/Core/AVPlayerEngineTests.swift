@@ -6,18 +6,21 @@ import LuminaryPlayerCore
 private final class RecordingPresenter: FullscreenPresenter {
     var commands: FullscreenCommands?
     var presented = false
+    var leavesWhenUpright: Bool?
     var browses: [Browse?] = []
 
     func present(
         _ player: AVPlayer,
         commands: FullscreenCommands,
         texts: FullscreenTexts,
+        leavesWhenUpright: Bool,
         onLeave: @escaping () -> Void,
         onPresentation: @escaping (Presentation) -> Void
     ) -> Bool {
         guard !presented else { return false }
         presented = true
         self.commands = commands
+        self.leavesWhenUpright = leavesWhenUpright
         return true
     }
 
@@ -80,6 +83,14 @@ struct AVPlayerEngineTests {
         engine.setSleepTimer(endsAt: now + 60_000)
         engine.destroy()
         #expect(clock.pending == 0)
+    }
+
+    @Test("full-screen asked for by the page holds sideways: turning the phone upright does not leave it")
+    func buttonFullscreenHolds() {
+        let (engine, presenter) = make()
+        engine.enterFullscreen(texts: nil, browse: nil)
+        #expect(presenter.presented)
+        #expect(presenter.leavesWhenUpright == false)
     }
 
     @Test("a media services reset gives the engine a new player that carries on as the old one was")

@@ -106,6 +106,13 @@ const NOTE_ICON =
 /** Room for this many cards in the strip. */
 const NEXT_UP_MAX = 5;
 
+/**
+ * The plugins that have reported a device to send to (AirPlay, or Cast on Android). From then on the control stays for
+ * the rest of the session: the platform's search comes and goes (a TV on standby, weak Wi-Fi, each new player searching
+ * afresh), and a control that comes and goes with it reads as broken. Its list still says what is there when opened.
+ */
+const devicesSeen = new WeakSet<object>();
+
 export const NativeLuminaryPlayer = defineComponent({
     name: 'NativeLuminaryPlayer',
     props: {
@@ -146,6 +153,8 @@ export const NativeLuminaryPlayer = defineComponent({
         captionsHidden: { type: Boolean, default: false },
         /** With `inline: 'front'`, the page's chevron drawn on the picture, which the page itself cannot draw over. */
         inlineBadge: { type: Boolean, default: false },
+        /** With `inline: 'front'`, the picture's corners in CSS pixels, to fit a rounded card around it. */
+        inlineRadius: { type: Number, default: 0 },
         /** Controls to switch off, as `player-web`'s `controls` prop. */
         controls: { type: Object as PropType<Partial<NativeLuminaryPlayerControls>>, default: undefined },
         /** The plugin to drive; the Capacitor one unless a host supplies another. */
@@ -173,7 +182,7 @@ export const NativeLuminaryPlayer = defineComponent({
         const startError = shallowRef<PlayerError | null>(null);
         const presentation = shallowRef<NativePresentation>('inline');
         const muted = shallowRef(false);
-        const airPlayDevices = shallowRef(false);
+        const airPlayDevices = shallowRef(devicesSeen.has(props.plugin));
         const airPlayActive = shallowRef(false);
         const controller = computed<PlayerController | null>(() => native.value?.controller ?? null);
 
@@ -265,7 +274,8 @@ export const NativeLuminaryPlayer = defineComponent({
                 // The devices around, and whether playback is on one: the player's, not a load's.
                 props.plugin.addListener('airplaychange', (payload) => {
                     if (!mine(payload)) return;
-                    airPlayDevices.value = payload.available;
+                    if (payload.available) devicesSeen.add(props.plugin);
+                    airPlayDevices.value = devicesSeen.has(props.plugin);
                     airPlayActive.value = payload.active;
                 }),
             ];
@@ -303,9 +313,9 @@ export const NativeLuminaryPlayer = defineComponent({
             const rect = el?.getBoundingClientRect();
             const frame =
                 rect && rect.width > 0 && rect.height > 0 && !state.value.isAudioOnly
-                    ? { x: rect.left, y: rect.top, width: rect.width, height: rect.height, ...(props.inline === 'front' ? { front: true } : {}), ...(props.captionBand > 0 && props.inline !== 'front' ? { captionHeight: props.captionBand } : {}), ...(props.captionsHidden ? { captionsHidden: true } : {}), ...(props.inlineBadge && props.inline === 'front' ? { badge: true } : {}) }
+                    ? { x: rect.left, y: rect.top, width: rect.width, height: rect.height, ...(props.inline === 'front' ? { front: true } : {}), ...(props.captionBand > 0 && props.inline !== 'front' ? { captionHeight: props.captionBand } : {}), ...(props.captionsHidden ? { captionsHidden: true } : {}), ...(props.inlineBadge && props.inline === 'front' ? { badge: true } : {}), ...(props.inlineRadius > 0 && props.inline === 'front' ? { radius: props.inlineRadius } : {}) }
                     : null;
-            const key = frame ? `${frame.x},${frame.y},${frame.width},${frame.height},${frame.front === true},${frame.captionHeight ?? 0},${frame.captionsHidden === true},${frame.badge === true}` : '';
+            const key = frame ? `${frame.x},${frame.y},${frame.width},${frame.height},${frame.front === true},${frame.captionHeight ?? 0},${frame.captionsHidden === true},${frame.badge === true},${frame.radius ?? 0}` : '';
             if (key === sentFrame) return;
             sentFrame = key;
             adapter.setInlineFrame(frame);
@@ -379,6 +389,7 @@ export const NativeLuminaryPlayer = defineComponent({
         watch(() => state.value.isAudioOnly, queueFrame);
         watch(() => props.captionsHidden, queueFrame);
         watch(() => props.inlineBadge, queueFrame);
+        watch(() => props.inlineRadius, queueFrame);
 
         onBeforeUnmount(() => {
             frameWatchers.splice(0).forEach((stop) => stop());

@@ -118,6 +118,10 @@ final class BrowsePanel: UIView {
     private let closeButton = GlyphButton(size: 40, iconSize: 20)
     private var tabs: [(tab: Tab, button: UIButton)] = []
     private var chapterRows: [(row: UIControl, title: UILabel, marker: GlyphButton)] = []
+    /// The scrub preview's frames: each chapter shows the one just after its start, once its sheet is in.
+    var frames: Thumbnails?
+    private var chapterPictures: [(picture: UIImageView, time: Double)] = []
+    private var decodedSheets: [String: CGImage] = [:]
 
     private var browse = Browse(chapters: [], upNext: [])
     private var texts = FullscreenTexts()
@@ -214,7 +218,8 @@ final class BrowsePanel: UIView {
         if !browse.upNext.isEmpty { addTab(texts.upNext, .upNext) }
         list.subviews.forEach { $0.removeFromSuperview() }
         chapterRows = []
-        if tab == .chapters { fillChapters() } else { fillUpNext() }
+        chapterPictures = []
+        if tab == .chapters { fillChapters(); refreshChapterPictures() } else { fillUpNext() }
         setNeedsLayout()
         layoutIfNeeded()
         if keepScroll {
@@ -269,6 +274,17 @@ final class BrowsePanel: UIView {
             time.textColor = BrowseSkin.secondary
             time.tag = 1
             for part in [marker, title, time] as [UIView] { row.addSubview(part) }
+            if frames != nil {
+                let picture = UIImageView()
+                picture.backgroundColor = BrowseSkin.tile
+                picture.contentMode = .scaleAspectFill
+                picture.clipsToBounds = true
+                picture.layer.cornerRadius = 8 * scale
+                picture.tag = 6
+                row.addSubview(picture)
+                // The very start can be the frame before the cut.
+                chapterPictures.append((picture, chapter.start + 0.5))
+            }
             row.isAccessibilityElement = true
             row.accessibilityLabel = "\(chapter.title), \(time.text ?? "")"
             row.accessibilityTraits = .button
@@ -278,6 +294,24 @@ final class BrowsePanel: UIView {
             style(entry, now: index == currentChapter)
             chapterRows.append(entry)
         }
+    }
+
+    /// Fills the chapters' pictures whose frames are in; a sheet still on its way asks again when it arrives.
+    func refreshChapterPictures() {
+        guard let frames, frames.ready else { return }
+        for entry in chapterPictures where entry.picture.image == nil {
+            guard let cue = frames.cue(at: entry.time), let sheet = sheetImage(for: cue, in: frames) else { continue }
+            let crop = cue.w > 0 && cue.h > 0 ? sheet.cropping(to: CGRect(x: cue.x, y: cue.y, width: cue.w, height: cue.h)) : sheet
+            if let crop { entry.picture.image = UIImage(cgImage: crop) }
+        }
+    }
+
+    private func sheetImage(for cue: ThumbnailCue, in frames: Thumbnails) -> CGImage? {
+        if let image = decodedSheets[cue.url] { return image }
+        guard let data = frames.sheet(for: cue), let image = UIImage(data: data)?.cgImage else { return nil }
+        if decodedSheets.count > 8 { decodedSheets.removeAll() }
+        decodedSheets[cue.url] = image
+        return image
     }
 
     private func style(_ row: (row: UIControl, title: UILabel, marker: GlyphButton), now: Bool) {
@@ -370,12 +404,18 @@ final class BrowsePanel: UIView {
               let time = row.subviews.first(where: { $0.tag == 1 }) as? UILabel else { return y }
         time.sizeToFit()
         let markerSide = 18 * scale
-        let titleX = 8 * scale + markerSide + 6 * scale
-        let titleWidth = width - titleX - 12 * scale - time.bounds.width - 12 * scale
+        // With frames, the chapter's picture leads the row as an up-next item's does.
+        let picture = row.subviews.first { $0.tag == 6 }
+        let pictureWidth = picture == nil ? 0 : BrowseSkin.upNextPicture * scale
+        let pictureHeight = pictureWidth * 9 / 16
+        let markerX = picture == nil ? 8 * scale : 8 * scale + pictureWidth + 12 * scale
+        let titleX = markerX + markerSide + 6 * scale
+        let titleWidth = max(width - titleX - 12 * scale - time.bounds.width - 12 * scale, 0)
         let titleHeight = title.sizeThatFits(CGSize(width: titleWidth, height: .greatestFiniteMagnitude)).height
-        let height = max(48 * scale, titleHeight + 20 * scale)
+        let height = max(48 * scale, titleHeight + 20 * scale, pictureHeight + 16 * scale)
         row.frame = CGRect(x: 0, y: y, width: width, height: height)
-        marker.frame = CGRect(x: 8 * scale, y: (height - markerSide) / 2, width: markerSide, height: markerSide)
+        picture?.frame = CGRect(x: 8 * scale, y: (height - pictureHeight) / 2, width: pictureWidth, height: pictureHeight)
+        marker.frame = CGRect(x: markerX, y: (height - markerSide) / 2, width: markerSide, height: markerSide)
         title.frame = CGRect(x: titleX, y: (height - titleHeight) / 2, width: titleWidth, height: titleHeight)
         time.frame = CGRect(x: width - 12 * scale - time.bounds.width, y: (height - time.bounds.height) / 2, width: time.bounds.width, height: time.bounds.height)
         return row.frame.maxY + 2 * scale

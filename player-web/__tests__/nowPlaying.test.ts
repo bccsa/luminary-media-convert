@@ -279,6 +279,14 @@ describe('the now-playing view for a host', () => {
             expect(wrapper.emitted('picture-in-picture')).toHaveLength(1);
         });
 
+        it('puts picture in picture and full screen on the right of the line above the seek bar, not among the tools', () => {
+            const wrapper = mountView({ stage: 'video', canPictureInPicture: true });
+            const group = find(wrapper, 'afsPictureTools');
+            expect(group.find("[data-test='afsPictureInPicture']").exists()).toBe(true);
+            expect(group.find("[data-test='afsFullscreen']").exists()).toBe(true);
+            expect(wrapper.find('[data-afs-tools] [data-test="afsFullscreen"]').exists()).toBe(false);
+        });
+
         it("keeps the host's player mounted with sound alone, only hidden, so switching never stops it", async () => {
             const wrapper = mountView({ stage: 'cover' }, { stage: () => h('div', { 'data-test': 'hostPicture' }) });
             const slot = find(wrapper, 'afsStageSlot');

@@ -241,6 +241,8 @@ export interface InlineFrame {
     captionsHidden?: boolean;
     /** Native draws the page's chevron at the top-left of a picture in front, which the page cannot draw over. */
     badge?: boolean;
+    /** The corners of a picture in front, in CSS pixels, so it fits a rounded card the page draws around it. */
+    radius?: number;
 }
 
 export interface BridgeInfo {

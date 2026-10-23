@@ -148,6 +148,8 @@ const isYouTube = computed(() => isYouTubeUrl(props.source.masterUrl));
 
 /** Element ids in the controls (menu triggers point at their menus by id) must not collide between players. */
 const instanceId = `lmpl-${Math.random().toString(36).slice(2, 9)}`;
+/** The preview frame at a time, for the chapters' pictures. */
+const chapterThumbnailAt = (seconds: number) => controller.value?.thumbnailAt(seconds) ?? null;
 const controlsHtml = computed(() =>
     buildControlsHtml(mergedControls.value, instanceId, {
         browse: msg.value.browse,
@@ -1676,6 +1678,7 @@ defineExpose({
                     :up-next="upNext"
                     :messages="msg"
                     :id-prefix="instanceId"
+                    :thumbnail-at="state.thumbnailsReady ? chapterThumbnailAt : undefined"
                     @close="closeBrowse"
                     @pick-chapter="pickChapter"
                     @pick-upnext="pickUpNext"

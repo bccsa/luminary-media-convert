@@ -23,6 +23,9 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     let videoView = PlayerLayerView()
     /// The viewer asked to leave: the exit button, or a double tap.
     var onLeave: (() -> Void)?
+    /// Opened by turning the phone sideways, so turning it back upright leaves (`watchDevice`). Opened by the
+    /// viewer's button, it stays sideways whatever the phone does, until the viewer leaves.
+    var leavesWhenUpright = false
     var onPictureInPicture: (() -> Void)?
     var pictureInPictureAvailable = false {
         didSet { refresh() }
@@ -185,7 +188,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         super.viewDidAppear(animated)
         scene = view.window?.windowScene
         guard holdsLandscape else { return }
-        watchDevice()
+        if leavesWhenUpright { watchDevice() }
         turnToLandscape()
     }
 
@@ -342,6 +345,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
             if !self.scrubPicture.isHidden { self.scrubPicture.setNeedsDisplay() }
             if let fraction = self.rosterFraction { self.updateRoster(fraction) }
             if self.rosterPinned { self.updatePinned() }
+            self.panel?.refreshChapterPictures()
         }
         roster.onPan = { [weak self] dx, state in self?.pinPanned(dx, state) }
 
@@ -1044,6 +1048,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         closePin()
         hideRoster()
         let panel = BrowsePanel(frame: view.bounds)
+        panel.frames = commands.thumbnails
         panel.onClose = { [weak self] in self?.closeBrowse() }
         panel.onChapter = { [weak self] chapter in
             guard let self else { return }
