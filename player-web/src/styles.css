@@ -753,7 +753,6 @@
     /* A hairline of light along its top edge, where the timeline rests on it. */
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.14);
     pointer-events: none;
-    contain: strict;
     animation: lmpl-roster-in 0.2s ease-out both;
 }
 
@@ -766,16 +765,19 @@
 
 .lmpl-roster-tile {
     position: absolute;
-    will-change: left;
     top: 0;
+    left: 0;
     overflow: hidden;
     background: #151518;
     /* A frame apart from its neighbour, without a gutter that would make the strip look like a grid. */
     box-shadow: inset -1px 0 0 rgb(0 0 0 / 0.55);
 }
 
+/* The crop at its own size, scaled to the tile, drawn as a chapter's picture is. */
 .lmpl-roster-frame {
-    flex: none;
+    position: absolute;
+    top: 0;
+    left: 0;
 }
 
 /*
