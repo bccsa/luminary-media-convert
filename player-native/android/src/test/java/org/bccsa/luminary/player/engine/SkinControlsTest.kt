@@ -474,13 +474,13 @@ class SkinControlsTest {
 
         assertTrue(controls.hasBrowseOpen)
         assertTrue(controls.anyView("Chapters").isSelected)
-        assertFalse(controls.anyView("Up next").isSelected)
+        assertFalse(controls.anyView("More videos").isSelected)
         assertNotNull(controls.find("Intro, 0:00"))
         assertNotNull(controls.find("Middle, 0:10"))
         assertNull("the other tab's list is not drawn", controls.find("Part 2, Season 1"))
 
-        controls.anyView("Up next").performClick()
-        assertTrue(controls.anyView("Up next").isSelected)
+        controls.anyView("More videos").performClick()
+        assertTrue(controls.anyView("More videos").isSelected)
         assertNotNull(controls.find("Part 2, Season 1"))
         assertNull(controls.find("Intro, 0:00"))
     }
@@ -491,7 +491,7 @@ class SkinControlsTest {
         controls.find(opener)!!.performClick()
 
         assertNull(controls.find("Chapters"))
-        assertTrue(controls.anyView("Up next").isSelected)
+        assertTrue(controls.anyView("More videos").isSelected)
         assertNotNull(controls.find("Part 3"))
     }
 
@@ -521,7 +521,7 @@ class SkinControlsTest {
         val picked = mutableListOf<String>()
         val controls = browseControls(picked = picked)
         controls.find(opener)!!.performClick()
-        controls.anyView("Up next").performClick()
+        controls.anyView("More videos").performClick()
 
         controls.find("Something else, Related one")!!.performClick()
 
@@ -533,7 +533,7 @@ class SkinControlsTest {
     fun `a section heading shows once over each run of items that share it`() {
         val controls = browseControls()
         controls.find(opener)!!.performClick()
-        controls.anyView("Up next").performClick()
+        controls.anyView("More videos").performClick()
 
         val texts = controls.texts()
         assertEquals(1, texts.count { it == "NEXT IN SERIES" })
@@ -546,7 +546,7 @@ class SkinControlsTest {
     fun `an up-next row has a tile for its picture, whether or not it has one to load`() {
         val controls = browseControls()
         controls.find(opener)!!.performClick()
-        controls.anyView("Up next").performClick()
+        controls.anyView("More videos").performClick()
 
         val pictures = ArrayList<View>().also { collect(controls, it) }.filterIsInstance<ImageView>()
         assertEquals(3, pictures.size)
@@ -591,10 +591,10 @@ class SkinControlsTest {
     fun `lists that arrive while the panel is open replace the ones on screen, and none takes the button and panel away`() {
         val controls = browseControls(browse = Browse(lists.chapters, emptyList()))
         controls.find(opener)!!.performClick()
-        assertNull(controls.find("Up next"))
+        assertNull(controls.find("More videos"))
 
         controls.setBrowse(lists)
-        assertNotNull(controls.find("Up next"))
+        assertNotNull(controls.find("More videos"))
         assertNotNull("still on chapters", controls.find("Intro, 0:00"))
 
         controls.setBrowse(null)

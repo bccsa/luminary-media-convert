@@ -1157,7 +1157,7 @@ internal class SkinControls(
                     setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15f * scale)
                     typeface = if (selected) PlayerFont.bold(context) else PlayerFont.regular(context)
                     setTextColor(if (selected) Color.WHITE else 0x99FFFFFF.toInt())
-                    setPadding(px(12f), px(12f), px(12f), px(8f))
+                    setPadding(px(12f), px(4f), px(12f), px(8f))
                 },
             )
             addView(

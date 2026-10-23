@@ -24,7 +24,7 @@ data class FullscreenTexts(
     val unmute: String = "Unmute",
     val loading: String = "Loading",
     val chapters: String = "Chapters",
-    val upNext: String = "Up next",
+    val upNext: String = "More videos",
     /** The button that opens the chapters / up-next panel, and the panel itself. */
     val browse: String = "Chapters and up next",
     val closeBrowse: String = "Close",

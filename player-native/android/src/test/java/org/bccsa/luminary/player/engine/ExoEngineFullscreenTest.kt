@@ -150,7 +150,7 @@ class ExoEngineFullscreenTest {
 
         enterWith(lists("p2"))
         described("Chapters and up next")!!.performClick()
-        described("Up next")!!.performClick()
+        described("More videos")!!.performClick()
         described("Title p2")!!.performClick()
 
         val picks = events.filter { it.first == "browseselect" }.map { it.second }
@@ -166,11 +166,11 @@ class ExoEngineFullscreenTest {
         load(audioOnly = false)
         enterWith(lists())
         described("Chapters and up next")!!.performClick()
-        assertNull(described("Up next"))
+        assertNull(described("More videos"))
 
         enterWith(lists("late"))
 
-        assertNotNull(described("Up next"))
+        assertNotNull(described("More videos"))
         assertEquals(listOf("fullscreen"), presentationChanges())
     }
 
