@@ -4,7 +4,11 @@ import {
     buildMasterPlaylist,
     parseMasterPlaylist,
 } from '@luminary-media-converter/hls-core';
-import { applyAudioTrackEdits, listAudioTracks } from './audio-tracks.js';
+import {
+    applyAudioTrackEdits,
+    listAudioTracks,
+    rewriteAudioTracks,
+} from './audio-tracks.js';
 
 /** Two audio tiers, as an encode with a mono fallback writes them. */
 const MASTER = [
@@ -140,5 +144,78 @@ describe('applyAudioTrackEdits', () => {
         expect(() => applyAudioTrackEdits(master, [edit, edit])).toThrow(
             BadRequestException
         );
+    });
+});
+
+describe('rewriteAudioTracks', () => {
+    // As FFmpeg writes it: blank lines between variants, attributes in its own order.
+    const WRITTEN = [
+        '#EXTM3U',
+        '#EXT-X-VERSION:7',
+        '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_aud",NAME="audio_2",DEFAULT=YES,LANGUAGE="eng",CHANNELS="1",URI="vaudio.m3u8"',
+        '#EXT-X-STREAM-INF:BANDWIDTH=880032,RESOLUTION=640x360,AUDIO="group_aud"',
+        'v0.m3u8',
+        '',
+        '#EXT-X-STREAM-INF:BANDWIDTH=280856,RESOLUTION=320x180,AUDIO="group_aud"',
+        'v1.m3u8',
+        '',
+    ].join('\n');
+    const edit = {
+        from: { language: 'eng', name: 'audio_2' },
+        to: { language: 'fra', name: 'Français' },
+    };
+
+    it('changes the name and language and leaves every other byte, blank lines included', () => {
+        expect(rewriteAudioTracks(WRITTEN, [edit])).toBe(
+            WRITTEN.replace('NAME="audio_2"', 'NAME="Français"').replace(
+                'LANGUAGE="eng"',
+                'LANGUAGE="fra"'
+            )
+        );
+    });
+
+    it('edits every group, as the parsed model does', () => {
+        const out = rewriteAudioTracks(MASTER, [
+            {
+                from: { language: 'fr', name: 'Francais' },
+                to: { language: 'fra', name: 'Français' },
+            },
+        ]);
+        expect(out).toBe(
+            MASTER.replaceAll(
+                'NAME="Francais",LANGUAGE="fr"',
+                'NAME="Français",LANGUAGE="fra"'
+            )
+        );
+    });
+
+    it('gives a track without a language one', () => {
+        const bare = WRITTEN.replace(',LANGUAGE="eng"', '');
+        const out = rewriteAudioTracks(bare, [
+            {
+                from: { language: '', name: 'audio_2' },
+                to: { language: 'fra', name: 'Français' },
+            },
+        ]);
+        expect(out).toContain(
+            'NAME="Français",DEFAULT=YES,CHANNELS="1",URI="vaudio.m3u8",LANGUAGE="fra"'
+        );
+    });
+
+    it('keeps CRLF line ends', () => {
+        const crlf = WRITTEN.replaceAll('\n', '\r\n');
+        expect(rewriteAudioTracks(crlf, [edit])).toBe(
+            crlf
+                .replace('NAME="audio_2"', 'NAME="Français"')
+                .replace('LANGUAGE="eng"', 'LANGUAGE="fra"')
+        );
+    });
+
+    it('refuses an invalid edit before rewriting anything', () => {
+        expect(() =>
+            rewriteAudioTracks(WRITTEN, [
+                { ...edit, to: { language: 'French', name: 'x' } },
+            ])
+        ).toThrow(BadRequestException);
     });
 });

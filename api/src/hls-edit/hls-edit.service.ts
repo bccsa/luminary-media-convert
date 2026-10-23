@@ -30,8 +30,8 @@ import type { HlsMutateRequestDto } from './dto/mutate.dto.js';
 import type { HlsDiscoverRequestDto } from './dto/discover.dto.js';
 import { applyOperation, type OperationContext } from './operations/index.js';
 import {
-    applyAudioTrackEdits,
     listAudioTracks,
+    rewriteAudioTracks,
     type AudioTrack,
     type AudioTrackEdit,
 } from './audio-tracks.js';
@@ -255,8 +255,8 @@ export class HlsEditService {
     /**
      * Changes audio tracks' languages and names in an existing video's master.
      *
-     * Nothing but `LANGUAGE` and `NAME` changes: segments, folders and the key
-     * stay as they are. The master goes back encrypted exactly when it was
+     * Nothing but `LANGUAGE` and `NAME` changes, byte for byte: segments,
+     * folders and the key stay as they are, and so does the rest of the master. The master goes back encrypted exactly when it was
      * read encrypted, and only if it is still the version `ifMatch` names, so
      * an edit never lands on top of one it has not seen. The first edit keeps
      * the master as the encode wrote it at `master.m3u8.orig`, to undo by hand.
@@ -285,8 +285,7 @@ export class HlsEditService {
                 'This video is encrypted: its key is needed to edit it'
             );
         }
-        const master = parseMasterPlaylist(this.decode(body, keyHex));
-        applyAudioTrackEdits(master, edits);
+        const rewritten = rewriteAudioTracks(this.decode(body, keyHex), edits);
 
         const contentType = encrypted ? OCTET_STREAM : M3U8_CONTENT_TYPE;
         await this.s3EtagService.putObjectIfAbsent(
@@ -298,10 +297,7 @@ export class HlsEditService {
         await this.s3EtagService.putObjectIfMatch(
             s3,
             masterKey,
-            this.encode(
-                buildMasterPlaylist(master),
-                encrypted ? keyHex : undefined
-            ),
+            this.encode(rewritten, encrypted ? keyHex : undefined),
             ifMatch,
             contentType,
             { cacheControl: EDITED_CACHE_CONTROL }

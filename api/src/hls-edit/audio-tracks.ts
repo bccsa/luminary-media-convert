@@ -1,5 +1,8 @@
 import { BadRequestException } from '@nestjs/common';
-import type { HlsParsedMaster } from '@luminary-media-converter/hls-core';
+import {
+    parseMasterPlaylist,
+    type HlsParsedMaster,
+} from '@luminary-media-converter/hls-core';
 
 /**
  * An audio track as a viewer sees it: one language and name, however many
@@ -126,4 +129,63 @@ export function applyAudioTrackEdits(
         media.language = to.language;
         media.name = to.name;
     }
+}
+
+/**
+ * `text`, a master playlist, with `edits` applied to the `NAME` and `LANGUAGE`
+ * of its audio renditions and every other byte left as it was: blank lines,
+ * attribute order and spelling, everything a rebuilt playlist would redraw.
+ *
+ * The edits are checked on the parsed master first ({@link applyAudioTrackEdits}),
+ * so an invalid one throws before anything is rewritten.
+ */
+export function rewriteAudioTracks(
+    text: string,
+    edits: AudioTrackEdit[]
+): string {
+    applyAudioTrackEdits(parseMasterPlaylist(text), edits);
+    const targets = new Map(
+        edits.map((edit) => [
+            signature(edit.from.language, edit.from.name),
+            { language: edit.to.language.trim(), name: edit.to.name.trim() },
+        ])
+    );
+    return text
+        .split(/(\r?\n)/)
+        .map((line) => {
+            if (!line.startsWith(MEDIA_TAG)) return line;
+            const attributes = line.slice(MEDIA_TAG.length);
+            if (readAttribute(attributes, 'TYPE') !== 'AUDIO') return line;
+            const to = targets.get(
+                signature(
+                    readAttribute(attributes, 'LANGUAGE'),
+                    readAttribute(attributes, 'NAME') ?? ''
+                )
+            );
+            if (!to) return line;
+            const named = writeAttribute(attributes, 'NAME', to.name);
+            return MEDIA_TAG + writeAttribute(named, 'LANGUAGE', to.language);
+        })
+        .join('');
+}
+
+const MEDIA_TAG = '#EXT-X-MEDIA:';
+
+const attributePattern = (name: string): RegExp =>
+    new RegExp(`(^|,)${name}=(?:"([^"]*)"|([^,]*))`);
+
+function readAttribute(list: string, name: string): string | undefined {
+    const match = attributePattern(name).exec(list);
+    return match ? (match[2] ?? match[3]) : undefined;
+}
+
+/** Sets a quoted attribute in place, or adds it at the end when the line has none. */
+function writeAttribute(list: string, name: string, value: string): string {
+    const pattern = attributePattern(name);
+    return pattern.test(list)
+        ? list.replace(
+              pattern,
+              (_, lead: string) => `${lead}${name}="${value}"`
+          )
+        : `${list},${name}="${value}"`;
 }
