@@ -391,11 +391,15 @@ internal class SkinControls(
 
     override fun onTouchEvent(event: MotionEvent): Boolean = gestures.onTouchEvent(event)
 
-    /** A press anywhere but the roster and the timeline puts the roster away. */
+    /**
+     * A press anywhere but the roster and the timeline puts the roster away. A press on the centre buttons
+     * still closes it, but goes on to the button, so play or a skip acts as well.
+     */
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-            closedByThisTouch = rosterOpen && !hits(roster, event) && !hits(timeline, event)
-            if (closedByThisTouch) closeRoster()
+            val outside = rosterOpen && !hits(roster, event) && !hits(timeline, event)
+            closedByThisTouch = outside && !hits(centre, event)
+            if (outside) closeRoster()
         }
         return super.dispatchTouchEvent(event)
     }
@@ -812,8 +816,8 @@ internal class SkinControls(
         val reach = height + (panel.height - rowBottom)
         roster.lp(reach.roundToInt(), -panel.paddingBottom)
         roster.configure(frames, reach)
-        // Nothing but the timeline and the roster stays: the buttons would show through behind the strip.
-        for (part in listOf(actionsRow, centre)) {
+        // The actions row is hidden so it does not show through behind the strip; the centre play and skips stay.
+        for (part in listOf(actionsRow)) {
             part.animate().alpha(0f).setDuration(120).withEndAction { if (rosterOpen) part.visibility = INVISIBLE }.start()
         }
         // The fade that darkens the controls would only dim the strip over them.

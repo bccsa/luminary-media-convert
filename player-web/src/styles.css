@@ -856,8 +856,9 @@
     height: calc(16px * var(--lmpl-s));
 }
 
-/* The strip is the only thing the viewer is looking at: the skip and play buttons would show through behind it. */
-.lmpl-root.lmpl-scrubbing .lmpl-cluster {
+/* The strip is the only thing the viewer is looking at: the actions row would show through behind it. The centre
+   play and skip buttons stay tappable; a press on them closes the strip and acts. */
+.lmpl-root.lmpl-scrubbing .lmpl-actions-row {
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.12s ease;
