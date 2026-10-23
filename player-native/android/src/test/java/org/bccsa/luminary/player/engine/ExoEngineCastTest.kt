@@ -2,7 +2,6 @@ package org.bccsa.luminary.player.engine
 
 import androidx.activity.ComponentActivity
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.test.utils.TestExoPlayerBuilder
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -51,7 +50,7 @@ class ExoEngineCastTest {
     }
 
     private val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup().get()
-    private val player: ExoPlayer = TestExoPlayerBuilder(activity).build()
+    private val player: ExoPlayer = fixturePlayer(activity)
     private val cast = FakeCast()
     private val events = mutableListOf<Pair<String, JsonObject>>()
 
@@ -169,7 +168,7 @@ class ExoEngineCastTest {
             VirtualClock(),
             HttpUpstream(OkHttpClient()),
             EngineFactory { router, clock, options ->
-                ExoEngine(activity, router, clock, options, FullscreenPresenter { activity }, TestExoPlayerBuilder(activity).build(), cast = broken)
+                ExoEngine(activity, router, clock, options, FullscreenPresenter { activity }, fixturePlayer(activity), cast = broken)
             },
         ) { _, _ -> }
         try {

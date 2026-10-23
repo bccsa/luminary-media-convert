@@ -2,7 +2,6 @@ package org.bccsa.luminary.player.engine
 
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.test.utils.TestExoPlayerBuilder
 import androidx.media3.test.utils.robolectric.TestPlayerRunHelper
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -39,7 +38,7 @@ import org.robolectric.RuntimeEnvironment
 class ExoEngineTest {
     private val context = RuntimeEnvironment.getApplication()
     private val upstream = FixtureUpstream("encrypted-byterange")
-    private val player: ExoPlayer = TestExoPlayerBuilder(context).build()
+    private val player: ExoPlayer = fixturePlayer(context)
     private val events = mutableListOf<Pair<String, JsonObject>>()
     private var lastRouter: UriRouter? = null
     private var engine: ExoEngine? = null

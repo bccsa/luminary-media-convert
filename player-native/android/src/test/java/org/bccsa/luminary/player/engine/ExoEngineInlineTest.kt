@@ -5,7 +5,6 @@ import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.test.utils.TestExoPlayerBuilder
 import androidx.media3.test.utils.robolectric.TestPlayerRunHelper
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -39,7 +38,7 @@ class ExoEngineInlineTest {
     private val container = FrameLayout(activity)
     private val web = View(activity)
     private val upstream = FixtureUpstream("encrypted-byterange")
-    private val player: ExoPlayer = TestExoPlayerBuilder(activity).build()
+    private val player: ExoPlayer = fixturePlayer(activity)
     private val events = mutableListOf<Pair<String, JsonObject>>()
     private val inline = InlinePresenter({ web }, { activity })
     private val registry = PlayerRegistry(
