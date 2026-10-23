@@ -80,11 +80,13 @@ public protocol FullscreenPresenter: AnyObject {
     /// False when already presented, or there is nowhere to present. `commands` are what the
     /// controls drive. `onLeave` is the viewer asking to leave; the engine decides what that means
     /// and dismisses. `onPresentation` is the viewer moving the player between full-screen and
-    /// picture in picture.
+    /// picture in picture. `leavesWhenUpright`: opened by turning the phone sideways, so turning it
+    /// back upright leaves; opened by the viewer's button it stays sideways until the viewer leaves.
     func present(
         _ player: AVPlayer,
         commands: FullscreenCommands,
         texts: FullscreenTexts,
+        leavesWhenUpright: Bool,
         onLeave: @escaping () -> Void,
         onPresentation: @escaping (Presentation) -> Void
     ) -> Bool

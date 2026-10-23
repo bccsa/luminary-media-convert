@@ -271,7 +271,7 @@ class ExoEngine(
         // A phone turned to landscape while the page shows the picture opens it full-screen, playing or
         // paused: turning it is asking for the big picture, and a paused video stays paused there.
         inline?.onRotatedToLandscape = {
-            if (inlineFrame != null && presentation == "inline" && hasVideo) enterFullscreen(null)
+            if (inlineFrame != null && presentation == "inline" && hasVideo) openFullscreen(null, null, byTurn = true)
         }
     }
 
@@ -533,7 +533,10 @@ class ExoEngine(
     /** What the full-screen panel lists; the page's latest, kept for a full-screen the engine opens itself. */
     private var browse: Browse? = null
 
-    override fun enterFullscreen(texts: Map<String, String>?, browse: Browse?) {
+    override fun enterFullscreen(texts: Map<String, String>?, browse: Browse?) = openFullscreen(texts, browse, byTurn = false)
+
+    /** [byTurn]: opened by turning the phone sideways, which turning it back upright undoes; a button's holds. */
+    private fun openFullscreen(texts: Map<String, String>?, browse: Browse?, byTurn: Boolean) {
         // A call with no texts keeps the last, or English.
         if (texts != null) this.texts = FullscreenTexts.from(texts)
         // The lists may arrive after full-screen opened (up next loads late): they replace what is on screen.
@@ -546,7 +549,7 @@ class ExoEngine(
         // Audio-only has no view. Until the tracks are known the item is presumed to have one, and
         // the view is taken down again if it turns out not to (see `onTracksChanged`).
         if (knownAudioOnly(player.currentTracks)) return
-        if (presenter.present(player, ::leaveFullscreenByViewer, skin, this.texts, ::presentationDidChange, thumbnails, cast?.let { { showAirPlayPicker() } }, this.browse, ::browseSelected, ::nextUpChosen, loadedNowPlaying?.title, loadedNowPlaying?.subtitle)) {
+        if (presenter.present(player, ::leaveFullscreenByViewer, skin, this.texts, ::presentationDidChange, thumbnails, cast?.let { { showAirPlayPicker() } }, this.browse, ::browseSelected, ::nextUpChosen, loadedNowPlaying?.title, loadedNowPlaying?.subtitle, leavesWhenUpright = byTurn)) {
             presentationDidChange("fullscreen")
         }
     }

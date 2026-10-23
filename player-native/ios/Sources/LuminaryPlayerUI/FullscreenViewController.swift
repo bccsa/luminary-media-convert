@@ -23,6 +23,9 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     let videoView = PlayerLayerView()
     /// The viewer asked to leave: the exit button, or a double tap.
     var onLeave: (() -> Void)?
+    /// Opened by turning the phone sideways, so turning it back upright leaves (`watchDevice`). Opened by the
+    /// viewer's button, it stays sideways whatever the phone does, until the viewer leaves.
+    var leavesWhenUpright = false
     var onPictureInPicture: (() -> Void)?
     var pictureInPictureAvailable = false {
         didSet { refresh() }
@@ -185,7 +188,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         super.viewDidAppear(animated)
         scene = view.window?.windowScene
         guard holdsLandscape else { return }
-        watchDevice()
+        if leavesWhenUpright { watchDevice() }
         turnToLandscape()
     }
 

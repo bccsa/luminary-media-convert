@@ -240,6 +240,11 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         /** What plays, named at the top left of the controls. */
         title: String? = null,
         subtitle: String? = null,
+        /**
+         * Opened by turning the phone sideways, so turning it back upright leaves. Opened by the viewer's button it
+         * stays sideways whatever the phone does, until the viewer leaves.
+         */
+        leavesWhenUpright: Boolean = false,
     ): Boolean {
         if (view != null) return false
         val activity = activity() ?: return false
@@ -303,7 +308,7 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         this.controls = controls
         this.surface = surface
         view.post { armAutoEnter(activity, true) }
-        watchSensor(activity)
+        if (leavesWhenUpright) watchSensor(activity)
         return true
     }
 
