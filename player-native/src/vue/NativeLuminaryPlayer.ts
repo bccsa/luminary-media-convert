@@ -106,6 +106,13 @@ const NOTE_ICON =
 /** Room for this many cards in the strip. */
 const NEXT_UP_MAX = 5;
 
+/**
+ * The plugins that have reported a device to send to (AirPlay, or Cast on Android). From then on the control stays for
+ * the rest of the session: the platform's search comes and goes (a TV on standby, weak Wi-Fi, each new player searching
+ * afresh), and a control that comes and goes with it reads as broken. Its list still says what is there when opened.
+ */
+const devicesSeen = new WeakSet<object>();
+
 export const NativeLuminaryPlayer = defineComponent({
     name: 'NativeLuminaryPlayer',
     props: {
@@ -175,7 +182,7 @@ export const NativeLuminaryPlayer = defineComponent({
         const startError = shallowRef<PlayerError | null>(null);
         const presentation = shallowRef<NativePresentation>('inline');
         const muted = shallowRef(false);
-        const airPlayDevices = shallowRef(false);
+        const airPlayDevices = shallowRef(devicesSeen.has(props.plugin));
         const airPlayActive = shallowRef(false);
         const controller = computed<PlayerController | null>(() => native.value?.controller ?? null);
 
@@ -267,7 +274,8 @@ export const NativeLuminaryPlayer = defineComponent({
                 // The devices around, and whether playback is on one: the player's, not a load's.
                 props.plugin.addListener('airplaychange', (payload) => {
                     if (!mine(payload)) return;
-                    airPlayDevices.value = payload.available;
+                    if (payload.available) devicesSeen.add(props.plugin);
+                    airPlayDevices.value = devicesSeen.has(props.plugin);
                     airPlayActive.value = payload.active;
                 }),
             ];

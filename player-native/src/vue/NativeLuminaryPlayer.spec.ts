@@ -494,9 +494,23 @@ describe('NativeLuminaryPlayer', () => {
             await flush();
             expect(exposed.airPlayActive).toBe(true);
 
+            // A device that drops out of the search keeps its control: the list says what is there when opened.
             plugin.emit('airplaychange', ids, { available: false, active: false });
             await flush();
-            expect(exposed.airPlayAvailable).toBe(false);
+            expect(exposed.airPlayAvailable).toBe(true);
+        });
+
+        it('keeps the control for the session once a device has been seen, a new player included', async () => {
+            const plugin = new FakePlugin({ airPlay: true });
+            const first = await mountPlayer({ plugin });
+            await ready(plugin);
+            const load = plugin.argsOf<LoadArgs>('load').at(-1)!;
+            plugin.emit('airplaychange', { playerId: load.playerId, loadId: load.loadId }, { available: true, active: false });
+            await flush();
+            first.wrapper.unmount();
+
+            const next = await mountPlayer({ plugin });
+            expect(next.exposed.airPlayAvailable).toBe(true);
         });
 
         it('says nothing is available where native cannot, whatever it reports', async () => {
