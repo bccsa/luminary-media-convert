@@ -1213,6 +1213,12 @@ async function fetchSession() {
         sessionToken.value = await resolveSessionToken();
 
         const detail = await getSession(sessionId.value);
+        // A session on a video already encoded has nothing to encode: it has a
+        // screen of its own, for that video's chapters and audio tracks.
+        if (detail.mode === 'edit') {
+            void router.replace(`/sessions/${sessionId.value}/edit`);
+            return;
+        }
         if (!detail) {
             notFound.value = true;
             return;

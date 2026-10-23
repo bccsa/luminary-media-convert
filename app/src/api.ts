@@ -4,6 +4,8 @@ import type {
     EncodeStartResponse,
     SessionStatusResponse,
     SessionSummary,
+    AudioTrackEdit,
+    EncodedMedia,
 } from './types';
 
 /**
@@ -281,6 +283,42 @@ export async function putChapters(
             token: sessionToken,
             body: { vtt },
             errorPrefix: 'Save chapters failed',
+        }
+    );
+}
+
+// ---------------------------------------------------------------------------
+// An existing video, opened by an edit session
+// ---------------------------------------------------------------------------
+
+/** The video's audio tracks and chapter languages, and the version read. */
+export async function getEncodedMedia(
+    sessionId: string,
+    sessionToken: string
+): Promise<EncodedMedia> {
+    return requestJson(`${API_BASE}/api/sessions/${sessionId}/media`, {
+        token: sessionToken,
+        errorPrefix: 'Could not read the video',
+    });
+}
+
+/**
+ * Change audio tracks' languages and names. Refused (409) once the video has
+ * changed since `ifMatch` was read; the error says so.
+ */
+export async function putAudioTracks(
+    sessionId: string,
+    sessionToken: string,
+    ifMatch: string,
+    edits: AudioTrackEdit[]
+): Promise<EncodedMedia> {
+    return requestJson(
+        `${API_BASE}/api/sessions/${sessionId}/media/audio-tracks`,
+        {
+            method: 'PUT',
+            token: sessionToken,
+            body: { ifMatch, edits },
+            errorPrefix: 'Could not save the audio tracks',
         }
     );
 }

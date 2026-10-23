@@ -75,6 +75,29 @@ export interface SessionSummary {
     sessionToken: string;
     hlsUrl?: string;
     error?: string;
+    /** `edit` for a session on a video already encoded; absent for an encode. */
+    mode?: 'edit';
+}
+
+/** An audio track of an existing video: one language and name, in however many groups. */
+export interface AudioTrack {
+    language: string;
+    name: string;
+    groups: string[];
+    default: boolean;
+}
+
+export interface AudioTrackEdit {
+    from: { language: string; name: string };
+    to: { language: string; name: string };
+}
+
+/** What an edit session's video offers to edit, and the version read. */
+export interface EncodedMedia {
+    tracks: AudioTrack[];
+    chapterLanguages: string[];
+    etag: string;
+    encrypted: boolean;
 }
 
 export interface SessionStatusResponse {
@@ -95,6 +118,8 @@ export interface SessionStatusResponse {
     title?: string;
     /** The CMS document this session's output belongs to. */
     documentId?: string;
+    /** `edit` for a session on a video already encoded; absent for an encode. */
+    mode?: 'edit';
     error?: string;
     /**
      * Something the encode did differently from what was submitted, on a
