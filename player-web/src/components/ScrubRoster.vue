@@ -22,8 +22,13 @@ const props = defineProps<{
     interactive?: boolean;
 }>();
 
+/** Slid into place rather than laid out: the strip moves every frame while the video plays under it. */
 function tileStyle(tile: { left: number }) {
-    return { left: `${Math.round(tile.left)}px`, width: `${props.tileWidth}px`, height: `${props.height}px` };
+    return {
+        transform: `translate3d(${Math.round(tile.left)}px, 0, 0)`,
+        width: `${props.tileWidth}px`,
+        height: `${props.height}px`,
+    };
 }
 
 function frameStyle(cue: ThumbnailSpriteCue) {
