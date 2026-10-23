@@ -1,5 +1,6 @@
 package org.bccsa.luminary.player.engine
 
+import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.os.Looper
 import android.view.View
@@ -57,6 +58,24 @@ class PictureInPictureTest {
 
         assertEquals(listOf("pip"), presentations)
         assertTrue("no controls over a small picture", controls.find("Pause") == null && controls.find("Play") == null)
+    }
+
+    @Test
+    fun `a full-screen opened only for the small window leaves the orientation as the viewer has it`() {
+        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+
+        presenter.present(player, onLeave = { left++ }, onPresentation = { presentations += it }, holdOrientation = true)
+
+        assertEquals(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, activity.requestedOrientation)
+    }
+
+    @Test
+    fun `an ordinary full-screen holds the window sideways`() {
+        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+
+        present()
+
+        assertEquals(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE, activity.requestedOrientation)
     }
 
     @Test

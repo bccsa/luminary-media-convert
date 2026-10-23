@@ -463,10 +463,18 @@ class ExoEngine(
 
     override fun startPictureInPicture() {
         if (!hasVideo || castPlayer != null) return
-        // The small window shows the full-screen view's picture: take the picture there first.
-        if (!presenter.isPresented) enterFullscreen(null)
+        // The small window shows the full-screen view's picture: take the picture there first, in the orientation the
+        // viewer is in, and put that view away again when the window is expanded.
+        if (!presenter.isPresented) {
+            fullscreenForPipOnly = true
+            presentFullscreen(null, null, holdOrientation = true)
+            if (!presenter.isPresented) fullscreenForPipOnly = false
+        }
         presenter.startPictureInPicture()
     }
+
+    /** The full-screen view was opened only to carry the picture to its small window, so it does not outlive it. */
+    private var fullscreenForPipOnly = false
 
     /** Where the page shows the picture, while it does. */
     private var inlineFrame: InlineFrame? = null
@@ -480,6 +488,8 @@ class ExoEngine(
     private var presentation = "inline"
 
     private fun presentationDidChange(state: String) {
+        // Expanded from the small window: back to the page, not into a landscape full-screen it never asked for.
+        if (state == "fullscreen" && fullscreenForPipOnly && presentation == "pip") return exitFullscreen()
         presentation = state
         inline?.setSuspended(state != "inline")
         events.presentationChanged(state)
@@ -533,7 +543,9 @@ class ExoEngine(
     /** What the full-screen panel lists; the page's latest, kept for a full-screen the engine opens itself. */
     private var browse: Browse? = null
 
-    override fun enterFullscreen(texts: Map<String, String>?, browse: Browse?) {
+    override fun enterFullscreen(texts: Map<String, String>?, browse: Browse?) = presentFullscreen(texts, browse, holdOrientation = false)
+
+    private fun presentFullscreen(texts: Map<String, String>?, browse: Browse?, holdOrientation: Boolean) {
         // A call with no texts keeps the last, or English.
         if (texts != null) this.texts = FullscreenTexts.from(texts)
         // The lists may arrive after full-screen opened (up next loads late): they replace what is on screen.
@@ -546,7 +558,7 @@ class ExoEngine(
         // Audio-only has no view. Until the tracks are known the item is presumed to have one, and
         // the view is taken down again if it turns out not to (see `onTracksChanged`).
         if (knownAudioOnly(player.currentTracks)) return
-        if (presenter.present(player, ::leaveFullscreenByViewer, skin, this.texts, ::presentationDidChange, thumbnails, cast?.let { { showAirPlayPicker() } }, this.browse, ::browseSelected, ::nextUpChosen, loadedNowPlaying?.title, loadedNowPlaying?.subtitle)) {
+        if (presenter.present(player, ::leaveFullscreenByViewer, skin, this.texts, ::presentationDidChange, thumbnails, cast?.let { { showAirPlayPicker() } }, this.browse, ::browseSelected, ::nextUpChosen, loadedNowPlaying?.title, loadedNowPlaying?.subtitle, holdOrientation)) {
             presentationDidChange("fullscreen")
         }
     }
@@ -564,6 +576,7 @@ class ExoEngine(
     private fun knownAudioOnly(tracks: Tracks) = !tracks.isEmpty && !tracks.containsType(C.TRACK_TYPE_VIDEO)
 
     override fun exitFullscreen() {
+        fullscreenForPipOnly = false
         if (presenter.dismiss()) presentationDidChange("inline")
     }
 

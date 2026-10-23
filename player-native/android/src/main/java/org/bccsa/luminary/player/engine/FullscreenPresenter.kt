@@ -240,6 +240,8 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         /** What plays, named at the top left of the controls. */
         title: String? = null,
         subtitle: String? = null,
+        /** Keep the orientation the viewer is in: the view only carries the picture to its small window. */
+        holdOrientation: Boolean = false,
     ): Boolean {
         if (view != null) return false
         val activity = activity() ?: return false
@@ -278,8 +280,8 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         finishRestoring()
         savedOrientation = activity.requestedOrientation
         wasPortrait = activity.resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
-        // Always landscape (either way up): portrait is the host app's own media experience.
-        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        // Landscape (either way up) unless held: portrait is the host app's own media experience.
+        if (!holdOrientation) activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         WindowCompat.getInsetsController(activity.window, view).apply {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             hide(WindowInsetsCompat.Type.systemBars())
@@ -303,7 +305,8 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         this.controls = controls
         this.surface = surface
         view.post { armAutoEnter(activity, true) }
-        watchSensor(activity)
+        // Holding the viewer's own orientation, there is no landscape to leave when the phone is turned upright.
+        if (!holdOrientation) watchSensor(activity)
         return true
     }
 

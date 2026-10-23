@@ -446,7 +446,7 @@ class SkinControlsTest {
         val picked = mutableListOf<String>()
         val controls = browseControls(picked = picked)
         controls.find(opener)!!.performClick()
-        controls.anyView("Up next").performClick()
+        controls.anyView("More videos").performClick()
         controls.find("Part 2, Season 1")!!.performClick()
 
         assertEquals(listOf("p2"), picked)
