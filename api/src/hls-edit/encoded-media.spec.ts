@@ -78,6 +78,16 @@ describe('HlsEditService — an existing video', () => {
             });
         });
 
+        it('names the scrub thumbnails beside the master', async () => {
+            etag = makeEtag(MASTER, [
+                MASTER_KEY,
+                'posts/p1/s1/thumbnails/thumbnails.vtt',
+            ]);
+            service = new HlsEditService(etag as never);
+            const media = await service.readEncodedMedia(s3, MASTER_KEY);
+            expect(media.thumbnailsVtt).toBe('thumbnails/thumbnails.vtt');
+        });
+
         it('decrypts an encrypted master with the key, and says it is encrypted', async () => {
             etag = makeEtag(encryptTextAsset(MASTER, keyFromHex(KEY)));
             service = new HlsEditService(etag as never);

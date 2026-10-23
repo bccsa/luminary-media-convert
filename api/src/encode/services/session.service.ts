@@ -222,6 +222,9 @@ export interface SessionInit {
     edit?: Session['edit'];
     /** The video an edit session opens; an encode learns its own once it starts. */
     hlsUrl?: string;
+    /** An edit session's master and thumbnails, relative to the video's folder, as a finished encode's are. */
+    masterPlaylist?: string;
+    thumbnailsVtt?: string;
 }
 
 @Injectable()
@@ -608,7 +611,9 @@ export class SessionService implements OnModuleInit {
         const session: Session = {
             id,
             sessionToken,
-            status: 'created',
+            // An edit session opens a video already encoded: it is a finished
+            // session from the start, shown and kept like one.
+            status: init.edit ? 'completed' : 'created',
             progress: 0,
             config: build(id),
             createdAt: Date.now(),
@@ -674,7 +679,8 @@ export class SessionService implements OnModuleInit {
         return this.list().find(
             (session) =>
                 session.documentId === documentId &&
-                ACTIVE.includes(session.status) &&
+                (ACTIVE.includes(session.status) ||
+                    (editing && session.status === 'completed')) &&
                 !!session.edit === editing &&
                 // Same document is not enough — it has to be the same caller.
                 // Document ids are the CMS's own post identifiers and are

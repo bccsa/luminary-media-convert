@@ -528,6 +528,24 @@ describe("CmsController — an edit session on the post's existing video", () =>
             '000102030405060708090a0b0c0d0e0f'
         );
         expect(session.hlsUrl).toBe(hlsUrl);
+        // Shown like a finished encode of the same video.
+        expect(session.status).toBe('completed');
+        expect(session.masterPlaylist).toBe('master.m3u8');
+        expect(session.thumbnailsVtt).toBeUndefined();
+    });
+
+    it("points at the video's scrub thumbnails when it has them", async () => {
+        readEncodedMedia.mockResolvedValue({
+            encrypted: false,
+            thumbnailsVtt: 'thumbnails/thumbnails.vtt',
+        });
+        const { sessionId } = await buildEditing().createSession(
+            editDto(),
+            req()
+        );
+        expect(sessions.get(sessionId)!.thumbnailsVtt).toBe(
+            'thumbnails/thumbnails.vtt'
+        );
     });
 
     it('hands a second click the same edit session, and an upload click a new encode', async () => {

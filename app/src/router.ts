@@ -17,11 +17,6 @@ const router = createRouter({
             name: 'session-detail',
             component: () => import('./views/SessionView.vue'),
         },
-        {
-            path: '/sessions/:id/edit',
-            name: 'session-edit',
-            component: () => import('./views/EditMediaView.vue'),
-        },
     ],
 });
 

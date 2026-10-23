@@ -184,12 +184,14 @@ export class CmsController {
             throw new Error('Editing needs the HLS edit service');
         }
         let encrypted: boolean;
+        let thumbnailsVtt: string | undefined;
         try {
-            ({ encrypted } = await this.hlsEditService.readEncodedMedia(
-                dto.s3,
-                masterKey,
-                media.hlsKey
-            ));
+            ({ encrypted, thumbnailsVtt } =
+                await this.hlsEditService.readEncodedMedia(
+                    dto.s3,
+                    masterKey,
+                    media.hlsKey
+                ));
         } catch (err) {
             if (isNoSuchKey(err)) {
                 throw new NotFoundException(
@@ -216,6 +218,8 @@ export class CmsController {
                 origin: 'cms',
                 createdByOrigin: callerOrigin,
                 hlsUrl: media.hlsUrl,
+                masterPlaylist: posix.basename(masterKey),
+                ...(thumbnailsVtt ? { thumbnailsVtt } : {}),
                 edit: { masterKey, encrypted },
             }
         );

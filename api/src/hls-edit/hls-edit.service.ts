@@ -66,6 +66,8 @@ export interface EncodedMedia {
     etag: string;
     /** The master is LMCENC-wrapped, so whatever is written beside it has to be too. */
     encrypted: boolean;
+    /** The scrub thumbnails' VTT beside the master, relative to its folder, when there is one. */
+    thumbnailsVtt?: string;
 }
 
 /**
@@ -80,6 +82,8 @@ const LANG_PATTERN = /^[a-z]{2,3}(?:-[A-Z]{2})?$/;
 const MAX_VTT_BYTES = 1024 * 1024;
 
 const OCTET_STREAM = 'application/octet-stream';
+/** Where an encode leaves its scrub thumbnails' VTT, relative to the master's folder. */
+const THUMBNAIL_VTTS = ['thumbnails/thumbnails.vtt', 'thumbnails.vtt'];
 const M3U8_CONTENT_TYPE = 'application/vnd.apple.mpegurl';
 const VTT_CONTENT_TYPE = 'text/vtt';
 
@@ -244,11 +248,15 @@ export class HlsEditService {
         const master = parseMasterPlaylist(this.decode(body, keyHex));
         const folderPrefix = folderOf(masterKey);
         const keys = await this.listObjects(s3, folderPrefix);
+        const thumbnailsVtt = THUMBNAIL_VTTS.find((name) =>
+            keys.includes(folderPrefix + name)
+        );
         return {
             tracks: listAudioTracks(master),
             chapterLanguages: collectChaptersLanguages(keys, folderPrefix),
             etag,
             encrypted: isLmcencPayload(body),
+            ...(thumbnailsVtt ? { thumbnailsVtt } : {}),
         };
     }
 

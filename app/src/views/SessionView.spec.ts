@@ -307,6 +307,35 @@ describe('SessionView', () => {
             return wrapper;
         }
 
+        it("opens an edit session like the finished encode it opened, with the video's audio tracks beside its chapters", async () => {
+            const editSession = {
+                status: 'completed',
+                mode: 'edit',
+                masterPlaylist: 'master.m3u8',
+                hlsUrl: HLS_URL,
+            };
+            detail.mockResolvedValue(uploadedSession(editSession));
+            status.mockResolvedValue(editSession);
+            const wrapper = await mountView();
+            await flushPromises();
+
+            expect(
+                (playerSource(wrapper) as { masterUrl?: string } | null)?.masterUrl
+            ).toBe(HLS_URL);
+            expect(playerSource(wrapper)?.sidecars?.chapters?.[0]?.url).toBe(
+                'http://127.0.0.1:9000/media/sess-1/chapters/en.vtt'
+            );
+            await wrapper.find('[data-test="audioTracksTab"]').trigger('click');
+            expect(
+                wrapper.findComponent({ name: 'AudioTracksPanel' }).props()
+            ).toMatchObject({ sessionId: 'sess-1', sessionToken: 'sess_token' });
+        });
+
+        it('offers no audio tracks tab for a finished encode', async () => {
+            const wrapper = await completedView();
+            expect(wrapper.find('[data-test="audioTracksTab"]').exists()).toBe(false);
+        });
+
         it('points the chapters sidecar beside the master, not at the bucket root', async () => {
             const source = playerSource(await completedView());
             const url = source?.sidecars?.chapters?.[0]?.url;

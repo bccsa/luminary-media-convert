@@ -28,6 +28,7 @@ import AccountMenu from '../components/AccountMenu.vue';
 import DeleteSessionModal from '../components/DeleteSessionModal.vue';
 import SessionOutputPanel from '../components/session-view/SessionOutputPanel.vue';
 import SessionPlayerStrip from '../components/session-view/SessionPlayerStrip.vue';
+import AudioTracksPanel from '../components/session-view/AudioTracksPanel.vue';
 import SessionTopline from '../components/session-view/SessionTopline.vue';
 import SessionTrimWorkspace from '../components/session-view/SessionTrimWorkspace.vue';
 import SessionWorkflowPanel from '../components/session-view/SessionWorkflowPanel.vue';
@@ -1213,12 +1214,6 @@ async function fetchSession() {
         sessionToken.value = await resolveSessionToken();
 
         const detail = await getSession(sessionId.value);
-        // A session on a video already encoded has nothing to encode: it has a
-        // screen of its own, for that video's chapters and audio tracks.
-        if (detail.mode === 'edit') {
-            void router.replace(`/sessions/${sessionId.value}/edit`);
-            return;
-        }
         if (!detail) {
             notFound.value = true;
             return;
@@ -1724,6 +1719,15 @@ const encodeSidePanelTab = ref<'encode' | 'chapters'>('encode');
 /** Sub-tab within the aside panel during active encoding. */
 const encodingAsideTab = ref<'progress' | 'chapters'>('progress');
 
+/**
+ * A session opened on a post's existing video, from the CMS: shown as the
+ * finished session it is, with its audio tracks to name beside its chapters.
+ */
+const editsExistingVideo = computed(() => session.value?.mode === 'edit');
+
+/** Sub-tab within the aside panel of an edit session. */
+const editAsideTab = ref<'chapters' | 'tracks'>('chapters');
+
 const trimTimelineWorkspaceRef = ref<InstanceType<
     typeof SessionTrimWorkspace
 > | null>(null);
@@ -2191,6 +2195,48 @@ onUnmounted(() => {
                                     </button>
                                 </div>
 
+                                <!-- Tab switcher: an existing video (Chapters / Audio tracks) -->
+                                <div
+                                    v-if="editsExistingVideo"
+                                    class="shrink-0 flex gap-0.5 rounded-lg border border-slate-200/90 bg-slate-100/80 p-0.5 dark:border-slate-700 dark:bg-slate-800/50"
+                                >
+                                    <button
+                                        type="button"
+                                        class="flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
+                                        :class="
+                                            editAsideTab === 'chapters'
+                                                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
+                                                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+                                        "
+                                        @click="editAsideTab = 'chapters'"
+                                    >
+                                        Chapters
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
+                                        :class="
+                                            editAsideTab === 'tracks'
+                                                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
+                                                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+                                        "
+                                        data-test="audioTracksTab"
+                                        @click="editAsideTab = 'tracks'"
+                                    >
+                                        Audio tracks
+                                    </button>
+                                </div>
+
+                                <AudioTracksPanel
+                                    v-if="
+                                        editsExistingVideo &&
+                                        editAsideTab === 'tracks'
+                                    "
+                                    :session-id="sessionId"
+                                    :session-token="sessionToken"
+                                    @saved="sessionPlayerStripRef?.reload?.()"
+                                />
+
                                 <!-- Encoding progress panel -->
                                 <div
                                     v-if="
@@ -2358,7 +2404,9 @@ onUnmounted(() => {
                                             encodeSidePanelTab ===
                                                 'chapters') &&
                                         (!showEncoding ||
-                                            encodingAsideTab === 'chapters')
+                                            encodingAsideTab === 'chapters') &&
+                                        (!editsExistingVideo ||
+                                            editAsideTab === 'chapters')
                                     "
                                     class="min-h-0 flex-1 flex flex-col overflow-hidden"
                                 >
