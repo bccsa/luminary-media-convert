@@ -98,6 +98,14 @@ export class SessionSummaryDto {
     })
     @Expose()
     error?: string;
+
+    @ApiPropertyOptional({
+        description:
+            "'edit' for a session that edits an existing video; absent for an encode.",
+        enum: ['edit'],
+    })
+    @Expose()
+    mode?: 'edit';
 }
 
 export class SessionStatusDto {
@@ -339,6 +347,14 @@ export class SessionStatusDto {
     })
     @Expose()
     trimSegments?: { inSec: number; outSec: number }[];
+
+    @ApiPropertyOptional({
+        description:
+            "'edit' for a session that edits an existing video; absent for an encode.",
+        enum: ['edit'],
+    })
+    @Expose()
+    mode?: 'edit';
 }
 
 /**

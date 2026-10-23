@@ -1,5 +1,6 @@
 import {
     Body,
+    ConflictException,
     Controller,
     Delete,
     Get,
@@ -38,7 +39,7 @@ import { rm, stat } from 'fs/promises';
 import { isAbsolute, join } from 'path';
 import { AuthResolverGuard } from '../auth/auth-resolver.guard.js';
 import { AuthTypes } from '../auth/auth-types.decorator.js';
-import { SessionService } from './services/session.service.js';
+import { SessionService, type Session } from './services/session.service.js';
 import {
     SessionEventsService,
     type SessionEvent,
@@ -50,6 +51,10 @@ import { CreateSessionDto } from './dto/create-session.dto.js';
 import { EncodeConfigDto } from './dto/encode-config.dto.js';
 import { LocalFileDto } from './dto/local-file.dto.js';
 import { ChaptersWriteDto } from './dto/chapters.dto.js';
+import {
+    AudioTracksWriteDto,
+    EncodedMediaDto,
+} from './dto/encoded-media.dto.js';
 import { hasAllowedExtension } from './services/media-extensions.js';
 import {
     copyModeRejection,
@@ -58,7 +63,10 @@ import {
 import { trimCopyMode } from './services/quick-trim-plan.js';
 import { IngestService } from './services/ingest.service.js';
 import { S3Service } from './services/s3.service.js';
-import { HlsEditService } from '../hls-edit/hls-edit.service.js';
+import {
+    EDITED_CACHE_CONTROL,
+    HlsEditService,
+} from '../hls-edit/hls-edit.service.js';
 import { WaveformService } from './services/waveform.service.js';
 import {
     selectStoryboardTrack,
@@ -191,6 +199,7 @@ export class EncodeController {
             sessionToken: session.sessionToken,
             hlsUrl: session.hlsUrl,
             error: session.error,
+            ...(session.edit ? { mode: 'edit' as const } : {}),
         }));
     }
 
@@ -234,6 +243,7 @@ export class EncodeController {
         if (!session) {
             throw new NotFoundException(`Session ${sessionId} not found`);
         }
+        this.assertEncodes(session);
 
         if (session.status !== 'created') {
             throw new BadRequestException(
@@ -324,6 +334,7 @@ export class EncodeController {
         if (!session) {
             throw new NotFoundException(`Session ${sessionId} not found`);
         }
+        this.assertEncodes(session);
 
         // A session restored without its credentials kept its destination but
         // not the keys to write there; its config holds placeholders. Encoding
@@ -585,6 +596,7 @@ export class EncodeController {
         // is deliberately not part of this payload — it is fetched separately from
         // GET /api/sessions/:sessionId/key.
         if (session.hlsUrl) result.hlsUrl = session.hlsUrl;
+        if (session.edit) result.mode = 'edit';
 
         if (
             session.probeResult &&
@@ -880,14 +892,104 @@ export class EncodeController {
         @Body() dto: ChaptersWriteDto,
         @Query('lang') lang = 'en'
     ): Promise<void> {
-        const { s3, folderPrefix, keyHex } = this.sessionStorage(sessionId);
+        const { s3, folderPrefix, keyHex, editing } =
+            this.sessionStorage(sessionId);
         await this.hlsEditService.writeChapters(
             s3,
             folderPrefix,
             lang,
             dto.vtt,
+            keyHex,
+            editing ? { cacheControl: EDITED_CACHE_CONTROL } : {}
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // An existing video, opened by an edit session
+    // -----------------------------------------------------------------------
+
+    @Get(':sessionId/media')
+    @UseGuards(AuthResolverGuard)
+    @AuthTypes('instance', 'session')
+    @ApiSecurity('apikey')
+    @ApiOperation({
+        summary: "Read the existing video's audio tracks and chapter languages",
+        description:
+            'Only for an edit session. Returns the etag to send back with a save.',
+    })
+    @ApiParam({ name: 'sessionId', description: 'Session ID' })
+    @ApiResponse({ status: 200, type: EncodedMediaDto })
+    @ApiResponse({ status: 404, description: 'Session not found.' })
+    @ApiResponse({ status: 409, description: 'Not an edit session.' })
+    async getEncodedMedia(
+        @Param('sessionId') sessionId: string
+    ): Promise<EncodedMediaDto> {
+        const { s3, keyHex, masterKey } = this.editedVideo(sessionId);
+        return this.hlsEditService.readEncodedMedia(s3, masterKey, keyHex);
+    }
+
+    @Put(':sessionId/media/audio-tracks')
+    @UseGuards(AuthResolverGuard)
+    @AuthTypes('instance', 'session')
+    @ApiSecurity('apikey')
+    @ApiOperation({
+        summary: "Change the existing video's audio track languages and names",
+        description:
+            'Only for an edit session. Rewrites LANGUAGE and NAME in every audio ' +
+            'group of the master and nothing else; the first edit keeps the ' +
+            'original at master.m3u8.orig. Refused with 409 once the master has ' +
+            'changed since `ifMatch` was read.',
+    })
+    @ApiParam({ name: 'sessionId', description: 'Session ID' })
+    @ApiResponse({ status: 200, type: EncodedMediaDto })
+    @ApiResponse({ status: 400, description: 'An edit is invalid.' })
+    @ApiResponse({ status: 404, description: 'Session not found.' })
+    @ApiResponse({
+        status: 409,
+        description:
+            'Not an edit session, or the video changed since it was read.',
+    })
+    async putAudioTracks(
+        @Param('sessionId') sessionId: string,
+        @Body() dto: AudioTracksWriteDto
+    ): Promise<EncodedMediaDto> {
+        const { s3, keyHex, masterKey } = this.editedVideo(sessionId);
+        return this.hlsEditService.saveAudioTracks(
+            s3,
+            masterKey,
+            dto.ifMatch,
+            dto.edits,
             keyHex
         );
+    }
+
+    /** Where an edit session's video is, and its key; refused for an encode. */
+    private editedVideo(sessionId: string): {
+        s3: CreateSessionDto['s3'];
+        keyHex?: string;
+        masterKey: string;
+    } {
+        const { s3 } = this.sessionStorage(sessionId);
+        const session = this.sessionService.get(sessionId)!;
+        if (!session.edit) {
+            throw new ConflictException(
+                'This session encodes a new video; it has no existing one to edit'
+            );
+        }
+        return {
+            s3,
+            keyHex: session.encryptionKeyHex,
+            masterKey: session.edit.masterKey,
+        };
+    }
+
+    /** An edit session opens a video already encoded, and never takes a source or encodes. */
+    private assertEncodes(session: Session): void {
+        if (session.edit) {
+            throw new ConflictException(
+                'This session edits an existing video and does not encode'
+            );
+        }
     }
 
     /**
@@ -903,6 +1005,8 @@ export class EncodeController {
         s3: CreateSessionDto['s3'];
         folderPrefix: string;
         keyHex?: string;
+        /** An edit session: what it writes replaces what players already fetch. */
+        editing: boolean;
     } {
         const session = this.sessionService.get(sessionId);
         if (!session) {
@@ -920,10 +1024,14 @@ export class EncodeController {
         // opted out of. Sidecars written after the encode have to be encrypted
         // exactly when the encode's own were, or the chapter the user just
         // saved becomes the one file in the output nothing can read.
-        const encryptsText =
-            session.config.encryption != null &&
-            session.config.encryption.enabled !== false &&
-            session.config.encryption.encryptPlaylists !== false;
+        //
+        // An edit session has no encode to mirror: its sidecars follow the
+        // video it opened, whose master was read encrypted or not.
+        const encryptsText = session.edit
+            ? session.edit.encrypted
+            : session.config.encryption != null &&
+              session.config.encryption.enabled !== false &&
+              session.config.encryption.encryptPlaylists !== false;
 
         return {
             s3: session.config.s3,
@@ -931,6 +1039,7 @@ export class EncodeController {
                 session.config.s3.pathPrefix
             ),
             keyHex: encryptsText ? session.encryptionKeyHex : undefined,
+            editing: !!session.edit,
         };
     }
 

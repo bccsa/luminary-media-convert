@@ -1,6 +1,7 @@
 import { type Mocked } from 'vitest';
 import {
     BadRequestException,
+    ConflictException,
     NotFoundException,
     ServiceUnavailableException,
     UnauthorizedException,
@@ -230,6 +231,116 @@ describe('EncodeController', () => {
             await expect(controller.getChapters('nope')).rejects.toThrow(
                 NotFoundException
             );
+        });
+    });
+
+    describe('an edit session on an existing video', () => {
+        const KEY = '000102030405060708090a0b0c0d0e0f';
+        const MASTER_KEY = 'posts/p1/s1/master.m3u8';
+        function editSession(encrypted: boolean) {
+            const session = sessionService.createWith(
+                () => ({
+                    ...makeConfig(),
+                    s3: { ...makeConfig().s3, pathPrefix: 'posts/p1/s1' },
+                }),
+                { origin: 'cms', edit: { masterKey: MASTER_KEY, encrypted } }
+            );
+            sessionService.setEncryptionKey(session.id, KEY);
+            return session;
+        }
+
+        it('takes no source file and starts no encode', async () => {
+            const session = editSession(false);
+            await expect(
+                controller.attachLocalFile(
+                    session.id,
+                    { path: '/tmp/clip.mp4' } as never,
+                    {} as never
+                )
+            ).rejects.toThrow(ConflictException);
+            await expect(
+                controller.startEncode(session.id, makeEncodeConfig())
+            ).rejects.toThrow(ConflictException);
+        });
+
+        it('writes chapters encrypted beside an encrypted video, asking the CDN to check back', async () => {
+            const session = editSession(true);
+            await controller.putChapters(session.id, { vtt: 'WEBVTT\n' }, 'en');
+            expect(hlsEditService.writeChapters).toHaveBeenCalledWith(
+                expect.anything(),
+                'posts/p1/s1',
+                'en',
+                'WEBVTT\n',
+                KEY,
+                { cacheControl: 'no-cache' }
+            );
+        });
+
+        it('writes chapters in plaintext beside a plaintext video, though it holds a key', async () => {
+            const session = editSession(false);
+            await controller.putChapters(session.id, { vtt: 'WEBVTT\n' }, 'en');
+            expect(
+                hlsEditService.writeChapters.mock.calls[0][4]
+            ).toBeUndefined();
+        });
+
+        it('reads and saves the audio tracks of the video it opened', async () => {
+            const session = editSession(true);
+            hlsEditService.readEncodedMedia = vi
+                .fn()
+                .mockResolvedValue({ etag: 'v1' });
+            hlsEditService.saveAudioTracks = vi
+                .fn()
+                .mockResolvedValue({ etag: 'v2' });
+            await controller.getEncodedMedia(session.id);
+            expect(hlsEditService.readEncodedMedia).toHaveBeenCalledWith(
+                expect.anything(),
+                MASTER_KEY,
+                KEY
+            );
+
+            const edits = [
+                {
+                    from: { language: 'fr', name: 'Francais' },
+                    to: { language: 'fr', name: 'Français' },
+                },
+            ];
+            await controller.putAudioTracks(session.id, {
+                ifMatch: 'v1',
+                edits,
+            });
+            expect(hlsEditService.saveAudioTracks).toHaveBeenCalledWith(
+                expect.anything(),
+                MASTER_KEY,
+                'v1',
+                edits,
+                KEY
+            );
+        });
+
+        it('has no existing video to show or edit in an encode session', async () => {
+            const session = sessionService.create(makeConfig());
+            await expect(
+                controller.getEncodedMedia(session.id)
+            ).rejects.toThrow(ConflictException);
+            await expect(
+                controller.putAudioTracks(session.id, {
+                    ifMatch: 'v1',
+                    edits: [],
+                })
+            ).rejects.toThrow(ConflictException);
+        });
+
+        it('says it is an edit session in the list and the status; an encode says nothing new', async () => {
+            const edit = editSession(false);
+            const encode = sessionService.create(makeConfig());
+            const listed = controller.listSessions();
+            expect(listed.find((s) => s.sessionId === edit.id)?.mode).toBe(
+                'edit'
+            );
+            expect(
+                listed.find((s) => s.sessionId === encode.id)
+            ).not.toHaveProperty('mode');
         });
     });
 

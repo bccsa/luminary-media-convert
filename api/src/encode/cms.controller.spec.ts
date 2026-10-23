@@ -480,3 +480,115 @@ describe('CmsController — the host notification', () => {
         ).resolves.toBeTruthy();
     });
 });
+
+describe("CmsController — an edit session on the post's existing video", () => {
+    const hlsUrl = 'https://cdn.example.com/media/posts/p1/s1/master.m3u8';
+    const editDto = (overrides: Partial<CmsCreateSessionDto> = {}) =>
+        makeDto({
+            mode: 'edit',
+            existingMedia: {
+                hlsUrl,
+                hlsKey: '000102030405060708090a0b0c0d0e0f',
+            },
+            ...overrides,
+        });
+    const req = () => makeRequest({ origin: 'https://cms.test' });
+    let readEncodedMedia: ReturnType<typeof vi.fn>;
+    const buildEditing = () =>
+        new CmsController(
+            sessions,
+            new OriginRegistry({ allowedOrigins: ['https://cms.test'] }),
+            onSessionCreated,
+            { readEncodedMedia } as never
+        );
+
+    beforeEach(() => {
+        readEncodedMedia = vi.fn().mockResolvedValue({ encrypted: true });
+    });
+
+    it('opens the video where it is, with its key, and never as an encode', async () => {
+        const { sessionId } = await buildEditing().createSession(
+            editDto(),
+            req()
+        );
+        const session = sessions.get(sessionId)!;
+
+        expect(readEncodedMedia).toHaveBeenCalledWith(
+            expect.objectContaining({ bucket: 'media' }),
+            'posts/p1/s1/master.m3u8',
+            '000102030405060708090a0b0c0d0e0f'
+        );
+        expect(session.edit).toEqual({
+            masterKey: 'posts/p1/s1/master.m3u8',
+            encrypted: true,
+        });
+        expect(session.config.s3.pathPrefix).toBe('posts/p1/s1');
+        expect(session.config.encryption).toBeUndefined();
+        expect(session.encryptionKeyHex).toBe(
+            '000102030405060708090a0b0c0d0e0f'
+        );
+        expect(session.hlsUrl).toBe(hlsUrl);
+    });
+
+    it('hands a second click the same edit session, and an upload click a new encode', async () => {
+        const controller = buildEditing();
+        const first = await controller.createSession(editDto(), req());
+        const again = await controller.createSession(editDto(), req());
+        expect(again).toMatchObject({
+            sessionId: first.sessionId,
+            reused: true,
+        });
+
+        const upload = await controller.createSession(makeDto(), req());
+        expect(upload.sessionId).not.toBe(first.sessionId);
+        expect(sessions.get(upload.sessionId)!.edit).toBeUndefined();
+    });
+
+    it.each([
+        ['without existingMedia', { existingMedia: undefined }],
+        [
+            'for a video outside publicBaseUrl',
+            { existingMedia: { hlsUrl: 'https://elsewhere.test/master.m3u8' } },
+        ],
+        [
+            'for a URL that is not a playlist',
+            {
+                existingMedia: {
+                    hlsUrl: 'https://cdn.example.com/media/posts/p1/s1/',
+                },
+            },
+        ],
+        [
+            'for a key that is not 32 hex characters',
+            { existingMedia: { hlsUrl, hlsKey: 'nope' } },
+        ],
+    ])('refuses %s, opening nothing', async (_, overrides) => {
+        await expect(
+            buildEditing().createSession(
+                editDto(overrides as Partial<CmsCreateSessionDto>),
+                req()
+            )
+        ).rejects.toMatchObject({ status: 400 });
+        expect(readEncodedMedia).not.toHaveBeenCalled();
+        expect(sessions.list()).toHaveLength(0);
+    });
+
+    it('says so when the bucket has no video at that URL', async () => {
+        readEncodedMedia.mockRejectedValue(
+            Object.assign(new Error('missing'), { name: 'NoSuchKey' })
+        );
+        await expect(
+            buildEditing().createSession(editDto(), req())
+        ).rejects.toMatchObject({ status: 404 });
+        expect(sessions.list()).toHaveLength(0);
+    });
+
+    it('still refuses an origin it was not told to trust', async () => {
+        await expect(
+            buildEditing().createSession(
+                editDto(),
+                makeRequest({ origin: 'https://evil.test' })
+            )
+        ).rejects.toThrow(ForbiddenException);
+    });
+});

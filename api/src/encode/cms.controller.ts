@@ -1,4 +1,5 @@
 import {
+    BadRequestException,
     Body,
     Controller,
     ForbiddenException,
@@ -7,6 +8,8 @@ import {
     HttpStatus,
     Inject,
     Logger,
+    NotFoundException,
+    Optional,
     Post,
     Req,
 } from '@nestjs/common';
@@ -26,6 +29,7 @@ import {
     CmsSessionResponseDto,
 } from './dto/cms-session-response.dto.js';
 import { CreateSessionDto } from './dto/create-session.dto.js';
+import { HlsEditService } from '../hls-edit/hls-edit.service.js';
 import { S3Service } from './services/s3.service.js';
 import { SessionService, type Session } from './services/session.service.js';
 
@@ -57,7 +61,9 @@ export class CmsController {
         private readonly sessionService: SessionService,
         private readonly originRegistry: OriginRegistry,
         @Inject(CMS_SESSION_HOOK)
-        private readonly onSessionCreated?: CmsSessionHook
+        private readonly onSessionCreated?: CmsSessionHook,
+        @Optional()
+        private readonly hlsEditService?: HlsEditService
     ) {}
 
     @Get('health')
@@ -95,6 +101,9 @@ export class CmsController {
     ): Promise<CmsSessionResponseDto> {
         await this.assertOriginAllowed(req);
         const callerOrigin = normalizeOrigin(req.headers.origin) ?? undefined;
+        if (dto.mode === 'edit') {
+            return this.createEditSession(dto, req, callerOrigin);
+        }
 
         // Matched on the document *and* the caller. Idempotency means "this site
         // clicked twice", not "somebody named this document" — without the
@@ -134,6 +143,91 @@ export class CmsController {
 
         this.notifyHost(session.id);
 
+        return this.describe(session, req, false);
+    }
+
+    /**
+     * A session on the post's existing video, to change its chapters and its
+     * audio tracks' languages and names. Its master is read before the session
+     * exists, so a URL outside the bucket, a missing file or a wrong key is
+     * refused here rather than on the user's first save.
+     */
+    private async createEditSession(
+        dto: CmsCreateSessionDto,
+        req: Request,
+        callerOrigin: string | undefined
+    ): Promise<CmsSessionResponseDto> {
+        const media = dto.existingMedia;
+        if (!media) {
+            throw new BadRequestException(
+                "existingMedia is required with mode 'edit'"
+            );
+        }
+        if (media.hlsKey !== undefined && !HEX_KEY.test(media.hlsKey)) {
+            throw new BadRequestException(
+                'existingMedia.hlsKey must be a 32-character hex AES-128 key'
+            );
+        }
+        const masterKey = masterKeyOf(media.hlsUrl, dto.publicBaseUrl);
+
+        const existing = this.sessionService.findActiveByDocumentId(
+            dto.documentId,
+            callerOrigin,
+            true
+        );
+        if (existing?.readToken && existing.edit?.masterKey === masterKey) {
+            this.notifyHost(existing.id);
+            return this.describe(existing, req, true);
+        }
+
+        if (!this.hlsEditService) {
+            throw new Error('Editing needs the HLS edit service');
+        }
+        let encrypted: boolean;
+        try {
+            ({ encrypted } = await this.hlsEditService.readEncodedMedia(
+                dto.s3,
+                masterKey,
+                media.hlsKey
+            ));
+        } catch (err) {
+            if (isNoSuchKey(err)) {
+                throw new NotFoundException(
+                    'No video was found at existingMedia.hlsUrl in this bucket'
+                );
+            }
+            throw err;
+        }
+
+        const session = this.sessionService.createWith(
+            () => {
+                const config = new CreateSessionDto();
+                const folder = posix.dirname(masterKey);
+                config.s3 = {
+                    ...dto.s3,
+                    pathPrefix: folder === '.' ? '' : folder,
+                };
+                return config;
+            },
+            {
+                title: dto.title,
+                documentId: dto.documentId,
+                publicBaseUrl: dto.publicBaseUrl,
+                origin: 'cms',
+                createdByOrigin: callerOrigin,
+                hlsUrl: media.hlsUrl,
+                edit: { masterKey, encrypted },
+            }
+        );
+        if (media.hlsKey) {
+            this.sessionService.setEncryptionKey(session.id, media.hlsKey);
+        }
+
+        this.logger.log(
+            `Edit session ${session.id} opened for document ${dto.documentId} ` +
+                `by ${req.headers.origin ?? 'a local caller'}`
+        );
+        this.notifyHost(session.id);
         return this.describe(session, req, false);
     }
 
@@ -249,4 +343,40 @@ export class CmsController {
             'This site is not allowed to use the local encoder'
         );
     }
+}
+
+const HEX_KEY = /^[0-9a-f]{32}$/i;
+
+/**
+ * The bucket key of a playlist the post links to: its URL less the public base
+ * URL the bucket is served from. A URL elsewhere is refused, since editing it
+ * would mean writing somewhere this request gave no credentials for.
+ */
+export function masterKeyOf(hlsUrl: string, publicBaseUrl: string): string {
+    const base = publicBaseUrl.replace(/\/+$/, '') + '/';
+    const url = hlsUrl.split(/[?#]/)[0];
+    if (!url.startsWith(base)) {
+        throw new BadRequestException(
+            'existingMedia.hlsUrl is not served from publicBaseUrl'
+        );
+    }
+    let key: string;
+    try {
+        key = decodeURIComponent(url.slice(base.length));
+    } catch {
+        throw new BadRequestException(
+            'existingMedia.hlsUrl is not a valid URL'
+        );
+    }
+    if (!key.endsWith('.m3u8') || key.split('/').includes('..')) {
+        throw new BadRequestException(
+            'existingMedia.hlsUrl must name a master playlist (.m3u8)'
+        );
+    }
+    return key;
+}
+
+function isNoSuchKey(err: unknown): boolean {
+    const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };
+    return e?.name === 'NoSuchKey' || e?.$metadata?.httpStatusCode === 404;
 }
