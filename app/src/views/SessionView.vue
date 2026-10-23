@@ -404,15 +404,24 @@ const canRetryEncode = computed(
     () => currentStatus.value === 'failed' && poller.canRetry.value === true
 );
 
-const showProbeConfig = computed(() => {
+/**
+ * The session can be configured: probed, waiting to encode (or retryable).
+ *
+ * Separate from `showProbeConfig` because the encode form outlives a submit. It
+ * holds the operator's edits — track labels and languages, the ladder — which
+ * exist nowhere else, so a rejected submit (a copy-mode refusal naming a track,
+ * a failed request) has to find them where it left them.
+ */
+const canConfigure = computed(() => {
     const s = currentStatus.value;
     return (
         (s === 'uploaded' || canRetryEncode.value) &&
         isActiveSession.value &&
-        !!probeResult.value &&
-        !submitting.value
+        !!probeResult.value
     );
 });
+
+const showProbeConfig = computed(() => canConfigure.value && !submitting.value);
 
 watch(showProbeConfig, (ready) => {
     if (!ready) encodeConfigCanSubmit.value = false;
@@ -1946,9 +1955,12 @@ onUnmounted(() => {
                     />
 
                     <!-- On trim: flex order shows progress card above player; player fills remaining height.
-                         Hidden during pure upload/probe-loading state so the centered upload card can use the full viewport. -->
+                         Hidden during pure upload/probe-loading state so the centered upload card can use the full viewport.
+                         Kept mounted, only hidden, while the encode request is in flight: the encode form in its aside holds
+                         the operator's edits, and a rejected submit has to find them where it left them. -->
                     <div
-                        v-if="!showSessionDetailCard"
+                        v-if="!showSessionDetailCard || submitting"
+                        v-show="!showSessionDetailCard"
                         :class="[
                             'min-w-0 flex flex-col',
                             activeTab === 'trim'
@@ -2307,7 +2319,7 @@ onUnmounted(() => {
                                     started their encode from the Cuts tab.
                                 -->
                                 <div
-                                    v-if="showProbeConfig"
+                                    v-if="canConfigure"
                                     v-show="
                                         !showChaptersBesidePlayer ||
                                         encodeSidePanelTab === 'encode'
@@ -2316,7 +2328,7 @@ onUnmounted(() => {
                                 >
                                     <SessionOutputPanel
                                         ref="outputPanelRef"
-                                        :show-probe-config="showProbeConfig"
+                                        :show-probe-config="canConfigure"
                                         :probe-result="probeResult"
                                         :byte-range-enabled="byteRangeEnabled"
                                         encode-primary-action="start-encoding"
