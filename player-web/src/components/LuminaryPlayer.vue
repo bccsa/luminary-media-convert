@@ -51,6 +51,7 @@ import {
     rosterFineStep,
     rosterStep,
     rosterTiles,
+    SCRUB_SLOP_PX,
 } from '../ui/scrubPreview';
 import ScrubThumbnail from './ScrubThumbnail.vue';
 import ScrubRoster from './ScrubRoster.vue';
@@ -729,6 +730,8 @@ function hideScrub(): void {
  * off the bar must keep its preview for as long as the button is down, wherever the pointer goes.
  */
 let scrubbing = false;
+/** Where the press that is scrubbing began; a drag past the slop is what makes the video hold still. */
+let pressAt: { x: number; y: number } | null = null;
 
 /**
  * Whether the video was playing when a scrub began, and so is to play on when it ends. A scrubbed video holds still:
@@ -752,6 +755,7 @@ function resumeFromScrub(): void {
 /** The press ended, or was taken from us: nothing is being scrubbed any more. */
 function endScrub(event?: PointerEvent): void {
     scrubbing = false;
+    pressAt = null;
     heldGap = null;
     resumeFromScrub();
     // A press that opened the roster leaves it open: the viewer lifted a finger to look, not to be done.
@@ -791,6 +795,10 @@ function updateScrub(event: PointerEvent): void {
     if (event.type === 'pointerdown' && pin.value && !onBar) closePin();
     if (event.type === 'pointerdown' && onBar) {
         scrubbing = true;
+        pressAt = { x: event.clientX, y: event.clientY };
+    }
+    // A plain tap seeks and keeps playing; the video holds still once the finger drags along the timeline.
+    if (scrubbing && pressAt && event.type === 'pointermove' && Math.hypot(event.clientX - pressAt.x, event.clientY - pressAt.y) > SCRUB_SLOP_PX) {
         pauseForScrub();
     }
     if (!scrubbing && !slider.hasAttribute('data-dragging') && !onBar) return hideScrub();

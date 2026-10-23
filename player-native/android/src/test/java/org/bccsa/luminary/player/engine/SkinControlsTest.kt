@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Looper
 import android.os.SystemClock
+import android.view.MotionEvent
 import android.view.View
 import android.widget.ImageView
 import androidx.activity.ComponentActivity
@@ -157,6 +158,48 @@ class SkinControlsTest {
         } finally {
             live.release()
         }
+    }
+
+    /** The timeline is private to the skin, so it is found by its class name in the view tree. */
+    private fun SkinControls.timeline(): View {
+        fun walk(view: View): View? {
+            if (view.javaClass.simpleName == "Timeline") return view
+            val group = view as? android.view.ViewGroup ?: return null
+            return (0 until group.childCount).firstNotNullOfOrNull { walk(group.getChildAt(it)) }
+        }
+        return checkNotNull(walk(this))
+    }
+
+    private fun touch(view: View, action: Int, x: Float, at: Long): MotionEvent =
+        MotionEvent.obtain(at, at, action, x, view.height / 2f, 0)
+
+    @Test
+    fun `a tap on the timeline seeks and keeps playing`() {
+        val controls = controls()
+        controls.measure(android.view.View.MeasureSpec.makeMeasureSpec(1080, android.view.View.MeasureSpec.EXACTLY), android.view.View.MeasureSpec.makeMeasureSpec(1920, android.view.View.MeasureSpec.EXACTLY))
+        controls.layout(0, 0, 1080, 1920)
+        player.play()
+        val timeline = controls.timeline()
+        val now = SystemClock.uptimeMillis()
+        timeline.onTouchEvent(touch(timeline, MotionEvent.ACTION_DOWN, timeline.width / 2f, now))
+        timeline.onTouchEvent(touch(timeline, MotionEvent.ACTION_UP, timeline.width / 2f, now + 50))
+        assertTrue(player.playWhenReady)
+    }
+
+    @Test
+    fun `dragging along the timeline holds the video still, and it plays on when the finger lifts`() {
+        val controls = controls()
+        controls.measure(android.view.View.MeasureSpec.makeMeasureSpec(1080, android.view.View.MeasureSpec.EXACTLY), android.view.View.MeasureSpec.makeMeasureSpec(1920, android.view.View.MeasureSpec.EXACTLY))
+        controls.layout(0, 0, 1080, 1920)
+        player.play()
+        val timeline = controls.timeline()
+        val now = SystemClock.uptimeMillis()
+        val start = timeline.width / 4f
+        timeline.onTouchEvent(touch(timeline, MotionEvent.ACTION_DOWN, start, now))
+        timeline.onTouchEvent(touch(timeline, MotionEvent.ACTION_MOVE, start + 200f, now + 50))
+        assertFalse(player.playWhenReady)
+        timeline.onTouchEvent(touch(timeline, MotionEvent.ACTION_UP, start + 200f, now + 100))
+        assertTrue(player.playWhenReady)
     }
 
     @Test

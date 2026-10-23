@@ -25,6 +25,7 @@ import android.view.GestureDetector
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewOutlineProvider
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
@@ -46,6 +47,7 @@ import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.util.Util
 import kotlin.math.max
+import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
@@ -771,7 +773,8 @@ internal class SkinControls(
 
     /** The finger is on the timeline at [fraction] of the way along it. */
     private fun scrubbed(fraction: Double, x: Float) {
-        pauseForScrub()
+        // A tap seeks and keeps playing; the video holds still once the finger drags along the timeline.
+        if (timeline.moved) pauseForScrub()
         if (rosterWanted() && !rosterOpen) openRoster()
         val seconds = fraction * (player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0L) / 1000.0
         if (rosterOpen) updateRoster(seconds, x)
@@ -1662,6 +1665,10 @@ private class Timeline(
         private set
     var pointerX = 0f
         private set
+    /** Whether the press has dragged past the touch slop: only then does the video hold still. */
+    var moved = false
+        private set
+    private var downX = 0f
 
     /** The roster is under the timeline: the track is as thick as when held, and stays so while the roster is up. */
     var onRoster = false
@@ -1715,11 +1722,14 @@ private class Timeline(
                 onTouch()
                 parent.requestDisallowInterceptTouchEvent(true)
                 dragging = true
+                moved = false
+                downX = event.x
                 dragAt = fraction
                 pointerX = event.x.coerceIn(0f, width.toFloat())
                 onScrub(fraction, pointerX)
             }
             MotionEvent.ACTION_MOVE -> {
+                if (!moved && abs(event.x - downX) > ViewConfiguration.get(context).scaledTouchSlop) moved = true
                 dragAt = fraction
                 pointerX = event.x.coerceIn(0f, width.toFloat())
                 onScrub(fraction, pointerX)
