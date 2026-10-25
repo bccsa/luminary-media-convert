@@ -104,6 +104,13 @@ export interface Session {
     masterPlaylist?: string;
     thumbnailsVtt?: string;
     encryptionKeyHex?: string;
+    /**
+     * Set when the session edits a video that is already encoded instead of
+     * encoding one: `masterKey` is its master playlist in the bucket, and
+     * `encrypted` says it is LMCENC-wrapped, so files written beside it are too.
+     * Such a session never takes a source or encodes.
+     */
+    edit?: { masterKey: string; encrypted: boolean };
     error?: string;
     /**
      * Something the encode had to do differently from what was asked, on a
@@ -211,6 +218,13 @@ export interface SessionInit {
      * site is not supposed to grant.
      */
     createdByOrigin?: string;
+    /** See {@link Session.edit}. */
+    edit?: Session['edit'];
+    /** The video an edit session opens; an encode learns its own once it starts. */
+    hlsUrl?: string;
+    /** An edit session's master and thumbnails, relative to the video's folder, as a finished encode's are. */
+    masterPlaylist?: string;
+    thumbnailsVtt?: string;
 }
 
 @Injectable()
@@ -597,7 +611,9 @@ export class SessionService implements OnModuleInit {
         const session: Session = {
             id,
             sessionToken,
-            status: 'created',
+            // An edit session opens a video already encoded: it is a finished
+            // session from the start, shown and kept like one.
+            status: init.edit ? 'completed' : 'created',
             progress: 0,
             config: build(id),
             createdAt: Date.now(),
@@ -652,15 +668,20 @@ export class SessionService implements OnModuleInit {
      * a page refresh mid-upload — must land back on the session already in
      * flight rather than start a second one against the same post. Finished
      * sessions are not matched: that click means "replace what is there".
+     * `editing` matches an edit session rather than an encode: one of each can
+     * be open on a post, and a click for one must not be handed the other.
      */
     findActiveByDocumentId(
         documentId: string,
-        callerOrigin?: string
+        callerOrigin?: string,
+        editing = false
     ): Session | undefined {
         return this.list().find(
             (session) =>
                 session.documentId === documentId &&
-                ACTIVE.includes(session.status) &&
+                (ACTIVE.includes(session.status) ||
+                    (editing && session.status === 'completed')) &&
+                !!session.edit === editing &&
                 // Same document is not enough — it has to be the same caller.
                 // Document ids are the CMS's own post identifiers and are
                 // routinely public, so matching on one alone let any other

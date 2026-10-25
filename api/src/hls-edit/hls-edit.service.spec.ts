@@ -328,7 +328,8 @@ describe('HlsEditService', () => {
                 s3,
                 'output/chapters/en.vtt',
                 expect.stringMatching(/^WEBVTT/),
-                'text/vtt'
+                'text/vtt',
+                {}
             );
         });
 
@@ -346,7 +347,8 @@ describe('HlsEditService', () => {
                 s3,
                 'output/chapters/en.vtt',
                 expect.stringMatching(/^WEBVTT/),
-                'text/vtt'
+                'text/vtt',
+                {}
             );
         });
 
