@@ -2391,9 +2391,10 @@
 }
 
 /* Chapters and up next on the now-playing screen are the web player's own panel, from the right when wide. Narrow,
-   it comes up from the foot instead, in the same dress. */
+   it comes up from the foot instead, in the same dress. Not in a player that has gone full-screen from the screen's
+   stage: the screen's narrow box is not what the panel stands in then, and the full screen is wide. */
 @container lmpl-afs (max-aspect-ratio: 6/5) {
-    .lmpl-root .lmpl-afs .lmpl-browse {
+    .lmpl-root .lmpl-afs .lmpl-browse:not(.lmpl-is-fullscreen .lmpl-browse) {
         /* From the picture's foot down, so it never covers what plays, and one top for both tabs; on a short screen it
            still keeps near half. */
         top: min(var(--lmpl-art-bottom, 36%), 52%);
@@ -2408,11 +2409,11 @@
     }
 
     /* A sheet from the foot: a slim line of tabs, the list taking the rest. */
-    .lmpl-root .lmpl-afs .lmpl-browse-head {
+    .lmpl-root .lmpl-afs .lmpl-browse-head:not(.lmpl-is-fullscreen .lmpl-browse-head) {
         padding-top: 2px;
     }
 
-    .lmpl-root .lmpl-afs .lmpl-browse-tab {
+    .lmpl-root .lmpl-afs .lmpl-browse-tab:not(.lmpl-is-fullscreen .lmpl-browse-tab) {
         padding-block: 8px;
     }
 }
