@@ -25,7 +25,7 @@ public final class TimelineScrub {
     }
 
     /// How long after the last touch it closes on its own.
-    public static let idleSeconds: Double = 3
+    public static let idleSeconds: Double = 5
 
     public private(set) var mode: Mode = .closed
     public var isOpen: Bool { mode != .closed }

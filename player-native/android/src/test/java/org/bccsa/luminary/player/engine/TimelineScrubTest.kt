@@ -45,9 +45,9 @@ class TimelineScrubTest {
     }
 
     @Test
-    fun `it closes three seconds after the last touch, and the video plays on`() {
+    fun `it closes five seconds after the last touch, and the video plays on`() {
         scrub.tapped(framesReady = true, playing = true)
-        clock.advance(2.9)
+        clock.advance(4.9)
         assertTrue(scrub.isOpen)
         clock.advance(0.1)
         assertFalse(scrub.isOpen)
@@ -62,7 +62,7 @@ class TimelineScrubTest {
         clock.advance(10.0)
         assertTrue(scrub.isOpen)
         scrub.dragEnded(5.0)
-        clock.advance(2.9)
+        clock.advance(4.9)
         assertTrue(scrub.isOpen)
         clock.advance(0.1)
         assertFalse(scrub.isOpen)
@@ -79,7 +79,7 @@ class TimelineScrubTest {
     @Test
     fun `a video that was paused stays paused when it closes`() {
         scrub.tapped(framesReady = true, playing = false)
-        clock.advance(3.0)
+        clock.advance(5.0)
         assertEquals(listOf(Effect.Open(Mode.STRIP), Effect.Close), effects)
     }
 
@@ -105,7 +105,7 @@ class TimelineScrubTest {
         scrub.tapped(framesReady = true, playing = true)
         clock.advance(2.0)
         scrub.tapped(framesReady = true, playing = false)
-        clock.advance(2.9)
+        clock.advance(4.9)
         assertTrue(scrub.isOpen)
         assertEquals(listOf(Effect.Open(Mode.STRIP), Effect.Pause), effects)
     }

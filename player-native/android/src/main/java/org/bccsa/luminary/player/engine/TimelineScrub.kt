@@ -95,6 +95,6 @@ internal class TimelineScrub(private val clock: Clock) {
 
     companion object {
         /** How long after the last touch it closes on its own. */
-        const val IDLE_SECONDS = 3.0
+        const val IDLE_SECONDS = 5.0
     }
 }

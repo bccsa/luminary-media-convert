@@ -44,9 +44,9 @@ describe('TimelineScrub: two touches to scrub', () => {
         expect(effects).toEqual([open('strip'), pause, { kind: 'seek', time: 10 }]);
     });
 
-    it('closes three seconds after the last touch, and the video plays on', () => {
+    it('closes five seconds after the last touch, and the video plays on', () => {
         scrub.tapped(true, true);
-        vi.advanceTimersByTime(2900);
+        vi.advanceTimersByTime(4900);
         expect(scrub.isOpen).toBe(true);
         vi.advanceTimersByTime(100);
         expect(scrub.isOpen).toBe(false);
@@ -60,7 +60,7 @@ describe('TimelineScrub: two touches to scrub', () => {
         vi.advanceTimersByTime(10000);
         expect(scrub.isOpen).toBe(true);
         scrub.dragEnded(5);
-        vi.advanceTimersByTime(2900);
+        vi.advanceTimersByTime(4900);
         expect(scrub.isOpen).toBe(true);
         vi.advanceTimersByTime(100);
         expect(scrub.isOpen).toBe(false);
@@ -75,7 +75,7 @@ describe('TimelineScrub: two touches to scrub', () => {
 
     it('a video that was paused stays paused when it closes', () => {
         scrub.tapped(true, false);
-        vi.advanceTimersByTime(3000);
+        vi.advanceTimersByTime(5000);
         expect(effects).toEqual([open('strip'), close]);
     });
 
@@ -97,7 +97,7 @@ describe('TimelineScrub: two touches to scrub', () => {
         scrub.tapped(true, true);
         vi.advanceTimersByTime(2000);
         scrub.tapped(true, false);
-        vi.advanceTimersByTime(2900);
+        vi.advanceTimersByTime(4900);
         expect(scrub.isOpen).toBe(true);
         expect(effects).toEqual([open('strip'), pause]);
     });
