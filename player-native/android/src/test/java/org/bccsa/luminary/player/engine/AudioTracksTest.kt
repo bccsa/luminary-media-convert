@@ -71,6 +71,26 @@ class AudioTracksTest {
         assertEquals(3, choices.first().members.size)
     }
 
+    private val unnamed = Tracks.Group(
+        TrackGroup(Format.Builder().setSampleMimeType(MimeTypes.AUDIO_AAC).build()),
+        false,
+        intArrayOf(C.FORMAT_HANDLED),
+        booleanArrayOf(true),
+    )
+
+    @Test
+    fun `the variant's own unnamed audio is left out beside named renditions`() {
+        // The audio-only master: a variant at the first rendition's address, which ExoPlayer lists as a track of its own.
+        val tracks = Tracks(listOf(unnamed, rendition("eng", "English", "en"), rendition("fra", "Français", "fr")))
+
+        assertEquals(listOf("English", "Français"), audioChoicesOf(tracks).map { it.label })
+    }
+
+    @Test
+    fun `a video whose only audio has no name keeps it`() {
+        assertEquals(1, audioChoicesOf(Tracks(listOf(video, unnamed))).size)
+    }
+
     @Test
     fun `renditions with no language are told apart by their label`() {
         val tracks = Tracks(listOf(rendition(null, "Commentary", "a"), rendition(null, "Original", "b"), rendition(null, "Commentary", "c")))
