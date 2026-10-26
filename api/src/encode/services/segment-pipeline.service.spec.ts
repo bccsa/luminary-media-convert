@@ -458,6 +458,23 @@ describe('SegmentPipeline', () => {
             expect(sentKeys(pipeline)).not.toContain('prefix/pack-list.txt');
         });
 
+        it('skips them on Windows too, where paths use backslashes', async () => {
+            // `concat.txt` lists the encoder's local file paths, so on Windows it
+            // put those in the bucket beside the video.
+            writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U\n');
+            const pipeline = makePipeline(tmpDir);
+            vi.spyOn(pipeline as any, 'walkDir').mockResolvedValue([
+                join(tmpDir, 'master.m3u8'),
+                `${tmpDir}\\concat.txt`,
+                `${tmpDir}\\thumbnails\\pack-list.txt`,
+            ]);
+
+            const keys = await pipeline.uploadRemainingFiles(tmpDir);
+
+            expect(keys).toEqual(['prefix/master.m3u8']);
+            expect(sentKeys(pipeline)).toEqual(['prefix/master.m3u8']);
+        });
+
         it('should upload all files when no concat.txt present', async () => {
             writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U\n');
             mkdirSync(join(tmpDir, 'thumbnails'));
