@@ -101,9 +101,8 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     private var rowRest: CGFloat = 0
     /// The frames last laid out as up or down.
     private var rosterWasUp = false
-    /// Playback paused for a scrub, to start again when the finger lifts: a playhead that keeps moving under the
-    /// finger makes the frames drift and the landing a guess.
-    private var resumeAfterScrub = false
+    /// A tap on the timeline opens the strip (or the thick bar), a drag moves the video, and it closes on its own.
+    private let timelineScrub: TimelineScrub
     /// The time left reads as the whole length instead, as the web's does when pressed.
     private var showTotal = false
 
@@ -124,6 +123,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         self.commands = commands
         self.texts = texts
         visibility = FullscreenControlsVisibility(clock: clock)
+        timelineScrub = TimelineScrub(clock: clock)
         super.init(nibName: nil, bundle: nil)
         // The engine's speed, which is right while paused too; the player's own reads 0 then.
         rate = commands.rate()
@@ -368,7 +368,9 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         spinner.accessibilityLabel = texts.loading
         progress.accessibilityLabel = texts.seek
 
-        on(playPause) { $0.state.playing ? $0.commands.pause() : $0.commands.play() }
+        on(playPause) {
+            if $0.timelineScrub.isOpen { $0.timelineScrub.playPressed() } else if $0.state.playing { $0.commands.pause() } else { $0.commands.play() }
+        }
         on(skipBack) { $0.skip(by: -Double($0.layout?.skipBack ?? 0)) }
         on(skipForward) { $0.skip(by: Double($0.layout?.skipForward ?? 0)) }
         on(exitButton) { $0.onLeave?() }
@@ -380,6 +382,10 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         on(subtitlesButton, opensMenu: true) { $0.openMenu(from: $0.subtitlesButton, title: $0.texts.subtitlesMenu, items: $0.subtitleItems()) }
         on(qualityButton, opensMenu: true) { $0.openMenu(from: $0.qualityButton, title: $0.texts.qualityMenu, items: $0.qualityItems()) }
         progress.onScrub = { [weak self] fraction, ended in self?.scrub(to: fraction, ended: ended) }
+        progress.onScrubCancelled = { [weak self] in self?.scrubCancelled() }
+        progress.onTap = { [weak self] in self?.timelineTapped() }
+        progress.onTouchDown = { [weak self] in self?.timelineScrub.touchBegan() }
+        timelineScrub.onEffect = { [weak self] effect in self?.apply(effect) }
 
         let doubleTap = UITapGestureRecognizer(target: self, action: #selector(doubleTapped))
         doubleTap.numberOfTapsRequired = 2
@@ -410,6 +416,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         stopObserving()
         visibility.stop()
         closeMenu()
+        timelineScrub.reset()
         closePin()
         hideRoster()
         panel?.removeFromSuperview()
@@ -527,6 +534,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     /// A reattach or a load gives the player a new item, whose subtitles are its own.
     private func itemChanged() {
         guard subtitles?.item !== player.currentItem else { return }
+        timelineScrub.reset()
         closePin()
         subtitles = nil
         if menu?.tag == subtitlesButton.hash || menu?.tag == qualityButton.hash { closeMenu() }
@@ -691,44 +699,73 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         commands.seek(min(max(target, 0), state.duration > 0 ? state.duration : target))
     }
 
+    /// The bar dragged to `fraction`, and let go when `ended`: only a drag moves the video. The strip, when there are
+    /// frames, follows the finger and stays open where it let go.
     private func scrub(to fraction: Double, ended: Bool) {
         visibility.touched()
         guard state.duration > 0 else { return }
-        let position = min(max(fraction, 0), 1) * state.duration
+        let fraction = min(max(fraction, 0), 1)
+        let position = fraction * state.duration
         if ended {
             scrubbing = nil
-            // A roster the press had open stays open, centred on where the video is going.
-            let held = rosterFraction != nil && commands.thumbnails?.ready == true
-            commands.seek(position)
-            if held {
+            if rosterFraction != nil {
                 rosterFraction = nil
-                let markerX = progress.frame.minX + CGFloat(min(max(fraction, 0), 1)) * progress.frame.width - roster.frame.minX
-                openPin(at: position, markerX: markerX)
-            } else {
-                hideRoster()
+                pinMarkerX = progress.frame.minX + CGFloat(fraction) * progress.frame.width - roster.frame.minX
             }
             hidePicture()
-            resumeFromScrub()
+            timelineScrub.dragEnded(at: position)
+            updatePinned()
         } else {
-            if scrubbing == nil { pauseForScrub() }
+            if scrubbing == nil { timelineScrub.dragBegan(framesReady: framesReady, playing: state.playing) }
             scrubbing = position
-            if rosterPinned { closePin() }
             if commands.thumbnails?.ready == true { updateRoster(fraction) }
             showPicture(position)
         }
         refresh()
     }
 
-    private func pauseForScrub() {
-        guard !resumeAfterScrub, state.playing else { return }
-        resumeAfterScrub = true
-        commands.pause()
+    /// The drag was taken from the finger: nothing moves.
+    private func scrubCancelled() {
+        scrubbing = nil
+        rosterFraction = nil
+        hidePicture()
+        timelineScrub.dragCancelled()
+        updatePinned()
+        refresh()
     }
 
-    private func resumeFromScrub() {
-        guard resumeAfterScrub else { return }
-        resumeAfterScrub = false
-        commands.play()
+    private func timelineTapped() {
+        visibility.touched()
+        guard state.duration > 0 else { return }
+        timelineScrub.tapped(framesReady: framesReady, playing: state.playing)
+    }
+
+    private var framesReady: Bool { commands.thumbnails?.ready == true && state.duration > 0 }
+
+    private func apply(_ effect: TimelineScrub.Effect) {
+        switch effect {
+        case .open(.strip):
+            placeRoster()
+            let fraction = state.duration > 0 ? CGFloat(min(max(playhead / state.duration, 0), 1)) : 0
+            openPin(at: playhead, markerX: progress.frame.minX + fraction * progress.frame.width - roster.frame.minX)
+        case .open(.bar):
+            progress.scrubMode = true
+            visibility.hold()
+        case .open(.closed):
+            break
+        case .close:
+            closePin()
+            progress.scrubMode = false
+            visibility.touched()
+        case .pause:
+            commands.pause()
+        case .play:
+            commands.play()
+        case let .seek(time):
+            if rosterPinned { rest(at: time) }
+            commands.seek(time)
+        }
+        refresh()
     }
 
     // MARK: Roster
@@ -878,7 +915,8 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     }
 
     private func updatePinned() {
-        guard rosterPinned, state.duration > 0 else { return }
+        // While the bar is dragged the strip follows the finger instead.
+        guard rosterPinned, rosterFraction == nil, state.duration > 0 else { return }
         placeRoster()
         let markerX = min(max(pinMarkerX, 0), roster.frame.width)
         let time = min(max(pinTime, 0), state.duration)
@@ -893,7 +931,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         visibility.touched()
         switch gesture {
         case .began:
-            pauseForScrub()
+            timelineScrub.dragBegan(framesReady: framesReady, playing: state.playing)
             pinDrag = (pinTime, pinTime, false)
         case .changed:
             guard let drag = pinDrag else { return }
@@ -907,23 +945,18 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
             hidePicture()
             guard let drag = pinDrag else { return }
             pinDrag = nil
-            if drag.moved {
-                rest(at: drag.time)
-                commands.seek(drag.time)
-            }
-            resumeFromScrub()
+            if drag.moved { timelineScrub.dragEnded(at: drag.time) } else { timelineScrub.dragCancelled() }
         default:
             pinDrag = nil
             hidePicture()
-            resumeFromScrub()
+            timelineScrub.dragCancelled()
         }
         updatePinned()
     }
 
     @objc private func tapped() {
-        if rosterPinned {
-            closePin()
-            visibility.touched()
+        if timelineScrub.isOpen {
+            timelineScrub.tappedElsewhere()
             return
         }
         if menu != nil {
@@ -1050,6 +1083,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     private func openBrowse() {
         guard let browse, panel == nil else { return }
         closeMenu()
+        timelineScrub.reset()
         closePin()
         hideRoster()
         let panel = BrowsePanel(frame: view.bounds)
@@ -1265,10 +1299,17 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
 }
 
 /// The timeline: thick and round with no knob, the fill being the playhead, cut at the chapter starts. The track
-/// grows a little while held, and stays so while the frames are under it. Dragging or tapping it seeks.
+/// grows a little while held, and stays so while the frames are under it. Dragging it seeks; a tap only opens the
+/// way to scrub, so a touch never moves the video by accident.
 final class ProgressBar: UIView {
-    /// The fraction the viewer points at, and whether they let go.
+    /// The fraction the viewer drags to, and whether they let go.
     var onScrub: ((Double, Bool) -> Void)?
+    /// The drag was taken away before the finger lifted.
+    var onScrubCancelled: (() -> Void)?
+    /// A tap, which does not seek.
+    var onTap: (() -> Void)?
+    /// A finger came down, before it is known to be a tap or a drag.
+    var onTouchDown: (() -> Void)?
     /// Where each chapter after the first starts, as a fraction of the bar: ``ChapterCuts/starts(_:duration:)``.
     var cuts: [Double] = [] {
         didSet { if cuts != oldValue { setNeedsLayout() } }
@@ -1281,6 +1322,14 @@ final class ProgressBar: UIView {
     var onRoster = false {
         didSet { if onRoster != oldValue { setNeedsLayout() } }
     }
+    /// Opened for scrubbing without frames: thicker still, with a handle on the playhead to take hold of.
+    var scrubMode = false {
+        didSet {
+            guard scrubMode != oldValue else { return }
+            handle.isHidden = !scrubMode
+            setNeedsLayout()
+        }
+    }
 
     /// The three bars, masked together so a cut goes through all of them.
     private let bars = UIView()
@@ -1291,6 +1340,7 @@ final class ProgressBar: UIView {
     private var playedFraction: Double = 0
     private var loadedFraction: Double = 0
     private var held = false
+    private let handle = UIView()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -1304,6 +1354,15 @@ final class ProgressBar: UIView {
             bars.addSubview(part)
         }
         cutMask.fillRule = .evenOdd
+        // Over the bars and outside their mask, so a chapter cut never slices it.
+        handle.backgroundColor = .white
+        handle.isUserInteractionEnabled = false
+        handle.isHidden = true
+        handle.layer.shadowColor = UIColor.black.cgColor
+        handle.layer.shadowOpacity = 0.35
+        handle.layer.shadowRadius = 3
+        handle.layer.shadowOffset = .zero
+        addSubview(handle)
         addGestureRecognizer(UIPanGestureRecognizer(target: self, action: #selector(panned)))
         addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(tapped)))
         isAccessibilityElement = true
@@ -1322,7 +1381,7 @@ final class ProgressBar: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         bars.frame = bounds
-        let thickness = (held || onRoster ? Skin.trackHeld : Skin.track) * scale
+        let thickness = (scrubMode ? Skin.trackScrub : held || onRoster ? Skin.trackHeld : Skin.track) * scale
         let y = (bounds.height - thickness) / 2
         if cuts.isEmpty {
             bars.layer.mask = nil
@@ -1341,6 +1400,14 @@ final class ProgressBar: UIView {
         loaded.frame = CGRect(x: 0, y: y, width: bounds.width * loadedFraction, height: thickness)
         played.frame = CGRect(x: 0, y: y, width: bounds.width * playedFraction, height: thickness)
         for part in [track, loaded, played] { part.layer.cornerRadius = thickness / 2 }
+        let side = Skin.scrubHandle * scale
+        handle.frame = CGRect(x: bounds.width * playedFraction - side / 2, y: (bounds.height - side) / 2, width: side, height: side)
+        handle.layer.cornerRadius = side / 2
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesBegan(touches, with: event)
+        onTouchDown?()
     }
 
     @objc private func panned(_ pan: UIPanGestureRecognizer) {
@@ -1349,16 +1416,19 @@ final class ProgressBar: UIView {
         case .began, .changed:
             held = true
             onScrub?(fraction, false)
-        case .ended, .cancelled:
+        case .ended:
             held = false
             onScrub?(fraction, true)
+        case .cancelled:
+            held = false
+            onScrubCancelled?()
         default: break
         }
         setNeedsLayout()
     }
 
     @objc private func tapped(_ tap: UITapGestureRecognizer) {
-        onScrub?(Double(tap.location(in: self).x / max(bounds.width, 1)), true)
+        onTap?()
     }
 
     override func accessibilityIncrement() {
