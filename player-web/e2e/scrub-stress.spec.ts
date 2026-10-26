@@ -123,6 +123,8 @@ test('the strip stays clear of the controls through a resize and the controls hi
     await wake(page);
     await page.locator('media-fullscreen-button').first().click();
     await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(true);
+    // The strip is offered in a video's last ten seconds only.
+    await page.locator('video').evaluate((v: HTMLVideoElement) => { v.currentTime = 8; });
     for (const size of [{ width: 1100, height: 760 }, { width: 700, height: 360 }, { width: 1280, height: 400 }, { width: 900, height: 700 }]) {
         await page.setViewportSize(size);
         await wake(page);

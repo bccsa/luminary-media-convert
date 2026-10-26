@@ -11,14 +11,21 @@ class NextUpTest {
         closed: Boolean = false,
         live: Boolean = false,
         duration: Double? = 600.0,
-        position: Double = 545.0,
+        position: Double = 595.0,
     ) = NextUp.due(offered, closed, live, duration, position)
 
     @Test
-    fun `it is up with a minute or less left`() {
-        assertTrue(due(position = 540.0))
+    fun `it is up with ten seconds or less left`() {
+        assertTrue(due(position = 590.0))
         assertTrue(due(position = 599.0))
-        assertFalse(due(position = 539.9))
+        assertFalse(due(position = 589.9))
+    }
+
+    @Test
+    fun `it leaves most of a short clip uncovered`() {
+        // A 1:16 video: not at 0:16, only in its last ten seconds.
+        assertFalse(due(duration = 76.0, position = 16.0))
+        assertTrue(due(duration = 76.0, position = 66.0))
     }
 
     @Test

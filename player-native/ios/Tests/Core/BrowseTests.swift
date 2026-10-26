@@ -65,10 +65,17 @@ struct ChapterCutsTests {
 
 @Suite("Up-next strip")
 struct NextUpTests {
-    @Test("due in the last minute of a video with something on offer")
+    @Test("due in the last ten seconds of a video with something on offer")
     func due() {
-        #expect(!NextUp.due(offered: true, closed: false, live: false, duration: 300, position: 239))
-        #expect(NextUp.due(offered: true, closed: false, live: false, duration: 300, position: 240))
+        #expect(!NextUp.due(offered: true, closed: false, live: false, duration: 300, position: 289.9))
+        #expect(NextUp.due(offered: true, closed: false, live: false, duration: 300, position: 290))
+    }
+
+    @Test("leaves most of a short clip uncovered")
+    func shortClip() {
+        // A 1:16 video: not at 0:16, only in its last ten seconds.
+        #expect(!NextUp.due(offered: true, closed: false, live: false, duration: 76, position: 16))
+        #expect(NextUp.due(offered: true, closed: false, live: false, duration: 76, position: 66))
     }
 
     @Test("never for live, an unknown length, a closed strip or nothing on offer")
