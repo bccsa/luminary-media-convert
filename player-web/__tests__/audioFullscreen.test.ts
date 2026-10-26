@@ -186,6 +186,19 @@ describe('AudioFullscreen — the transport', () => {
         expect(bar.classes()).toContain('lmpl-afs-bar-open');
     });
 
+    it('with frames, a finger tap shows the host its strip instead of thickening the bar', async () => {
+        const wrapper = mountScreen();
+        await wrapper.setProps({ thumbnailAt: () => ({ url: 'sheet.jpg', x: 0, y: 0, w: 160, h: 90 }) });
+        const bar = find(wrapper, 'afsBar');
+        bar.element.getBoundingClientRect = () => ({ left: 100, width: 200, top: 0, height: 30, right: 300, bottom: 30, x: 100, y: 0, toJSON: () => ({}) });
+        await bar.trigger('pointerdown', { clientX: 250, pointerId: 4, pointerType: 'touch' });
+        await bar.trigger('pointerup', { clientX: 250, pointerId: 4, pointerType: 'touch' });
+        expect(wrapper.emitted('seek')).toBeUndefined();
+        const scrubs = wrapper.emitted('scrub') ?? [];
+        expect(scrubs.at(-1)?.[0]).toMatchObject({ held: true });
+        expect(bar.classes()).not.toContain('lmpl-afs-bar-open');
+    });
+
     it('seeks once when a finger drags the bar and lets go', async () => {
         const wrapper = mountScreen();
         const bar = find(wrapper, 'afsBar');
