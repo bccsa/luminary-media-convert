@@ -1,6 +1,7 @@
 package org.bccsa.luminary.player.engine
 
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
@@ -36,11 +37,19 @@ class AudioChoice(val id: String, val language: String?, val label: String, val 
     val selected: Boolean get() = members.any { it.group.isTrackSelected(it.index) }
 }
 
-/** One choice per distinct language (else label), in the order they first appear; unplayable renditions are left out. */
+/**
+ * One choice per distinct language (else label), in the order they first appear; unplayable renditions are left out.
+ *
+ * So is a track with neither a language nor a label beside ones that have them: that is the variant's own audio, which
+ * ExoPlayer lists apart from the renditions when a variant's address is a rendition's (the audio-only master promotes
+ * each audio group to a variant at its first rendition). It is that rendition again, under no name the viewer knows.
+ */
 fun audioChoicesOf(tracks: Tracks): List<AudioChoice> {
+    val playable = audioTracksOf(tracks).filter { it.group.isTrackSupported(it.index) }
+    val named = playable.filter { it.group.getTrackFormat(it.index).isNamed() }
     val byKey = LinkedHashMap<String, MutableList<AudioRef>>()
-    for (ref in audioTracksOf(tracks)) {
-        if (!ref.group.isTrackSupported(ref.index)) continue
+    for (ref in playable) {
+        if (named.isNotEmpty() && ref !in named) continue
         val format = ref.group.getTrackFormat(ref.index)
         val key = format.language?.takeIf { it.isNotEmpty() }?.let { "lang:$it" } ?: "name:${format.label ?: ref.id}"
         byKey.getOrPut(key) { mutableListOf() } += ref
@@ -52,6 +61,8 @@ fun audioChoicesOf(tracks: Tracks): List<AudioChoice> {
         AudioChoice(first.id, language, format.label ?: language ?: first.id, first, members)
     }
 }
+
+private fun Format.isNamed() = !language.isNullOrEmpty() || !label.isNullOrEmpty()
 
 /**
  * Plays [choice]. A language is asked for as a preference, which ExoPlayer applies to every audio
