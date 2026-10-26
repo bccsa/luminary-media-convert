@@ -1760,9 +1760,19 @@
 }
 
 /* The play and pause glyph is a share of its disc, so it grows with it. */
-.lmpl-afs-playbtn svg {
+.lmpl-afs-playbtn svg,
+.lmpl-afs-playbtn .media-button-icon {
+    display: block;
     width: 62%;
     height: 62%;
+}
+.lmpl-afs-playbtn .media-button-icon svg {
+    width: 100%;
+    height: 100%;
+}
+/* The triangle's weight sits left of its box: moved right so it looks centred in its disc, as the player's is. */
+.lmpl-afs-playbtn .media-button-icon[name='play'] {
+    translate: 8% 0;
 }
 
 .lmpl-afs-tools {
