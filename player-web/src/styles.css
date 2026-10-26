@@ -1702,6 +1702,11 @@
     background: #fff;
 }
 
+/* Only there to tell a press on the host's strip from one elsewhere: it takes no box of its own. */
+.lmpl-afs-roster-slot {
+    display: contents;
+}
+
 /* Opened for scrubbing by a tap: thicker, with a handle where the fill ends, which the track's own clip would cut. */
 .lmpl-afs-bar-open .lmpl-afs-bar-track {
     height: calc(16px * var(--lmpl-s));

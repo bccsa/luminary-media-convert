@@ -292,12 +292,22 @@ function framesReady(): boolean {
     return knownDuration.value > 0 && !!props.thumbnailAt?.(0);
 }
 
-/** A press anywhere but the bar closes it, and play closes it and plays. */
+/**
+ * A press anywhere but the bar and the host's strip closes it, and play closes it and plays. A finger on the strip,
+ * which the host drags itself, keeps it open until three seconds after it lifts.
+ */
 function onRootDown(event: PointerEvent): void {
     if (!timelineScrub.isOpen || !(event.target instanceof Element)) return;
+    if (event.target.closest('.lmpl-afs-roster-slot')) return timelineScrub.touchBegan();
     if (event.target.closest('.lmpl-afs-bar, .lmpl-afs-scrubzone')) return;
     if (event.target.closest('.lmpl-afs-playbtn')) return;
     timelineScrub.tappedElsewhere();
+}
+
+function onRootUp(event: PointerEvent): void {
+    if (timelineScrub.isOpen && event.target instanceof Element && event.target.closest('.lmpl-afs-roster-slot')) {
+        timelineScrub.dragCancelled();
+    }
 }
 
 function onPlayButton(): void {
@@ -515,6 +525,8 @@ const washSrc = computed(() => props.wash || cover.value?.src);
     <div
         ref="rootEl"
         @pointerdown.capture="onRootDown"
+        @pointerup.capture="onRootUp"
+        @pointercancel.capture="onRootUp"
         class="lmpl-afs"
         :class="[
             `lmpl-afs-${appearance}`,
@@ -548,7 +560,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
             <img class="lmpl-afs-wash" :class="{ 'lmpl-afs-wash-hash': wash }" :src="washSrc" alt="" draggable="false" />
         </div>
 
-        <slot name="roster"></slot>
+        <div class="lmpl-afs-roster-slot"><slot name="roster"></slot></div>
 
         <div class="lmpl-afs-top">
             <button

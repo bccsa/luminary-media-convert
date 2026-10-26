@@ -5,7 +5,7 @@ import { DEFAULT_MESSAGES } from '../src/messages';
 
 const chapters = Array.from({ length: 8 }, (_, i) => ({ startTime: i * 60, endTime: i * 60 + 60, title: `Chapter ${i + 1}` }));
 
-function mountScreen(props: Record<string, unknown> = {}) {
+function mountScreen(props: Record<string, unknown> = {}, slots: Record<string, string> = {}) {
     return mount(AudioFullscreen, {
         props: {
             title: 'Why we get thirsty',
@@ -31,6 +31,7 @@ function mountScreen(props: Record<string, unknown> = {}) {
             ...props,
         },
         global: { config: { compilerOptions: { isCustomElement: (tag: string) => tag.startsWith('media-') } } },
+        slots,
         attachTo: document.body,
     });
 }
@@ -197,6 +198,27 @@ describe('AudioFullscreen — the transport', () => {
         const scrubs = wrapper.emitted('scrub') ?? [];
         expect(scrubs.at(-1)?.[0]).toMatchObject({ held: true });
         expect(bar.classes()).not.toContain('lmpl-afs-bar-open');
+    });
+
+    it('stays open while a finger is on the host strip, and closes three seconds after it lifts', async () => {
+        vi.useFakeTimers();
+        try {
+            const wrapper = mountScreen({}, { roster: '<div data-test="hostStrip"></div>' });
+            await wrapper.setProps({ thumbnailAt: () => ({ url: 'sheet.jpg', x: 0, y: 0, w: 160, h: 90 }) });
+            const bar = find(wrapper, 'afsBar');
+            bar.element.getBoundingClientRect = () => ({ left: 100, width: 200, top: 0, height: 30, right: 300, bottom: 30, x: 100, y: 0, toJSON: () => ({}) });
+            await bar.trigger('pointerdown', { clientX: 250, pointerId: 5, pointerType: 'touch' });
+            await bar.trigger('pointerup', { clientX: 250, pointerId: 5, pointerType: 'touch' });
+            const strip = wrapper.find('[data-test="hostStrip"]');
+            await strip.trigger('pointerdown', { pointerId: 6, pointerType: 'touch' });
+            vi.advanceTimersByTime(10000);
+            expect(wrapper.emitted('scrub')?.at(-1)?.[0]).not.toBeNull();
+            await strip.trigger('pointerup', { pointerId: 6, pointerType: 'touch' });
+            vi.advanceTimersByTime(3000);
+            expect(wrapper.emitted('scrub')?.at(-1)?.[0]).toBeNull();
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it('seeks once when a finger drags the bar and lets go', async () => {
