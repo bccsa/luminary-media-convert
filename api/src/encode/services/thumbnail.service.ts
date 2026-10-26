@@ -422,6 +422,8 @@ export class ThumbnailService {
          * would not read as a change on the other end.
          */
         onProgress?: (thumbCount: number, complete?: boolean) => void;
+        /** Decode every frame even when the keyframes look dense enough to skip the rest. */
+        fullDecode?: boolean;
     }): Promise<ThumbnailResult | null> {
         const format = await this.detectSpriteFormat();
         if (!format) return null;
@@ -439,13 +441,13 @@ export class ThumbnailService {
         // seconds, and a three-digit counter wraps long before that.
         const thumbPattern = join(thumbnailDir, `thumb_%06d.${format.ext}`);
 
+        const keyframesOnly =
+            !opts.fullDecode &&
+            (await this.keyframesDenseEnough(opts.inputPath, opts.trackIndex));
         const args = [
-            ...((await this.keyframesDenseEnough(
-                opts.inputPath,
-                opts.trackIndex
-            ))
-                ? ['-skip_frame', 'nokey']
-                : []),
+            // A second pass writes over the first one's files.
+            '-y',
+            ...(keyframesOnly ? ['-skip_frame', 'nokey'] : []),
             '-i',
             opts.inputPath,
             '-map',
@@ -497,6 +499,18 @@ export class ThumbnailService {
         }
 
         const thumbFiles = await this.listThumbFiles(thumbnailDir);
+        // The keyframe flags are read off the container, but the decoder decides
+        // what `-skip_frame nokey` drops: it can discard keyframes the container
+        // marks (open-GOP recovery points, some encoders' I-frames), and then the
+        // pass ends early, short of the source, without an error. Counted rather
+        // than predicted, and decoded in full when it falls short.
+        if (keyframesOnly && !coversSource(thumbFiles.length, opts.duration)) {
+            this.logger.warn(
+                `Keyframe-only sampling gave ${thumbFiles.length} thumbnail(s) for ` +
+                    `${Math.floor(opts.duration)}s of source; decoding every frame instead`
+            );
+            return this.generateIndividualThumbs({ ...opts, fullDecode: true });
+        }
         if (thumbFiles.length === 0) {
             this.logger.warn('No thumbnails were generated');
             return null;
@@ -571,11 +585,15 @@ export class ThumbnailService {
         const sourceDir = join(this.previewDir(opts.sessionId), 'thumbnails');
         let thumbFiles = await this.listThumbFiles(sourceDir);
 
-        // No thumb_* files covers both "the prime never ran" and "this session
-        // was restored from before individual thumbs existed, so the cache holds
-        // sprite_* sheets" — a filename check, no VTT parsing. Either way the
-        // cache is unusable: throw it out and sample again.
-        if (thumbFiles.length === 0) {
+        // Sampled again when the cached thumbs do not reach the end of the
+        // source. None at all covers both "the prime never ran" and "this
+        // session was restored from before individual thumbs existed, so the
+        // cache holds sprite_* sheets" — a filename check, no VTT parsing. Too
+        // few is a prime that stopped early: killed by its timeout while an
+        // encode had every core, or cut short by keyframe-only decoding. Packing
+        // that would lay its last frame over the rest of the video, which reads
+        // as thumbnails that stop partway.
+        if (!coversSource(thumbFiles.length, opts.sourceDuration)) {
             if (!track || opts.sourceDuration <= 0) {
                 this.logger.warn(
                     `No thumbnails to pack for ${opts.sessionId} and no usable video track to regenerate from`
@@ -583,7 +601,10 @@ export class ThumbnailService {
                 return null;
             }
             this.logger.log(
-                `No individual thumbnails cached for ${opts.sessionId} — regenerating before packing`
+                thumbFiles.length === 0
+                    ? `No individual thumbnails cached for ${opts.sessionId} — regenerating before packing`
+                    : `Only ${thumbFiles.length} thumbnail(s) cached for ${opts.sessionId}, short of ` +
+                          `${Math.floor(opts.sourceDuration)}s of source — regenerating before packing`
             );
             await rm(this.previewDir(opts.sessionId), {
                 recursive: true,
@@ -599,7 +620,14 @@ export class ThumbnailService {
             });
             if (!regenerated) return null;
             thumbFiles = await this.listThumbFiles(sourceDir);
-            if (thumbFiles.length === 0) return null;
+            // Better no storyboard than one whose frames stop partway.
+            if (!coversSource(thumbFiles.length, opts.sourceDuration)) {
+                this.logger.warn(
+                    `Thumbnails for ${opts.sessionId} still cover only ${thumbFiles.length} of ` +
+                        `${Math.floor(opts.sourceDuration)}s at ${INTERVAL_SECONDS}s each — shipping no storyboard`
+                );
+                return null;
+            }
         }
 
         if (!track) {
@@ -882,6 +910,15 @@ function outputToSource(
  * quote-free in practice, but a single quote in a session path would otherwise
  * end the string and hand ffmpeg a filename it cannot open.
  */
+/**
+ * Whether `count` thumbs, one per INTERVAL_SECONDS, reach the end of the source.
+ * One short is allowed: the sampling filter's last frame depends on how the final
+ * partial interval rounds, and the cue that would show it can reuse its neighbour.
+ */
+function coversSource(count: number, durationSeconds: number): boolean {
+    return count >= Math.max(1, Math.floor(durationSeconds / INTERVAL_SECONDS));
+}
+
 function concatEscape(path: string): string {
     return path.replace(/'/g, `'\\''`);
 }
