@@ -690,6 +690,16 @@ describe('PlayerController — quality and tracks', () => {
         expect(controller.getState().activeSubtitleTrackId).toBeNull();
     });
 
+    it('starts each load with no subtitle active', async () => {
+        const { controller } = setup(simpleRoutes);
+        await controller.load({ masterUrl: MASTER_URL });
+        controller.setSubtitleTrack('m::English');
+
+        await controller.load({ masterUrl: MASTER_URL });
+
+        expect(controller.getState().activeSubtitleTrackId).toBeNull();
+    });
+
     it('serves sidecar subtitles to the engine as text tracks', async () => {
         const { adapter, controller, serveStrategy } = setup({
             ...simpleRoutes,

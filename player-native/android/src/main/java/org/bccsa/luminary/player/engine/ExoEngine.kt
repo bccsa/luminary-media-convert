@@ -193,6 +193,11 @@ class ExoEngine(
     private var poll: Cancellable? = null
     private var sleepTimer: Cancellable? = null
     private var reportedSubtitle: String? = null
+    /**
+     * A subtitle asked for before the item's tracks were known, as (label, language): the page picks one as soon as it
+     * has read the master, which is usually before ExoPlayer has. Applied once the tracks arrive.
+     */
+    private var pendingSubtitle: Pair<String, String?>? = null
 
     /** The id `setVariant` pinned; re-applied to a rebuilt ladder that still offers it. */
     private var pinnedVariant: String? = null
@@ -374,6 +379,10 @@ class ExoEngine(
         reportedAudio = null
         reportedVariants = null
         reportedBufferedEnd = -1.0
+        // A new item starts with subtitles off, which is not a choice the viewer made: told as a change from the last
+        // item's track, it reads as one, and the page saves "off" over the choice it is about to apply.
+        reportedSubtitle = null
+        pendingSubtitle = null
     }
 
     /** As a video element does: playing at the end starts again from the beginning. */
@@ -453,7 +462,10 @@ class ExoEngine(
         }
     }
 
-    override fun setSubtitleTrack(label: String?, language: String?) = selectSubtitle(player, label, language)
+    override fun setSubtitleTrack(label: String?, language: String?) {
+        pendingSubtitle = if (label != null && subtitleChoicesOf(player.currentTracks).isEmpty()) label to language else null
+        selectSubtitle(player, label, language)
+    }
 
     /** Needs the system's picture in picture and an activity that allows it; the registry refuses the call otherwise. */
     /** The system's list of Cast devices (or, when connected, its controller). The capability is off where there is no Cast. */
@@ -731,8 +743,14 @@ class ExoEngine(
             reportedAudio = audio to activeAudio
             events.audioTracks(audio, activeAudio)
         }
+        // A subtitle asked for before the tracks were known is applied now; what it selects is told in the track change
+        // that follows, so this one's "nothing selected" is not told as the viewer turning them off.
+        val applyingPending = pendingSubtitle?.takeIf { subtitleChoicesOf(tracks).isNotEmpty() }?.let { (label, language) ->
+            pendingSubtitle = null
+            selectSubtitle(player, label, language)
+        } != null
         // Only a change is told: a repeat would reach the page before its own pick has landed and undo it.
-        if (subtitleChoicesOf(tracks).isNotEmpty() || reportedSubtitle != null) {
+        if (!applyingPending && (subtitleChoicesOf(tracks).isNotEmpty() || reportedSubtitle != null)) {
             val selected = subtitleChoicesOf(tracks).firstOrNull { it.selected }?.label
             if (selected != reportedSubtitle) {
                 reportedSubtitle = selected

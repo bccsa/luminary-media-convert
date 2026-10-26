@@ -320,6 +320,9 @@ export class PlayerController implements PlayerControllerApi {
             audioTracks: info.audioTracks,
             activeAudioTrackId: info.audioTracks[0]?.id ?? null,
             subtitleTracks: info.subtitleTracks,
+            // A load starts with subtitles off on every engine; one left marked from the last video reads as on, and
+            // a host waiting for "off" before applying the viewer's choice would never apply it.
+            activeSubtitleTrackId: null,
             isAudioOnly: info.nativelyAudioOnly,
             chapterTracks: this.prepareChapterTracks(),
         });

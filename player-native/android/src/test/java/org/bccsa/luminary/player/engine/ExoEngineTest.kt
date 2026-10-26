@@ -294,6 +294,18 @@ class ExoEngineTest {
     }
 
     @Test
+    fun `a new load forgets the subtitle the last one reported`() {
+        // Kept, the new item's subtitles-off would be told as the viewer turning them off, and saved over their choice.
+        val field = ExoEngine::class.java.getDeclaredField("reportedSubtitle").apply { isAccessible = true }
+        load("load1", KEY_HEX)
+        field.set(engine!!, "English")
+
+        load("load2", KEY_HEX)
+
+        assertEquals(null, field.get(engine!!))
+    }
+
+    @Test
     fun `subtitles off disables the text renderer, and an unknown label changes nothing`() {
         load("load1", KEY_HEX)
         TestPlayerRunHelper.advance(player).untilState(Player.STATE_READY)
