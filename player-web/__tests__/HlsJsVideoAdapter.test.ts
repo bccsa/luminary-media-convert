@@ -544,6 +544,41 @@ describe('text tracks', () => {
     });
 });
 
+describe("the master's own subtitles", () => {
+    /** The element's subtitle tracks as hls.js makes them from the master, the first its default. */
+    function masterSubtitles() {
+        const tracks = ['en', 'fr'].map((language, i) => ({
+            kind: 'subtitles',
+            id: '',
+            label: `stream_${i}`,
+            language,
+            mode: i === 0 ? 'showing' : 'disabled',
+        }));
+        (el as unknown as { target: unknown }).target = { textTracks: tracks, querySelectorAll: () => [] };
+        el.engine = fakeEngine();
+        el.dispatchEvent(new Event('loadstart'));
+        return { tracks, engine: el.engine as FakeEngine };
+    }
+
+    it("puts the master's default aside when the page has picked none", () => {
+        vi.useFakeTimers();
+        const { tracks, engine } = masterSubtitles();
+        engine.emit(Hls.Events.SUBTITLE_TRACKS_UPDATED, {});
+        vi.runAllTimers();
+        expect(tracks.map((t) => t.mode)).toEqual(['disabled', 'disabled']);
+    });
+
+    it('shows the one the page picked before the tracks existed', () => {
+        // The page picks as soon as it has read the master, which is before hls.js has built its tracks.
+        vi.useFakeTimers();
+        const { tracks, engine } = masterSubtitles();
+        adapter.setActiveTextTrack('m:subs:stream_1');
+        engine.emit(Hls.Events.SUBTITLE_TRACKS_UPDATED, {});
+        vi.runAllTimers();
+        expect(tracks.map((t) => t.mode)).toEqual(['disabled', 'showing']);
+    });
+});
+
 describe('transport', () => {
     it('plays, pauses and sets the rate on the element', async () => {
         await adapter.play();

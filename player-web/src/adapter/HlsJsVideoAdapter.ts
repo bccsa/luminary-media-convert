@@ -582,16 +582,16 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         if (this.subtitlesSettled || !this.engine) return;
         this.subtitlesSettled = true;
         const engine = this.engine;
-        const off = (): void => {
+        // The page's choice, not the master's default: none turns them all off, and one the page picked before the
+        // tracks existed (it picks as soon as it has read the master) is turned on now that it can be.
+        const settle = (): void => {
             if (this.engine !== engine || this.destroyed) return;
             engine.subtitleTrack = -1;
-            for (const track of Array.from(this.mediaTarget()?.textTracks ?? [])) {
-                if (track.kind === 'subtitles' && track.mode === 'showing' && !this.textTracks.has(track.id)) track.mode = 'disabled';
-            }
+            this.applyMasterSubtitle();
         };
-        off();
-        setTimeout(off, 0);
-        setTimeout(off, 400);
+        settle();
+        setTimeout(settle, 0);
+        setTimeout(settle, 400);
     };
 
     private readonly onEngineError = (_event: string, data: HlsErrorData): void => {
