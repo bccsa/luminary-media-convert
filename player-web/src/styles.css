@@ -1956,6 +1956,10 @@
     text-shadow: 0 1px 2px rgb(0 0 0 / 0.6);
     white-space: pre-line;
 }
+/* With a band left for them, the words sit in it, clear of the title below. */
+.lmpl-afs-captions .lmpl-afs-caption {
+    top: calc(100% - 64px);
+}
 
 .lmpl-afs-captions .lmpl-afs-stage {
     bottom: 64px;
