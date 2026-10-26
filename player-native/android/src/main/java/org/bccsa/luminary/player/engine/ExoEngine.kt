@@ -989,7 +989,6 @@ class ExoEngine(
             return MediaMetadata.Builder()
                 .setTitle(nowPlaying.title)
                 .setDisplayTitle(nowPlaying.title)
-                // Left out, the system writes its own word there ("Unknown", or "null"): empty shows nothing.
                 .setArtist(nowPlaying.subtitle ?: "")
                 .setSubtitle(nowPlaying.subtitle)
                 .apply {
