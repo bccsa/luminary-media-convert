@@ -175,6 +175,11 @@ internal class SkinControls(
     private val timelineScrub = TimelineScrub(MainLooperClock()).also { it.onEffect = ::apply }
     /** A drag on the timeline is under way: its first move opens the scrub. */
     private var timelineDragging = false
+    /**
+     * Where the open roster's marker stays, in the timeline's coordinates: over the playhead when a tap opened it,
+     * where the finger lifted after a drag.
+     */
+    private var rosterMarkerX: Float? = null
     private var scale = 1f
     private var widthDp = 0f
 
@@ -515,7 +520,7 @@ internal class SkinControls(
         updateNextUp()
         if (browseOpen && browseTab == BrowseTab.CHAPTERS) markCurrentChapter()
         // Held open after the finger lifts, the roster follows the playhead until it is touched again.
-        if (rosterOpen && !timeline.dragging && sliding == null) updateRoster(position)
+        if (rosterOpen && !timeline.dragging && sliding == null) updateRoster(position, rosterMarkerX ?: timeline.pointerX)
     }
 
     // The strip of next videos, offered near the end.
@@ -788,6 +793,7 @@ internal class SkinControls(
     /** The drag let go (or the touch was taken): the video moves only on a let-go, and the strip stays open. */
     private fun scrubEnded(fraction: Double, commit: Boolean) {
         timelineDragging = false
+        rosterMarkerX = timeline.pointerX
         val duration = player.duration.takeIf { it != C.TIME_UNSET && it > 0 }
         if (commit && duration != null) timelineScrub.dragEnded(duration * fraction / 1000.0) else timelineScrub.dragCancelled()
         hidePicture()
@@ -806,7 +812,9 @@ internal class SkinControls(
             is TimelineScrub.Effect.Open -> when (effect.mode) {
                 TimelineScrub.Mode.STRIP -> {
                     openRoster()
-                    updateRoster(player.currentPosition / 1000.0, timeline.width * timeline.playedFraction)
+                    val markerX = timeline.width * timeline.playedFraction
+                    rosterMarkerX = markerX
+                    updateRoster(player.currentPosition / 1000.0, markerX)
                 }
                 TimelineScrub.Mode.BAR -> {
                     timeline.scrubMode = true
@@ -866,6 +874,7 @@ internal class SkinControls(
     }
 
     private fun closeRoster() {
+        rosterMarkerX = null
         if (!rosterOpen) return
         rosterOpen = false
         timeline.onRoster = false
