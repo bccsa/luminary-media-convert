@@ -250,6 +250,16 @@ class ExoEngineFullscreenTest {
     }
 
     @Test
+    fun `with nobody named, the lock screen's artist is empty rather than left for the system to fill`() {
+        create()
+        load(audioOnly = false, nowPlaying = buildJsonObject { put("title", "Sunday meeting") })
+
+        val metadata = engine!!.mediaSession.player.mediaMetadata
+        assertEquals("Sunday meeting", metadata.title.toString())
+        assertEquals("", metadata.artist?.toString())
+    }
+
+    @Test
     fun `the host's stand-in picture stays out of the metadata the system is sent, and stands in as bytes when there is no artwork`() {
         create()
         load(audioOnly = false, nowPlaying = buildJsonObject {

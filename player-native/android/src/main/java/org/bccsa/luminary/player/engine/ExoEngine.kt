@@ -989,7 +989,7 @@ class ExoEngine(
             return MediaMetadata.Builder()
                 .setTitle(nowPlaying.title)
                 .setDisplayTitle(nowPlaying.title)
-                .setArtist(nowPlaying.subtitle)
+                .setArtist(nowPlaying.subtitle ?: "")
                 .setSubtitle(nowPlaying.subtitle)
                 .apply {
                     when {
