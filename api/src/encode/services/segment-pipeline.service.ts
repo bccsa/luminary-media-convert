@@ -774,19 +774,17 @@ export class SegmentPipeline {
 
         const tasks: UploadTask[] = [];
         for (const filePath of files) {
-            // Internal build artifacts. The packer removes its own list in a
-            // finally, so `pack-list.txt` is belt-and-braces — a crashed pack
-            // must not put its scratch file in the delivered output.
-            if (
-                filePath.endsWith('/concat.txt') ||
-                filePath.endsWith('/pack-list.txt')
-            ) {
-                continue;
-            }
-
             const relativePath = relative(outputDir, filePath)
                 .split(/[\\/]/)
                 .join('/');
+
+            // Internal build artifacts, matched by name on the normalised path
+            // so Windows separators match too. The packer removes its own list
+            // in a finally, so `pack-list.txt` is belt-and-braces — a crashed
+            // pack must not put its scratch file in the delivered output.
+            const name = posix.basename(relativePath);
+            if (name === 'concat.txt' || name === 'pack-list.txt') continue;
+
             const objectKey = this.config.s3PathPrefix
                 ? posix.join(this.config.s3PathPrefix, relativePath)
                 : relativePath;
