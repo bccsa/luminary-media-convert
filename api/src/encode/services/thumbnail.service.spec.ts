@@ -581,10 +581,16 @@ describe('ThumbnailService', () => {
                 ])
                 .join('\n') + '\n';
 
-        async function pass(keyframes: string): Promise<string[]> {
+        /** One thumb per five seconds of the 600s source the pass is given. */
+        const FULL = 120;
+
+        async function pass(
+            keyframes: string,
+            thumbs = FULL
+        ): Promise<string[]> {
             const tmpDir = mkdtempSync(join(tmpdir(), 'thumb-kf-'));
             try {
-                mockFfmpeg({ thumbs: 1, keyframes });
+                mockFfmpeg({ thumbs, keyframes });
                 await service.generateIndividualThumbs({
                     inputPath: '/tmp/test.mkv',
                     outputDir: tmpDir,
@@ -601,7 +607,25 @@ describe('ThumbnailService', () => {
 
         it('decodes keyframes only when they are never further apart than the interval', async () => {
             const args = await pass(keyframesAt(0, 2, 4, 6));
-            expect(args.slice(0, 2)).toEqual(['-skip_frame', 'nokey']);
+            const at = args.indexOf('-skip_frame');
+            expect(args.slice(at, at + 2)).toEqual(['-skip_frame', 'nokey']);
+            expect(at).toBeLessThan(args.indexOf('-i'));
+            expect(passCalls(THUMBS)).toHaveLength(1);
+        });
+
+        it('decodes every frame after all when keyframes alone fall short of the source', async () => {
+            // The container's keyframe flags said dense enough, but the decoder
+            // dropped some of them and the pass stopped early: 10 thumbs for
+            // 600s, where 120 cover it.
+            await pass(keyframesAt(0, 2, 4, 6), 10);
+
+            const [first, second] = passCalls(THUMBS).map(
+                (c) => c[1] as string[]
+            );
+            expect(first).toContain('-skip_frame');
+            expect(second).toBeDefined();
+            expect(second).not.toContain('-skip_frame');
+            expect(second).toContain('-y');
         });
 
         it('decodes every frame when a keyframe gap exceeds the interval', async () => {
@@ -1362,21 +1386,46 @@ describe('ThumbnailService', () => {
             ]);
         });
 
-        it('never names a frame that was never sampled', async () => {
-            // A pass cut short by its timeout leaves fewer thumbs than the
-            // output has cues; the tail repeats the last one it has.
+        it('samples again when the cached thumbs stop short of the end', async () => {
+            // A prime killed by its timeout left 3 thumbs for 30s of source.
+            // Packed as it was, the last of them would stand in for the rest of
+            // the video, which reads as a storyboard that stops partway.
             writeThumbs(sourceDir(), 3);
+            mockFfmpeg({ thumbs: 6, sprites: 1, onPass: capturePackList });
 
-            await pack({ sourceDuration: 30 });
+            const result = await pack({ sourceDuration: 30 });
 
-            expect(packed()).toHaveLength(6);
-            expect(new Set(packed())).toEqual(
-                new Set([
-                    'thumb_000001.webp',
-                    'thumb_000002.webp',
-                    'thumb_000003.webp',
-                ])
-            );
+            expect(passCalls(THUMBS)).toHaveLength(1);
+            expect(result).not.toBeNull();
+            expect(packed()).toEqual([
+                'thumb_000001.webp',
+                'thumb_000002.webp',
+                'thumb_000003.webp',
+                'thumb_000004.webp',
+                'thumb_000005.webp',
+                'thumb_000006.webp',
+            ]);
+        });
+
+        it('ships no storyboard rather than one whose frames stop partway', async () => {
+            writeThumbs(sourceDir(), 3);
+            mockFfmpeg({ thumbs: 3, sprites: 1, onPass: capturePackList });
+
+            const result = await pack({ sourceDuration: 30 });
+
+            expect(result).toBeNull();
+            expect(passCalls(SPRITES)).toHaveLength(0);
+        });
+
+        it('packs a set that reaches the end without sampling again', async () => {
+            // One short of a cue per five seconds still covers the source: the
+            // sampler's last frame depends on how the final interval rounds.
+            writeThumbs(sourceDir(), 5);
+
+            const result = await pack({ sourceDuration: 29 });
+
+            expect(result).not.toBeNull();
+            expect(passCalls(THUMBS)).toHaveLength(0);
         });
 
         it('escapes a quote in the path instead of handing ffmpeg half a filename', async () => {

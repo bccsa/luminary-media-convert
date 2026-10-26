@@ -50,6 +50,8 @@ vi.mock('../api', () => ({
 
 import SessionView from './SessionView.vue';
 import SessionPlayerStrip from '../components/session-view/SessionPlayerStrip.vue';
+import SessionOutputPanel from '../components/session-view/SessionOutputPanel.vue';
+import { startEncode } from '../api';
 
 /** A probed session sitting in the pre-encode state, which is where trimming happens. */
 function uploadedSession(overrides: Record<string, unknown> = {}) {
@@ -305,6 +307,35 @@ describe('SessionView', () => {
             return wrapper;
         }
 
+        it("opens an edit session like the finished encode it opened, with the video's audio tracks beside its chapters", async () => {
+            const editSession = {
+                status: 'completed',
+                mode: 'edit',
+                masterPlaylist: 'master.m3u8',
+                hlsUrl: HLS_URL,
+            };
+            detail.mockResolvedValue(uploadedSession(editSession));
+            status.mockResolvedValue(editSession);
+            const wrapper = await mountView();
+            await flushPromises();
+
+            expect(
+                (playerSource(wrapper) as { masterUrl?: string } | null)?.masterUrl
+            ).toBe(HLS_URL);
+            expect(playerSource(wrapper)?.sidecars?.chapters?.[0]?.url).toBe(
+                'http://127.0.0.1:9000/media/sess-1/chapters/en.vtt'
+            );
+            await wrapper.find('[data-test="audioTracksTab"]').trigger('click');
+            expect(
+                wrapper.findComponent({ name: 'AudioTracksPanel' }).props()
+            ).toMatchObject({ sessionId: 'sess-1', sessionToken: 'sess_token' });
+        });
+
+        it('offers no audio tracks tab for a finished encode', async () => {
+            const wrapper = await completedView();
+            expect(wrapper.find('[data-test="audioTracksTab"]').exists()).toBe(false);
+        });
+
         it('points the chapters sidecar beside the master, not at the bucket root', async () => {
             const source = playerSource(await completedView());
             const url = source?.sidecars?.chapters?.[0]?.url;
@@ -346,6 +377,32 @@ describe('SessionView', () => {
      * present in `encrypting`, where it could only fail — silently, because the
      * refusal was swallowed and the route change happened anyway.
      */
+    describe('the bottom timeline', () => {
+        async function workspacesAt(state: string) {
+            detail.mockResolvedValue(uploadedSession({ status: state }));
+            status.mockResolvedValue({
+                status: state,
+                probeResult: uploadedSession().probeResult,
+            });
+            const wrapper = await mountView();
+            return wrapper.findAllComponents({ name: 'SessionTrimWorkspace' });
+        }
+
+        it('holds trim ranges before the encode is started', async () => {
+            const workspaces = await workspacesAt('uploaded');
+            expect(workspaces.length).toBeGreaterThan(0);
+            for (const w of workspaces) expect(w.props('editsChapters')).toBe(false);
+        });
+
+        it('holds chapters while the encode runs, as the list beside the player does', async () => {
+            // Left in trim mode until the encode finished, the timeline kept one
+            // range only, and marking a second chapter replaced the first.
+            const workspaces = await workspacesAt('encoding');
+            expect(workspaces.length).toBeGreaterThan(0);
+            for (const w of workspaces) expect(w.props('editsChapters')).toBe(true);
+        });
+    });
+
     describe('discarding a session', () => {
         const button = (w: Awaited<ReturnType<typeof mountView>>) =>
             w.find('[data-testid="discard-session"]');
@@ -728,5 +785,73 @@ describe('SessionView', () => {
 
         expect(storyboardUrl).toContain('/api/sessions/sess-1/thumbnails');
         expect(storyboardUrl).toContain('token=');
+    });
+
+    describe('the encode form across a submit', () => {
+        // The form holds the operator's edits — track labels and languages, the
+        // ladder — and nothing else does. Destroying it while the request is in
+        // flight meant a rejected submit rebuilt it from the raw probe.
+        const config = { type: 'video', segmentDuration: 6 };
+
+        it('is the same instance after the encoder rejects the submit', async () => {
+            let reject!: (e: Error) => void;
+            vi.mocked(startEncode).mockReturnValueOnce(
+                new Promise((_, r) => {
+                    reject = r;
+                }) as never
+            );
+            const wrapper = await mountView();
+            const before = wrapper.findComponent(SessionOutputPanel);
+            expect(before.exists()).toBe(true);
+
+            before.vm.$emit('submit', config);
+            await flushPromises();
+
+            const during = wrapper.findComponent(SessionOutputPanel);
+            expect(during.exists()).toBe(true);
+            expect(during.vm).toBe(before.vm);
+
+            reject(new Error('Copy is not possible for track 2'));
+            await flushPromises();
+
+            const after = wrapper.findComponent(SessionOutputPanel);
+            expect(after.exists()).toBe(true);
+            expect(after.vm).toBe(before.vm);
+        });
+
+        it('is hidden, not destroyed, while the request is in flight', async () => {
+            vi.mocked(startEncode).mockReturnValueOnce(
+                new Promise(() => {}) as never
+            );
+            const wrapper = await mountView();
+            const panel = wrapper.findComponent(SessionOutputPanel);
+
+            panel.vm.$emit('submit', config);
+            await flushPromises();
+
+            const strip = wrapper.findComponent({ name: 'SessionPlayerStrip' });
+            expect(strip.exists()).toBe(true);
+            expect(
+                (strip.element.parentElement as HTMLElement).style.display
+            ).toBe('none');
+        });
+
+        it('keeps the panel the form lives in while the request is in flight', async () => {
+            // The strip draws its aside only while `showAside` holds, and the
+            // form is in that aside: dropped for the request, a refused start
+            // brought the form back rebuilt from the source.
+            vi.mocked(startEncode).mockReturnValueOnce(
+                new Promise(() => {}) as never
+            );
+            const wrapper = await mountView();
+            const strip = () =>
+                wrapper.findComponent({ name: 'SessionPlayerStrip' });
+            expect(strip().props('showAside')).toBe(true);
+
+            wrapper.findComponent(SessionOutputPanel).vm.$emit('submit', config);
+            await flushPromises();
+
+            expect(strip().props('showAside')).toBe(true);
+        });
     });
 });
