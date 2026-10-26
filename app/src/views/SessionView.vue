@@ -1748,10 +1748,16 @@ watch(
     }
 );
 
+/**
+ * The panel beside the player. It holds the encode form, so it follows
+ * `canConfigure` rather than `showProbeConfig`: gone while a start is in flight,
+ * it took the form with it, and a refused start brought back one rebuilt from
+ * the source, its copy ticks, removed tracks and labels all undone.
+ */
 const showAside = computed(
     () =>
         activeTab.value === 'trim' &&
-        (showProbeConfig.value ||
+        (canConfigure.value ||
             showChaptersBesidePlayer.value ||
             showEncoding.value ||
             isCompleted.value)
