@@ -800,16 +800,21 @@ internal class SkinControls(
 
     private fun trackInset() = dpf(TRACK_INSET_DP * scale)
 
+    /**
+     * How far the timeline rises to rest on the roster's top edge, which stands the roster's height above the bottom
+     * edge. Nothing when the buttons under the timeline already leave room for it.
+     */
+    private fun rosterLift() = max(0f, rosterHeight() - trackInset() - (panel.height - (column.top + timelineRow.bottom)))
+
     private fun openRoster() {
         val frames = thumbnails ?: return
         rosterOpen = true
         timeline.onRoster = true
         val height = rosterHeight()
-        // The roster rises from the bottom edge over the buttons, and the timeline rests on its top.
-        val rowBottom = column.top + timelineRow.bottom
-        val reach = height + (panel.height - rowBottom)
-        roster.lp(reach.roundToInt(), -panel.paddingBottom)
-        roster.configure(frames, reach)
+        // The frames' own height, standing on the bottom edge over the buttons, and the timeline rests on their top:
+        // no more of the picture is covered than that, and the frames keep their shape.
+        roster.lp(height.roundToInt(), -panel.paddingBottom)
+        roster.configure(frames, height)
         // Nothing but the timeline and the roster stays: the buttons would show through behind the strip.
         for (part in listOf(actionsRow, centre)) {
             part.animate().alpha(0f).setDuration(120).withEndAction { if (rosterOpen) part.visibility = INVISIBLE }.start()
@@ -821,7 +826,7 @@ internal class SkinControls(
         roster.alpha = 0f
         roster.translationY = dpf(6f)
         roster.animate().alpha(1f).translationY(0f).setDuration(200).start()
-        timelineRow.animate().translationY(-(height - trackInset())).setDuration(180).start()
+        timelineRow.animate().translationY(-rosterLift()).setDuration(180).start()
         label.visibility = VISIBLE
         label.alpha = 0f
         label.animate().alpha(1f).setDuration(150).start()
@@ -859,7 +864,7 @@ internal class SkinControls(
         label.text = formatTime(time, duration / 1000.0)
         // The label rides above the lifted timeline, centred on the finger and kept inside the panel.
         val rowTop = column.top + timelineRow.top
-        val lifted = rowTop - (rosterHeight() - trackInset())
+        val lifted = rowTop - rosterLift()
         label.measure(MeasureSpec.UNSPECIFIED, MeasureSpec.UNSPECIFIED)
         val half = label.measuredWidth / 2f
         val centreX = (pointerX + at[0] - panelLocationX()).coerceIn(half + dpf(8f), max(half + dpf(8f), panel.width - half - dpf(8f)))

@@ -457,7 +457,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         rowRest = rowY
         let rowHeight = Skin.timelineRow * scale
         let restingY = rowY - rowHeight
-        let timelineY = restingY - (rosterUp ? rosterHeight(area.width) - Skin.trackInset * scale : 0)
+        let timelineY = restingY - (rosterUp ? rosterLift(area.width, scale: scale) : 0)
         for label in [timeLabel, remainingLabel] {
             label.font = PlayerFont.monospacedDigits(size: 13 * scale, weight: .medium)
             label.sizeToFit()
@@ -741,14 +741,19 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     /// The frames are up: held from the timeline, or pinned open after it.
     private var rosterUp: Bool { rosterFraction != nil || rosterPinned }
 
-    /// From the bottom edge over the buttons up to where the timeline rests; the frames are drawn at the hover
-    /// preview's height.
+    /// How far the timeline rises to rest on the frames' top edge, which stands that high above the bottom edge.
+    /// Nothing when the buttons under the timeline already leave room for them.
+    private func rosterLift(_ width: CGFloat, scale: CGFloat) -> CGFloat {
+        max(0, rosterHeight(width) - Skin.trackInset * scale - (view.bounds.maxY - rowRest))
+    }
+
+    /// The frames' own height, standing on the bottom edge: the strip covers the buttons but no more of the picture
+    /// than that, and the frames keep their shape.
     private func placeRoster() {
         let area = view.bounds.inset(by: view.safeAreaInsets)
         let height = rosterHeight(area.width)
-        let top = rowRest - height
         roster.tileHeight = height
-        roster.frame = CGRect(x: area.minX, y: top, width: area.width, height: max(view.bounds.maxY - top, height))
+        roster.frame = CGRect(x: area.minX, y: view.bounds.maxY - height, width: area.width, height: height)
     }
 
     /// The time over the lifted timeline, centred on `x` and kept inside the safe area.
