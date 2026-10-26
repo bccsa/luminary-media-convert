@@ -734,8 +734,8 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                                 @click="onPlayButton"
                             >
                                 <svg v-if="busy" class="lmpl-afs-spinner" viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true" data-test="afsSpinner"><path d="M12 3a9 9 0 1 1-9 9" /></svg>
-                                <svg v-else-if="playing" viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden="true"><rect x="6.2" y="4.8" width="4" height="14.4" rx="1.8" /><rect x="13.8" y="4.8" width="4" height="14.4" rx="1.8" /></svg>
-                                <svg v-else viewBox="0 0 24 24" width="30" height="30" fill="currentColor" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round" aria-hidden="true"><path d="M20.4 12 7.8 4.73v14.54Z" /></svg>
+                                <media-icon v-else-if="playing" name="pause" class="media-button-icon" data-test="afsPauseIcon"></media-icon>
+                                <media-icon v-else name="play" class="media-button-icon" data-test="afsPlayIcon"></media-icon>
                             </button>
                             <button
                                 v-if="skipForwardSeconds > 0 && !isLive"

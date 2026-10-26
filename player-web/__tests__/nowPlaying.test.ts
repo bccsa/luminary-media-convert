@@ -208,6 +208,15 @@ describe('the now-playing view for a host', () => {
             expect(play.attributes('aria-busy')).toBeUndefined();
         });
 
+        it("draws play and pause with the player's own icons, as full screen does", async () => {
+            const wrapper = mountView({ playing: false });
+            const play = find(wrapper, 'afsPlay');
+            expect(play.find("[data-test='afsPlayIcon']").attributes('name')).toBe('play');
+
+            await wrapper.setProps({ playing: true });
+            expect(play.find("[data-test='afsPauseIcon']").attributes('name')).toBe('pause');
+        });
+
         it('has no lyrics button for a post without words, and keeps the sleep timer', () => {
             const wrapper = mountView();
             expect(find(wrapper, 'afsLyricsLanguage').exists()).toBe(false);
