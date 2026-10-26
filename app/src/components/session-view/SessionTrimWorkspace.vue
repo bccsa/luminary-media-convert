@@ -37,8 +37,8 @@ const props = withDefaults(
          * only part of the timeline and more frames are on the way.
          */
         storyboardPending?: boolean;
-        /** After encode completes — timeline title is for chapter editing, not pre-encode trim. */
-        isCompleted?: boolean;
+        /** The timeline edits chapters, from the moment the encode is submitted, rather than trim ranges. */
+        editsChapters?: boolean;
         /**
          * When the session shell uses zero flex gap (collapsed detail card), add space
          * between the player row and this timeline so it matches the spaced stack after encode.
@@ -48,7 +48,7 @@ const props = withDefaults(
     {
         section: undefined,
         addGapAboveTimeline: false,
-        isCompleted: false,
+        editsChapters: false,
         canSaveChapters: false,
     },
 );
@@ -64,23 +64,23 @@ const showToolbarSection = () => props.section !== 'timeline';
 const trimSegmentEditorRef = ref<{ focus?: () => void } | null>(null);
 
 const segmentEditorTimelineTitle = computed(() =>
-    props.isCompleted ? 'Edit chapters' : 'Trim segments',
+    props.editsChapters ? 'Edit chapters' : 'Trim segments',
 );
 
 /**
- * The same strip is trim before the encode and chapters after it, so the mode has
- * to follow the phase. Left hardcoded to `trim`, chapter editing inherited every
+ * The same strip is trim before the encode and chapters once it is submitted, so
+ * the mode has to follow the phase. Left hardcoded to `trim`, chapter editing inherited every
  * trim rule: one selection at a time, no hover delete, and shift-drag marking a
  * range instead of selecting across one.
  */
-const timelineMode = computed(() => (props.isCompleted ? 'chapters' : 'trim'));
+const timelineMode = computed(() => (props.editsChapters ? 'chapters' : 'trim'));
 
 /**
  * Trimming keeps a single range; chapters are a list and must not be capped —
  * with the trim cap applied, marking a second chapter silently replaced the first.
  */
 const timelineMaxSegments = computed(() =>
-    props.isCompleted ? undefined : 1,
+    props.editsChapters ? undefined : 1,
 );
 
 defineExpose({

@@ -4,17 +4,17 @@ import { shallowMount } from '@vue/test-utils';
 import SessionTrimWorkspace from './SessionTrimWorkspace.vue';
 
 /**
- * The bottom timeline is trim before the encode and chapters after it. The two
+ * The bottom timeline is trim before the encode and chapters once it is submitted. The two
  * differ in more than a title, so the props it hands the editor have to follow
  * the phase — which they did not, and chapter editing quietly inherited the trim
  * rules.
  */
-function mountTimeline(isCompleted: boolean) {
+function mountTimeline(editsChapters: boolean) {
     return shallowMount(SessionTrimWorkspace, {
         props: {
             section: 'timeline',
             showTrimSegmentEditor: true,
-            isCompleted,
+            editsChapters,
             editorSegments: [],
             showChaptersSidePanel: false,
             chaptersIsDirty: false,
@@ -30,15 +30,15 @@ function mountTimeline(isCompleted: boolean) {
     });
 }
 
-const editorProps = (isCompleted: boolean) =>
-    mountTimeline(isCompleted).findComponent({ name: 'SegmentEditor' }).props();
+const editorProps = (editsChapters: boolean) =>
+    mountTimeline(editsChapters).findComponent({ name: 'SegmentEditor' }).props();
 
 describe('SessionTrimWorkspace timeline', () => {
     it('edits trim ranges before the encode', () => {
         expect(editorProps(false).mode).toBe('trim');
     });
 
-    it('edits chapters once the encode has produced output', () => {
+    it('edits chapters once the encode is submitted', () => {
         // Left in trim mode, chapters could not be multi-selected, lost their
         // hover delete, and shift-drag marked a new range instead of selecting
         // across several.
