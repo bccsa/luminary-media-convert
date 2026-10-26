@@ -430,7 +430,15 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         }
     }
 
-    private removeTextTracks(): void {
+    /** hls.js's index of the master subtitle the page picked, or -1 for none (or one of ours). */
+    private masterSubtitleIndex(engine: HlsEngine): number {
+        const id = this.activeTextTrackId;
+        if (id === null || !id.startsWith('m:')) return -1;
+        const label = id.split(':').slice(2).join(':');
+        return (engine.subtitleTracks ?? []).findIndex((track) => track.name === label || track.lang === label);
+    }
+
+        private removeTextTracks(): void {
         for (const trackEl of this.textTracks.values()) {
             if (trackEl.track) trackEl.track.mode = 'disabled';
             trackEl.remove();
@@ -583,10 +591,11 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         this.subtitlesSettled = true;
         const engine = this.engine;
         // The page's choice, not the master's default: none turns them all off, and one the page picked before the
-        // tracks existed (it picks as soon as it has read the master) is turned on now that it can be.
+        // tracks existed (it picks as soon as it has read the master) is turned on now that it can be. hls.js is told
+        // which track that is rather than none: told none, it turns the text tracks off on its own time, after ours.
         const settle = (): void => {
             if (this.engine !== engine || this.destroyed) return;
-            engine.subtitleTrack = -1;
+            engine.subtitleTrack = this.masterSubtitleIndex(engine);
             this.applyMasterSubtitle();
         };
         settle();

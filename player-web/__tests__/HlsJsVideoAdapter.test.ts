@@ -555,9 +555,12 @@ describe("the master's own subtitles", () => {
             mode: i === 0 ? 'showing' : 'disabled',
         }));
         (el as unknown as { target: unknown }).target = { textTracks: tracks, querySelectorAll: () => [] };
-        el.engine = fakeEngine();
+        el.engine = Object.assign(fakeEngine(), {
+            subtitleTracks: tracks.map((t) => ({ name: t.label, lang: t.language })),
+            subtitleTrack: 0,
+        });
         el.dispatchEvent(new Event('loadstart'));
-        return { tracks, engine: el.engine as FakeEngine };
+        return { tracks, engine: el.engine as FakeEngine & { subtitleTrack: number } };
     }
 
     it("puts the master's default aside when the page has picked none", () => {
@@ -566,6 +569,7 @@ describe("the master's own subtitles", () => {
         engine.emit(Hls.Events.SUBTITLE_TRACKS_UPDATED, {});
         vi.runAllTimers();
         expect(tracks.map((t) => t.mode)).toEqual(['disabled', 'disabled']);
+        expect(engine.subtitleTrack).toBe(-1);
     });
 
     it('shows the one the page picked before the tracks existed', () => {
@@ -576,6 +580,8 @@ describe("the master's own subtitles", () => {
         engine.emit(Hls.Events.SUBTITLE_TRACKS_UPDATED, {});
         vi.runAllTimers();
         expect(tracks.map((t) => t.mode)).toEqual(['disabled', 'showing']);
+        // hls.js is told the same track, not none, which it would act on after this and turn the subtitle off.
+        expect(engine.subtitleTrack).toBe(1);
     });
 });
 
