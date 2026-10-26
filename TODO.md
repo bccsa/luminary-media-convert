@@ -12,7 +12,7 @@ packages here. The full app list is in `TODO.md` on luminary's
 | ---- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [ ]  | #310                | A trimmed encode resets the rendition modes and brings back audio tracks that were removed, so it can't start (v0.0.3). **Likely fixed by #260 in 0.0.4: waiting for Ivan to retry.** |
 | [x]  | #311                | The segment editor keeps one segment only: selecting a second region removes the first. **Fixed in #312.**                                                                                               |
-| [ ]  | bccsa/luminary#2274 | Thumbnails only cover the start of the video (new report: 37 minutes, frames only near the start). Is only one sprite sheet uploaded?                                                 |
+| [x]  | bccsa/luminary#2274 | Thumbnails only cover the start of the video (new report: 37 minutes, frames only near the start). **Fixed in #313**: a short set is sampled again, or no storyboard ships.                                                 |
 | [ ]  | #209                | Fails on Windows 11 with an RTX 5070 Ti: `h264_nvenc` won't open ("Function not implemented"). New report on this ticket.                                                             |
 
 ## Player packages (app tickets)
