@@ -614,6 +614,15 @@ const asidePanelSegments = computed<Segment[]>({
     },
 });
 
+/**
+ * Whether the bottom timeline holds chapters rather than trim markers: from the
+ * moment the encode is submitted, while it runs as well as once it is done, since
+ * the chapter list beside the player is live for that whole time.
+ */
+const timelineEditsChapters = computed(
+    () => canEditTrimTimeline.value && !showProbeConfig.value
+);
+
 const showTrimSegmentEditor = computed(
     () =>
         !!(
@@ -1701,9 +1710,7 @@ const { syncChaptersFromTimeline } = useChapterTrimSync({
     // nothing to say about chapters: mirroring stays off so they cannot seed the
     // chapter list, and a chapter sidecar cannot overwrite them. Afterwards the
     // timeline *is* the chapter editor and the two are kept in step.
-    mirrorActive: computed(
-        () => canEditTrimTimeline.value && !showProbeConfig.value
-    ),
+    mirrorActive: timelineEditsChapters,
     chaptersLoaded: chapters.isLoaded,
 });
 
@@ -2673,7 +2680,7 @@ onUnmounted(() => {
                         :storyboard-pending="storyboardPending"
                         :waveform-peaks="timelineWaveformPeaks"
                         @segment-removed="onTimelineSegmentRemoved"
-                        :is-completed="isCompleted"
+                        :edits-chapters="timelineEditsChapters"
                         :probe-duration="trimEditorProbeDuration"
                         :add-gap-above-timeline="false"
                         :get-current-time="timelineCurrentTime"
@@ -2861,7 +2868,7 @@ onUnmounted(() => {
                             :thumbnail-vtt-url="thumbnailVttUrl"
                             :waveform-peaks="timelineWaveformPeaks"
                             @segment-removed="onTimelineSegmentRemoved"
-                            :is-completed="isCompleted"
+                            :edits-chapters="timelineEditsChapters"
                             :can-edit-trim-timeline="canEditTrimTimeline"
                             :can-edit-chapters-playback="
                                 canEditChaptersPlayback

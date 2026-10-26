@@ -377,6 +377,32 @@ describe('SessionView', () => {
      * present in `encrypting`, where it could only fail — silently, because the
      * refusal was swallowed and the route change happened anyway.
      */
+    describe('the bottom timeline', () => {
+        async function workspacesAt(state: string) {
+            detail.mockResolvedValue(uploadedSession({ status: state }));
+            status.mockResolvedValue({
+                status: state,
+                probeResult: uploadedSession().probeResult,
+            });
+            const wrapper = await mountView();
+            return wrapper.findAllComponents({ name: 'SessionTrimWorkspace' });
+        }
+
+        it('holds trim ranges before the encode is started', async () => {
+            const workspaces = await workspacesAt('uploaded');
+            expect(workspaces.length).toBeGreaterThan(0);
+            for (const w of workspaces) expect(w.props('editsChapters')).toBe(false);
+        });
+
+        it('holds chapters while the encode runs, as the list beside the player does', async () => {
+            // Left in trim mode until the encode finished, the timeline kept one
+            // range only, and marking a second chapter replaced the first.
+            const workspaces = await workspacesAt('encoding');
+            expect(workspaces.length).toBeGreaterThan(0);
+            for (const w of workspaces) expect(w.props('editsChapters')).toBe(true);
+        });
+    });
+
     describe('discarding a session', () => {
         const button = (w: Awaited<ReturnType<typeof mountView>>) =>
             w.find('[data-testid="discard-session"]');
