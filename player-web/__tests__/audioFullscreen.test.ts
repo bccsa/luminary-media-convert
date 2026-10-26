@@ -200,7 +200,7 @@ describe('AudioFullscreen — the transport', () => {
         expect(bar.classes()).not.toContain('lmpl-afs-bar-open');
     });
 
-    it('stays open while a finger is on the host strip, and closes three seconds after it lifts', async () => {
+    it('stays open while a finger is on the host strip, and closes five seconds after it lifts', async () => {
         vi.useFakeTimers();
         try {
             const wrapper = mountScreen({}, { roster: '<div data-test="hostStrip"></div>' });
@@ -214,7 +214,7 @@ describe('AudioFullscreen — the transport', () => {
             vi.advanceTimersByTime(10000);
             expect(wrapper.emitted('scrub')?.at(-1)?.[0]).not.toBeNull();
             await strip.trigger('pointerup', { pointerId: 6, pointerType: 'touch' });
-            vi.advanceTimersByTime(3000);
+            vi.advanceTimersByTime(5000);
             expect(wrapper.emitted('scrub')?.at(-1)?.[0]).toBeNull();
         } finally {
             vi.useRealTimers();

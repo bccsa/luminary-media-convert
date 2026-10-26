@@ -47,11 +47,11 @@ struct TimelineScrubTests {
         #expect(box.effects == [.open(.strip), .pause, .seek(10)])
     }
 
-    @Test("it closes three seconds after the last touch, and the video plays on")
+    @Test("it closes five seconds after the last touch, and the video plays on")
     func idleCloses() {
         let (scrub, clock, box) = make()
         scrub.tapped(framesReady: true, playing: true)
-        clock.advance(2.9)
+        clock.advance(4.9)
         #expect(scrub.isOpen)
         clock.advance(0.1)
         #expect(!scrub.isOpen)
@@ -67,7 +67,7 @@ struct TimelineScrubTests {
         clock.advance(10)
         #expect(scrub.isOpen)
         scrub.dragEnded(at: 5)
-        clock.advance(2.9)
+        clock.advance(4.9)
         #expect(scrub.isOpen)
         clock.advance(0.1)
         #expect(!scrub.isOpen)
@@ -86,7 +86,7 @@ struct TimelineScrubTests {
     func pausedStaysPaused() {
         let (scrub, clock, box) = make()
         scrub.tapped(framesReady: true, playing: false)
-        clock.advance(3)
+        clock.advance(5)
         #expect(box.effects == [.open(.strip), .close])
     }
 
@@ -114,7 +114,7 @@ struct TimelineScrubTests {
         scrub.tapped(framesReady: true, playing: true)
         clock.advance(2)
         scrub.tapped(framesReady: true, playing: false)
-        clock.advance(2.9)
+        clock.advance(4.9)
         #expect(scrub.isOpen)
         #expect(box.effects == [.open(.strip), .pause])
     }

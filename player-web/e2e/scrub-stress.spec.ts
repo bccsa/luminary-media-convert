@@ -177,11 +177,11 @@ test.describe('with a finger', () => {
         const roster = (await page.locator('.lmpl-roster').boundingBox())!;
         expect(track.y + track.height - roster.y).toBeLessThanOrEqual(0.5);
         await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-        // The strip stays open, the video still held, until three seconds go by without a touch.
+        // The strip stays open, the video still held, until five seconds go by without a touch.
         await page.waitForTimeout(500);
         expect((await state(page)).paused).toBe(true);
         await expect(page.locator('.lmpl-roster')).toBeVisible();
-        await expect.poll(() => state(page).then((s) => s.paused), { timeout: 6000 }).toBe(false);
+        await expect.poll(() => state(page).then((s) => s.paused), { timeout: 8000 }).toBe(false);
         await expect(page.locator('.lmpl-roster')).toHaveCount(0);
     });
 
@@ -221,7 +221,7 @@ test.describe('with a finger', () => {
         await expect(page.locator('.lmpl-root.lmpl-scrub-bar')).toHaveCount(1);
         expect((await state(page)).paused).toBe(true);
         expect(Math.abs((await state(page)).t - before)).toBeLessThan(1.5);
-        await expect(page.locator('.lmpl-root.lmpl-scrub-bar')).toHaveCount(0, { timeout: 6000 });
+        await expect(page.locator('.lmpl-root.lmpl-scrub-bar')).toHaveCount(0, { timeout: 8000 });
         await expect.poll(() => state(page).then((s) => s.paused)).toBe(false);
     });
 
@@ -236,7 +236,7 @@ test.describe('with a finger', () => {
             await touch(page, [{ x: bar.x + bar.width * r, y }, { x: bar.x + bar.width * (r + 0.03), y }, { x: bar.x + bar.width * (r + 0.05), y: y - (i % 4) * 6 }]);
         }
         // The last scrub leaves the strip open and the video held until three quiet seconds have passed.
-        await expect.poll(() => state(page).then((s) => s.paused), { timeout: 8000 }).toBe(false);
+        await expect.poll(() => state(page).then((s) => s.paused), { timeout: 10000 }).toBe(false);
         expect(errors).toEqual([]);
     });
 });
