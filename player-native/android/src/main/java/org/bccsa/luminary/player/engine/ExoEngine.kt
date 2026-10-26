@@ -354,7 +354,10 @@ class ExoEngine(
         startPolling()
     }
 
-    override fun setAppSuspended(suspended: Boolean) = ladder.setAppSuspended(suspended)
+    override fun setAppSuspended(suspended: Boolean) {
+        ladder.setAppSuspended(suspended)
+        if (::events.isInitialized) events.setBackground(suspended)
+    }
 
     override fun takeHeldReload(): PendingReload? = ladder.takeHeldReload()
 
@@ -623,14 +626,22 @@ class ExoEngine(
         poll = clock.schedule(POLL_PERIOD, ::sample)
     }
 
+    /** The buffer only moves while loading or playing; a timer left running otherwise keeps waking the app. */
     private fun sample() {
         val end = active.bufferedPosition / 1000.0
         if (metadataSent && end != reportedBufferedEnd) {
             reportedBufferedEnd = end
             events.bufferedTo(end)
         }
-        poll = clock.schedule(POLL_PERIOD, ::sample)
+        poll = if (active.isLoading || active.isPlaying) clock.schedule(POLL_PERIOD, ::sample) else null
     }
+
+    override fun onIsLoadingChanged(isLoading: Boolean) {
+        if (isLoading) startPolling()
+    }
+
+    /** Whether the buffered end is still being sampled, for tests. */
+    internal val polling: Boolean get() = poll != null
 
     // Player.Listener: what ExoPlayer reports, handed to EventSink.
 
@@ -686,6 +697,7 @@ class ExoEngine(
 
     private fun handleIsPlayingChanged(isPlaying: Boolean) {
         if (!isPlaying) return
+        startPolling()
         ladder.notePlaybackHealthy()
         clearStall()
         events.playing()
@@ -925,7 +937,8 @@ class ExoEngine(
         )
 
         private const val TAG = "LuminaryCast"
-        const val POLL_PERIOD = 0.25
+        /** `progress` goes out at most once a second; sampling faster only wakes the app. */
+        const val POLL_PERIOD = 1.0
         /** How long the app may be in the background before its video track, and downloads, are dropped. */
         const val BACKGROUND_VIDEO_OFF_SECONDS = 30.0
         const val DEFAULT_SKIP_SECONDS = 10

@@ -23,6 +23,7 @@ class EventSink(
     /** A new player plays at 1; a load keeps whatever rate the last one had. */
     private var rate = 1.0
     private var tick: Cancellable? = null
+    private var background = false
     private var lastProgressAt: Double? = null
     private var heldProgress: Double? = null
     private var heldProgressTimer: Cancellable? = null
@@ -235,10 +236,19 @@ class EventSink(
 
     // The 4 Hz `timeupdate`.
 
-    /** The 0.25 s period starts now; there is no `timeupdate` at the transition itself. */
+    /** In the background the page only keeps a resume point, and every event wakes its JavaScript. */
+    fun setBackground(background: Boolean) {
+        if (background == this.background) return
+        this.background = background
+        if (tick != null) startTicking()
+    }
+
+    private val timeupdatePeriod get() = if (background) BACKGROUND_TIMEUPDATE_PERIOD else TIMEUPDATE_PERIOD
+
+    /** The period starts now; there is no `timeupdate` at the transition itself. */
     private fun startTicking() {
         stopTicking()
-        tick = clock.schedule(TIMEUPDATE_PERIOD, ::onTick)
+        tick = clock.schedule(timeupdatePeriod, ::onTick)
     }
 
     private fun stopTicking() {
@@ -248,7 +258,7 @@ class EventSink(
 
     private fun onTick() {
         send("timeupdate", buildJsonObject { put("currentTime", position()) })
-        tick = clock.schedule(TIMEUPDATE_PERIOD, ::onTick)
+        tick = clock.schedule(timeupdatePeriod, ::onTick)
     }
 
     /** A `timeupdate` outside the period (seek, pause); a running period restarts from it. */
@@ -259,6 +269,7 @@ class EventSink(
 
     private companion object {
         const val TIMEUPDATE_PERIOD = 0.25
+        const val BACKGROUND_TIMEUPDATE_PERIOD = 5.0
         const val PROGRESS_PERIOD = 1.0
     }
 }

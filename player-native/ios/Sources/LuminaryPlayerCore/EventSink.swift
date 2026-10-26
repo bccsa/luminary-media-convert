@@ -4,7 +4,8 @@
 public final class EventSink {
     public typealias Emit = (_ name: String, _ payload: [String: JSON]) -> Void
 
-    private static let timeupdatePeriod = 0.25
+    private static let foregroundTimeupdatePeriod = 0.25
+    private static let backgroundTimeupdatePeriod = 5.0
     private static let progressPeriod = 1.0
 
     private let playerId: String
@@ -20,6 +21,7 @@ public final class EventSink {
     /// A new player plays at 1; a load keeps whatever rate the last one had.
     private var rate = 1.0
     private var tick: Cancellable?
+    private var background = false
     private var lastProgressAt: Double?
     private var heldProgress: Double?
     private var heldProgressTimer: Cancellable?
@@ -220,10 +222,21 @@ public final class EventSink {
 
     // MARK: The 4 Hz timeupdate
 
-    /// The 0.25 s period starts now; there is no `timeupdate` at the transition itself.
+    /// In the background the page only keeps a resume point, and every event wakes its JavaScript.
+    public func setBackground(_ background: Bool) {
+        guard background != self.background else { return }
+        self.background = background
+        if tick != nil { startTicking() }
+    }
+
+    private var timeupdatePeriod: Double {
+        background ? Self.backgroundTimeupdatePeriod : Self.foregroundTimeupdatePeriod
+    }
+
+    /// The period starts now; there is no `timeupdate` at the transition itself.
     private func startTicking() {
         stopTicking()
-        tick = clock.schedule(Self.timeupdatePeriod) { [weak self] in self?.onTick() }
+        tick = clock.schedule(timeupdatePeriod) { [weak self] in self?.onTick() }
     }
 
     private func stopTicking() {
@@ -233,7 +246,7 @@ public final class EventSink {
 
     private func onTick() {
         send("timeupdate", ["currentTime": .number(position())])
-        tick = clock.schedule(Self.timeupdatePeriod) { [weak self] in self?.onTick() }
+        tick = clock.schedule(timeupdatePeriod) { [weak self] in self?.onTick() }
     }
 
     /// A `timeupdate` outside the period (seek, pause); a running period restarts from it.

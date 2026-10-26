@@ -247,7 +247,9 @@ so that virtual time gives exactly one right answer:
   then emits the list.
 - **`timeupdate`, while playing:** one every 0.25 s of clock, counted from the
   later of the last `timeupdate` and the `playing` transition. There is none at
-  the transition itself.
+  the transition itself. While the app is in the background the period is 5 s:
+  the page then only keeps a resume point, and each event wakes its JavaScript.
+  The harness has no app-lifecycle signal, so no scenario covers this.
 - **`timeupdate` on seek and pause:** on `seeked`, a `timeupdate` then `seeked`;
   on `paused`, a `timeupdate` then `pause`.
 - **`progress`:** at most one per 1 s of clock. A change inside the window is

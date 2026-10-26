@@ -6,7 +6,8 @@ import AVFoundation
 /// Main thread only. AVFoundation reports from its own threads; every report hops to the main
 /// queue before it reaches ``EventSink``.
 public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
-    private static let pollPeriod = 0.25
+    /// `progress` goes out at most once a second; sampling faster only wakes the app.
+    private static let pollPeriod = 1.0
 
     public var events: EventSink?
     /// Borrowed by the presenters. Replaced only when iOS resets its media services, which leaves
@@ -743,6 +744,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         switch status {
         case .playing:
             intendedPlaying = true
+            startPolling()
             ladder?.notePlaybackHealthy()
             if stalled {
                 stalled = false
@@ -804,6 +806,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
 
     public func setAppSuspended(_ suspended: Bool) {
         ladder?.setAppSuspended(suspended)
+        events?.setBackground(suspended)
     }
 
     public func takeHeldReload() -> PendingReload? {
@@ -954,14 +957,23 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         poll = clock.schedule(Self.pollPeriod) { [weak self] in self?.sample() }
     }
 
+    /// Paused with the buffer standing still there is nothing to sample; playing starts it again.
     private func sample() {
         let end = bufferedEnd()
+        let moved = end != lastSampledEnd
+        lastSampledEnd = end
         if metadataSent, end != reportedBufferedEnd {
             reportedBufferedEnd = end
             events?.bufferedTo(end)
         }
+        guard moved || !metadataSent || player.timeControlStatus != .paused else {
+            poll = nil
+            return
+        }
         poll = clock.schedule(Self.pollPeriod) { [weak self] in self?.sample() }
     }
+
+    private var lastSampledEnd = -1.0
 
     /// The end of the loaded range containing the playhead; 0 when none does.
     private func bufferedEnd() -> Double {

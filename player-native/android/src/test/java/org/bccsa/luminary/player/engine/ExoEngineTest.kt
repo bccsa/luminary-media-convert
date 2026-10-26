@@ -102,6 +102,21 @@ class ExoEngineTest {
     private fun named(name: String) = events.filter { it.first == name }.map { it.second }
 
     @Test
+    fun `stops sampling the buffer once nothing loads or plays, and samples again on play`() {
+        load("load1", KEY_HEX)
+        call("play")
+        TestPlayerRunHelper.advance(player).untilState(Player.STATE_ENDED)
+        TestPlayerRunHelper.advance(player).untilLoadingIs(false)
+        clock.advance(2.0)
+        assertTrue(!engine!!.polling)
+
+        call("seek", "position" to 0, "exact" to true)
+        call("play")
+        TestPlayerRunHelper.advance(player).untilState(Player.STATE_READY)
+        assertTrue(engine!!.polling)
+    }
+
+    @Test
     fun `plays an encrypted byte-range fMP4 stream to the end`() {
         load("load1", KEY_HEX)
         call("play")
