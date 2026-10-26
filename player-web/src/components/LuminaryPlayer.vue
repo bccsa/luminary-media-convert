@@ -52,6 +52,7 @@ import {
     rosterStep,
     rosterTiles,
 } from '../ui/scrubPreview';
+import { TimelineScrub } from '../ui/timelineScrub';
 import ScrubThumbnail from './ScrubThumbnail.vue';
 import ScrubRoster from './ScrubRoster.vue';
 import ScrubPicture from './ScrubPicture.vue';
@@ -361,7 +362,11 @@ onMounted(() => {
         media.addEventListener(type, handler);
         mediaListeners.push([type, handler]);
     };
-    on('play', () => keepAlive?.sync(true));
+    on('play', () => {
+        keepAlive?.sync(true);
+        // Played some other way (a key, the lock screen): the scrub has nothing left to hold still.
+        if (timelineScrub.isOpen) timelineScrub.reset();
+    });
     on('playing', () => {
         keepAlive?.sync(true);
         mediaWaiting.value = false;
@@ -756,6 +761,7 @@ function resumeFromScrub(): void {
 
 /** The press ended, or was taken from us: nothing is being scrubbed any more. */
 function endScrub(event?: PointerEvent): void {
+    if (event && endTouch(event)) return;
     scrubbing = false;
     heldGap = null;
     resumeFromScrub();
@@ -769,6 +775,166 @@ function endScrub(event?: PointerEvent): void {
     hideScrub();
 }
 
+// --- the timeline under a finger ------------------------------------------------
+
+/**
+ * A finger on the timeline does not seek where it lands: a tap opens the strip of frames (or, without frames, a
+ * thicker bar with a handle) and holds the video, and only a drag moves it. The press is taken from the slider, which
+ * would seek on release, and decided here. A mouse keeps the slider's click-to-seek.
+ */
+const timelineScrub = new TimelineScrub((effect) => {
+    const media = mediaEl.value;
+    switch (effect.kind) {
+        case 'open':
+            if (effect.mode === 'strip') openPinAtPlayhead();
+            else barScrub.value = true;
+            break;
+        case 'close':
+            putAwayPin();
+            barScrub.value = false;
+            barDragAt.value = null;
+            break;
+        case 'pause':
+            media?.pause();
+            break;
+        case 'play':
+            void media?.play();
+            break;
+        case 'seek':
+            pinAnchor.value = effect.time;
+            armAnchorTimeout();
+            seek(effect.time);
+            break;
+    }
+});
+onBeforeUnmount(() => timelineScrub.reset());
+
+/** Opened without frames: the bar thickens and carries a handle. */
+const barScrub = ref(false);
+/** Where a finger dragging the thick bar is, as a fraction of it; null while it rests on the playhead. */
+const barDragAt = ref<number | null>(null);
+
+/** How far a finger travels along the bar before a tap becomes a drag. */
+const TOUCH_DRAG_SLOP_PX = 8;
+
+/** A finger that came down on the timeline, until it lifts. */
+let touchPress: { id: number; x: number; y: number; dragging: boolean } | null = null;
+
+function isTouch(event: PointerEvent): boolean {
+    return event.pointerType === 'touch' || event.pointerType === 'pen';
+}
+
+function framesReady(): boolean {
+    const duration = mediaEl.value?.duration ?? NaN;
+    return state.value.thumbnailsReady && mergedControls.value.scrubRoster && Number.isFinite(duration) && duration > 0;
+}
+
+function isPlaying(): boolean {
+    const media = mediaEl.value;
+    return !!media && !media.paused;
+}
+
+/** Where the handle sits on the thick bar: under the finger while it drags, else on the playhead. */
+const scrubAt = computed(() => {
+    if (barDragAt.value !== null) return barDragAt.value;
+    const { duration, currentTime } = state.value;
+    return duration > 0 ? Math.min(Math.max(currentTime / duration, 0), 1) : 0;
+});
+
+/**
+ * A finger's press, travel and lift on the timeline, decided here rather than by the slider. True when the event is
+ * done with; false lets the scrub preview run on it, as for a drag over the frames.
+ */
+function followTouch(event: PointerEvent): boolean {
+    const container = containerEl.value;
+    const slider = container?.querySelector<HTMLElement>('.lmpl-time-slider');
+    if (!container || !slider) return false;
+    if (event.type === 'pointerdown') {
+        const onBar = isOnBar(event.clientX, event.clientY, slider.getBoundingClientRect());
+        if (isTouch(event) && onBar) {
+            const duration = mediaEl.value?.duration ?? NaN;
+            if (!Number.isFinite(duration) || duration <= 0) return true;
+            // The slider never sees it, so it cannot seek on release.
+            event.stopPropagation();
+            event.preventDefault();
+            container.setPointerCapture?.(event.pointerId);
+            touchPress = { id: event.pointerId, x: event.clientX, y: event.clientY, dragging: false };
+            timelineScrub.touchBegan();
+            return true;
+        }
+        if (timelineScrub.isOpen && !onBar) {
+            // Play, which shows beside the thick bar, closes it and plays; anywhere else closes it and plays on.
+            if (event.target instanceof Element && event.target.closest('.lmpl-play')) {
+                event.stopPropagation();
+                event.preventDefault();
+                timelineScrub.playPressed();
+                return true;
+            }
+            timelineScrub.tappedElsewhere();
+        }
+        return false;
+    }
+    if (!touchPress || event.pointerId !== touchPress.id) return false;
+    if (!touchPress.dragging && Math.hypot(event.clientX - touchPress.x, event.clientY - touchPress.y) > TOUCH_DRAG_SLOP_PX) {
+        touchPress.dragging = true;
+        timelineScrub.dragBegan(framesReady(), isPlaying());
+        scrubbing = true;
+    }
+    if (!touchPress.dragging) return true;
+    if (timelineScrub.mode === 'bar') {
+        barDragAt.value = pointerRatio(event.clientX, slider.getBoundingClientRect());
+        return true;
+    }
+    return false;
+}
+
+/** The finger lifted, or was taken away: a drag lands, a tap only opens. True when it was a finger on the timeline. */
+function endTouch(event: PointerEvent): boolean {
+    const press = touchPress;
+    if (!press || event.pointerId !== press.id) return false;
+    touchPress = null;
+    const slider = containerEl.value?.querySelector<HTMLElement>('.lmpl-time-slider');
+    const duration = mediaEl.value?.duration ?? NaN;
+    if (!press.dragging) {
+        if (event.type === 'pointerup') timelineScrub.tapped(framesReady(), isPlaying());
+        return true;
+    }
+    scrubbing = false;
+    heldGap = null;
+    const ratio = slider ? pointerRatio(event.clientX, slider.getBoundingClientRect()) : null;
+    // The strip stays where the finger lifted, centred on where the video is going.
+    const roster = scrub.value?.roster;
+    if (roster && pin.value) pin.value = { ...pin.value, markerX: roster.markerX };
+    hideScrub();
+    barDragAt.value = null;
+    if (event.type === 'pointerup' && ratio !== null && Number.isFinite(duration) && duration > 0) {
+        timelineScrub.dragEnded(Math.min(ratio * duration, Math.max(0, duration - 0.001)));
+    } else {
+        timelineScrub.dragCancelled();
+    }
+    return true;
+}
+
+/** The strip opened by a tap: its marker over the playhead, where the bar's fill ends. */
+function openPinAtPlayhead(): void {
+    const container = containerEl.value;
+    const slider = container?.querySelector<HTMLElement>('.lmpl-time-slider');
+    const media = mediaEl.value;
+    if (!container || !slider || !media || !(media.duration > 0)) return;
+    const bar = slider.getBoundingClientRect();
+    const frame = container.getBoundingClientRect();
+    restBarTop = bar.top;
+    restBarBottom = bar.bottom;
+    const ratio = Math.min(Math.max(media.currentTime / media.duration, 0), 1);
+    pin.value = {
+        bottom: 0,
+        gap: frame.bottom - bar.bottom,
+        markerX: bar.left - frame.left + ratio * bar.width,
+        labelBottom: frame.bottom - (bar.top - (rosterHeight.value - TRACK_INSET_PX * controlsScale(slider))) + LABEL_GAP_PX,
+    };
+    pinAnchor.value = null;
+}
+
 /**
  * Follows the pointer over, or dragging, the timeline: where the viewer is about to land, which is not
  * where the video is. Driven from the container's pointer events rather than the slider's own, because
@@ -780,6 +946,7 @@ function endScrub(event?: PointerEvent): void {
 function updateScrub(event: PointerEvent): void {
     // The pinned roster is dragged by its own handlers; what happens on it is not a press on the timeline.
     if (event.target instanceof Element && event.target.closest('.lmpl-roster')) return;
+    if (followTouch(event)) return;
     const container = containerEl.value;
     const slider = container?.querySelector<HTMLElement>('.lmpl-time-slider');
     const media = mediaEl.value;
@@ -953,13 +1120,21 @@ watch(pinNow, (now) => {
 
 function closePin(): void {
     resumeFromScrub();
+    putAwayPin();
+}
+
+/** The strip goes, and playback is left as it is. */
+function putAwayPin(): void {
     pin.value = null;
     pinDrag.value = null;
     pinAnchor.value = null;
     if (anchorTimer) clearTimeout(anchorTimer);
 }
 
-watch([isFullscreen, frameWidth, () => props.source], closePin);
+watch([isFullscreen, frameWidth, () => props.source], () => {
+    timelineScrub.reset();
+    closePin();
+});
 onBeforeUnmount(() => anchorTimer && clearTimeout(anchorTimer));
 
 const pinnedView = computed(() => {
@@ -987,7 +1162,8 @@ function onPinDown(event: PointerEvent): void {
     const view = pinnedView.value;
     if (!view) return;
     (event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId);
-    pauseForScrub();
+    if (isTouch(event)) timelineScrub.dragBegan(true, isPlaying());
+    else pauseForScrub();
     pinDrag.value = {
         startX: event.clientX,
         lastX: event.clientX,
@@ -1016,7 +1192,8 @@ function onPinUp(event: PointerEvent): void {
     const drag = pinDrag.value;
     const view = pinnedView.value;
     pinDrag.value = null;
-    if (!drag || !view || event.type !== 'pointerup') return resumeFromScrub();
+    const touch = isTouch(event);
+    if (!drag || !view || event.type !== 'pointerup') return touch ? timelineScrub.dragCancelled() : resumeFromScrub();
     let target = drag.time;
     if (!drag.moved) {
         // A tap: the frame under the finger, read off the strip's own scale.
@@ -1025,6 +1202,7 @@ function onPinUp(event: PointerEvent): void {
         target = view.time + (event.clientX - (frame?.left ?? 0) - view.markerX) / (view.tileWidth / view.step);
         target = Math.min(Math.max(0, target), Math.max(0, duration - 0.001));
     }
+    if (touch) return timelineScrub.dragEnded(target);
     pinAnchor.value = target;
     armAnchorTimeout();
     seek(target);
@@ -1489,6 +1667,7 @@ defineExpose({
             'lmpl-has-heading': !!nowPlaying?.title,
             'lmpl-audio-fs': audioFullscreen,
             'lmpl-scrubbing': rosterShown,
+            'lmpl-scrub-bar': barScrub,
             'lmpl-previewing': scrub !== null,
             'lmpl-is-busy': showsBusy,
             'lmpl-awaiting-duration': awaitingDuration,
@@ -1497,6 +1676,7 @@ defineExpose({
             '--lmpl-roster-h': `${rosterHeight}px`,
             '--lmpl-track-inset': `${TRACK_INSET_PX}px`,
             '--lmpl-chapter-mask': chapterBarMask || undefined,
+            '--lmpl-scrub-at': barScrub ? String(scrubAt) : undefined,
         }"
     >
         <video-player ref="playerEl" class="lmpl-video-player" :lang="lang">

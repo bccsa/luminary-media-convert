@@ -174,6 +174,29 @@ describe('AudioFullscreen — the transport', () => {
         expect(find(wrapper, 'afsElapsed').text()).toBe('6:02');
     });
 
+    it('opens for scrubbing on a finger tap instead of seeking, and holds the sound', async () => {
+        const wrapper = mountScreen();
+        await wrapper.setProps({ playing: true });
+        const bar = find(wrapper, 'afsBar');
+        bar.element.getBoundingClientRect = () => ({ left: 100, width: 200, top: 0, height: 30, right: 300, bottom: 30, x: 100, y: 0, toJSON: () => ({}) });
+        await bar.trigger('pointerdown', { clientX: 250, pointerId: 2, pointerType: 'touch' });
+        await bar.trigger('pointerup', { clientX: 250, pointerId: 2, pointerType: 'touch' });
+        expect(wrapper.emitted('seek')).toBeUndefined();
+        expect(wrapper.emitted('toggle-play')).toHaveLength(1);
+        expect(bar.classes()).toContain('lmpl-afs-bar-open');
+    });
+
+    it('seeks once when a finger drags the bar and lets go', async () => {
+        const wrapper = mountScreen();
+        const bar = find(wrapper, 'afsBar');
+        bar.element.getBoundingClientRect = () => ({ left: 100, width: 200, top: 0, height: 30, right: 300, bottom: 30, x: 100, y: 0, toJSON: () => ({}) });
+        await bar.trigger('pointerdown', { clientX: 200, pointerId: 3, pointerType: 'touch' });
+        await bar.trigger('pointermove', { clientX: 250, pointerId: 3, pointerType: 'touch' });
+        expect(wrapper.emitted('seek')).toBeUndefined();
+        await bar.trigger('pointerup', { clientX: 250, pointerId: 3, pointerType: 'touch' });
+        expect(wrapper.emitted('seek')).toEqual([[360]]);
+    });
+
     it('lets go of a seek the player never makes, after a moment', async () => {
         vi.useFakeTimers();
         try {

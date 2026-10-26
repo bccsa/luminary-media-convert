@@ -9,6 +9,7 @@ import { activeLyric, type LyricCue } from '../ui/lyrics';
 import { skipIcon } from '../ui/controlsHtml';
 import type { ScrubPosition } from '../ui/audioFullscreen';
 import { formatChapterOf } from '../ui/chapterBar';
+import { TimelineScrub } from '../ui/timelineScrub';
 import { SLEEP_MINUTES, SPEED_OPTIONS, formatMinutes, sleepMinutesLeft } from '../ui/audioFullscreen';
 
 /**
@@ -239,18 +240,94 @@ function announceScrub(time: number): void {
     const markerX = bar.left - root.left + Math.min(1, Math.max(0, time / knownDuration.value)) * bar.width;
     emit('scrub', { time, markerX, width: root.width, bottom: root.bottom - bar.top + 8 });
 }
+/**
+ * A finger on the bar does not seek where it lands: a tap opens it for scrubbing, thicker and with a handle, and holds
+ * the sound; only a drag moves it. It closes on a tap elsewhere, on play, or three seconds after the last touch, as the
+ * video players' timelines do. A mouse still seeks on a click.
+ */
+const scrubOpen = ref(false);
+const timelineScrub = new TimelineScrub((effect) => {
+    switch (effect.kind) {
+        case 'open':
+            scrubOpen.value = true;
+            break;
+        case 'close':
+            scrubOpen.value = false;
+            break;
+        case 'pause':
+            if (props.playing) emit('toggle-play');
+            break;
+        case 'play':
+            if (!props.playing) emit('toggle-play');
+            break;
+        case 'seek':
+            holdSeek(effect.time);
+            emit('seek', effect.time);
+            break;
+    }
+});
+onBeforeUnmount(() => timelineScrub.reset());
+
+/** How far a finger travels along the bar before a tap becomes a drag. */
+const TOUCH_DRAG_SLOP_PX = 8;
+/** A finger that came down on the bar, until it lifts. */
+let touchPress: { id: number; x: number; dragging: boolean } | null = null;
+
+function isTouch(event: PointerEvent): boolean {
+    return event.pointerType === 'touch' || event.pointerType === 'pen';
+}
+
+/** A press anywhere but the bar closes it, and play closes it and plays. */
+function onRootDown(event: PointerEvent): void {
+    if (!timelineScrub.isOpen || !(event.target instanceof Element)) return;
+    if (event.target.closest('.lmpl-afs-bar, .lmpl-afs-scrubzone')) return;
+    if (event.target.closest('.lmpl-afs-playbtn')) return;
+    timelineScrub.tappedElsewhere();
+}
+
+function onPlayButton(): void {
+    if (timelineScrub.isOpen) timelineScrub.playPressed();
+    else emit('toggle-play');
+}
+
 function onBarDown(event: PointerEvent): void {
     if (!knownDuration.value) return;
     (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
+    if (isTouch(event)) {
+        touchPress = { id: event.pointerId, x: event.clientX, dragging: false };
+        timelineScrub.touchBegan();
+        return;
+    }
     dragTime.value = timeAt(event.clientX);
     announceScrub(dragTime.value);
 }
 function onBarMove(event: PointerEvent): void {
-    if (dragTime.value === null) return;
+    if (touchPress && event.pointerId === touchPress.id) {
+        if (!touchPress.dragging && Math.abs(event.clientX - touchPress.x) > TOUCH_DRAG_SLOP_PX) {
+            touchPress.dragging = true;
+            timelineScrub.dragBegan(false, props.playing);
+        }
+        if (!touchPress.dragging) return;
+    }
+    if (dragTime.value === null && !touchPress?.dragging) return;
     dragTime.value = timeAt(event.clientX);
     announceScrub(dragTime.value);
 }
-function onBarUp(): void {
+function onBarUp(event?: PointerEvent): void {
+    const press = touchPress;
+    if (press && event && event.pointerId === press.id) {
+        touchPress = null;
+        if (!press.dragging) {
+            if (event.type === 'pointerup') timelineScrub.tapped(false, props.playing);
+            return;
+        }
+        const time = dragTime.value;
+        dragTime.value = null;
+        emit('scrub', null);
+        if (event.type === 'pointerup' && time !== null) timelineScrub.dragEnded(time);
+        else timelineScrub.dragCancelled();
+        return;
+    }
     if (dragTime.value === null) return;
     holdSeek(dragTime.value);
     emit('seek', dragTime.value);
@@ -420,6 +497,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
 <template>
     <div
         ref="rootEl"
+        @pointerdown.capture="onRootDown"
         class="lmpl-afs"
         :class="[
             `lmpl-afs-${appearance}`,
@@ -581,6 +659,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                         <div
                             ref="barEl"
                             class="lmpl-afs-bar"
+                            :style="{ '--lmpl-afs-at': pct(shownTime) }"
                             role="slider"
                             tabindex="0"
                             aria-valuemin="0"
@@ -588,7 +667,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                             :aria-valuenow="Math.floor(shownTime)"
                             :aria-valuetext="clock(shownTime, timeGuide)"
                             :aria-label="messages.scrubberLabel"
-                            :class="{ 'lmpl-afs-bar-dragging': dragTime !== null }"
+                            :class="{ 'lmpl-afs-bar-dragging': dragTime !== null, 'lmpl-afs-bar-open': scrubOpen }"
                             data-test="afsBar"
                             @pointerdown="onBarDown"
                             @pointermove="onBarMove"
@@ -623,7 +702,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                                 :aria-label="busy ? messages.loading : playing ? messages.pause : messages.play"
                                 :aria-busy="busy ? 'true' : undefined"
                                 data-test="afsPlay"
-                                @click="emit('toggle-play')"
+                                @click="onPlayButton"
                             >
                                 <svg v-if="busy" class="lmpl-afs-spinner" viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true" data-test="afsSpinner"><path d="M12 3a9 9 0 1 1-9 9" /></svg>
                                 <svg v-else-if="playing" viewBox="0 0 24 24" width="30" height="30" fill="currentColor" aria-hidden="true"><rect x="6.2" y="4.8" width="4" height="14.4" rx="1.8" /><rect x="13.8" y="4.8" width="4" height="14.4" rx="1.8" /></svg>
