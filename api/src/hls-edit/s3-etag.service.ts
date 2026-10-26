@@ -16,6 +16,11 @@ export interface PutResult {
     etag: string;
 }
 
+export interface PutOptions {
+    /** `Cache-Control` for the object, so a CDN in front of the bucket knows how long it may keep it. */
+    cacheControl?: string;
+}
+
 /**
  * S3 helper scoped to hls-edit. Uses @aws-sdk/client-s3 so conditional
  * writes via `If-Match` work across AWS S3, Cloudflare R2, MinIO, and
@@ -57,6 +62,33 @@ export class S3EtagService {
         return { body, etag };
     }
 
+    /** `length` bytes of the object from `offset`: an init kept inside a byte-range chunk. */
+    async getObjectRange(
+        config: S3ConfigDto,
+        key: string,
+        offset: number,
+        length: number
+    ): Promise<Buffer> {
+        const client = this.createClient(config);
+        const resp = await client.send(
+            new GetObjectCommand({
+                Bucket: config.bucket,
+                Key: key,
+                Range: `bytes=${offset}-${offset + length - 1}`,
+            })
+        );
+        return streamToBuffer(resp.Body as NodeJS.ReadableStream);
+    }
+
+    /** The object's size in bytes. */
+    async objectSize(config: S3ConfigDto, key: string): Promise<number> {
+        const client = this.createClient(config);
+        const resp = await client.send(
+            new HeadObjectCommand({ Bucket: config.bucket, Key: key })
+        );
+        return resp.ContentLength ?? 0;
+    }
+
     /**
      * Conditional PUT. Throws ConflictException (HTTP 409) when the
      * upstream ETag no longer matches `ifMatch` (412 PreconditionFailed).
@@ -66,7 +98,8 @@ export class S3EtagService {
         key: string,
         body: Buffer | string,
         ifMatch: string,
-        contentType: string
+        contentType: string,
+        options: PutOptions = {}
     ): Promise<PutResult> {
         const client = this.createClient(config);
         try {
@@ -77,6 +110,9 @@ export class S3EtagService {
                     Body: body,
                     ContentType: contentType,
                     IfMatch: ifMatch,
+                    ...(options.cacheControl
+                        ? { CacheControl: options.cacheControl }
+                        : {}),
                 })
             );
             return { etag: stripQuotes(resp.ETag ?? '') };
@@ -101,7 +137,8 @@ export class S3EtagService {
         config: S3ConfigDto,
         key: string,
         body: Buffer | string,
-        contentType: string
+        contentType: string,
+        options: PutOptions = {}
     ): Promise<PutResult> {
         const client = this.createClient(config);
         const resp = await client.send(
@@ -110,9 +147,40 @@ export class S3EtagService {
                 Key: key,
                 Body: body,
                 ContentType: contentType,
+                ...(options.cacheControl
+                    ? { CacheControl: options.cacheControl }
+                    : {}),
             })
         );
         return { etag: stripQuotes(resp.ETag ?? '') };
+    }
+
+    /**
+     * PUT only when nothing is stored at `key` yet (`If-None-Match: *`).
+     * Resolves false, writing nothing, when an object is already there.
+     */
+    async putObjectIfAbsent(
+        config: S3ConfigDto,
+        key: string,
+        body: Buffer | string,
+        contentType: string
+    ): Promise<boolean> {
+        const client = this.createClient(config);
+        try {
+            await client.send(
+                new PutObjectCommand({
+                    Bucket: config.bucket,
+                    Key: key,
+                    Body: body,
+                    ContentType: contentType,
+                    IfNoneMatch: '*',
+                })
+            );
+            return true;
+        } catch (err) {
+            if (isPreconditionFailed(err)) return false;
+            throw err;
+        }
     }
 
     private async headEtag(

@@ -1,5 +1,6 @@
 import {
     IsBoolean,
+    IsIn,
     IsNotEmpty,
     IsNumber,
     IsOptional,
@@ -35,11 +36,8 @@ export class CmsEncryptionRequirementDto {
 }
 
 /**
- * Media the post already has.
- *
- * Accepted and stored so the CMS can send it today and get edit mode when it
- * lands; nothing acts on it yet. Validated all the same — a shape that was
- * never checked is a shape that will be wrong by the time something reads it.
+ * Media the post already has: what an edit session (`mode: 'edit'`) opens.
+ * Validated in an encode session too, which does nothing with it.
  */
 export class CmsExistingMediaDto {
     @ApiProperty({
@@ -199,8 +197,8 @@ export class CmsCreateSessionDto {
 
     @ApiPropertyOptional({
         description:
-            'Media already attached to the post. Stored for a future edit mode; ' +
-            'nothing acts on it today.',
+            "Media already attached to the post. Required with mode 'edit', where it " +
+            'is the video to edit; an encode session does nothing with it.',
         type: CmsExistingMediaDto,
     })
     @IsOptional()
@@ -208,4 +206,18 @@ export class CmsCreateSessionDto {
     @Type(() => CmsExistingMediaDto)
     @Expose()
     existingMedia?: CmsExistingMediaDto;
+
+    @ApiPropertyOptional({
+        description:
+            "'encode' (the default) encodes a new file for the post. 'edit' opens the " +
+            "post's existing video (existingMedia) to change its chapters and its audio " +
+            "tracks' languages and names; it never encodes, and leaves the video's " +
+            'segments as they are.',
+        enum: ['encode', 'edit'],
+        default: 'encode',
+    })
+    @IsOptional()
+    @IsIn(['encode', 'edit'])
+    @Expose()
+    mode?: 'encode' | 'edit';
 }

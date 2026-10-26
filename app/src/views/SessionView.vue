@@ -28,6 +28,7 @@ import AccountMenu from '../components/AccountMenu.vue';
 import DeleteSessionModal from '../components/DeleteSessionModal.vue';
 import SessionOutputPanel from '../components/session-view/SessionOutputPanel.vue';
 import SessionPlayerStrip from '../components/session-view/SessionPlayerStrip.vue';
+import AudioTracksPanel from '../components/session-view/AudioTracksPanel.vue';
 import SessionTopline from '../components/session-view/SessionTopline.vue';
 import SessionTrimWorkspace from '../components/session-view/SessionTrimWorkspace.vue';
 import SessionWorkflowPanel from '../components/session-view/SessionWorkflowPanel.vue';
@@ -404,15 +405,24 @@ const canRetryEncode = computed(
     () => currentStatus.value === 'failed' && poller.canRetry.value === true
 );
 
-const showProbeConfig = computed(() => {
+/**
+ * The session can be configured: probed, waiting to encode (or retryable).
+ *
+ * Separate from `showProbeConfig` because the encode form outlives a submit. It
+ * holds the operator's edits — track labels and languages, the ladder — which
+ * exist nowhere else, so a rejected submit (a copy-mode refusal naming a track,
+ * a failed request) has to find them where it left them.
+ */
+const canConfigure = computed(() => {
     const s = currentStatus.value;
     return (
         (s === 'uploaded' || canRetryEncode.value) &&
         isActiveSession.value &&
-        !!probeResult.value &&
-        !submitting.value
+        !!probeResult.value
     );
 });
+
+const showProbeConfig = computed(() => canConfigure.value && !submitting.value);
 
 watch(showProbeConfig, (ready) => {
     if (!ready) encodeConfigCanSubmit.value = false;
@@ -603,6 +613,15 @@ const asidePanelSegments = computed<Segment[]>({
         else chapterSegments.value = next;
     },
 });
+
+/**
+ * Whether the bottom timeline holds chapters rather than trim markers: from the
+ * moment the encode is submitted, while it runs as well as once it is done, since
+ * the chapter list beside the player is live for that whole time.
+ */
+const timelineEditsChapters = computed(
+    () => canEditTrimTimeline.value && !showProbeConfig.value
+);
 
 const showTrimSegmentEditor = computed(
     () =>
@@ -1691,9 +1710,7 @@ const { syncChaptersFromTimeline } = useChapterTrimSync({
     // nothing to say about chapters: mirroring stays off so they cannot seed the
     // chapter list, and a chapter sidecar cannot overwrite them. Afterwards the
     // timeline *is* the chapter editor and the two are kept in step.
-    mirrorActive: computed(
-        () => canEditTrimTimeline.value && !showProbeConfig.value
-    ),
+    mirrorActive: timelineEditsChapters,
     chaptersLoaded: chapters.isLoaded,
 });
 
@@ -1709,6 +1726,15 @@ const encodeSidePanelTab = ref<'encode' | 'chapters'>('encode');
 /** Sub-tab within the aside panel during active encoding. */
 const encodingAsideTab = ref<'progress' | 'chapters'>('progress');
 
+/**
+ * A session opened on a post's existing video, from the CMS: shown as the
+ * finished session it is, with its audio tracks to name beside its chapters.
+ */
+const editsExistingVideo = computed(() => session.value?.mode === 'edit');
+
+/** Sub-tab within the aside panel of an edit session. */
+const editAsideTab = ref<'chapters' | 'tracks'>('chapters');
+
 const trimTimelineWorkspaceRef = ref<InstanceType<
     typeof SessionTrimWorkspace
 > | null>(null);
@@ -1722,10 +1748,16 @@ watch(
     }
 );
 
+/**
+ * The panel beside the player. It holds the encode form, so it follows
+ * `canConfigure` rather than `showProbeConfig`: gone while a start is in flight,
+ * it took the form with it, and a refused start brought back one rebuilt from
+ * the source, its copy ticks, removed tracks and labels all undone.
+ */
 const showAside = computed(
     () =>
         activeTab.value === 'trim' &&
-        (showProbeConfig.value ||
+        (canConfigure.value ||
             showChaptersBesidePlayer.value ||
             showEncoding.value ||
             isCompleted.value)
@@ -1946,9 +1978,12 @@ onUnmounted(() => {
                     />
 
                     <!-- On trim: flex order shows progress card above player; player fills remaining height.
-                         Hidden during pure upload/probe-loading state so the centered upload card can use the full viewport. -->
+                         Hidden during pure upload/probe-loading state so the centered upload card can use the full viewport.
+                         Kept mounted, only hidden, while the encode request is in flight: the encode form in its aside holds
+                         the operator's edits, and a rejected submit has to find them where it left them. -->
                     <div
-                        v-if="!showSessionDetailCard"
+                        v-if="!showSessionDetailCard || submitting"
+                        v-show="!showSessionDetailCard"
                         :class="[
                             'min-w-0 flex flex-col',
                             activeTab === 'trim'
@@ -2173,6 +2208,48 @@ onUnmounted(() => {
                                     </button>
                                 </div>
 
+                                <!-- Tab switcher: an existing video (Chapters / Audio tracks) -->
+                                <div
+                                    v-if="editsExistingVideo"
+                                    class="shrink-0 flex gap-0.5 rounded-lg border border-slate-200/90 bg-slate-100/80 p-0.5 dark:border-slate-700 dark:bg-slate-800/50"
+                                >
+                                    <button
+                                        type="button"
+                                        class="flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
+                                        :class="
+                                            editAsideTab === 'chapters'
+                                                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
+                                                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+                                        "
+                                        @click="editAsideTab = 'chapters'"
+                                    >
+                                        Chapters
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
+                                        :class="
+                                            editAsideTab === 'tracks'
+                                                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
+                                                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+                                        "
+                                        data-test="audioTracksTab"
+                                        @click="editAsideTab = 'tracks'"
+                                    >
+                                        Audio tracks
+                                    </button>
+                                </div>
+
+                                <AudioTracksPanel
+                                    v-if="
+                                        editsExistingVideo &&
+                                        editAsideTab === 'tracks'
+                                    "
+                                    :session-id="sessionId"
+                                    :session-token="sessionToken"
+                                    @saved="sessionPlayerStripRef?.reload?.()"
+                                />
+
                                 <!-- Encoding progress panel -->
                                 <div
                                     v-if="
@@ -2307,7 +2384,7 @@ onUnmounted(() => {
                                     started their encode from the Cuts tab.
                                 -->
                                 <div
-                                    v-if="showProbeConfig"
+                                    v-if="canConfigure"
                                     v-show="
                                         !showChaptersBesidePlayer ||
                                         encodeSidePanelTab === 'encode'
@@ -2316,7 +2393,7 @@ onUnmounted(() => {
                                 >
                                     <SessionOutputPanel
                                         ref="outputPanelRef"
-                                        :show-probe-config="showProbeConfig"
+                                        :show-probe-config="canConfigure"
                                         :probe-result="probeResult"
                                         :byte-range-enabled="byteRangeEnabled"
                                         encode-primary-action="start-encoding"
@@ -2340,7 +2417,9 @@ onUnmounted(() => {
                                             encodeSidePanelTab ===
                                                 'chapters') &&
                                         (!showEncoding ||
-                                            encodingAsideTab === 'chapters')
+                                            encodingAsideTab === 'chapters') &&
+                                        (!editsExistingVideo ||
+                                            editAsideTab === 'chapters')
                                     "
                                     class="min-h-0 flex-1 flex flex-col overflow-hidden"
                                 >
@@ -2607,7 +2686,7 @@ onUnmounted(() => {
                         :storyboard-pending="storyboardPending"
                         :waveform-peaks="timelineWaveformPeaks"
                         @segment-removed="onTimelineSegmentRemoved"
-                        :is-completed="isCompleted"
+                        :edits-chapters="timelineEditsChapters"
                         :probe-duration="trimEditorProbeDuration"
                         :add-gap-above-timeline="false"
                         :get-current-time="timelineCurrentTime"
@@ -2795,7 +2874,7 @@ onUnmounted(() => {
                             :thumbnail-vtt-url="thumbnailVttUrl"
                             :waveform-peaks="timelineWaveformPeaks"
                             @segment-removed="onTimelineSegmentRemoved"
-                            :is-completed="isCompleted"
+                            :edits-chapters="timelineEditsChapters"
                             :can-edit-trim-timeline="canEditTrimTimeline"
                             :can-edit-chapters-playback="
                                 canEditChaptersPlayback

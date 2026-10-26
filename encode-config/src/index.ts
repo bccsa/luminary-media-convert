@@ -1,4 +1,5 @@
 export { default as EncodeConfigForm } from './EncodeConfigForm.vue';
+export { default as LanguageSelect } from './LanguageSelect.vue';
 export * from './types';
 export { computeLayoutKey, getStoredConfig, saveConfig } from './layoutStorage';
 export {

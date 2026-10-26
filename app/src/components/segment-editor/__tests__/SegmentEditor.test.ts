@@ -1965,6 +1965,122 @@ describe('SegmentEditor — discarded ranges', () => {
     });
 });
 
+describe('SegmentEditor — hover timecode', () => {
+    const VTT = [
+        'WEBVTT',
+        '',
+        ...Array.from({ length: 10 }, (_, i) => {
+            const from = `00:00:${String(i * 10).padStart(2, '0')}.000`;
+            const to = `00:00:${String((i + 1) * 10).padStart(2, '0')}.000`;
+            return `${from} --> ${to}\nsprite.jpg#xywh=${i * 160},0,160,90\n`;
+        }),
+    ].join('\n');
+
+    const readout = (w: ReturnType<typeof mountEditor>) =>
+        w.find('[data-testid="hover-timecode"]');
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    it('is not shown until the pointer is over the timeline', async () => {
+        const w = mountEditor({ props: { mode: 'trim' } });
+        await flush();
+        expect(readout(w).exists()).toBe(false);
+    });
+
+    it('reads the time under the pointer, with no storyboard', async () => {
+        const w = mountEditor({ props: { mode: 'trim', thumbnailVttUrl: null } });
+        await flush();
+
+        mouseAt(w.get('.se-timeline').element, 'mousemove', 12.5);
+        await flush();
+
+        expect(readout(w).text()).toBe('0:12.500');
+    });
+
+    it('follows the pointer', async () => {
+        const w = mountEditor({ props: { mode: 'trim' } });
+        await flush();
+        const track = w.get('.se-timeline').element;
+
+        mouseAt(track, 'mousemove', 30);
+        await flush();
+        expect(readout(w).text()).toBe('0:30.000');
+        expect(readout(w).attributes('style')).toContain('left: 300px');
+
+        mouseAt(track, 'mousemove', 60);
+        await flush();
+        expect(readout(w).text()).toBe('1:00.000');
+        expect(readout(w).attributes('style')).toContain('left: 600px');
+    });
+
+    it('stays inside the timeline at either edge', async () => {
+        const w = mountEditor({ props: { mode: 'trim' } });
+        await flush();
+        const track = w.get('.se-timeline').element;
+
+        mouseAt(track, 'mousemove', 0);
+        await flush();
+        expect(readout(w).attributes('style')).toContain('left: 44px');
+
+        mouseAt(track, 'mousemove', 100);
+        await flush();
+        expect(readout(w).attributes('style')).toContain('left: 956px');
+    });
+
+    it('goes away when the pointer leaves', async () => {
+        const w = mountEditor({ props: { mode: 'trim' } });
+        await flush();
+        const track = w.get('.se-timeline');
+
+        mouseAt(track.element, 'mousemove', 40);
+        await flush();
+        expect(readout(w).exists()).toBe(true);
+
+        await track.trigger('mouseleave');
+        expect(readout(w).exists()).toBe(false);
+    });
+
+    it('is hidden while a range is being dragged', async () => {
+        const w = mountEditor({ props: { mode: 'trim' } });
+        await flush();
+        const track = w.get('.se-timeline').element;
+
+        mouseAt(track, 'mousemove', 40);
+        await flush();
+        expect(readout(w).exists()).toBe(true);
+
+        mouseAt(track, 'mousedown', 40, { shiftKey: true });
+        mouseAt(track, 'mousemove', 55, { shiftKey: true });
+        await flush();
+        expect(readout(w).exists()).toBe(false);
+    });
+
+    it('rides above the thumbnail when a storyboard is showing', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue({ ok: true, text: async () => VTT })
+        );
+        const w = mountEditor({
+            props: {
+                mode: 'trim',
+                thumbnailVttUrl: 'https://example.test/thumbs/thumbnails.vtt',
+            },
+        });
+        await flush();
+        await flush();
+
+        mouseAt(w.get('.se-timeline').element, 'mousemove', 25);
+        await flush();
+
+        expect(readout(w).text()).toBe('0:25.000');
+        // 6px gap + 90px frame + 4px border + 4px clearance.
+        expect(readout(w).attributes('style')).toContain('calc(100% + 104px)');
+        expect(w.get('.se-thumb-preview').attributes('style')).toContain('display: block');
+    });
+});
+
 describe('SegmentEditor — thumbnail filmstrip', () => {
     // Ten cues of 10s each, 160x90 frames laid out along one sprite sheet.
     const VTT = [
