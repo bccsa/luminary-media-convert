@@ -4,6 +4,7 @@ import type { Chapter, ThumbnailSpriteCue } from '@luminary-media-converter/play
 import type { PlayerMessages } from '../messages';
 import { formatClock } from '../ui/scrubPreview';
 import { withSectionHeadings, type PlayerUpNextItem } from '../upNext';
+import NextUpThumb from './NextUpThumb.vue';
 
 /**
  * Chapters and up next, in a panel over the picture: tabs for what there is, a list under them, a close button.
@@ -185,7 +186,8 @@ defineExpose({ hasFocus });
                     <li>
                         <button type="button" class="lmpl-browse-row lmpl-upnext" :aria-current="row.item.current ? 'true' : undefined" @click="row.item.current || emit('pick-upnext', row.item.id)">
                             <span class="lmpl-upnext-thumb">
-                                <img v-if="row.item.imageUrl" :src="row.item.imageUrl" alt="" loading="lazy" draggable="false" />
+                                <!-- As the up next strip's cards: the picture, else its fallback, else the plain tile. -->
+                                <NextUpThumb :item="row.item" />
                             </span>
                             <span class="lmpl-upnext-text">
                                 <span class="lmpl-upnext-title">{{ row.item.title }}</span>

@@ -270,3 +270,24 @@ describe('BrowsePanel — the chapters', () => {
         expect(wrapper.findAll('.lmpl-chapter-tile svg')).toHaveLength(2);
     });
 });
+
+describe('BrowsePanel — up next', () => {
+    const upNext: PlayerUpNextItem[] = [
+        { id: 'a', title: 'With a picture', imageUrl: 'https://img/a.jpg', fallbackImageUrl: '/assets/fallback-1.webp' },
+        { id: 'b', title: 'Without one', fallbackImageUrl: '/assets/fallback-2.webp' },
+    ];
+    const pictures = (wrapper: ReturnType<typeof mountPanel>) =>
+        wrapper.findAll('.lmpl-upnext-thumb').map((thumb) => thumb.find('img').attributes('src') ?? null);
+
+    it('shows the fallback picture for an item that has none of its own', () => {
+        // As the strip near the end does: a plain grey tile reads as a picture that failed.
+        const wrapper = mountPanel({ upNext, initialTab: 'upnext' });
+        expect(pictures(wrapper)).toEqual(['https://img/a.jpg', '/assets/fallback-2.webp']);
+    });
+
+    it('falls back when an item\'s own picture fails to load', async () => {
+        const wrapper = mountPanel({ upNext, initialTab: 'upnext' });
+        await wrapper.findAll('.lmpl-upnext-thumb img')[0]!.trigger('error');
+        expect(pictures(wrapper)[0]).toBe('/assets/fallback-1.webp');
+    });
+});
