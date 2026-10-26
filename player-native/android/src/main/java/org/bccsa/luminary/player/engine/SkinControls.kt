@@ -25,6 +25,7 @@ import android.view.GestureDetector
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewOutlineProvider
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
@@ -45,6 +46,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.util.Util
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -52,6 +54,7 @@ import kotlin.math.roundToLong
 import org.bccsa.luminary.player.Browse
 import org.bccsa.luminary.player.BrowseChapter
 import org.bccsa.luminary.player.BrowseItem
+import org.bccsa.luminary.player.MainLooperClock
 import org.bccsa.luminary.player.Roster
 import org.bccsa.luminary.player.ThumbnailCue
 import org.bccsa.luminary.player.Thumbnails
@@ -120,7 +123,10 @@ internal class SkinControls(
 
     private val elapsed = timeView(Gravity.START or Gravity.CENTER_VERTICAL)
     private val remaining = timeView(Gravity.END or Gravity.CENTER_VERTICAL)
-    private val timeline = Timeline(context, ::scrubbed, ::scrubEnded) { if (menuOpen) closeMenu() }
+    private val timeline = Timeline(context, ::scrubbed, ::scrubEnded, ::timelineTapped) {
+        if (menuOpen) closeMenu()
+        timelineScrub.touchBegan()
+    }
     private val timelineRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
     private val actionsRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
     private val column = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
@@ -165,6 +171,10 @@ internal class SkinControls(
     /** The time the strip is held at by a finger on it (the slow scrub), until it lifts. */
     private var sliding: Double? = null
     private var closedByThisTouch = false
+    /** A tap on the timeline opens the strip (or the thick bar), a drag moves the video, and it closes on its own. */
+    private val timelineScrub = TimelineScrub(MainLooperClock()).also { it.onEffect = ::apply }
+    /** A drag on the timeline is under way: its first move opens the scrub. */
+    private var timelineDragging = false
     private var scale = 1f
     private var widthDp = 0f
 
@@ -332,20 +342,20 @@ internal class SkinControls(
             refreshChapterPictures()
             if (rosterOpen) updateRoster(rosterTime)
         }
+        roster.onPress = { timelineScrub.touchBegan() }
         roster.onSlide = { time ->
-            pauseForScrub()
+            if (sliding == null) timelineScrub.dragBegan(rosterWanted(), player.playWhenReady)
             sliding = time
             updateRoster(time)
             showPicture(time)
             refresh()
         }
         roster.onSlideEnd = { commit ->
-            sliding?.let { if (commit) player.seekTo((it * 1000).roundToLong()) }
+            val slid = sliding
             sliding = null
             hidePicture()
-            resumeFromScrub()
+            if (commit && slid != null) timelineScrub.dragEnded(slid) else timelineScrub.dragCancelled()
             refresh()
-            scheduleHide()
         }
         applyScale()
         refresh()
@@ -369,6 +379,7 @@ internal class SkinControls(
         main.removeCallbacks(tick)
         main.removeCallbacks(hide)
         main.removeCallbacks(switchingLimit)
+        timelineScrub.reset()
         if (thumbnails?.onChange != null) thumbnails.onChange = null
         cancelImages()
         super.onDetachedFromWindow()
@@ -390,11 +401,15 @@ internal class SkinControls(
 
     override fun onTouchEvent(event: MotionEvent): Boolean = gestures.onTouchEvent(event)
 
-    /** A press anywhere but the roster and the timeline puts the roster away. */
+    /**
+     * A press anywhere but the strip and the timeline puts the scrub away and the video plays on. Play itself, when it
+     * shows (the thick bar leaves it up), is left to its own button, which closes the scrub and plays.
+     */
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-            closedByThisTouch = rosterOpen && !hits(roster, event) && !hits(timeline, event)
-            if (closedByThisTouch) closeRoster()
+            val onPlay = play.isShown && play.alpha > 0f && hits(play, event)
+            closedByThisTouch = timelineScrub.isOpen && !onPlay && !hits(roster, event) && !hits(timeline, event)
+            if (closedByThisTouch) timelineScrub.tappedElsewhere()
         }
         return super.dispatchTouchEvent(event)
     }
@@ -413,6 +428,8 @@ internal class SkinControls(
     override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) = playingChanged()
 
     override fun onTracksChanged(tracks: Tracks) = refresh()
+
+    override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = timelineScrub.reset()
 
     /**
      * While the picture is in its own small window the controls would cover it: nothing but the
@@ -730,6 +747,10 @@ internal class SkinControls(
     // Actions.
 
     private fun playOrPause() {
+        if (timelineScrub.isOpen) {
+            timelineScrub.playPressed()
+            return
+        }
         if (Util.shouldShowPlayButton(player)) Util.handlePlayButtonAction(player) else Util.handlePauseButtonAction(player)
         scheduleHide()
     }
@@ -752,45 +773,57 @@ internal class SkinControls(
 
     // The timeline, held: a roster of frames takes its place and the timeline lifts onto it.
 
-    /**
-     * Whether the video was playing when a scrub began, and so plays on when it ends. A scrubbed video holds still: a
-     * playhead that keeps moving under the finger makes the strip drift and the landing a guess.
-     */
-    private var resumeAfterScrub = false
-
-    private fun pauseForScrub() {
-        if (resumeAfterScrub || !player.playWhenReady) return
-        resumeAfterScrub = true
-        player.pause()
-    }
-
-    private fun resumeFromScrub() {
-        if (!resumeAfterScrub) return
-        resumeAfterScrub = false
-        player.play()
-    }
-
-    /** The finger is on the timeline at [fraction] of the way along it. */
+    /** The finger is dragging the timeline at [fraction] of the way along it: the first move opens the scrub. */
     private fun scrubbed(fraction: Double, x: Float) {
-        pauseForScrub()
-        if (rosterWanted() && !rosterOpen) openRoster()
+        if (!timelineDragging) {
+            timelineDragging = true
+            timelineScrub.dragBegan(rosterWanted(), player.playWhenReady)
+        }
         val seconds = fraction * (player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0L) / 1000.0
         if (rosterOpen) updateRoster(seconds, x)
         showPicture(seconds)
         refresh()
     }
 
-    /** The finger came up (or the touch was taken): seek, and give the timeline back its place. */
+    /** The drag let go (or the touch was taken): the video moves only on a let-go, and the strip stays open. */
     private fun scrubEnded(fraction: Double, commit: Boolean) {
-        if (commit) {
-            val duration = player.duration.takeIf { it != C.TIME_UNSET }
-            if (duration != null) player.seekTo((duration * fraction).roundToLong())
-        }
-        resumeFromScrub()
+        timelineDragging = false
+        val duration = player.duration.takeIf { it != C.TIME_UNSET && it > 0 }
+        if (commit && duration != null) timelineScrub.dragEnded(duration * fraction / 1000.0) else timelineScrub.dragCancelled()
         hidePicture()
-        // The roster stays until a press lands outside it and the timeline.
         refresh()
-        scheduleHide()
+    }
+
+    /** A tap on the timeline, which opens the scrub and never moves the video. */
+    private fun timelineTapped() {
+        if (player.duration == C.TIME_UNSET || player.duration <= 0) return
+        timelineScrub.tapped(rosterWanted(), player.playWhenReady)
+        refresh()
+    }
+
+    private fun apply(effect: TimelineScrub.Effect) {
+        when (effect) {
+            is TimelineScrub.Effect.Open -> when (effect.mode) {
+                TimelineScrub.Mode.STRIP -> {
+                    openRoster()
+                    updateRoster(player.currentPosition / 1000.0, timeline.width * timeline.playedFraction)
+                }
+                TimelineScrub.Mode.BAR -> {
+                    timeline.scrubMode = true
+                    main.removeCallbacks(hide)
+                }
+                TimelineScrub.Mode.CLOSED -> Unit
+            }
+            TimelineScrub.Effect.Close -> {
+                closeRoster()
+                timeline.scrubMode = false
+                scheduleHide()
+            }
+            TimelineScrub.Effect.Pause -> player.pause()
+            TimelineScrub.Effect.Play -> player.play()
+            is TimelineScrub.Effect.Seek -> player.seekTo((effect.seconds * 1000).roundToLong())
+        }
+        refresh()
     }
 
     private fun rosterWanted() = thumbnails?.ready == true && player.duration != C.TIME_UNSET && player.duration > 0
@@ -896,7 +929,8 @@ internal class SkinControls(
 
     // Auto-hide: three seconds, only while playing and with nothing open or being dragged.
 
-    private fun canHide() = !menuOpen && !browseOpen && !timeline.dragging && !rosterOpen && !Util.shouldShowPlayButton(player)
+    private fun canHide() =
+        !menuOpen && !browseOpen && !timeline.dragging && !rosterOpen && !timelineScrub.isOpen && !Util.shouldShowPlayButton(player)
 
     private fun scheduleHide() {
         main.removeCallbacks(hide)
@@ -1103,6 +1137,7 @@ internal class SkinControls(
     private fun openBrowse() {
         val lists = browse ?: return
         closeMenu()
+        timelineScrub.reset()
         closeRoster()
         browseOpen = true
         updateNextUp()
@@ -1690,10 +1725,16 @@ private class Timeline(
     context: Context,
     private val onScrub: (Double, Float) -> Unit,
     private val onEnd: (Double, Boolean) -> Unit,
+    /** A tap, which does not seek. */
+    private val onTap: () -> Unit,
     private val onTouch: () -> Unit,
 ) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val slop = ViewConfiguration.get(context).scaledTouchSlop
+    private var downX = 0f
     private var played = 0.0
+    /** Where the playhead is drawn, as a fraction of the bar. */
+    val playedFraction get() = played.toFloat()
     private var buffered = 0.0
     var scale = 1f
 
@@ -1718,6 +1759,13 @@ private class Timeline(
             invalidate()
         }
 
+    /** Opened for scrubbing without frames: thicker still, with a handle on the playhead to take hold of. */
+    var scrubMode = false
+        set(value) {
+            field = value
+            invalidate()
+        }
+
     fun lp(height: Int) {
         layoutParams = LinearLayout.LayoutParams(0, height, 1f)
     }
@@ -1732,6 +1780,7 @@ private class Timeline(
     override fun onDraw(canvas: Canvas) {
         val density = resources.displayMetrics.density
         val dp = when {
+            scrubMode -> 20f
             onRoster -> 16f
             dragging -> 16f
             else -> 12f
@@ -1753,6 +1802,14 @@ private class Timeline(
         bar(buffered, 0x66FFFFFF)
         bar(if (dragging) dragAt else played, Color.WHITE)
         canvas.restore()
+        // Outside the cuts' clip, so a chapter gap never slices it.
+        if (scrubMode) {
+            val x = (width * (if (dragging) dragAt else played)).toFloat()
+            paint.color = Color.WHITE
+            paint.setShadowLayer(3f * density, 0f, 0f, 0x59000000)
+            canvas.drawCircle(x, height / 2f, 14f * scale * density, paint)
+            paint.clearShadowLayer()
+        }
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -1760,27 +1817,35 @@ private class Timeline(
         val fraction = (event.x / width).toDouble().coerceIn(0.0, 1.0)
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                // Not yet a scrub: a finger that lifts without travelling is a tap, which does not seek.
                 onTouch()
                 parent.requestDisallowInterceptTouchEvent(true)
-                dragging = true
-                dragAt = fraction
+                downX = event.x
                 pointerX = event.x.coerceIn(0f, width.toFloat())
-                onScrub(fraction, pointerX)
             }
             MotionEvent.ACTION_MOVE -> {
-                dragAt = fraction
-                pointerX = event.x.coerceIn(0f, width.toFloat())
-                onScrub(fraction, pointerX)
+                if (!dragging && abs(event.x - downX) > slop) dragging = true
+                if (dragging) {
+                    dragAt = fraction
+                    pointerX = event.x.coerceIn(0f, width.toFloat())
+                    onScrub(fraction, pointerX)
+                }
             }
             MotionEvent.ACTION_UP -> {
-                dragging = false
-                // Where the finger last was, not where it lifted: a lift drifts, and the strip showed the former.
-                played = dragAt
-                onEnd(dragAt, true)
+                if (dragging) {
+                    dragging = false
+                    // Where the finger last was, not where it lifted: a lift drifts, and the strip showed the former.
+                    played = dragAt
+                    onEnd(dragAt, true)
+                } else {
+                    onTap()
+                }
             }
             MotionEvent.ACTION_CANCEL -> {
-                dragging = false
-                onEnd(fraction, false)
+                if (dragging) {
+                    dragging = false
+                    onEnd(fraction, false)
+                }
             }
         }
         invalidate()
@@ -1857,8 +1922,12 @@ private class RosterView(context: Context) : View(context) {
     /** The slow scrub: a finger on the strip slides it under the marker. The time it reaches, and then the lift. */
     var onSlide: ((Double) -> Unit)? = null
     var onSlideEnd: ((Boolean) -> Unit)? = null
+    /** A finger came down on the strip, before it is known to slide. */
+    var onPress: (() -> Unit)? = null
+    private val slop = ViewConfiguration.get(context).scaledTouchSlop
     private var downX = 0f
     private var downTime = 0.0
+    private var slid = false
 
     private fun secondsPerPx(): Double {
         val sample = frames?.sample() ?: return 0.0
@@ -1871,10 +1940,15 @@ private class RosterView(context: Context) : View(context) {
             MotionEvent.ACTION_DOWN -> {
                 downX = event.x
                 downTime = time
+                slid = false
                 parent.requestDisallowInterceptTouchEvent(true)
+                onPress?.invoke()
             }
-            MotionEvent.ACTION_MOVE -> onSlide?.invoke((downTime - (event.x - downX) * secondsPerPx()).coerceIn(0.0, duration))
-            MotionEvent.ACTION_UP -> onSlideEnd?.invoke(true)
+            MotionEvent.ACTION_MOVE -> {
+                if (!slid && abs(event.x - downX) > slop) slid = true
+                if (slid) onSlide?.invoke((downTime - (event.x - downX) * secondsPerPx()).coerceIn(0.0, duration))
+            }
+            MotionEvent.ACTION_UP -> onSlideEnd?.invoke(slid)
             MotionEvent.ACTION_CANCEL -> onSlideEnd?.invoke(false)
         }
         return true

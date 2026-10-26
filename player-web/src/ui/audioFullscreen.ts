@@ -44,4 +44,9 @@ export interface ScrubPosition {
     markerX: number;
     width: number;
     bottom: number;
+    /**
+     * The player holds the strip open and closes it itself, holding and resuming playback as it does: a finger's tap
+     * opened it. The host shows the frames while it is set, and leaves pausing, pinning and resuming to the player.
+     */
+    held?: boolean;
 }

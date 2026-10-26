@@ -38,6 +38,9 @@ enum Skin {
     /// The track at rest, and while held or resting on the frames.
     static let track: CGFloat = 12
     static let trackHeld: CGFloat = 16
+    /// The track opened for scrubbing without frames: thicker, with a handle on the playhead.
+    static let trackScrub: CGFloat = 20
+    static let scrubHandle: CGFloat = 28
     /// How far the held track's bottom sits above the row's: the row lifts by the frames' height less this.
     static let trackInset: CGFloat = 7
     /// The column the controls stand in: room above them for the fade, and below them to the edge.

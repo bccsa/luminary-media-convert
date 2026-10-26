@@ -165,7 +165,7 @@ test.describe('with a finger', () => {
         return cdp;
     }
 
-    test('a finger held on the timeline holds the video, the roster meets the track, and a lift plays on', async ({ page }) => {
+    test('a finger dragged on the timeline holds the video, the roster meets the track, and it plays on once left alone', async ({ page }) => {
         await open(page);
         await page.locator('.lmpl-play').tap();
         await expect.poll(() => state(page).then((s) => s.paused)).toBe(false);
@@ -177,6 +177,51 @@ test.describe('with a finger', () => {
         const roster = (await page.locator('.lmpl-roster').boundingBox())!;
         expect(track.y + track.height - roster.y).toBeLessThanOrEqual(0.5);
         await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        // The strip stays open, the video still held, until three seconds go by without a touch.
+        await page.waitForTimeout(500);
+        expect((await state(page)).paused).toBe(true);
+        await expect(page.locator('.lmpl-roster')).toBeVisible();
+        await expect.poll(() => state(page).then((s) => s.paused), { timeout: 6000 }).toBe(false);
+        await expect(page.locator('.lmpl-roster')).toHaveCount(0);
+    });
+
+    test('a tap on the timeline opens the strip and holds the video without moving it', async ({ page }) => {
+        await open(page);
+        await page.locator('.lmpl-play').tap();
+        await expect.poll(() => state(page).then((s) => s.paused)).toBe(false);
+        const bar = (await page.locator('.lmpl-time-slider').boundingBox())!;
+        const before = (await state(page)).t;
+        await touch(page, [{ x: bar.x + bar.width * 0.8, y: bar.y + bar.height / 2 }]);
+        await expect(page.locator('.lmpl-roster')).toBeVisible();
+        expect((await state(page)).paused).toBe(true);
+        expect(Math.abs((await state(page)).t - before)).toBeLessThan(1.5);
+    });
+
+    test('a tap on the picture puts the strip away and the video plays on', async ({ page }) => {
+        await open(page);
+        await page.locator('.lmpl-play').tap();
+        await expect.poll(() => state(page).then((s) => s.paused)).toBe(false);
+        const bar = (await page.locator('.lmpl-time-slider').boundingBox())!;
+        await touch(page, [{ x: bar.x + bar.width * 0.5, y: bar.y + bar.height / 2 }]);
+        await expect(page.locator('.lmpl-roster')).toBeVisible();
+        const frame = (await page.locator('media-container').first().boundingBox())!;
+        await touch(page, [{ x: frame.x + frame.width / 2, y: frame.y + frame.height * 0.25 }]);
+        await expect(page.locator('.lmpl-roster')).toHaveCount(0);
+        await expect.poll(() => state(page).then((s) => s.paused)).toBe(false);
+    });
+
+    test('without frames a tap shows the thick bar with a handle instead', async ({ page }) => {
+        await page.setViewportSize({ width: 1100, height: 760 });
+        await page.goto(`/?master=${encodeURIComponent(`${FIXTURES}/clear/master.m3u8`)}&embed=1`);
+        await page.locator('.lmpl-play').tap();
+        await expect.poll(() => state(page).then((s) => s.paused)).toBe(false);
+        const bar = (await page.locator('.lmpl-time-slider').boundingBox())!;
+        const before = (await state(page)).t;
+        await touch(page, [{ x: bar.x + bar.width * 0.8, y: bar.y + bar.height / 2 }]);
+        await expect(page.locator('.lmpl-root.lmpl-scrub-bar')).toHaveCount(1);
+        expect((await state(page)).paused).toBe(true);
+        expect(Math.abs((await state(page)).t - before)).toBeLessThan(1.5);
+        await expect(page.locator('.lmpl-root.lmpl-scrub-bar')).toHaveCount(0, { timeout: 6000 });
         await expect.poll(() => state(page).then((s) => s.paused)).toBe(false);
     });
 
@@ -190,7 +235,8 @@ test.describe('with a finger', () => {
             const r = 0.05 + (i % 9) * 0.1;
             await touch(page, [{ x: bar.x + bar.width * r, y }, { x: bar.x + bar.width * (r + 0.03), y }, { x: bar.x + bar.width * (r + 0.05), y: y - (i % 4) * 6 }]);
         }
-        await expect.poll(() => state(page).then((s) => s.paused), { timeout: 5000 }).toBe(false);
+        // The last scrub leaves the strip open and the video held until three quiet seconds have passed.
+        await expect.poll(() => state(page).then((s) => s.paused), { timeout: 8000 }).toBe(false);
         expect(errors).toEqual([]);
     });
 });
