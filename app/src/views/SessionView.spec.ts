@@ -835,5 +835,23 @@ describe('SessionView', () => {
                 (strip.element.parentElement as HTMLElement).style.display
             ).toBe('none');
         });
+
+        it('keeps the panel the form lives in while the request is in flight', async () => {
+            // The strip draws its aside only while `showAside` holds, and the
+            // form is in that aside: dropped for the request, a refused start
+            // brought the form back rebuilt from the source.
+            vi.mocked(startEncode).mockReturnValueOnce(
+                new Promise(() => {}) as never
+            );
+            const wrapper = await mountView();
+            const strip = () =>
+                wrapper.findComponent({ name: 'SessionPlayerStrip' });
+            expect(strip().props('showAside')).toBe(true);
+
+            wrapper.findComponent(SessionOutputPanel).vm.$emit('submit', config);
+            await flushPromises();
+
+            expect(strip().props('showAside')).toBe(true);
+        });
     });
 });
