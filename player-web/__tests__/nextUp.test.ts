@@ -28,7 +28,7 @@ HTMLMediaElement.prototype.play = () => Promise.resolve();
 
 let wrapper: VueWrapper | undefined;
 
-async function mountPlayer(props: Record<string, unknown>, state: Partial<PlayerState> = { duration: 600, currentTime: 545 }) {
+async function mountPlayer(props: Record<string, unknown>, state: Partial<PlayerState> = { duration: 600, currentTime: 595 }) {
     wrapper = mount(LuminaryPlayer, {
         attachTo: document.body,
         props: { source: { masterUrl: 'https://x/master.m3u8' }, createController: () => fakeController(state), ...props },
@@ -59,7 +59,7 @@ afterEach(async () => {
 });
 
 describe('LuminaryPlayer up next card', () => {
-    it('shows in fullscreen with 60 seconds or less left, with title, label and actions', async () => {
+    it('shows in fullscreen with 10 seconds or less left, with title, label and actions', async () => {
         await mountPlayer({ nextUp: NEXT });
         await setFullscreen(true);
         expect(card()).not.toBeNull();
@@ -74,12 +74,19 @@ describe('LuminaryPlayer up next card', () => {
         expect(card()!.querySelector('.lmpl-nextup-close')!.getAttribute('aria-label')).toBe('Dismiss');
     });
 
-    it('shows at exactly 60 seconds and not at 61', async () => {
-        await mountPlayer({ nextUp: NEXT }, { duration: 600, currentTime: 540 });
+    it('shows at exactly 10 seconds and not at 11', async () => {
+        await mountPlayer({ nextUp: NEXT }, { duration: 600, currentTime: 590 });
         await setFullscreen(true);
         expect(card()).not.toBeNull();
         wrapper!.unmount();
-        await mountPlayer({ nextUp: NEXT }, { duration: 600, currentTime: 539 });
+        await mountPlayer({ nextUp: NEXT }, { duration: 600, currentTime: 589 });
+        await setFullscreen(true);
+        expect(card()).toBeNull();
+    });
+
+    it('leaves most of a short clip uncovered', async () => {
+        // A 1:16 video: not at 0:16, only in its last ten seconds.
+        await mountPlayer({ nextUp: NEXT }, { duration: 76, currentTime: 16 });
         await setFullscreen(true);
         expect(card()).toBeNull();
     });

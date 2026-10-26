@@ -84,6 +84,8 @@ test.describe('the up next strip', () => {
         await wake(page);
         await page.locator('.lmpl-fullscreen-button, media-fullscreen-button').first().click();
         await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(true);
+        // The strip is offered in a video's last ten seconds only.
+        await page.locator('video').evaluate((v: HTMLVideoElement) => { v.currentTime = 8; });
         await wake(page);
         await expect(page.locator('.lmpl-nextup')).toBeVisible();
         await page.waitForTimeout(500);

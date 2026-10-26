@@ -99,8 +99,8 @@ public enum ChapterCuts {
 
 /// When the strip of next videos is offered: the web player's rule, so full-screen counts down to the end the same way.
 public enum NextUp {
-    /// The strip is up once this much or less of the video is left.
-    public static let leadSeconds: Double = 60
+    /// The strip is up once this much or less of the video is left: the very end, so a short clip is not half covered.
+    public static let leadSeconds: Double = 10
     /// Room for this many cards.
     public static let max = 5
 

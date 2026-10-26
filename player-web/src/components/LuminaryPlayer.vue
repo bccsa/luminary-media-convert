@@ -124,8 +124,11 @@ const emit = defineEmits<{
     nextupdismiss: [];
 }>();
 
-/** How long before the end the up-next card appears. */
-const NEXT_UP_LEAD_SECONDS = 60;
+/**
+ * How long before the end the up-next card appears. Only the very end, so the strip does not cover the picture while
+ * there is still something to watch, however short the video.
+ */
+const NEXT_UP_LEAD_SECONDS = 10;
 /** How many cards the strip holds. */
 const NEXT_UP_MAX = 5;
 
