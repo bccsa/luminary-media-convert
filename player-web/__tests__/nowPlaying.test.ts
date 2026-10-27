@@ -339,6 +339,28 @@ describe('the now-playing view for a host', () => {
             }
         });
 
+        it("cuts the hole to the stage's exact foot, not a whole pixel short of it", async () => {
+            // A Pixel 9: the stage is 231.42 px tall, which offsetHeight reads as 231.
+            const original = HTMLElement.prototype.getBoundingClientRect;
+            HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+                const stage = this.dataset.test === 'afsStage';
+                const top = stage ? 185.43 : 0;
+                const height = stage ? 231.42 : 0;
+                return { top, bottom: top + height, left: 0, right: 0, width: 0, height, x: 0, y: top, toJSON: () => ({}) } as DOMRect;
+            };
+            try {
+                const wrapper = mountView({ ...video, stageHole: true, stage: 'cover' });
+                await wrapper.setProps({ stage: 'video' });
+                await nextTick();
+                await nextTick();
+                const style = wrapper.find('.lmpl-afs').attributes('style') ?? '';
+                const bottom = Number(/--lmpl-hole-bottom:\s*([\d.]+)px/.exec(style)?.[1]);
+                expect(bottom).toBeCloseTo(185.43 + 231.42, 6);
+            } finally {
+                HTMLElement.prototype.getBoundingClientRect = original;
+            }
+        });
+
         it('leaves its stage clear for a picture drawn behind the page', () => {
             const wrapper = mountView({ ...video, stageHole: true });
             const root = wrapper.find('.lmpl-afs');
