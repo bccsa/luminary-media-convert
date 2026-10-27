@@ -1,7 +1,8 @@
 import type { Component } from 'vue';
 import type { PlayerSource } from '@luminary-media-converter/player-core';
 import { LuminaryPlayer, isYouTubeUrl } from '@luminary-media-converter/player-web';
-import { LuminaryPlayer as YouTubePlayer } from '@luminary-media-converter/player-web-v8';
+// YouTube played through the retired Video.js 8 player; the Video.js 10 player shows it as unsupported.
+import { LuminaryPlayer as YouTubePlayer } from '@luminary-media-converter/player-web';
 import type { ModeInfo, PlaybackMode, VideoPlayerService } from '@/build-time/contracts/video-player/contract';
 import NativeVideoPlayer from '@/players/NativeVideoPlayer.vue';
 

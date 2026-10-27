@@ -10,7 +10,7 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { ThumbnailSpriteCue } from '@luminary-media-converter/player-core';
-import { formatClock, rosterStep, rosterTiles } from '@luminary-media-converter/player-web';
+import { formatClock, rosterStep, rosterTiles } from './scrubPreview';
 
 const props = defineProps<{
     /** The time under the marker, in seconds. */

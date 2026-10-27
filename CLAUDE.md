@@ -14,15 +14,14 @@ Each workspace has its own `CLAUDE.md`, loaded when you work inside that folder;
 | `encode-config/` | Shared `EncodeConfigForm` component and encode/probe types |
 | `hls-core/` | Lossless HLS playlist parser/builder, LMCENC helpers, angle extraction |
 | `player-core/` | Headless player wrapper: munging pipeline, `PlayerController`, `PlayerAdapter` contract |
-| `player-web/` | Web player on Video.js 10 / hls.js, plus `LuminaryPlayer.vue` |
+| `player-web/` | Simple web player on Video.js 10 / hls.js: the browser engine plus a `LuminaryPlayer.vue` on the stock skin (encoder and CMS previews). The Luminary app's full player UI lives in the Luminary repo |
 | `player-native/` | Native (Capacitor) player adapters for Android/iOS, the lab app in `example-app/`. No section in the old CLAUDE.md; see its own `temp_native-player-*.md` notes |
-| `player-web-v8/`, `player-web-old/` | Retired and frozen; see their `CLAUDE.md` |
 
 There is **no** SaaS service, admin panel, Auth0, CouchDB, tus upload server, webhook delivery, or PWA/Cloudflare deployment. Those workspaces (`saas/`, `admin/`, `tusd/`) were removed in the local-only migration.
 
 ## Monorepo Structure
 
-- Root `package.json` declares npm workspaces (`"workspaces": ["api", "app", "encode-config", "hls-core", "player-core", "player-web", "player-web-v8", "player-web-old", "cms-mock", "app-electron"]`)
+- Root `package.json` declares npm workspaces (`"workspaces": ["api", "app", "encode-config", "hls-core", "player-core", "player-web", "cms-mock", "app-electron"]`)
 - Dependencies are hoisted to the root `node_modules/`
 - Run workspace scripts from root: `npm -w api run <script>` or `npm -w app run <script>`
 - Root `npm run dev` — browser development: builds the shared libraries, then runs their watch builds (each Vue library watches JS and `.d.ts` side by side, so a type-check during dev is not left staring at a `dist` with no declarations), the API dev server and the Vite web client concurrently

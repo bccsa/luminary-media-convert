@@ -49,7 +49,6 @@ export default defineConfig({
             '@luminary-media-converter/player-core': at('../../player-core/src/index.ts'),
             '@luminary-media-converter/hls-core': at('../../hls-core/src/index.ts'),
             '@luminary-media-converter/player-web': at('../../player-web/src/index.ts'),
-            '@luminary-media-converter/player-web-v8': at('../../player-web-v8/src/index.ts'),
             // Before the package's own entry, which would otherwise match this as a prefix.
             '@luminary-media-converter/player-native/vue': at('../src/vue/index.ts'),
             '@luminary-media-converter/player-native': at('../src/index.ts'),
