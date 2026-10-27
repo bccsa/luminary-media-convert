@@ -28,6 +28,7 @@ export {
     isHlsEngineSupported,
     type HlsJsVideoAdapterOptions,
 } from './adapter/HlsJsVideoAdapter';
+export type { HlsJsVideoElement } from './adapter/hlsTypes';
 
 // The hls.js request seam: one loader that answers `luminary://key` and `luminary://live/…`, and the
 // load policy that stops a cold byte-range chunk being abandoned.
