@@ -471,10 +471,13 @@ function measureHole(): void {
     const root = rootEl.value;
     const stageBox = stageEl.value;
     if (!root || !stageBox) return;
-    const top = stageBox.getBoundingClientRect().top - root.getBoundingClientRect().top;
-    artBottom.value = Math.round(top + stageBox.offsetHeight);
-    // The room for subtitles under the picture is the page's, not part of the picture's hole.
-    const bottom = top + stageBox.offsetHeight - (isVideo.value && props.captionBand ? 64 : 0);
+    const box = stageBox.getBoundingClientRect();
+    const top = box.top - root.getBoundingClientRect().top;
+    artBottom.value = Math.round(top + box.height);
+    // The room for subtitles under the picture is the page's, not part of the picture's hole. The exact height, not
+    // offsetHeight's whole pixels: a hole that stops short leaves a sliver of the screen inside the stage, out of its
+    // shadow, as a light line under the picture.
+    const bottom = top + box.height - (isVideo.value && props.captionBand ? 64 : 0);
     if (top === holeTop.value && bottom === holeBottom.value) return;
     holeTop.value = top;
     holeBottom.value = bottom;
