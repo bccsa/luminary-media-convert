@@ -11,12 +11,7 @@
         "test": "vitest run",
         "test:watch": "vitest",
         "demo": "vite --config vite.demo.config.ts",
-        "skin:css": "node scripts/build-skin-css.mjs",
-        "prebuild": "npm run skin:css",
-        "predemo": "npm run skin:css",
-        "predev": "npm run skin:css",
         "build:lib": "vite build",
-        "prebuild:lib": "npm run skin:css",
         "test:e2e": "playwright test",
         "fixtures": "node e2e/fixtures/build.mjs"
     },
@@ -33,7 +28,6 @@
         "@vitejs/plugin-vue": "^5.2.0",
         "@vue/test-utils": "^2.4.0",
         "jsdom": "^26.0.0",
-        "purgecss": "^8.0.0",
         "typescript": "~5.7.0",
         "vite": "^6.0.0",
         "vite-plugin-css-injected-by-js": "^3.5.0",
@@ -55,7 +49,6 @@
     ],
     "sideEffects": [
         "**/*.css",
-        "**/*.vue",
-        "**/ui/register.ts"
+        "**/*.vue"
     ]
 }
