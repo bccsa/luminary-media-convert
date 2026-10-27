@@ -111,13 +111,14 @@ watch(
 /**
  * The skin draws into its own shadow root, so the rules that leave its controls out go there. Its error
  * dialog is always left out: the `error` panel below speaks instead, and a host can replace that one.
+ * A submenu's item is found by its label token: items and submenus are linked only by a random id.
  */
 const SKIN_RULES = `
 media-error-dialog { display: none !important; }
 :host(.lmpl-bare) media-controls { display: none !important; }
-:host(.lmpl-no-audio-menu) media-menu-item:has(+ media-menu-content media-audio-track-radio-group) { display: none !important; }
+:host(.lmpl-no-audio-menu) media-menu-item:has(> media-text[token="menu.audio"]) { display: none !important; }
 :host(.lmpl-no-captions) media-captions-button,
-:host(.lmpl-no-captions) media-menu-item:has(+ media-menu-content media-captions-radio-group) { display: none !important; }
+:host(.lmpl-no-captions) media-menu-item:has(> media-text[token="menu.captions"]) { display: none !important; }
 `;
 
 async function styleSkin(): Promise<void> {
