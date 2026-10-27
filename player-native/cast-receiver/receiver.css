@@ -1,0 +1,103 @@
+/* Sized for a TV across a room: large type, high contrast, nothing that needs a pointer. */
+html,
+body {
+    margin: 0;
+    height: 100%;
+    background: #000;
+    overflow: hidden;
+    font-family: Roboto, 'Google Sans', Arial, sans-serif;
+}
+
+cast-media-player {
+    --theme-hue: 210;
+    --progress-color: #1e88e5;
+    position: absolute;
+    inset: 0;
+}
+
+.menu {
+    position: absolute;
+    top: 48px;
+    right: 64px;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 16px;
+    color: #fff;
+}
+
+.menu[hidden] {
+    display: none;
+}
+
+.menu__row {
+    display: flex;
+    gap: 12px;
+}
+
+.menu__button {
+    display: flex;
+    flex-direction: column;
+    min-width: 140px;
+    padding: 12px 20px;
+    border-radius: 12px;
+    border: 3px solid transparent;
+    background: rgba(0, 0, 0, 0.6);
+}
+
+.menu:not(.menu--open) .menu__button {
+    opacity: 0.75;
+}
+
+.menu__button--focus {
+    border-color: #fff;
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.menu__button--current {
+    border-color: rgba(255, 255, 255, 0.5);
+}
+
+.menu__title {
+    font-size: 20px;
+    opacity: 0.75;
+}
+
+.menu__value {
+    font-size: 26px;
+    font-weight: 500;
+}
+
+.menu__hint {
+    font-size: 20px;
+    opacity: 0.75;
+    text-shadow: 0 1px 4px #000;
+}
+
+.menu__list {
+    min-width: 320px;
+    max-height: 60vh;
+    overflow-y: auto;
+    padding: 8px;
+    border-radius: 12px;
+    background: rgba(20, 20, 20, 0.92);
+}
+
+.menu__item {
+    padding: 12px 20px 12px 48px;
+    border-radius: 8px;
+    font-size: 26px;
+    position: relative;
+}
+
+.menu__item--active::before {
+    content: '✓';
+    position: absolute;
+    left: 16px;
+}
+
+.menu__item--focus {
+    background: #fff;
+    color: #000;
+}
