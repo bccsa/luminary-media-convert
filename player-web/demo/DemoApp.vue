@@ -21,7 +21,8 @@ import { computed, onMounted, reactive, ref, shallowRef, watchEffect } from 'vue
 import type { PlayerSource } from '@luminary-media-converter/player-core';
 import { isYouTubeUrl } from '../src/youtube';
 import LuminaryPlayer from '../src/components/LuminaryPlayer.vue';
-import type { PlayerImage } from '../src/image';
+// The simple player takes no poster; the form keeps the field for the Luminary app's player.
+type PlayerImage = { src?: string; srcset?: string; fallback?: string };
 
 const STORAGE_KEY = 'luminary-legacy-player-demo';
 
@@ -277,13 +278,8 @@ const fmt = (n: number | undefined) => (n ?? 0).toFixed(1);
                 ref="player"
                 :key="playerKey"
                 :source="source"
-                :poster="poster"
                 :controls="controls"
-                :preferred-language="preferredLanguage || undefined"
                 :controller-options="controllerOptions"
-                :now-playing="nowPlaying"
-                :appearance="appearance"
-                :next-up="nextUp.length ? nextUp : undefined"
             />
 
             <p v-if="youtubeMode" class="demo-hint">
