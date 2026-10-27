@@ -15,7 +15,6 @@ Each workspace has its own `CLAUDE.md`, loaded when you work inside that folder;
 | `hls-core/` | Lossless HLS playlist parser/builder, LMCENC helpers, angle extraction |
 | `player-core/` | Headless player wrapper: munging pipeline, `PlayerController`, `PlayerAdapter` contract |
 | `player-web/` | Simple web player on Video.js 10 / hls.js: the browser engine plus a `LuminaryPlayer.vue` on the stock skin (encoder and CMS previews). The Luminary app's full player UI lives in the Luminary repo |
-| `player-native/` | Native (Capacitor) player adapters for Android/iOS, the lab app in `example-app/`. No section in the old CLAUDE.md; see its own `temp_native-player-*.md` notes |
 
 There is **no** SaaS service, admin panel, Auth0, CouchDB, tus upload server, webhook delivery, or PWA/Cloudflare deployment. Those workspaces (`saas/`, `admin/`, `tusd/`) were removed in the local-only migration.
 
