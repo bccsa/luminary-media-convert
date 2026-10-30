@@ -667,6 +667,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                                 class="lmpl-afs-iconbtn"
                                 :aria-label="messages.pictureInPicture"
                                 data-test="afsPictureInPicture"
+                                data-lmpl-press="activation"
                                 @click="emit('picture-in-picture')"
                             >
                                 <media-icon name="pip-enter" class="media-button-icon"></media-icon>
@@ -677,6 +678,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                                 class="lmpl-afs-iconbtn"
                                 :aria-label="messages.enterFullscreen"
                                 data-test="afsFullscreen"
+                                data-lmpl-press="activation"
                                 @click="emit('fullscreen')"
                             >
                                 <media-icon name="fullscreen-enter" class="media-button-icon"></media-icon>
@@ -724,6 +726,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                                 class="lmpl-afs-skip"
                                 :aria-label="formatSeconds(messages.skipBack, skipBackSeconds)"
                                 data-test="afsSkipBack"
+                                data-lmpl-press
                                 @click="skip(-skipBackSeconds)"
                                 v-html="skipIcon(skipBackSeconds, false)"
                             ></button>
@@ -734,6 +737,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                                 :aria-label="busy ? messages.loading : playing ? messages.pause : messages.play"
                                 :aria-busy="busy ? 'true' : undefined"
                                 data-test="afsPlay"
+                                data-lmpl-press="play"
                                 @click="onPlayButton"
                             >
                                 <svg v-if="busy" class="lmpl-afs-spinner" viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true" data-test="afsSpinner"><path d="M12 3a9 9 0 1 1-9 9" /></svg>
@@ -746,6 +750,7 @@ const washSrc = computed(() => props.wash || cover.value?.src);
                                 class="lmpl-afs-skip"
                                 :aria-label="formatSeconds(messages.skipForward, skipForwardSeconds)"
                                 data-test="afsSkipForward"
+                                data-lmpl-press
                                 @click="skip(skipForwardSeconds)"
                                 v-html="skipIcon(skipForwardSeconds, true)"
                             ></button>
