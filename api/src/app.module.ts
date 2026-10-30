@@ -10,6 +10,7 @@ import {
     RuntimeOptionsModule,
     type RuntimeOptions,
 } from './runtime-options.module.js';
+import { THROTTLERS } from './throttle.js';
 
 @Module({
     imports: [
@@ -20,12 +21,7 @@ import {
         CmsModule,
         EncodeModule,
         HlsEditModule,
-        ThrottlerModule.forRoot({
-            throttlers: [
-                { name: 'short', ttl: 1000, limit: 100 },
-                { name: 'medium', ttl: 60000, limit: 1000 },
-            ],
-        }),
+        ThrottlerModule.forRoot({ throttlers: THROTTLERS }),
     ],
     providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
