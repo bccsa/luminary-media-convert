@@ -2953,8 +2953,9 @@ describe('PreviewService — copy seek hop', () => {
 
     it('relearns a zero hop when the aimed extraction lands late', async () => {
         const service = await makeCopyService();
-        // The default-stream case: aiming a step ahead landed a step late.
-        landings = [8.34];
+        // The default-stream case: aiming a step ahead landed a step late,
+        // and the retry lands on the boundary.
+        landings = [8.34, 4.17];
 
         await service.getSegmentStream('s1', 0, 1);
         const calls = ffmpegCalls();
@@ -2976,6 +2977,50 @@ describe('PreviewService — copy seek hop', () => {
             8.341,
             3
         );
+    });
+
+    it('relearns a zero hop when the aimed extraction has no video', async () => {
+        // One GOP per segment: landing a GOP late leaves nothing before `-to`,
+        // so the probe finds no video packet. Caching the aimed hop from that
+        // shipped every segment of the session with sound and no picture.
+        const service = await makeCopyService();
+        landings = [null, 4.17];
+
+        await service.getSegmentStream('s1', 0, 1);
+        const calls = ffmpegCalls();
+        expect(calls).toHaveLength(2);
+        const retryArgs = calls[1][1] as string[];
+        expect(parseFloat(retryArgs[retryArgs.indexOf('-ss') + 1])).toBeCloseTo(
+            4.171,
+            3
+        );
+
+        // The zero hop is cached: the next segment is aimed at its boundary.
+        mockExistsSync.mockReturnValue(false);
+        await service.getSegmentStream('s1', 0, 2);
+        const after = ffmpegCalls();
+        expect(after).toHaveLength(3);
+        const nextArgs = after[2][1] as string[];
+        expect(parseFloat(nextArgs[nextArgs.indexOf('-ss') + 1])).toBeCloseTo(
+            8.341,
+            3
+        );
+    });
+
+    it('leaves the hop unlearned when the retry has no video either', async () => {
+        const service = await makeCopyService();
+        landings = [null, null, 8.34];
+
+        await service.getSegmentStream('s1', 0, 1);
+        expect(ffmpegCalls()).toHaveLength(2);
+
+        // Nothing was cached, so the next segment measures again.
+        mockExistsSync.mockReturnValue(false);
+        await service.getSegmentStream('s1', 0, 2);
+        const probes = (mockExecFile.mock.calls as unknown[][]).filter((c) =>
+            (c[1] as string[]).includes('packet=pts_time')
+        );
+        expect(probes).toHaveLength(3);
     });
 
     it('learns the hop once when several segments start together', async () => {

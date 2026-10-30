@@ -1006,15 +1006,24 @@ export class PreviewService {
                 let hop = state.keyframeStep as number;
                 await runOnce(start + hop + SEEK_AIM_EPSILON_SECONDS);
 
+                // No video packet is a miss too: when a segment is one GOP
+                // long, landing a GOP late leaves nothing before `-to`, and a
+                // hop cached from that ships every segment without a picture.
                 const landed = await this.probeFirstVideoPts(outputPath);
                 if (
-                    landed !== null &&
+                    landed === null ||
                     Math.abs(landed - start) > LANDING_TOLERANCE_SECONDS
                 ) {
-                    const corrected = Math.max(0, hop + (start - landed));
+                    const corrected =
+                        landed === null
+                            ? 0
+                            : Math.max(0, hop + (start - landed));
                     this.logger.warn(
-                        `Segment r${renditionIndex}/s${segmentIndex} landed at ` +
-                            `${landed.toFixed(3)}s for ${start.toFixed(3)}s — ` +
+                        `Segment r${renditionIndex}/s${segmentIndex} ` +
+                            (landed === null
+                                ? 'has no video'
+                                : `landed at ${landed.toFixed(3)}s`) +
+                            ` for ${start.toFixed(3)}s — ` +
                             `re-extracting with a ${corrected.toFixed(3)}s seek hop`
                     );
                     await runOnce(start + corrected + SEEK_AIM_EPSILON_SECONDS);
@@ -1026,13 +1035,16 @@ export class PreviewService {
                     // probe to notice.
                     const after = await this.probeFirstVideoPts(outputPath);
                     if (
-                        after !== null &&
+                        after === null ||
                         Math.abs(after - start) > LANDING_TOLERANCE_SECONDS
                     ) {
                         this.logger.warn(
                             `Segment r${renditionIndex}/s${segmentIndex} still ` +
-                                `landed at ${after.toFixed(3)}s — leaving the ` +
-                                'hop unlearned so the next segment measures again'
+                                (after === null
+                                    ? 'has no video'
+                                    : `landed at ${after.toFixed(3)}s`) +
+                                ' — leaving the hop unlearned so the next ' +
+                                'segment measures again'
                         );
                         throw new UnlearnedHop();
                     }
