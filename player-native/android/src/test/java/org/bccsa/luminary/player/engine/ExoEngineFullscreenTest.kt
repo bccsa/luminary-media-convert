@@ -1,6 +1,10 @@
 package org.bccsa.luminary.player.engine
 
 import android.content.Intent
+import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
 import androidx.activity.ComponentActivity
@@ -61,7 +65,7 @@ class ExoEngineFullscreenTest {
 
     private val registry by lazy {
         PlayerRegistry(
-            BridgeCapabilities(variantSwitching = true),
+            BridgeCapabilities(variantSwitching = true, pictureInPicture = true),
             clock,
             HttpUpstream(OkHttpClient()),
             EngineFactory { router, clock, options ->
@@ -171,6 +175,49 @@ class ExoEngineFullscreenTest {
 
         assertNotNull(described("Up next"))
         assertEquals(listOf("fullscreen"), presentationChanges())
+    }
+
+    /** The system has picture in picture, and the activity says `android:supportsPictureInPicture`. */
+    private fun allowPictureInPicture() {
+        val packages = shadowOf(activity.packageManager)
+        packages.setSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE, true)
+        val info = activity.packageManager.getActivityInfo(activity.componentName, 0)
+        packages.addOrUpdateActivity(ActivityInfo(info).apply { flags = flags or 0x400000 })
+    }
+
+    private fun smallWindowThenExpanded() {
+        activity.onPictureInPictureModeChanged(true, Configuration())
+        activity.onPictureInPictureModeChanged(false, Configuration())
+        shadowOf(Looper.getMainLooper()).idle()
+    }
+
+    @Test
+    fun `picture in picture opened from the page goes back to the page, upright again, when expanded`() {
+        allowPictureInPicture()
+        create()
+        load(audioOnly = false)
+
+        call("startPictureInPicture")
+        smallWindowThenExpanded()
+
+        assertFalse(presenter.isPresented)
+        assertEquals(listOf("fullscreen", "pip", "inline"), presentationChanges())
+        assertEquals(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, activity.requestedOrientation)
+    }
+
+    @Test
+    fun `picture in picture opened from full-screen goes back to full-screen when expanded`() {
+        allowPictureInPicture()
+        create()
+        load(audioOnly = false)
+        call("enterFullscreen")
+
+        call("startPictureInPicture")
+        smallWindowThenExpanded()
+
+        assertTrue(presenter.isPresented)
+        assertEquals(listOf("fullscreen", "pip", "fullscreen"), presentationChanges())
+        assertEquals(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE, activity.requestedOrientation)
     }
 
     @Test
