@@ -31,7 +31,7 @@ import {
     ApiSecurity,
     ApiTags,
 } from '@nestjs/swagger';
-import { SkipThrottle } from '@nestjs/throttler';
+import { SkipAllThrottles } from '../throttle.js';
 import type { Request } from 'express';
 import { Observable, map } from 'rxjs';
 import { createReadStream, existsSync } from 'fs';
@@ -116,7 +116,7 @@ function firstReEncodedStreamLabel(config: EncodeConfigDto): string {
 
 @ApiTags('Encoding Sessions')
 @Controller('api/sessions')
-@SkipThrottle()
+@SkipAllThrottles()
 export class EncodeController {
     private readonly logger = new Logger(EncodeController.name);
 
@@ -520,7 +520,7 @@ export class EncodeController {
         };
     }
 
-    @SkipThrottle()
+    @SkipAllThrottles()
     @Sse(':sessionId/events')
     @ApiOperation({
         summary: 'Stream session events via SSE',
@@ -1294,7 +1294,7 @@ export class EncodeController {
     }
 
     @Get(':sessionId/thumbnails/thumbnails.vtt')
-    @SkipThrottle()
+    @SkipAllThrottles()
     @ApiOperation({
         summary: 'Get the storyboard for the uploaded source',
         description:
@@ -1427,7 +1427,7 @@ export class EncodeController {
     }
 
     @Get(':sessionId/thumbnails/:filename')
-    @SkipThrottle()
+    @SkipAllThrottles()
     @ApiOperation({ summary: 'Get a storyboard sprite sheet for the source' })
     @ApiResponse({ status: 200, description: 'Sprite sheet image.' })
     @ApiResponse({ status: 404, description: 'Sprite not found.' })

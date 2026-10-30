@@ -14,7 +14,7 @@ import {
     ApiSecurity,
     ApiTags,
 } from '@nestjs/swagger';
-import { SkipThrottle } from '@nestjs/throttler';
+import { SkipAllThrottles } from '../throttle.js';
 import { AuthResolverGuard } from '../auth/auth-resolver.guard.js';
 import { AuthTypes } from '../auth/auth-types.decorator.js';
 import {
@@ -38,7 +38,7 @@ import {
 
 @ApiTags('HLS Edit')
 @Controller('api/hls')
-@SkipThrottle()
+@SkipAllThrottles()
 export class HlsEditController {
     private readonly logger = new Logger(HlsEditController.name);
 

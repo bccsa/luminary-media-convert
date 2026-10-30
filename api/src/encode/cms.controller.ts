@@ -14,7 +14,7 @@ import {
     Req,
 } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { SkipThrottle } from '@nestjs/throttler';
+import { SkipAllThrottles } from '../throttle.js';
 import type { Request } from 'express';
 import { posix } from 'path';
 import {
@@ -53,7 +53,7 @@ const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
  */
 @ApiTags('CMS')
 @Controller('api/cms')
-@SkipThrottle()
+@SkipAllThrottles()
 export class CmsController {
     private readonly logger = new Logger(CmsController.name);
 
