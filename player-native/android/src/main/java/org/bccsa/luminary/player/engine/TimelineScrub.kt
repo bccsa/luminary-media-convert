@@ -5,9 +5,10 @@ import org.bccsa.luminary.player.Clock
 
 /**
  * The timeline under a finger: a tap does not move the video, it opens the way to scrub it. With frames that is the
- * strip of them; without, a thicker bar with a handle. Only a drag moves the playhead. The video holds still while
- * either is open, and they put themselves away a few seconds after the last touch, on a tap elsewhere or on play,
- * the video carrying on only if it was playing when they opened. `player-web` and the iOS player keep the same rules.
+ * strip of them; without, a thicker bar with a handle. Only a drag moves the playhead, and only a drag holds the
+ * video: it carries on from where the finger let go if it was playing when the drag began. They put themselves away
+ * a few seconds after the last touch, on a tap elsewhere or on play. `player-web` and the iOS player keep the same
+ * rules.
  */
 internal class TimelineScrub(private val clock: Clock) {
     /** What a touch on the timeline has opened. */
@@ -27,7 +28,8 @@ internal class TimelineScrub(private val clock: Clock) {
     val isOpen get() = mode != Mode.CLOSED
     var onEffect: ((Effect) -> Unit)? = null
 
-    private var resumeOnClose = false
+    private var dragging = false
+    private var resumeAfterDrag = false
     private var idle: Cancellable? = null
 
     /** A finger came down on the timeline or the strip: nothing closes under it. */
@@ -37,25 +39,33 @@ internal class TimelineScrub(private val clock: Clock) {
     }
 
     /** A tap on the timeline, which never moves the video. */
-    fun tapped(framesReady: Boolean, playing: Boolean) {
-        openIfClosed(framesReady, playing)
+    fun tapped(framesReady: Boolean) {
+        openIfClosed(framesReady)
         armIdle()
     }
 
-    /** A drag on the timeline or the strip started. */
+    /** A drag on the timeline or the strip started: the video holds still under the finger. */
     fun dragBegan(framesReady: Boolean, playing: Boolean) {
-        openIfClosed(framesReady, playing)
+        openIfClosed(framesReady)
         touchBegan()
+        if (dragging) return
+        dragging = true
+        resumeAfterDrag = playing
+        if (playing) onEffect?.invoke(Effect.Pause)
     }
 
     /** The drag let go at [seconds]: the one place the video moves. */
     fun dragEnded(seconds: Double) {
         onEffect?.invoke(Effect.Seek(seconds))
+        endDrag(resume = true)
         armIdle()
     }
 
     /** The drag was taken away from the finger without a decision: nothing moves. */
-    fun dragCancelled() = armIdle()
+    fun dragCancelled() {
+        endDrag(resume = true)
+        armIdle()
+    }
 
     /** A tap anywhere but the timeline and the strip. */
     fun tappedElsewhere() = close(resume = true)
@@ -63,19 +73,24 @@ internal class TimelineScrub(private val clock: Clock) {
     /** Play was asked for while open: it closes, and the video plays whether or not it was before. */
     fun playPressed() {
         if (!isOpen) return
-        resumeOnClose = true
-        close(resume = true)
+        close(resume = false)
+        onEffect?.invoke(Effect.Play)
     }
 
     /** A new video, or the player going away: put away without touching playback. */
     fun reset() = close(resume = false)
 
-    private fun openIfClosed(framesReady: Boolean, playing: Boolean) {
+    private fun openIfClosed(framesReady: Boolean) {
         if (mode != Mode.CLOSED) return
-        resumeOnClose = playing
         mode = if (framesReady) Mode.STRIP else Mode.BAR
         onEffect?.invoke(Effect.Open(mode))
-        if (playing) onEffect?.invoke(Effect.Pause)
+    }
+
+    private fun endDrag(resume: Boolean) {
+        if (!dragging) return
+        dragging = false
+        if (resume && resumeAfterDrag) onEffect?.invoke(Effect.Play)
+        resumeAfterDrag = false
     }
 
     private fun armIdle() {
@@ -89,8 +104,7 @@ internal class TimelineScrub(private val clock: Clock) {
         if (!isOpen) return
         mode = Mode.CLOSED
         onEffect?.invoke(Effect.Close)
-        if (resume && resumeOnClose) onEffect?.invoke(Effect.Play)
-        resumeOnClose = false
+        endDrag(resume)
     }
 
     companion object {

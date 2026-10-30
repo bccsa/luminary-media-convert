@@ -1,10 +1,10 @@
 import Foundation
 
 /// The timeline under a finger: a tap does not move the video, it opens the way to scrub it. With frames that is the
-/// strip of them; without, a thicker bar with a handle. Only a drag moves the playhead. The video holds still while
-/// either is open, and they put themselves away a few seconds after the last touch, on a tap elsewhere or on play,
-/// the video carrying on only if it was playing when they opened. `player-web` and the Android player keep the same
-/// rules.
+/// strip of them; without, a thicker bar with a handle. Only a drag moves the playhead, and only a drag holds the
+/// video: it carries on from where the finger let go if it was playing when the drag began. They put themselves away
+/// a few seconds after the last touch, on a tap elsewhere or on play. `player-web` and the Android player keep the
+/// same rules.
 public final class TimelineScrub {
     /// What a touch on the timeline has opened.
     public enum Mode: Equatable {
@@ -32,7 +32,8 @@ public final class TimelineScrub {
     public var onEffect: ((Effect) -> Void)?
 
     private let clock: Clock
-    private var resumeOnClose = false
+    private var dragging = false
+    private var resumeAfterDrag = false
     private var idle: Cancellable?
 
     public init(clock: Clock) {
@@ -46,25 +47,31 @@ public final class TimelineScrub {
     }
 
     /// A tap on the timeline, which never moves the video.
-    public func tapped(framesReady: Bool, playing: Bool) {
-        openIfClosed(framesReady: framesReady, playing: playing)
+    public func tapped(framesReady: Bool) {
+        openIfClosed(framesReady: framesReady)
         armIdle()
     }
 
-    /// A drag on the timeline or the strip started.
+    /// A drag on the timeline or the strip started: the video holds still under the finger.
     public func dragBegan(framesReady: Bool, playing: Bool) {
-        openIfClosed(framesReady: framesReady, playing: playing)
+        openIfClosed(framesReady: framesReady)
         touchBegan()
+        guard !dragging else { return }
+        dragging = true
+        resumeAfterDrag = playing
+        if playing { onEffect?(.pause) }
     }
 
     /// The drag let go at `seconds`: the one place the video moves.
     public func dragEnded(at seconds: Double) {
         onEffect?(.seek(seconds))
+        endDrag(resume: true)
         armIdle()
     }
 
     /// The drag was taken away from the finger without a decision: nothing moves.
     public func dragCancelled() {
+        endDrag(resume: true)
         armIdle()
     }
 
@@ -76,8 +83,8 @@ public final class TimelineScrub {
     /// Play was asked for while open: it closes, and the video plays whether or not it was before.
     public func playPressed() {
         guard isOpen else { return }
-        resumeOnClose = true
-        close(resume: true)
+        close(resume: false)
+        onEffect?(.play)
     }
 
     /// A new video, or the player going away: put away without touching playback.
@@ -85,12 +92,17 @@ public final class TimelineScrub {
         close(resume: false)
     }
 
-    private func openIfClosed(framesReady: Bool, playing: Bool) {
+    private func openIfClosed(framesReady: Bool) {
         guard mode == .closed else { return }
-        resumeOnClose = playing
         mode = framesReady ? .strip : .bar
         onEffect?(.open(mode))
-        if playing { onEffect?(.pause) }
+    }
+
+    private func endDrag(resume: Bool) {
+        guard dragging else { return }
+        dragging = false
+        if resume, resumeAfterDrag { onEffect?(.play) }
+        resumeAfterDrag = false
     }
 
     private func armIdle() {
@@ -105,7 +117,6 @@ public final class TimelineScrub {
         guard isOpen else { return }
         mode = .closed
         onEffect?(.close)
-        if resume, resumeOnClose { onEffect?(.play) }
-        resumeOnClose = false
+        endDrag(resume: resume)
     }
 }
