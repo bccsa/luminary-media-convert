@@ -131,7 +131,9 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         val clamped = if (ratio.toFloat() > MAX_RATIO) Rational(239, 100) else if (ratio.toFloat() < 1 / MAX_RATIO) Rational(100, 239) else ratio
         val builder = PictureInPictureParams.Builder().setAspectRatio(clamped).setActions(pipActions(activity))
         val bounds = Rect()
-        if (surface?.getGlobalVisibleRect(bounds) == true && !bounds.isEmpty) builder.setSourceRectHint(bounds)
+        // The picture only, not the bars beside it: a hint of another shape than the window is dropped, and the
+        // system covers the change with a plain sheet in the app's theme colour (white) instead.
+        if (surface?.getGlobalVisibleRect(bounds) == true && !bounds.isEmpty) builder.setSourceRectHint(pictureRect(bounds, clamped))
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) builder.setAutoEnterEnabled(autoEnter)
         return builder.build()
     }
@@ -470,6 +472,21 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
 
         /** `ActivityInfo.FLAG_SUPPORTS_PICTURE_IN_PICTURE`: set by `android:supportsPictureInPicture`, and not in the public API. */
         private const val FLAG_SUPPORTS_PICTURE_IN_PICTURE = 0x400000
+
+        /** Where a picture of [ratio] sits in [bounds], fitted and centred, as the full-screen view draws it. */
+        internal fun pictureRect(bounds: Rect, ratio: Rational): Rect {
+            val width = bounds.width()
+            val height = bounds.height()
+            return if (width.toLong() * ratio.denominator > height.toLong() * ratio.numerator) {
+                val fitted = (height.toLong() * ratio.numerator / ratio.denominator).toInt()
+                val left = bounds.left + (width - fitted) / 2
+                Rect(left, bounds.top, left + fitted, bounds.bottom)
+            } else {
+                val fitted = (width.toLong() * ratio.denominator / ratio.numerator).toInt()
+                val top = bounds.top + (height - fitted) / 2
+                Rect(bounds.left, top, bounds.right, top + fitted)
+            }
+        }
 
         /** The system has picture in picture, and this activity has said it may be put in one. */
         fun pictureInPictureAvailable(activity: Activity): Boolean {
