@@ -14,6 +14,8 @@ const INTERVAL_SECONDS = 5;
 const COLUMNS = 5;
 const ROWS = 5;
 const THUMBS_PER_SPRITE = COLUMNS * ROWS;
+/** How long each frame lasts in the packing pass; any fixed value will do. */
+const PACK_FRAME_SECONDS = 0.04;
 
 /** Individual thumbs, one per sampled instant, as written at ingest. */
 const THUMB_FILE_RE = /^thumb_\d+\.(webp|jpg|jpeg|png)$/;
@@ -674,12 +676,20 @@ export class ThumbnailService {
          * the two paths concatenated and could not open. It surfaced only as a
          * warning and a session with no sprites — invisible under Electron,
          * which passes an absolute workDir.
+         *
+         * Each entry carries a `duration`: a still image has no timestamp of its
+         * own, and without one every frame after the first two sheets' worth
+         * came in with an invalid time and was dropped — silently, ffmpeg still
+         * exits 0 — so storyboards stopped about four minutes in.
          */
         const listPath = join(thumbnailDir, 'pack-list.txt');
         await writeFile(
             listPath,
             selected
-                .map((f) => `file '${concatEscape(resolve(sourceDir, f))}'`)
+                .map(
+                    (f) =>
+                        `file '${concatEscape(resolve(sourceDir, f))}'\nduration ${PACK_FRAME_SECONDS}`
+                )
                 .join('\n') + '\n',
             'utf-8'
         );
@@ -725,6 +735,17 @@ export class ThumbnailService {
             this.logger.warn(
                 `No sprite sheets were produced for ${opts.sessionId}`
             );
+            return null;
+        }
+        // Better no storyboard than one that stops partway: ffmpeg can drop
+        // frames and still succeed.
+        const expectedSprites = Math.ceil(selected.length / THUMBS_PER_SPRITE);
+        if (spriteFiles.length < expectedSprites) {
+            this.logger.warn(
+                `Only ${spriteFiles.length} of ${expectedSprites} sprite sheet(s) were produced for ` +
+                    `${opts.sessionId} — shipping no storyboard`
+            );
+            await rm(thumbnailDir, { recursive: true, force: true });
             return null;
         }
 
