@@ -473,11 +473,15 @@ class ExoEngine(
         runCatching { cast?.showPicker() }
     }
 
+    /** The small window was opened from the page, so expanding it goes back to the page and its orientation. */
+    private var pipFromInline = false
+
     override fun startPictureInPicture() {
         if (!hasVideo || castPlayer != null) return
+        val fromInline = !presenter.isPresented
         // The small window shows the full-screen view's picture: take the picture there first.
-        if (!presenter.isPresented) enterFullscreen(null)
-        presenter.startPictureInPicture()
+        if (fromInline) enterFullscreen(null)
+        pipFromInline = presenter.startPictureInPicture() && fromInline
     }
 
     /** Where the page shows the picture, while it does. */
@@ -492,6 +496,8 @@ class ExoEngine(
     private var presentation = "inline"
 
     private fun presentationDidChange(state: String) {
+        if (state == "fullscreen" && pipFromInline) return exitFullscreen()
+        if (state != "pip") pipFromInline = false
         presentation = state
         inline?.setSuspended(state != "inline")
         events.presentationChanged(state)
