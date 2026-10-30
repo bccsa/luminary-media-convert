@@ -1,7 +1,9 @@
 package org.bccsa.luminary.player.engine
 
 import android.content.res.Configuration
+import android.graphics.Rect
 import android.os.Looper
+import android.util.Rational
 import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.media3.common.C
@@ -168,6 +170,21 @@ class PictureInPictureTest {
         assertFalse(FullscreenPresenter.pictureInPictureAvailable(activity))
         assertFalse(presenter.startPictureInPicture())
         assertNull(presenter.skinControls()!!.find("Picture-in-Picture"))
+    }
+
+    @Test
+    fun `on a wide screen the small window grows from the picture, not from the black bars beside it`() {
+        // A 20:9 phone held sideways, showing 16:9.
+        val hint = FullscreenPresenter.pictureRect(Rect(0, 0, 2400, 1080), Rational(16, 9))
+
+        assertEquals(Rect(240, 0, 2160, 1080), hint)
+    }
+
+    @Test
+    fun `a picture taller than its screen is fitted between bars above and below`() {
+        val hint = FullscreenPresenter.pictureRect(Rect(0, 100, 1080, 2500), Rational(16, 9))
+
+        assertEquals(Rect(0, 996, 1080, 1603), hint)
     }
 
     private fun View.find(description: String): View? =
