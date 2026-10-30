@@ -737,7 +737,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     private func timelineTapped() {
         visibility.touched()
         guard state.duration > 0 else { return }
-        timelineScrub.tapped(framesReady: framesReady, playing: state.playing)
+        timelineScrub.tapped(framesReady: framesReady)
     }
 
     private var framesReady: Bool { commands.thumbnails?.ready == true && state.duration > 0 }

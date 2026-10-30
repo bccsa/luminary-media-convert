@@ -803,7 +803,7 @@ internal class SkinControls(
     /** A tap on the timeline, which opens the scrub and never moves the video. */
     private fun timelineTapped() {
         if (player.duration == C.TIME_UNSET || player.duration <= 0) return
-        timelineScrub.tapped(rosterWanted(), player.playWhenReady)
+        timelineScrub.tapped(rosterWanted())
         refresh()
     }
 
