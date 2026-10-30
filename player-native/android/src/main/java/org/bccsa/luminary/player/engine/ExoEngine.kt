@@ -19,6 +19,7 @@ import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.util.Util
 import androidx.media3.datasource.DataSourceBitmapLoader
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.exoplayer.hls.HlsMediaSource
@@ -102,6 +103,7 @@ class ExoEngine(
         .setHandleAudioBecomingNoisy(true)
         // The screen may lock mid-stream; the Wi-Fi has to stay up for the next segment.
         .setWakeMode(C.WAKE_MODE_NETWORK)
+        .setLoadControl(seekBackLoadControl())
         .setSeekBackIncrementMs((skin.back ?: DEFAULT_SKIP_SECONDS) * 1000L)
         .setSeekForwardIncrementMs((skin.forward ?: DEFAULT_SKIP_SECONDS) * 1000L)
         .build()
@@ -1031,6 +1033,15 @@ private class TransientRetryPolicy(private val policy: () -> RecoveryPolicy) : D
 }
 
 /** The menu as our own receiver reads it (`player-native/cast-receiver`). */
+/** How much already-played media is kept, so a skip back lands in it instead of downloading it again. */
+internal const val BACK_BUFFER_MS = 30_000
+
+/** ExoPlayer's default keeps nothing behind the playhead: every skip back waited on the network. */
+@OptIn(UnstableApi::class)
+internal fun seekBackLoadControl(): DefaultLoadControl = DefaultLoadControl.Builder()
+    .setBackBuffer(BACK_BUFFER_MS, /* retainBackBufferFromKeyframe= */ true)
+    .build()
+
 internal fun castMenuJson(menu: CastMenu): String = buildJsonObject {
     put("type", "menu")
     put("angles", JsonArray(menu.angles.map { buildJsonObject { put("id", it.id); put("label", it.label) } }))
