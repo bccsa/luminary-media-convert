@@ -1226,9 +1226,9 @@ describe('ThumbnailService', () => {
 
         /** The thumbnails named in the pack list, by bare filename. */
         const packed = () =>
-            packList.map((line) =>
-                basename(line.replace(/^file '(.*)'$/, '$1'))
-            );
+            packList
+                .filter((line) => line.startsWith('file '))
+                .map((line) => basename(line.replace(/^file '(.*)'$/, '$1')));
 
         const pack = (
             overrides: Partial<{
@@ -1507,6 +1507,34 @@ describe('ThumbnailService', () => {
             expect(readdirSync(outThumbDir())).not.toContain('thumbnails.vtt');
         });
 
+        it('gives every packed frame a duration, so ffmpeg keeps them all', async () => {
+            writeThumbs(sourceDir(), 20);
+
+            await pack({ sourceDuration: 60 });
+
+            const files = packList.filter((line) => line.startsWith('file '));
+            const durations = packList.filter((line) =>
+                line.startsWith('duration ')
+            );
+            expect(files).toHaveLength(12);
+            expect(durations).toHaveLength(12);
+            packList.forEach((line, i) =>
+                expect(line.startsWith(i % 2 ? 'duration ' : 'file ')).toBe(
+                    true
+                )
+            );
+        });
+
+        it('ships no storyboard when ffmpeg writes fewer sheets than the frames fill', async () => {
+            // 38 minutes is 456 cues, 19 sheets. ffmpeg dropping frames and
+            // still exiting 0 left 2 sheets: a storyboard that stops at 4 min.
+            writeThumbs(sourceDir(), 456);
+            mockFfmpeg({ sprites: 2, onPass: capturePackList });
+
+            expect(await pack({ sourceDuration: 2278 })).toBeNull();
+            expect(existsSync(outThumbDir())).toBe(false);
+        });
+
         it('resamples a cache left by an older version of the encoder', async () => {
             // Individual thumbs are new: a session restored from before them has
             // sprite sheets cached, which cannot be re-laid-out onto a trimmed
@@ -1657,9 +1685,9 @@ describe('ThumbnailService', () => {
                 await pack();
 
                 expect(packList.length).toBeGreaterThan(0);
-                const paths = packList.map((line) =>
-                    line.replace(/^file '(.*)'$/, '$1')
-                );
+                const paths = packList
+                    .filter((line) => line.startsWith('file '))
+                    .map((line) => line.replace(/^file '(.*)'$/, '$1'));
                 expect(paths.every((path) => isAbsolute(path))).toBe(true);
             } finally {
                 process.chdir(cwd);
