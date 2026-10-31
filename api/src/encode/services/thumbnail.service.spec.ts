@@ -1233,6 +1233,7 @@ describe('ThumbnailService', () => {
         const pack = (
             overrides: Partial<{
                 sourceDuration: number;
+                alignmentOffset: number;
                 trimSegments: { inSec: number; outSec: number }[];
                 videoTracks: Array<{
                     index: number;
@@ -1246,6 +1247,7 @@ describe('ThumbnailService', () => {
                 inputPath: '/tmp/source.mkv',
                 outputDir,
                 sourceDuration: overrides.sourceDuration ?? 60,
+                alignmentOffset: overrides.alignmentOffset,
                 trimSegments: overrides.trimSegments,
                 videoTracks: overrides.videoTracks ?? [
                     { index: 0, width: 1920, height: 1080 },
@@ -1333,6 +1335,80 @@ describe('ThumbnailService', () => {
             );
             expect(vtt).toContain('00:00:35.000 --> 00:00:40.000');
             expect(vtt).not.toContain('00:00:40.000 -->');
+        });
+
+        describe('a source whose streams start apart', () => {
+            // The encode seeks past the head until every stream has started, so
+            // the output's t=0 is the source's t=alignmentOffset.
+            const vttCues = () =>
+                readFileSync(join(outThumbDir(), 'thumbnails.vtt'), 'utf-8')
+                    .split('\n')
+                    .filter((line) => line.includes(' --> '));
+
+            it('starts the storyboard where the output starts', async () => {
+                writeThumbs(sourceDir(), 20);
+
+                await pack({ sourceDuration: 60, alignmentOffset: 10 });
+
+                // 50s of output: cue 0 is source t=12.5, sampled by thumb 3
+                // (t=10), not thumb 1 (t=0), which the encode never wrote.
+                expect(packed()).toEqual([
+                    'thumb_000003.webp',
+                    'thumb_000004.webp',
+                    'thumb_000005.webp',
+                    'thumb_000006.webp',
+                    'thumb_000007.webp',
+                    'thumb_000008.webp',
+                    'thumb_000009.webp',
+                    'thumb_000010.webp',
+                    'thumb_000011.webp',
+                    'thumb_000012.webp',
+                ]);
+                expect(vttCues().at(-1)).toMatch(/--> 00:00:50\.000/);
+            });
+
+            it('counts only what a range keeps past the head', async () => {
+                writeThumbs(sourceDir(), 20);
+
+                await pack({
+                    sourceDuration: 100,
+                    alignmentOffset: 10,
+                    trimSegments: [
+                        { inSec: 0, outSec: 20 },
+                        { inSec: 40, outSec: 60 },
+                    ],
+                });
+
+                // The first range keeps 10s to 20s, so the second starts at
+                // output t=10, not t=20.
+                expect(packed()).toEqual([
+                    'thumb_000003.webp',
+                    'thumb_000004.webp',
+                    'thumb_000009.webp',
+                    'thumb_000010.webp',
+                    'thumb_000011.webp',
+                    'thumb_000012.webp',
+                ]);
+                expect(vttCues().at(-1)).toMatch(/--> 00:00:30\.000/);
+            });
+
+            it('leaves out a range that ends inside the head', async () => {
+                writeThumbs(sourceDir(), 20);
+
+                await pack({
+                    sourceDuration: 100,
+                    alignmentOffset: 10,
+                    trimSegments: [
+                        { inSec: 0, outSec: 8 },
+                        { inSec: 40, outSec: 50 },
+                    ],
+                });
+
+                expect(packed()).toEqual([
+                    'thumb_000009.webp',
+                    'thumb_000010.webp',
+                ]);
+            });
         });
 
         it('never shows a frame from material the user cut out', async () => {

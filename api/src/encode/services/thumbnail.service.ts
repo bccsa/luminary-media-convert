@@ -565,6 +565,8 @@ export class ThumbnailService {
         inputPath: string;
         outputDir: string;
         sourceDuration: number;
+        /** Where the output's t=0 sits in the source: the head the encode seeked past. */
+        alignmentOffset?: number;
         trimSegments?: { inSec: number; outSec: number }[];
         videoTracks?: Array<{ index: number; width: number; height: number }>;
     }): Promise<ThumbnailResult | null> {
@@ -643,10 +645,15 @@ export class ThumbnailService {
         }
         const thumbHeight = this.thumbHeightFor(track.width, track.height);
 
-        const ranges = orderedRanges(opts.trimSegments ?? []);
-        const outDuration = ranges.length
-            ? ranges.reduce((sum, r) => sum + (r.outSec - r.inSec), 0)
-            : opts.sourceDuration;
+        const ranges = encodedRanges(
+            opts.trimSegments ?? [],
+            opts.alignmentOffset ?? 0,
+            opts.sourceDuration
+        );
+        const outDuration = ranges.reduce(
+            (sum, r) => sum + (r.outSec - r.inSec),
+            0
+        );
         if (outDuration <= 0) return null;
 
         const selected = this.selectThumbsForOutput(
@@ -886,6 +893,26 @@ export class ThumbnailService {
 
         return lines.join('\n');
     }
+}
+
+/**
+ * The source ranges the encode actually wrote, in order. The encode seeks past
+ * a head of `alignmentOffset` seconds, so each trim's in-point is clamped to it
+ * (as the concat list's `inpoint` is), and an untrimmed encode is the one range
+ * from the offset to the end.
+ */
+function encodedRanges(
+    trims: readonly KeptRange[],
+    alignmentOffset: number,
+    sourceDuration: number
+): KeptRange[] {
+    const kept = trims.length
+        ? trims.map((r) => ({
+              inSec: Math.max(r.inSec, alignmentOffset),
+              outSec: r.outSec,
+          }))
+        : [{ inSec: alignmentOffset, outSec: sourceDuration }];
+    return orderedRanges(kept);
 }
 
 // ---------------------------------------------------------------------------
