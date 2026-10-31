@@ -3055,3 +3055,93 @@ describe('PreviewService — copy seek hop', () => {
         expect(ffmpegCalls()).toHaveLength(1);
     });
 });
+
+/**
+ * A session restored after a restart has its file, its probe and its cached
+ * segments, but no preview state: that lived in memory and was built when the
+ * file was attached. The player waited on "Coming soon" for good.
+ */
+describe('PreviewService — a session restored after a restart', () => {
+    const probe = () =>
+        makeProbe({
+            duration: 20,
+            videoTracks: [
+                {
+                    index: 0,
+                    codec: 'h264',
+                    width: 854,
+                    height: 480,
+                    bitrateKbps: 2000,
+                    frameRate: 30,
+                },
+            ],
+        });
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        setupDefaultMocks();
+    });
+
+    it('builds the preview on the first request', async () => {
+        const service = new PreviewService(
+            makeSessionService({
+                filePath: '/tmp/video.mp4',
+                probeResult: probe(),
+            }),
+            makeFfmpegService()
+        );
+        expect(service.getPlaylist('s1', 'tok')).toBeNull();
+
+        expect(await service.ensureReady('s1')).toBe(true);
+        expect(service.getPlaylist('s1', 'tok')).toContain('#EXTM3U');
+    });
+
+    it('shares one build between requests that arrive together', async () => {
+        const ffmpeg = makeFfmpegService();
+        const service = new PreviewService(
+            makeSessionService({
+                filePath: '/tmp/video.mp4',
+                probeResult: probe(),
+            }),
+            ffmpeg
+        );
+
+        const ready = await Promise.all([
+            service.ensureReady('s1'),
+            service.ensureReady('s1'),
+            service.ensureReady('s1'),
+        ]);
+
+        expect(ready).toEqual([true, true, true]);
+        expect(ffmpeg.scanKeyframeGrid).toHaveBeenCalledTimes(1);
+    });
+
+    it('applies again the cuts the encode was started with', async () => {
+        const service = new PreviewService(
+            makeSessionService({
+                filePath: '/tmp/video.mp4',
+                probeResult: probe(),
+                encodeConfig: { trimSegments: [{ inSec: 0, outSec: 8.34 }] },
+            }),
+            makeFfmpegService()
+        );
+
+        await service.ensureReady('s1');
+
+        const media = service.getPlaylist('s1', 'tok', 0)!;
+        expect(media).toContain('segment0.ts');
+        expect(media).toContain('segment1.ts');
+        expect(media).not.toContain('segment3.ts');
+    });
+
+    it('stays without a preview when the session has no file yet', async () => {
+        const ffmpeg = makeFfmpegService();
+        const service = new PreviewService(
+            makeSessionService({ filePath: undefined, probeResult: undefined }),
+            ffmpeg
+        );
+
+        expect(await service.ensureReady('s1')).toBe(false);
+        expect(ffmpeg.scanKeyframeGrid).not.toHaveBeenCalled();
+    });
+});

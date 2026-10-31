@@ -157,6 +157,7 @@ describe('EncodeController', () => {
         previewService = {
             init: vi.fn(),
             isReady: vi.fn().mockReturnValue(false),
+            ensureReady: vi.fn().mockResolvedValue(true),
             getPlaylist: vi.fn().mockReturnValue(null),
             getAudioTracks: vi.fn().mockReturnValue(null),
             getSegmentStream: vi.fn().mockResolvedValue(null),
@@ -1506,59 +1507,59 @@ describe('EncodeController', () => {
         }
 
         describe('validatePreviewToken', () => {
-            it('should throw UnauthorizedException when token is missing', () => {
+            it('should throw UnauthorizedException when token is missing', async () => {
                 const session = sessionService.create(makeConfig());
                 const res = makeRes();
 
-                expect(() =>
+                await expect(
                     controller.getPreviewMasterPlaylist(
                         session.id,
                         '',
                         undefined,
                         res
                     )
-                ).toThrow(UnauthorizedException);
+                ).rejects.toThrow(UnauthorizedException);
             });
 
-            it('should throw UnauthorizedException for invalid token', () => {
+            it('should throw UnauthorizedException for invalid token', async () => {
                 const session = sessionService.create(makeConfig());
                 const res = makeRes();
 
-                expect(() =>
+                await expect(
                     controller.getPreviewMasterPlaylist(
                         session.id,
                         'invalid-token',
                         undefined,
                         res
                     )
-                ).toThrow(UnauthorizedException);
+                ).rejects.toThrow(UnauthorizedException);
             });
 
-            it('should throw UnauthorizedException when token belongs to different session', () => {
+            it('should throw UnauthorizedException when token belongs to different session', async () => {
                 const session1 = sessionService.create(makeConfig());
                 const session2 = sessionService.create(makeConfig());
                 const res = makeRes();
 
-                expect(() =>
+                await expect(
                     controller.getPreviewMasterPlaylist(
                         session1.id,
                         session2.sessionToken,
                         undefined,
                         res
                     )
-                ).toThrow(UnauthorizedException);
+                ).rejects.toThrow(UnauthorizedException);
             });
         });
 
         describe('getPreviewMasterPlaylist', () => {
-            it('should return playlist content with correct headers', () => {
+            it('should return playlist content with correct headers', async () => {
                 const session = sessionService.create(makeConfig());
                 const res = makeRes();
                 previewService.getPlaylist.mockReturnValue(
                     '#EXTM3U\n#EXT-X-STREAM-INF\n'
                 );
 
-                controller.getPreviewMasterPlaylist(
+                await controller.getPreviewMasterPlaylist(
                     session.id,
                     session.sessionToken,
                     undefined,
@@ -1575,31 +1576,31 @@ describe('EncodeController', () => {
                 );
             });
 
-            it('should throw NotFoundException when preview is not ready', () => {
+            it('should throw NotFoundException when preview is not ready', async () => {
                 const session = sessionService.create(makeConfig());
                 const res = makeRes();
                 previewService.getPlaylist.mockReturnValue(null);
 
-                expect(() =>
+                await expect(
                     controller.getPreviewMasterPlaylist(
                         session.id,
                         session.sessionToken,
                         undefined,
                         res
                     )
-                ).toThrow(NotFoundException);
+                ).rejects.toThrow(NotFoundException);
             });
         });
 
         describe('getPreviewRenditionPlaylist', () => {
-            it('should return rendition playlist with correct headers', () => {
+            it('should return rendition playlist with correct headers', async () => {
                 const session = sessionService.create(makeConfig());
                 const res = makeRes();
                 previewService.getPlaylist.mockReturnValue(
                     '#EXTM3U\n#EXTINF:6\n'
                 );
 
-                controller.getPreviewRenditionPlaylist(
+                await controller.getPreviewRenditionPlaylist(
                     session.id,
                     '0',
                     session.sessionToken,
@@ -1621,12 +1622,12 @@ describe('EncodeController', () => {
                 expect(res.send).toHaveBeenCalledWith('#EXTM3U\n#EXTINF:6\n');
             });
 
-            it('should throw NotFoundException when rendition is not available', () => {
+            it('should throw NotFoundException when rendition is not available', async () => {
                 const session = sessionService.create(makeConfig());
                 const res = makeRes();
                 previewService.getPlaylist.mockReturnValue(null);
 
-                expect(() =>
+                await expect(
                     controller.getPreviewRenditionPlaylist(
                         session.id,
                         '0',
@@ -1634,7 +1635,7 @@ describe('EncodeController', () => {
                         undefined,
                         res
                     )
-                ).toThrow(NotFoundException);
+                ).rejects.toThrow(NotFoundException);
             });
         });
 
@@ -1707,7 +1708,7 @@ describe('EncodeController', () => {
         });
 
         describe('getPreviewAudioTracks', () => {
-            it('should return audio tracks', () => {
+            it('should return audio tracks', async () => {
                 const session = sessionService.create(makeConfig());
                 const tracks = [
                     {
@@ -1719,7 +1720,7 @@ describe('EncodeController', () => {
                 ];
                 previewService.getAudioTracks.mockReturnValue(tracks);
 
-                const result = controller.getPreviewAudioTracks(
+                const result = await controller.getPreviewAudioTracks(
                     session.id,
                     session.sessionToken
                 );
@@ -1730,26 +1731,50 @@ describe('EncodeController', () => {
                 expect(result).toEqual(tracks);
             });
 
-            it('should throw NotFoundException when preview not ready', () => {
+            it('should throw NotFoundException when preview not ready', async () => {
                 const session = sessionService.create(makeConfig());
                 previewService.getAudioTracks.mockReturnValue(null);
 
-                expect(() =>
+                await expect(
                     controller.getPreviewAudioTracks(
                         session.id,
                         session.sessionToken
                     )
-                ).toThrow(NotFoundException);
+                ).rejects.toThrow(NotFoundException);
             });
         });
 
-        describe('audio query param forwarding', () => {
-            it('should pass audio param to getPlaylist for master playlist', () => {
+        describe('a session restored after a restart', () => {
+            it('asks for its preview to be built before reading it', async () => {
                 const session = sessionService.create(makeConfig());
                 const res = makeRes();
                 previewService.getPlaylist.mockReturnValue('#EXTM3U\n');
 
-                controller.getPreviewMasterPlaylist(
+                await controller.getPreviewMasterPlaylist(
+                    session.id,
+                    session.sessionToken,
+                    undefined,
+                    res
+                );
+
+                expect(previewService.ensureReady).toHaveBeenCalledWith(
+                    session.id
+                );
+                expect(
+                    previewService.ensureReady.mock.invocationCallOrder[0]
+                ).toBeLessThan(
+                    previewService.getPlaylist.mock.invocationCallOrder[0]
+                );
+            });
+        });
+
+        describe('audio query param forwarding', () => {
+            it('should pass audio param to getPlaylist for master playlist', async () => {
+                const session = sessionService.create(makeConfig());
+                const res = makeRes();
+                previewService.getPlaylist.mockReturnValue('#EXTM3U\n');
+
+                await controller.getPreviewMasterPlaylist(
                     session.id,
                     session.sessionToken,
                     '2',
@@ -1764,12 +1789,12 @@ describe('EncodeController', () => {
                 );
             });
 
-            it('should pass audio param to getPlaylist for rendition playlist', () => {
+            it('should pass audio param to getPlaylist for rendition playlist', async () => {
                 const session = sessionService.create(makeConfig());
                 const res = makeRes();
                 previewService.getPlaylist.mockReturnValue('#EXTM3U\n');
 
-                controller.getPreviewRenditionPlaylist(
+                await controller.getPreviewRenditionPlaylist(
                     session.id,
                     '0',
                     session.sessionToken,
