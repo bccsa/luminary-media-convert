@@ -493,6 +493,7 @@ export class EncodeService {
                             outputDir,
                             sourceDuration:
                                 session.probeResult?.format?.duration ?? 0,
+                            alignmentOffset: encodeResult.alignmentOffset,
                             trimSegments: session.encodeConfig.trimSegments,
                             videoTracks: session.probeResult?.videoTracks,
                         });
