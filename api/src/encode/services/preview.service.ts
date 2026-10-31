@@ -173,6 +173,15 @@ export class PreviewService {
               )
             : { boundaries: [], keyframeStep: undefined };
         const boundaries = scan.boundaries;
+        if (copyRendition && boundaries.length > 0) {
+            renditions = await this.alignRenditions(
+                sessionId,
+                filePath,
+                renditions,
+                copyRendition,
+                boundaries
+            );
+        }
 
         // Generate playlists
         const mediaPlaylists = renditions.map((_, i) =>
@@ -609,6 +618,61 @@ export class PreviewService {
             this.logger.warn(`Keyframe scan failed: ${e}`);
             return { boundaries: [] };
         }
+    }
+
+    /**
+     * The renditions, with every one that cannot be copied on the reference's
+     * segment boundaries switched to transcoding.
+     *
+     * Every rendition is cut on those boundaries, and a copied segment can only
+     * start on its own stream's keyframe. A stream whose keyframes fall
+     * elsewhere would start each segment early, by a different amount each
+     * time, so a switch to it jumps the picture back and leaves the audio out
+     * of step. Transcoded, it is cut exactly on the boundaries instead.
+     */
+    private async alignRenditions(
+        sessionId: string,
+        filePath: string,
+        renditions: Rendition[],
+        reference: Rendition,
+        boundaries: SegmentBoundary[]
+    ): Promise<Rendition[]> {
+        const kept: Rendition[] = [];
+        for (const rendition of renditions) {
+            if (rendition === reference || !rendition.canCopy) {
+                kept.push(rendition);
+                continue;
+            }
+            let keyframes: number[];
+            try {
+                keyframes = await this.ffmpegService.scanKeyframeGrid(
+                    filePath,
+                    rendition.videoIndex,
+                    join(this.workDir, sessionId, 'kfscan')
+                );
+            } catch (e) {
+                this.logger.warn(
+                    `Re-encoding stream ${rendition.videoIndex} for the preview of ${sessionId}: keyframe scan failed (${e})`
+                );
+                kept.push({ ...rendition, canCopy: false });
+                continue;
+            }
+            const aligned = boundaries.every((b) =>
+                keyframes.some(
+                    (k) => Math.abs(k - b.start) <= LANDING_TOLERANCE_SECONDS
+                )
+            );
+            if (aligned) {
+                kept.push(rendition);
+            } else {
+                this.logger.warn(
+                    `Re-encoding stream ${rendition.videoIndex} (${rendition.width}x${rendition.height}) for the preview ` +
+                        `of ${sessionId}: its keyframes are not on the segment boundaries`
+                );
+                kept.push({ ...rendition, canCopy: false });
+            }
+        }
+        return kept;
     }
 
     /**

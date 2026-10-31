@@ -345,6 +345,76 @@ describe('PreviewService', () => {
             expect(master).toContain('r1/playlist.m3u8');
         });
 
+        describe('streams whose keyframes fall elsewhere', () => {
+            // Every rendition is cut on the first one's segment boundaries, and
+            // a copied segment can only start on its own stream's keyframe.
+            const ladder = makeProbe({
+                videoTracks: [480, 360, 240].map((height, index) => ({
+                    index,
+                    codec: 'h264',
+                    width: Math.round((height * 16) / 9),
+                    height,
+                    bitrateKbps: height * 4,
+                    frameRate: 25,
+                })),
+            });
+            const every = (step: number, from = 0) =>
+                Array.from({ length: Math.floor((20 - from) / step) + 1 }, (_, i) => from + i * step);
+
+            const initWith = async (grids: Record<number, number[] | Error>) => {
+                const ffmpeg = makeFfmpegService();
+                ffmpeg.scanKeyframeGrid.mockImplementation(
+                    async (_file: string, stream: number) => {
+                        const grid = grids[stream];
+                        if (grid instanceof Error) throw grid;
+                        return grid;
+                    }
+                );
+                sessionService = makeSessionService({
+                    filePath: '/tmp/video.mp4',
+                    probeResult: ladder,
+                });
+                service = new PreviewService(sessionService, ffmpeg);
+                await service.init('s1');
+                return service.getPlaylist('s1', 'tok') as string;
+            };
+
+            /** How each rendition in the master is produced, in order. */
+            const modes = () =>
+                (service as any).states
+                    .get('s1')
+                    .renditions.map((r: any) => `${r.height}:${r.canCopy ? 'copy' : 'transcode'}`);
+
+            it('copies a stream with a keyframe at every boundary', async () => {
+                await initWith({ 0: every(2), 1: every(4), 2: every(1) });
+
+                expect(modes()).toEqual(['480:copy', '360:copy', '240:copy']);
+            });
+
+            it('transcodes a stream whose keyframes miss the boundaries', async () => {
+                // 360p starts 0.4s late on a 3s grid: 0.4, 3.4, 6.4... — none
+                // of them on the 0, 4, 8... boundaries the 480p grid gives.
+                const master = await initWith({
+                    0: every(2),
+                    1: every(3, 0.4),
+                    2: every(2),
+                });
+
+                expect(modes()).toEqual(['480:copy', '360:transcode', '240:copy']);
+                expect(master).toContain('RESOLUTION=640x360');
+            });
+
+            it('transcodes a stream whose keyframes could not be read', async () => {
+                await initWith({
+                    0: every(2),
+                    1: new Error('scan failed'),
+                    2: every(2),
+                });
+
+                expect(modes()).toEqual(['480:copy', '360:transcode', '240:copy']);
+            });
+        });
+
         it('should use the smallest stream when all multi-stream H.264 are > 480p', async () => {
             const probe = makeProbe({
                 videoTracks: [
