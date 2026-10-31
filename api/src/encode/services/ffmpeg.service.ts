@@ -23,6 +23,7 @@ import {
 import {
     mergeWaveMasters,
     planLadderWaves,
+    waveProgressShares,
     type LadderWave,
 } from './ladder-waves';
 import { aacCodecAttribute } from './aac-codec-attribute';
@@ -1292,19 +1293,25 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                     .join(', ')
         );
 
+        // Each wave reports 0-100 for its own run, and the job's bar advances
+        // through that wave's share of it.
+        const shares = waveProgressShares(
+            waves,
+            encodeConfig.audioGroups?.length ?? 0
+        );
+        let base = 0;
         for (const [index, wave] of waves.entries()) {
             const args = await this.buildVideoArgs(opts, alignmentOffset, wave);
 
-            // Each wave reports 0-100 for its own run, so the job's bar advances
-            // through an equal share per wave. Every wave decodes the whole
-            // source and decoding dominates, so equal shares track the work
-            // closely enough to keep the bar honest.
-            const span = 100 / waves.length;
-            const base = span * index;
+            const span = shares[index]! * 100;
+            const waveBase = base;
+            base += span;
             const waveOpts: EncodeOptions = {
                 ...opts,
                 onProgress: (percent) =>
-                    onProgress(Math.min(99.9, base + (percent * span) / 100)),
+                    onProgress(
+                        Math.min(99.9, waveBase + (percent * span) / 100)
+                    ),
             };
 
             const release = await acquireEncoderSessions(wave.sessionCount);

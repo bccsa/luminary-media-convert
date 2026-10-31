@@ -3,6 +3,7 @@ import {
     mergeWaveMasters,
     planLadderWaves,
     waveMasterName,
+    waveProgressShares,
 } from './ladder-waves';
 import type { VideoRenditionDto } from '../dto/encode-config.dto.js';
 
@@ -393,5 +394,42 @@ describe('mergeWaveMasters — codecs the encoder vouches for', () => {
             if (!line.startsWith('#EXT-X-STREAM-INF')) continue;
             expect(line.match(/AUDIO=/g)).toHaveLength(1);
         }
+    });
+});
+
+describe('waveProgressShares', () => {
+    it('gives the whole bar to a ladder that runs once', () => {
+        const waves = planLadderWaves([rendition(720), rendition(480)], 3);
+
+        expect(waveProgressShares(waves, 2)).toEqual([1]);
+    });
+
+    it('shares the bar by the streams each wave writes', () => {
+        // Wave 1: three renditions and both audio groups, five of seven
+        // streams. Wave 2: two renditions. The segment counts behind the
+        // encrypting and upload bars weigh the waves the same way.
+        const waves = planLadderWaves(
+            [720, 480, 360, 240, 144].map((h) => rendition(h)),
+            3
+        );
+
+        const shares = waveProgressShares(waves, 2);
+
+        expect(shares[0]).toBeCloseTo(5 / 7);
+        expect(shares[1]).toBeCloseTo(2 / 7);
+    });
+
+    it('counts a copied rendition, which writes segments too', () => {
+        const waves = planLadderWaves(
+            [
+                rendition(1080, { copyStream: true }),
+                rendition(720),
+                rendition(480),
+            ],
+            1
+        );
+
+        // Wave 1: the copy, 720p and the audio group. Wave 2: 480p.
+        expect(waveProgressShares(waves, 1)).toEqual([0.75, 0.25]);
     });
 });

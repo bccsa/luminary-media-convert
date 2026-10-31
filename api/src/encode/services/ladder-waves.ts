@@ -35,6 +35,27 @@ export function waveMasterName(index: number): string {
 }
 
 /**
+ * Each wave's share of the encode's progress bar, by the streams it writes.
+ *
+ * The encrypting and upload bars count segments, and every stream writes the
+ * same number of them, so weighing the waves by their streams keeps the three
+ * bars on one scale. It also tracks time better than equal shares: the first
+ * wave carries the largest renditions and the audio.
+ */
+export function waveProgressShares(
+    waves: LadderWave[],
+    audioGroupCount: number
+): number[] {
+    const streams = waves.map(
+        (w) => w.renditions.length + (w.includeAudio ? audioGroupCount : 0)
+    );
+    const total = streams.reduce((sum, n) => sum + n, 0);
+    return total > 0
+        ? streams.map((n) => n / total)
+        : waves.map(() => 1 / waves.length);
+}
+
+/**
  * Plan the runs for one ladder.
  *
  * A ladder that already fits under the cap returns a single wave writing
