@@ -110,6 +110,8 @@ export class PreviewService {
         process.env.WORK_DIR || join(process.cwd(), 'work');
     private readonly states = new Map<string, PreviewState>();
     private readonly pending = new Map<string, Promise<string>>();
+    /** Builds in progress, so concurrent requests share one keyframe scan. */
+    private readonly building = new Map<string, Promise<void>>();
     // Concurrency limiter for FFmpeg processes
     private activeCount = 0;
     private readonly waitQueue: Array<() => void> = [];
@@ -210,6 +212,43 @@ export class PreviewService {
     }
 
     isReady(sessionId: string): boolean {
+        return this.states.has(sessionId);
+    }
+
+    /**
+     * Whether the session has a preview, building it first when it can.
+     *
+     * The state lives in memory and is built when a file is attached, so a
+     * session restored after a restart has its file, its probe and its cached
+     * segments, but no preview until something builds it again — the player
+     * waited on "Coming soon" for good. Cuts the encode was started with are
+     * applied again, as they were before the restart.
+     */
+    async ensureReady(sessionId: string): Promise<boolean> {
+        if (this.states.has(sessionId)) return true;
+        const session = this.sessionService.get(sessionId);
+        if (!session?.filePath || !session.probeResult) return false;
+
+        let build = this.building.get(sessionId);
+        if (!build) {
+            build = this.init(sessionId).finally(() =>
+                this.building.delete(sessionId)
+            );
+            this.building.set(sessionId, build);
+        }
+        try {
+            await build;
+        } catch (err) {
+            this.logger.warn(
+                `Could not rebuild the preview for ${sessionId}: ${(err as Error).message}`
+            );
+            return false;
+        }
+
+        const trims = session.encodeConfig?.trimSegments;
+        if (trims?.length && !this.states.get(sessionId)?.trimSegments) {
+            this.setTrimSegments(sessionId, trims);
+        }
         return this.states.has(sessionId);
     }
 

@@ -1191,11 +1191,12 @@ export class EncodeController {
 
     @Get(':sessionId/preview/audio-tracks')
     @ApiOperation({ summary: 'Get available preview audio tracks' })
-    getPreviewAudioTracks(
+    async getPreviewAudioTracks(
         @Param('sessionId') sessionId: string,
         @Query('token') token: string
-    ): any {
+    ): Promise<any> {
         this.validatePreviewToken(sessionId, token);
+        await this.previewService.ensureReady(sessionId);
         const tracks = this.previewService.getAudioTracks(sessionId);
         if (!tracks) throw new NotFoundException('Preview not ready');
         return tracks;
@@ -1203,13 +1204,14 @@ export class EncodeController {
 
     @Get(':sessionId/preview/playlist.m3u8')
     @ApiOperation({ summary: 'Get preview HLS master playlist' })
-    getPreviewMasterPlaylist(
+    async getPreviewMasterPlaylist(
         @Param('sessionId') sessionId: string,
         @Query('token') token: string,
         @Query('audio') audio: string | undefined,
         @Res() res: Response
-    ): void {
+    ): Promise<void> {
         this.validatePreviewToken(sessionId, token);
+        await this.previewService.ensureReady(sessionId);
 
         const audioTrackIndex =
             audio !== undefined ? parseInt(audio, 10) : undefined;
@@ -1230,14 +1232,15 @@ export class EncodeController {
 
     @Get(':sessionId/preview/r:rendition/playlist.m3u8')
     @ApiOperation({ summary: 'Get preview HLS rendition playlist' })
-    getPreviewRenditionPlaylist(
+    async getPreviewRenditionPlaylist(
         @Param('sessionId') sessionId: string,
         @Param('rendition') rendition: string,
         @Query('token') token: string,
         @Query('audio') audio: string | undefined,
         @Res() res: Response
-    ): void {
+    ): Promise<void> {
         this.validatePreviewToken(sessionId, token);
+        await this.previewService.ensureReady(sessionId);
 
         const renditionIndex = parseInt(rendition, 10);
         const audioTrackIndex =
@@ -1276,6 +1279,7 @@ export class EncodeController {
         const segmentIndex = parseInt(segMatch[1], 10);
         const audioTrackIndex =
             audio !== undefined ? parseInt(audio, 10) : undefined;
+        await this.previewService.ensureReady(sessionId);
         const result = await this.previewService.getSegmentStream(
             sessionId,
             renditionIndex,
