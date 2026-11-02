@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import {
+    computed,
+    onBeforeUnmount,
+    onMounted,
+    ref,
+    toRaw,
+    watch,
+} from 'vue';
 import type { Segment, SegmentEditorMode } from './types';
 import { createSegmentId } from './types';
 import { formatDuration, formatTime, parseTime } from './time';
@@ -146,6 +153,8 @@ const emit = defineEmits<{
     'segment-commit': [segments: Segment[]];
     /** A segment was removed. Carries it whole so consumers can offer an undo. */
     'segment-removed': [segment: Segment];
+    /** Undo of a cut: the host that took the range out on `segment-removed` puts it back. */
+    'segment-restored': [segment: Segment];
 }>();
 
 // -------------- derived mode config --------------
@@ -289,6 +298,7 @@ function deleteSelected() {
     if (selectedIds.value.size === 0) return;
     const removed = segments.value.filter((s) => selectedIds.value.has(s.id));
     commitSegments(segments.value.filter((s) => !selectedIds.value.has(s.id)));
+    markLastStepAsCut(removed);
     clearSelection();
     for (const seg of removed) emit('segment-removed', { ...seg });
 }
@@ -844,16 +854,49 @@ function updateSegmentEdge(
     return field === 'inSec' ? inSec : outSec;
 }
 
+/**
+ * History steps that were cuts, and the ranges each took out. A cut shortens the
+ * timeline, so its snapshot describes positions that no longer exist: undoing one
+ * hands the ranges back to the host instead of restoring the snapshot.
+ */
+const cutSteps = new WeakMap<Segment[], Segment[]>();
+
+function markLastStepAsCut(removed: Segment[]) {
+    if (props.mode !== 'trim') return;
+    const step = history.value[history.value.length - 1];
+    if (step) cutSteps.set(toRaw(step), removed.map((s) => ({ ...s })));
+}
+
 function undo() {
     if (history.value.length === 0) return;
     const previous = history.value.pop()!;
-    redoStack.value.push(cloneSegments());
+    const current = cloneSegments();
+    redoStack.value.push(current);
+    const cut = cutSteps.get(toRaw(previous));
+    if (cut) {
+        cutSteps.set(current, cut);
+        for (const seg of cut) emit('segment-restored', { ...seg });
+        return;
+    }
     emit('update:modelValue', previous);
 }
 function redo() {
     if (redoStack.value.length === 0) return;
     const next = redoStack.value.pop()!;
-    history.value.push(cloneSegments());
+    const current = cloneSegments();
+    history.value.push(current);
+    const cut = cutSteps.get(toRaw(next));
+    if (cut) {
+        cutSteps.set(current, cut);
+        const ids = new Set(cut.map((s) => s.id));
+        const removed = segments.value.filter((s) => ids.has(s.id));
+        emit(
+            'update:modelValue',
+            segments.value.filter((s) => !ids.has(s.id))
+        );
+        for (const seg of removed) emit('segment-removed', { ...seg });
+        return;
+    }
     emit('update:modelValue', next);
 }
 
@@ -997,6 +1040,7 @@ function rippleInsert(list: Segment[], incoming: Segment): Segment[] {
 function removeSegment(id: string) {
     const removed = segments.value.find((s) => s.id === id);
     commitSegments(segments.value.filter((s) => s.id !== id));
+    if (removed) markLastStepAsCut([removed]);
     selectedIds.value.delete(id);
     if (removed) emit('segment-removed', { ...removed });
 }

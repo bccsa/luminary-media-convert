@@ -57,6 +57,7 @@ const editorSegments = defineModel<Segment[]>('editorSegments', { required: true
 
 const emit = defineEmits<{
     segmentRemoved: [segment: Segment];
+    segmentRestored: [segment: Segment];
 }>();
 
 const showToolbarSection = () => props.section !== 'timeline';
@@ -151,6 +152,7 @@ const trimToolbarHasVisibleContent = computed(() => {
             :waveform-peaks="waveformPeaks"
             combined-controls
             @segment-removed="emit('segmentRemoved', $event)"
+            @segment-restored="emit('segmentRestored', $event)"
         >
             <!--
                 `controls-end` is the controls bar's end cluster — the same
