@@ -331,6 +331,30 @@ describe('SessionView', () => {
             ).toMatchObject({ sessionId: 'sess-1', sessionToken: 'sess_token' });
         });
 
+        it('keeps the audio tracks panel, and its unsaved edits, across a visit to Chapters', async () => {
+            const editSession = {
+                status: 'completed',
+                mode: 'edit',
+                masterPlaylist: 'master.m3u8',
+                hlsUrl: HLS_URL,
+            };
+            detail.mockResolvedValue(uploadedSession(editSession));
+            status.mockResolvedValue(editSession);
+            const wrapper = await mountView();
+            await flushPromises();
+
+            await wrapper.find('[data-test="audioTracksTab"]').trigger('click');
+            const panel = wrapper.findComponent({ name: 'AudioTracksPanel' }).vm;
+            const chaptersTab = wrapper
+                .findAll('button')
+                .find((b) => b.text() === 'Chapters' && b.attributes('data-test') !== 'audioTracksTab')!;
+            await chaptersTab.trigger('click');
+            expect(wrapper.findComponent({ name: 'AudioTracksPanel' }).isVisible()).toBe(false);
+            await wrapper.find('[data-test="audioTracksTab"]').trigger('click');
+
+            expect(wrapper.findComponent({ name: 'AudioTracksPanel' }).vm).toBe(panel);
+        });
+
         it('offers no audio tracks tab for a finished encode', async () => {
             const wrapper = await completedView();
             expect(wrapper.find('[data-test="audioTracksTab"]').exists()).toBe(false);
