@@ -10,7 +10,7 @@ A Luminary player is therefore expected to:
 
 1. Fetch the master and media playlists, decrypting LMCENC-wrapped ones (an encrypted session encrypts its playlists and sidecars too, unless it opted out).
 2. Supply the key for `luminary://key` (and any other AES-128 key URI — a locally supplied key always wins). The wrapper normalizes key URIs to the sentinel and the engine adapter serves the raw bytes **from memory** (the VHS xhr seam on the web; `AVAssetResourceLoaderDelegate` / ExoPlayer `DataSource` later) — a key blob URL is only the fallback for adapters without a key hook.
-3. Feed the munged playlists to the engine. **`player-core` (`PlayerController` + pipeline) is the reference implementation**, with `player-web`'s `HlsJsVideoAdapter`/`LuminaryPlayer` as the web engine binding — which both the media encoder app and the Luminary app consume.
+3. Feed the munged playlists to the engine. **`player-core` (`PlayerController` + pipeline) is the reference implementation**, with `player-web`'s `HlsJsVideoAdapter` (and its simple `LuminaryPlayer`) as the web engine binding — which both the media encoder app and the Luminary app consume.
 
 The encoder writes **one** spec-correct multi-angle `master.m3u8`: each camera angle is an `#EXT-X-MEDIA:TYPE=VIDEO` rendition group and every `#EXT-X-STREAM-INF` carries `VIDEO="<group>"`. Most players ignore video rendition groups and simply play whichever variant their ABR logic picks, so narrowing happens client-side with the `hls-core/` helpers — this is the contract, not an implementation detail:
 

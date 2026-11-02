@@ -69,3 +69,11 @@ if (!usable('localStorage') || !usable('sessionStorage')) {
     define('localStorage', new MemoryStorage());
     define('sessionStorage', new MemoryStorage());
 }
+
+/**
+ * jsdom has no constructable-stylesheet `replaceSync`, and the player's stock Video.js 10 skin builds
+ * its shadow stylesheet with it as soon as it is imported.
+ */
+if (typeof CSSStyleSheet !== 'undefined' && typeof CSSStyleSheet.prototype.replaceSync !== 'function') {
+    CSSStyleSheet.prototype.replaceSync = function replaceSync(): void {};
+}
