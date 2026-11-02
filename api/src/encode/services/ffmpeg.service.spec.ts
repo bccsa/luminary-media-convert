@@ -330,6 +330,68 @@ describe('FfmpegService', () => {
             return (service as any).buildVideoArgs(opts);
         };
 
+        it('keeps two renditions of the same name and size in separate directories', async () => {
+            // The form's Add rendition adds a 480p row at 854x480 beside the
+            // ladder's own: named alike, both wrote stream_480p_854x480/.
+            const rendition = (videoBitrateKbps: number) => ({
+                width: 854,
+                height: 480,
+                videoBitrateKbps,
+                copyStream: false,
+                audioGroupId: 'hd',
+                label: '480p',
+            });
+            const encodeConfig: EncodeConfigDto = {
+                type: 'video',
+                segmentDuration: 6,
+                videoRenditions: [
+                    rendition(1000),
+                    rendition(400),
+                    rendition(400),
+                ],
+                audioGroups: [
+                    {
+                        id: 'hd',
+                        label: 'HD',
+                        audioBitrateKbps: 128,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
+                ],
+            };
+
+            const args = await buildVideoArgs({
+                inputPath: '/tmp/input.mp4',
+                outputDir: '/tmp/output',
+                encodeConfig,
+            });
+            const varMap = args[args.indexOf('-var_stream_map') + 1];
+
+            expect(varMap).toContain('name:480p_854x480 ');
+            expect(varMap).toContain('name:480p_854x480_400k ');
+            expect(varMap).toContain('name:480p_854x480_400k_2 ');
+            // Every reader of the directories names them the same way.
+            expect(
+                Object.keys(service.buildStreamChainMap(encodeConfig))
+            ).toEqual([
+                'stream_480p_854x480',
+                'stream_480p_854x480_400k',
+                'stream_480p_854x480_400k_2',
+                'stream_hd_HD',
+            ]);
+            expect(
+                service
+                    .quickTrimStreamTargets(encodeConfig)
+                    .filter((t) => t.kind === 'video')
+                    .map((t) => t.streamDir)
+            ).toEqual([
+                'stream_480p_854x480',
+                'stream_480p_854x480_400k',
+                'stream_480p_854x480_400k_2',
+            ]);
+        });
+
         it('should build CPU video args with correct structure', async () => {
             const encodeConfig: EncodeConfigDto = {
                 type: 'video',
@@ -5062,7 +5124,11 @@ describe('FfmpegService — audio codecs for the merged master', () => {
 describe('audio stream names', () => {
     const service = new FfmpegService();
     const name = (label?: string) =>
-        (service as any).buildAudioStreamName({ id: 'hd', label, audioBitrateKbps: 128 });
+        (service as any).buildAudioStreamName({
+            id: 'hd',
+            label,
+            audioBitrateKbps: 128,
+        });
 
     it('keeps the name a plain label always had', () => {
         expect(name('ENG HD')).toBe('hd_ENG_HD');
@@ -5072,7 +5138,9 @@ describe('audio stream names', () => {
 
     it('makes a title from a file safe for a folder, a URL and the stream map', () => {
         expect(name('Français')).toBe('hd_Francais');
-        expect(name('English, director\'s cut')).toBe('hd_English_director_s_cut');
+        expect(name("English, director's cut")).toBe(
+            'hd_English_director_s_cut'
+        );
         expect(name('EN/FR: mixed')).toBe('hd_EN_FR_mixed');
     });
 

@@ -988,15 +988,14 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         );
 
         // The whole ladder, never this wave's share of it: the name decides the
-        // output directory, and buildStreamChainMap applies the same test over
-        // the full set. Deciding it per wave would rename a rendition purely
-        // because it landed in a run with fewer tracks.
-        const multiTrack =
-            new Set(allRenditions.map((r) => r.sourceTrackIndex ?? 0)).size > 1;
+        // output directory, and every other reader of it names the full set.
+        // Deciding it per wave would rename a rendition purely because it
+        // landed in a run with fewer tracks or no namesake.
+        const names = this.videoStreamNames(allRenditions);
 
         const varParts: string[] = [];
         for (const { rendition, outputIndex } of videoIndexMap) {
-            const name = this.buildVideoStreamName(rendition, multiTrack);
+            const name = names.get(rendition)!;
             // In a wave without audio the agroup names streams absent from this
             // run. Verified harmless against the shipped ffmpeg: the muxer
             // simply writes no AUDIO attribute, and the merge restores it from
@@ -1417,15 +1416,10 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         // A variant's URI names its stream directory, the directory is named
         // after the rendition, and the rendition carries the audio group that
         // every wave after the first had to omit.
-        const renditions = encodeConfig.videoRenditions ?? [];
-        const multiTrack =
-            new Set(renditions.map((r) => r.sourceTrackIndex ?? 0)).size > 1;
+        const names = this.videoStreamNames(encodeConfig.videoRenditions ?? []);
         const groupByDir = new Map<string, string>();
-        for (const rendition of renditions) {
-            groupByDir.set(
-                `stream_${this.buildVideoStreamName(rendition, multiTrack)}`,
-                rendition.audioGroupId
-            );
+        for (const [rendition, name] of names) {
+            groupByDir.set(`stream_${name}`, rendition.audioGroupId);
         }
 
         const audioCodecs = await this.audioGroupCodecAttributes(
@@ -1630,16 +1624,10 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         const targets: QuickTrimStreamTarget[] = [];
 
         if (config.type === 'video') {
-            const renditions = config.videoRenditions ?? [];
-            const multiTrack =
-                new Set(renditions.map((r) => r.sourceTrackIndex ?? 0)).size >
-                1;
-            for (const rendition of renditions) {
+            const names = this.videoStreamNames(config.videoRenditions ?? []);
+            for (const [rendition, name] of names) {
                 targets.push({
-                    streamDir: `stream_${this.buildVideoStreamName(
-                        rendition,
-                        multiTrack
-                    )}`,
+                    streamDir: `stream_${name}`,
                     kind: 'video',
                     sourceTrackIndex: rendition.sourceTrackIndex ?? 0,
                     rendition,
@@ -2017,15 +2005,12 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         const chains: Record<string, string> = {};
 
         if (encodeConfig.type === 'video') {
-            const renditions = encodeConfig.videoRenditions ?? [];
-            // The same test buildVideoArgs applies when it names the stream
-            // directories, and it has to stay the same test: a different answer
-            // here maps chains onto directories that do not exist.
-            const multiTrack =
-                new Set(renditions.map((r) => r.sourceTrackIndex ?? 0)).size >
-                1;
-            for (const rendition of renditions) {
-                const name = this.buildVideoStreamName(rendition, multiTrack);
+            // Named the same way buildVideoArgs names the stream directories:
+            // a different answer here maps chains onto directories that do not exist.
+            const names = this.videoStreamNames(
+                encodeConfig.videoRenditions ?? []
+            );
+            for (const [rendition, name] of names) {
                 chains[`stream_${name}`] =
                     `v${rendition.sourceTrackIndex ?? 0}`;
             }
@@ -2038,6 +2023,34 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         }
 
         return chains;
+    }
+
+    /**
+     * Every rendition's stream name, which is also its output directory. Two
+     * renditions sharing one write the same playlist and segments, and the last
+     * writer wins without an error, so a repeat takes its bitrate, then a
+     * counter; the first keeps the plain name. Worked out over the whole ladder,
+     * never per wave, so a rendition is named the same in every run.
+     */
+    private videoStreamNames(
+        renditions: VideoRenditionDto[]
+    ): Map<VideoRenditionDto, string> {
+        const multiTrack =
+            new Set(renditions.map((r) => r.sourceTrackIndex ?? 0)).size > 1;
+        const names = new Map<VideoRenditionDto, string>();
+        const taken = new Set<string>();
+        for (const rendition of renditions) {
+            const base = this.buildVideoStreamName(rendition, multiTrack);
+            let name = base;
+            if (taken.has(name))
+                name = `${base}_${rendition.videoBitrateKbps}k`;
+            for (let n = 2; taken.has(name); n++) {
+                name = `${base}_${rendition.videoBitrateKbps}k_${n}`;
+            }
+            taken.add(name);
+            names.set(rendition, name);
+        }
+        return names;
     }
 
     private buildVideoStreamName(
