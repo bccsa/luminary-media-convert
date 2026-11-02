@@ -886,6 +886,42 @@ export class SessionService implements OnModuleInit {
         }
     }
 
+    /**
+     * A post's finished sessions, from the site that opened it, other than
+     * `keepId`, removed as a new one opens: the same rule start-up applies, so
+     * the list shows a post once. Their output is already in the bucket and
+     * their URL already with the CMS, which follows only the newest session.
+     */
+    removeFinishedOfDocument(
+        documentId: string,
+        callerOrigin: string | undefined,
+        keepId: string
+    ): string[] {
+        const done = this.list().filter(
+            (session) =>
+                session.id !== keepId &&
+                session.documentId === documentId &&
+                session.createdByOrigin === callerOrigin &&
+                TERMINAL.includes(session.status)
+        );
+        for (const session of done) this.remove(session.id);
+        return done.map((session) => session.id);
+    }
+
+    /** The post's encode that is running now, from the site that opened it. */
+    findBusyEncodeOfDocument(
+        documentId: string,
+        callerOrigin: string | undefined
+    ): Session | undefined {
+        return this.list().find(
+            (session) =>
+                session.documentId === documentId &&
+                session.createdByOrigin === callerOrigin &&
+                !session.edit &&
+                BUSY.includes(session.status)
+        );
+    }
+
     remove(id: string): Session | undefined {
         const session = this.sessions.get(id);
         if (!session) return undefined;

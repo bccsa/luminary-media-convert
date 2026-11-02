@@ -1,6 +1,7 @@
 import {
     BadRequestException,
     Body,
+    ConflictException,
     Controller,
     ForbiddenException,
     Get,
@@ -30,6 +31,7 @@ import {
 } from './dto/cms-session-response.dto.js';
 import { CreateSessionDto } from './dto/create-session.dto.js';
 import { HlsEditService } from '../hls-edit/hls-edit.service.js';
+import { PreviewService } from './services/preview.service.js';
 import { S3Service } from './services/s3.service.js';
 import { SessionService, type Session } from './services/session.service.js';
 
@@ -63,7 +65,9 @@ export class CmsController {
         @Inject(CMS_SESSION_HOOK)
         private readonly onSessionCreated?: CmsSessionHook,
         @Optional()
-        private readonly hlsEditService?: HlsEditService
+        private readonly hlsEditService?: HlsEditService,
+        @Optional()
+        private readonly previewService?: PreviewService
     ) {}
 
     @Get('health')
@@ -140,6 +144,7 @@ export class CmsController {
             `Session ${session.id} opened for document ${dto.documentId} ` +
                 `by ${req.headers.origin ?? 'a local caller'}`
         );
+        this.removeFinished(dto.documentId, callerOrigin, session.id);
 
         this.notifyHost(session.id);
 
@@ -169,6 +174,19 @@ export class CmsController {
             );
         }
         const masterKey = masterKeyOf(media.hlsUrl, dto.publicBaseUrl);
+
+        // The video is about to be replaced: edits made to it now would be
+        // lost, so the running encode comes forward instead.
+        const encoding = this.sessionService.findBusyEncodeOfDocument(
+            dto.documentId,
+            callerOrigin
+        );
+        if (encoding) {
+            this.notifyHost(encoding.id);
+            throw new ConflictException(
+                'This post is being encoded. Its chapters and audio tracks can be edited once the encode has finished.'
+            );
+        }
 
         const existing = this.sessionService.findActiveByDocumentId(
             dto.documentId,
@@ -231,6 +249,7 @@ export class CmsController {
             `Edit session ${session.id} opened for document ${dto.documentId} ` +
                 `by ${req.headers.origin ?? 'a local caller'}`
         );
+        this.removeFinished(dto.documentId, callerOrigin, session.id);
         this.notifyHost(session.id);
         return this.describe(session, req, false);
     }
@@ -242,6 +261,24 @@ export class CmsController {
      * throws must not turn a created session into a 500 the CMS reads as
      * failure, having no way to learn that the session exists after all.
      */
+    private removeFinished(
+        documentId: string,
+        callerOrigin: string | undefined,
+        keepId: string
+    ): void {
+        const removed = this.sessionService.removeFinishedOfDocument(
+            documentId,
+            callerOrigin,
+            keepId
+        );
+        for (const id of removed) void this.previewService?.destroy(id);
+        if (removed.length > 0) {
+            this.logger.log(
+                `Removed ${removed.length} finished session(s) of document ${documentId}`
+            );
+        }
+    }
+
     private notifyHost(sessionId: string): void {
         try {
             this.onSessionCreated?.(sessionId);

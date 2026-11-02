@@ -610,3 +610,85 @@ describe("CmsController — an edit session on the post's existing video", () =>
         ).rejects.toThrow(ForbiddenException);
     });
 });
+
+describe('CmsController — one session per post in the list', () => {
+    const req = () => makeRequest({ origin: 'https://cms.test' });
+    const editing = (readEncodedMedia = vi.fn().mockResolvedValue({ encrypted: false })) =>
+        new CmsController(
+            sessions,
+            new OriginRegistry({ allowedOrigins: ['https://cms.test'] }),
+            onSessionCreated,
+            { readEncodedMedia } as never
+        );
+    const editDto = () =>
+        makeDto({
+            mode: 'edit',
+            existingMedia: { hlsUrl: 'https://cdn.example.com/media/posts/p1/s1/master.m3u8' },
+        });
+
+    it('drops a finished session of the post when it is opened again', async () => {
+        const controller = build();
+        const first = await controller.createSession(makeDto(), req());
+        sessions.updateStatus(first.sessionId, 'completed');
+
+        const second = await controller.createSession(makeDto(), req());
+
+        expect(second.sessionId).not.toBe(first.sessionId);
+        expect(sessions.list().map((s) => s.id)).toEqual([second.sessionId]);
+    });
+
+    it('drops a failed one too', async () => {
+        const controller = build();
+        const first = await controller.createSession(makeDto(), req());
+        sessions.setFailed(first.sessionId, 'upload refused');
+
+        const second = await controller.createSession(makeDto(), req());
+
+        expect(sessions.list().map((s) => s.id)).toEqual([second.sessionId]);
+    });
+
+    it("keeps another post's sessions, and another site's", async () => {
+        const controller = build(['https://cms.test', 'https://other.test']);
+        const other = await controller.createSession(makeDto({ documentId: 'post_other' }), req());
+        const elsewhere = await controller.createSession(makeDto(), makeRequest({ origin: 'https://other.test' }));
+        sessions.updateStatus(other.sessionId, 'completed');
+        sessions.updateStatus(elsewhere.sessionId, 'completed');
+
+        await controller.createSession(makeDto(), req());
+
+        const ids = sessions.list().map((s) => s.id);
+        expect(ids).toContain(other.sessionId);
+        expect(ids).toContain(elsewhere.sessionId);
+    });
+
+    it('drops a finished encode of the post when an edit session opens', async () => {
+        const controller = editing();
+        const encode = await controller.createSession(makeDto(), req());
+        sessions.updateStatus(encode.sessionId, 'completed');
+
+        const edit = await controller.createSession(editDto(), req());
+
+        expect(sessions.list().map((s) => s.id)).toEqual([edit.sessionId]);
+    });
+
+    it('refuses an edit while the post is encoding, and brings the encode forward', async () => {
+        const controller = editing();
+        const encode = await controller.createSession(makeDto(), req());
+        sessions.updateStatus(encode.sessionId, 'encoding');
+        onSessionCreated.mockClear();
+
+        await expect(controller.createSession(editDto(), req())).rejects.toThrow(/being encoded/);
+
+        expect(onSessionCreated).toHaveBeenCalledWith(encode.sessionId);
+        expect(sessions.list().map((s) => s.id)).toEqual([encode.sessionId]);
+    });
+
+    it('opens an edit beside a new upload that has not started encoding', async () => {
+        const controller = editing();
+        const pending = await controller.createSession(makeDto(), req());
+
+        const edit = await controller.createSession(editDto(), req());
+
+        expect(sessions.list().map((s) => s.id).sort()).toEqual([pending.sessionId, edit.sessionId].sort());
+    });
+});
