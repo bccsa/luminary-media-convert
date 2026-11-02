@@ -624,6 +624,14 @@ html.dark .ecf-input-invalid:focus {
     color: #d4d4d8; /* text-zinc-300 */
 }
 
+.ecf-tr--excluded > .ecf-td:not(.ecf-td-include) {
+    opacity: 0.45;
+}
+.ecf-th-include,
+.ecf-td-include {
+    width: 1%;
+    text-align: center;
+}
 .ecf-tr {
     border-bottom: 1px solid rgb(39 39 42 / 0.5); /* border-zinc-800/50 */
 }

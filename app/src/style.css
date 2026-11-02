@@ -295,6 +295,9 @@
     .ecf-tbody { @apply text-slate-700 dark:text-slate-300; }
     .ecf-tr { @apply border-b border-slate-200/90 dark:border-slate-700/50; }
     .ecf-td { @apply px-2 py-1; }
+    .ecf-tr--excluded > .ecf-td:not(.ecf-td-include) { @apply opacity-45; }
+    .ecf-th-include,
+    .ecf-td-include { @apply w-px text-center; }
 
     /* Cards */
     .ecf-card { @apply relative rounded-md border border-slate-200 bg-slate-50 p-3 space-y-2 dark:border-transparent dark:bg-slate-900/60; }
