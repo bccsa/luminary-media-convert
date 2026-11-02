@@ -29,9 +29,38 @@ export interface PreviewAudioTrack {
     bitrateKbps?: number;
     codec?: string;
     isDefault: boolean;
+    sampleRate?: number;
+    channels?: number;
+    /** Where the track begins in the source, which can be well after the picture. */
+    startTime?: number;
 }
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * The audio of a segment the track has not fully reached yet, or null when it
+ * has. The player only plays where it holds both picture and sound, so a span
+ * with picture alone never plays and a seek into it never lands: the missing
+ * part has to be silence rather than nothing.
+ */
+function lateAudioFilter(
+    track: PreviewAudioTrack | undefined,
+    start: number,
+    segDur: number,
+    audioInput: number
+): string | null {
+    const audioStart = track?.startTime ?? 0;
+    if (!track || audioStart - start <= LANDING_TOLERANCE_SECONDS) return null;
+    const sampleRate = track.sampleRate ?? 48000;
+    if (audioStart >= start + segDur) {
+        return (
+            `anullsrc=r=${sampleRate}:cl=${track.channels ?? 2}c,` +
+            `atrim=duration=${segDur},asetpts=N/SR/TB+${start}/TB[a]`
+        );
+    }
+    const firstPts = Math.round(start * sampleRate);
+    return `[${audioInput}:a:${track.streamIndex}]aresample=async=1:first_pts=${firstPts}[a]`;
+}
 
 // Codecs that can be remuxed to MPEG-TS for browser MSE playback
 const TS_COPY_CODECS = new Set(['h264', 'vp8', 'vp9']);
@@ -475,6 +504,9 @@ export class PreviewService {
             bitrateKbps: t.bitrateKbps,
             codec: t.codec,
             isDefault: i === 0,
+            sampleRate: t.sampleRate,
+            channels: t.channels,
+            startTime: t.startTime,
         }));
     }
 
@@ -875,7 +907,8 @@ export class PreviewService {
          * {@link extractSegment}; ignored by the transcode and audio paths,
          * whose accurate seek has no hop.
          */
-        copySeekStart = start
+        copySeekStart = start,
+        audioTrack?: PreviewAudioTrack
     ): string[] {
         const args: string[] = [];
 
@@ -940,11 +973,14 @@ export class PreviewService {
                 String(copySeekStart),
                 '-i',
                 filePath,
-                ...(audioMap ? ['-ss', String(start), '-i', filePath] : []),
-                '-map',
-                videoMap
+                ...(audioMap ? ['-ss', String(start), '-i', filePath] : [])
             );
-            if (audioMap) args.push('-map', audioMap.replace(/^0:/, '1:'));
+            const lateAudio = lateAudioFilter(audioTrack, start, segDur, 1);
+            if (lateAudio) args.push('-filter_complex', lateAudio);
+            args.push('-map', videoMap);
+            if (lateAudio) args.push('-map', '[a]');
+            else if (audioMap)
+                args.push('-map', audioMap.replace(/^0:/, '1:'));
             args.push('-c:v', 'copy', '-to', String(start + segDur));
             if (audioMap) args.push(...aacArgs(), '-b:a', '128k');
             args.push(...TS_OUTPUT);
@@ -957,11 +993,13 @@ export class PreviewService {
             '-t',
             String(segDur),
             '-i',
-            filePath,
-            '-map',
-            videoMap
+            filePath
         );
-        if (audioMap) args.push('-map', audioMap);
+        const lateAudio = lateAudioFilter(audioTrack, start, segDur, 0);
+        if (lateAudio) args.push('-filter_complex', lateAudio);
+        args.push('-map', videoMap);
+        if (lateAudio) args.push('-map', '[a]');
+        else if (audioMap) args.push('-map', audioMap);
 
         args.push(
             ...previewVideoArgs(accelMode, useGpu, rendition.scaleFilter)
@@ -1017,7 +1055,8 @@ export class PreviewService {
                 rendition,
                 accelMode,
                 useGpu,
-                copySeekStart
+                copySeekStart,
+                audioTrack ?? undefined
             );
             const timeout = rendition.canCopy ? 30_000 : 120_000;
             const opts = {

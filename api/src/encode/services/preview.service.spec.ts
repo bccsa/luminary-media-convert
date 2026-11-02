@@ -3215,3 +3215,105 @@ describe('PreviewService — a session restored after a restart', () => {
         expect(ffmpeg.scanKeyframeGrid).not.toHaveBeenCalled();
     });
 });
+
+describe('PreviewService — audio that starts after the segment does', () => {
+    const copyRendition = {
+        videoIndex: 0,
+        width: 854,
+        height: 480,
+        bitrateKbps: 1000,
+        canCopy: true,
+    };
+    const transcodeRendition = {
+        videoIndex: 0,
+        width: 854,
+        height: 480,
+        bitrateKbps: 1000,
+        canCopy: false,
+    };
+    const track = (startTime?: number) => ({
+        index: 0,
+        streamIndex: 2,
+        isDefault: true,
+        sampleRate: 44100,
+        channels: 1,
+        startTime,
+    });
+
+    const segmentArgs = (
+        start: number,
+        rendition: object,
+        audioTrack: object
+    ): string[] =>
+        (
+            new PreviewService(
+                makeSessionService(),
+                makeFfmpegService()
+            ) as any
+        ).buildSegmentArgs(
+            '/tmp/video.mp4',
+            start,
+            4,
+            '0:v:0',
+            '0:a:2',
+            rendition,
+            'cpu',
+            false,
+            start,
+            audioTrack
+        );
+    const filterOf = (args: string[]) =>
+        args[args.indexOf('-filter_complex') + 1];
+
+    it('fills a segment the audio has not reached with silence', () => {
+        const args = segmentArgs(4, transcodeRendition, track(10));
+
+        expect(filterOf(args)).toBe(
+            'anullsrc=r=44100:cl=1c,atrim=duration=4,asetpts=N/SR/TB+4/TB[a]'
+        );
+        expect(args).toContain('[a]');
+        expect(args).not.toContain('0:a:2');
+    });
+
+    it('pads the start of the segment the audio begins in', () => {
+        const args = segmentArgs(8, transcodeRendition, track(10));
+
+        expect(filterOf(args)).toBe(
+            '[0:a:2]aresample=async=1:first_pts=352800[a]'
+        );
+        expect(args).toContain('[a]');
+    });
+
+    it('reads the audio from its own input on the copy path', () => {
+        const args = segmentArgs(8, copyRendition, track(10));
+
+        expect(filterOf(args)).toBe(
+            '[1:a:2]aresample=async=1:first_pts=352800[a]'
+        );
+        expect(args).toContain('[a]');
+        expect(args).not.toContain('1:a:2');
+    });
+
+    it('fills a copied segment with silence too', () => {
+        const args = segmentArgs(4, copyRendition, track(10));
+
+        expect(filterOf(args)).toContain('anullsrc');
+        expect(args).toContain('[a]');
+    });
+
+    it.each([
+        ['the audio has started', 12, 10],
+        ['the audio starts with the segment', 8, 8],
+        ['the audio starts within the landing tolerance', 8, 8.05],
+        ['the track has no start time', 0, undefined],
+    ])('leaves the audio alone when %s', (_why, start, audioStart) => {
+        const args = segmentArgs(
+            start as number,
+            transcodeRendition,
+            track(audioStart as number | undefined)
+        );
+
+        expect(args).not.toContain('-filter_complex');
+        expect(args).toContain('0:a:2');
+    });
+});
