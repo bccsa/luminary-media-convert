@@ -6,6 +6,12 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, 'out');
+/**
+ * The native sample stream, written by `make-sample-stream.py` (54 MB, not committed): two angles, four languages,
+ * AES-128 under `luminary://key`, byte-range chunk chains. Served at `/native/`; its key is
+ * 6c756d696e6172792d737069a4e2c0de.
+ */
+const NATIVE = join(HERE, 'out-native');
 const PORT = Number(process.env.FIXTURE_PORT ?? 5190);
 const TYPES = { '.m3u8': 'application/vnd.apple.mpegurl', '.m4s': 'video/iso.segment', '.mp4': 'video/mp4' };
 /** Every request seen, so a test can assert on what the player asked for. */
@@ -67,8 +73,10 @@ createServer((req, res) => {
         }
         return serveFile(req, res, live.file);
     }
-    const file = normalize(join(ROOT, url.pathname));
-    if (!file.startsWith(ROOT) || !existsSync(file) || !statSync(file).isFile()) {
+    const native = url.pathname.startsWith('/native/');
+    const base = native ? NATIVE : ROOT;
+    const file = normalize(join(base, native ? url.pathname.slice('/native'.length) : url.pathname));
+    if (!file.startsWith(base) || !existsSync(file) || !statSync(file).isFile()) {
         return void res.writeHead(404).end();
     }
     log.push({ path: url.pathname, range: req.headers.range ?? null, at: Date.now() });

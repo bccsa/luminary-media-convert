@@ -251,7 +251,7 @@ Port `<youtube-video>` and the frame-protocol media element (row 30), and delete
 - **Language selector:** shown only when the stream has more than one language (v10 hides the trigger itself otherwise). Switching works, but needed a fix: `<hlsjs-video>` builds new track lists with each engine and has none before one exists, so listeners bound once at mount never attached, and a language picked in the card reached the engine but not the controller.
 - **Bugs found by looking, not by tests:** the skip buttons were inert (`media-seek-button` is not registered by the default skin, which seeks by gesture); the vertical volume fill covered half the track (the skin sets `left: 0` for a horizontal fill's pseudo-element only); a 22 px gap between volume and the settings.
 - **A test-infrastructure finding:** the tests and a browser tab on the same fixture server disturb each other (armed faults, the live clock reset). The tests now have their own on port 5191 (`FIXTURE_PORT`).
-- **Real multi-language media:** the native player's spike stream (two angles, English/Español/Français/Deutsch, AES-128, byte-range chains) was served at `/native/` by the fixture server, key `6c756d696e6172792d737069a4e2c0de`. The route went with `player-native` to luminary-deployment; no test used it.
+- **Real multi-language media:** a sample stream (two angles, English/Español/Français/Deutsch, AES-128, byte-range chains) is served at `/native/` by the fixture server, key `6c756d696e6172792d737069a4e2c0de`. `e2e/fixtures/make-sample-stream.py` writes it to `e2e/fixtures/out-native` from `test-media/` (`npm -w player-web run fixtures`); `playback.spec.ts` plays it.
 
 ### Open, and cross-player
 
