@@ -869,6 +869,7 @@ function markLastStepAsCut(removed: Segment[]) {
 
 function undo() {
     if (history.value.length === 0) return;
+    labelEditRecorded = false;
     const previous = history.value.pop()!;
     const current = cloneSegments();
     redoStack.value.push(current);
@@ -882,6 +883,7 @@ function undo() {
 }
 function redo() {
     if (redoStack.value.length === 0) return;
+    labelEditRecorded = false;
     const next = redoStack.value.pop()!;
     const current = cloneSegments();
     history.value.push(current);
@@ -1098,19 +1100,61 @@ function syncLabelFieldHeight(el: HTMLTextAreaElement) {
 }
 
 /**
- * Push a single history snapshot when the user focuses a label, before any
- * keystrokes mutate it. Per-keystroke history would make Undo roll back one
- * character at a time, which is unusable.
+ * Whether the label being edited has its history snapshot yet. Taken on the first
+ * keystroke: per-keystroke history would make Undo roll back one character at a
+ * time, and one on focus would leave an empty step for every field passed through.
  */
+let labelEditRecorded = false;
+
 function onLabelFocus(e: FocusEvent) {
-    pushHistory(cloneSegments());
+    labelEditRecorded = false;
     syncLabelFieldHeight(e.target as HTMLTextAreaElement);
 }
 
 function onLabelInput(e: Event, id: string) {
     const el = e.target as HTMLTextAreaElement;
+    if (!labelEditRecorded) {
+        pushHistory(cloneSegments());
+        labelEditRecorded = true;
+    }
     commitSegmentChange(id, { label: el.value }, { history: false });
     syncLabelFieldHeight(el);
+}
+
+/** Whether a label's text runs over more than one line, wrapped or not. */
+function labelIsMultiline(el: HTMLTextAreaElement): boolean {
+    const styles = getComputedStyle(el);
+    const lineHeight = parseFloat(styles.lineHeight);
+    if (!(lineHeight > 0)) return false;
+    const padding =
+        (parseFloat(styles.paddingTop) || 0) +
+        (parseFloat(styles.paddingBottom) || 0);
+    return el.scrollHeight - padding >= lineHeight * 1.5;
+}
+
+/**
+ * Up and Down walk the labels. In a multi-line label they first move the caret as
+ * usual, and leave only once it has reached that end of the text.
+ */
+function onLabelKeyDown(e: KeyboardEvent) {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    if (e.shiftKey || e.altKey || e.metaKey || e.ctrlKey) return;
+    const el = e.target as HTMLTextAreaElement;
+    if (el.selectionStart !== el.selectionEnd) return;
+    const up = e.key === 'ArrowUp';
+    const edge = up ? 0 : el.value.length;
+    if (labelIsMultiline(el) && el.selectionStart !== edge) return;
+
+    const fields = Array.from(
+        el
+            .closest('.se-root')
+            ?.querySelectorAll<HTMLTextAreaElement>('.se-label-field') ?? []
+    );
+    const next = fields[fields.indexOf(el) + (up ? -1 : 1)];
+    if (!next) return;
+    e.preventDefault();
+    next.focus();
+    next.setSelectionRange(next.value.length, next.value.length);
 }
 
 /** Fire the user-intentioned commit signal once when a label edit ends. */
@@ -3416,6 +3460,7 @@ const splitRowFrame = computed(() =>
                         "
                         rows="1"
                         @focus="onLabelFocus"
+                        @keydown="onLabelKeyDown"
                         @input="onLabelInput($event, seg.id)"
                         @blur="onLabelBlur"
                         @click.stop
@@ -3595,6 +3640,14 @@ const splitRowFrame = computed(() =>
                         <dd class="m-0 text-slate-500 dark:text-slate-400">
                             Remove selected segment(s)
                         </dd>
+                        <template v-if="labelsVisible && !readOnly">
+                            <dt class="font-mono text-sky-600 dark:text-sky-300 whitespace-nowrap">
+                                ↑ / ↓ in a title
+                            </dt>
+                            <dd class="m-0 text-slate-500 dark:text-slate-400">
+                                Move to the previous / next title
+                            </dd>
+                        </template>
                         <dt class="font-mono text-sky-600 dark:text-sky-300 whitespace-nowrap">
                             ⌘ / Ctrl + Z
                         </dt>
