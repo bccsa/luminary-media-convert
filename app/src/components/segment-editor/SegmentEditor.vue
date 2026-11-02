@@ -933,6 +933,11 @@ function markOut() {
         addSegmentInternal(inSec, outSec);
         return;
     }
+    // Nothing marked yet: an out point alone selects from the beginning up to it.
+    if (segments.value.length === 0) {
+        if (t >= props.minSegmentSec) addSegmentInternal(0, t);
+        return;
+    }
     const sel = selectedSegment();
     if (sel && t > sel.outSec && !inGapBetweenSegments(t)) {
         commitSegmentChange(sel.id, { outSec: t });
