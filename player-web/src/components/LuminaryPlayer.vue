@@ -10,7 +10,7 @@ import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vu
 import '@videojs/html/video/player';
 import '@videojs/html/video/skin';
 import '@videojs/html/media/hlsjs-video';
-import { PlayerController } from '@luminary-media-converter/player-core';
+import { AUDIO_ONLY_ANGLE_ID, PlayerController } from '@luminary-media-converter/player-core';
 import type {
     PlayerControllerApi,
     PlayerControllerOptions,
@@ -64,6 +64,10 @@ const state = usePlayerState(controller);
 const msg = computed(() => mergeMessages(props.messages));
 const mergedControls = computed(() => mergeControls(props.controls));
 const bare = computed(() => !mergedControls.value.windowedControls && !isFullscreen.value);
+/** Only sound is playing: the frame shows a note instead of a black picture. */
+const isAudioOnly = computed(
+    () => controller.value !== null && (state.value.isAudioOnly || state.value.activeAngleId === AUDIO_ONLY_ANGLE_ID)
+);
 
 const UNSUPPORTED_YOUTUBE: PlayerError = {
     code: 'media',
@@ -281,6 +285,21 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
                 :inert="bare"
             >
                 <hlsjs-video ref="mediaEl" class="lmpl-media" playsinline preload="auto"></hlsjs-video>
+                <!-- heroicons 24/solid "musical-note". In the skin's media container, so it goes fullscreen with it. -->
+                <svg
+                    v-if="isAudioOnly"
+                    class="lmpl-audio-glyph"
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                    aria-hidden="true"
+                >
+                    <path
+                        fill-rule="evenodd"
+                        d="M19.952 1.651a.75.75 0 0 1 .298.599V16.303a3 3 0 0 1-2.176 2.884l-1.32.377a2.553 2.553 0 1 1-1.403-4.909l2.311-.66a1.5 1.5 0 0 0 1.088-1.442V6.994l-9 2.572v9.737a3 3 0 0 1-2.176 2.884l-1.32.377a2.553 2.553 0 1 1-1.402-4.909l2.31-.66a1.5 1.5 0 0 0 1.088-1.442V5.25a.75.75 0 0 1 .544-.721l10.5-3a.75.75 0 0 1 .658.122Z"
+                        clip-rule="evenodd"
+                    />
+                </svg>
             </video-skin>
         </video-player>
 

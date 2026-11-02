@@ -4,12 +4,12 @@ const FIXTURES = `http://127.0.0.1:${process.env.FIXTURE_PORT ?? 5191}`;
 const KEY_HEX = '00112233445566778899aabbccddeeff';
 const STORAGE_KEY = 'luminary-legacy-player-demo';
 
-async function load(page: Page, fixture: string, keyHex = '') {
+async function load(page: Page, fixture: string, keyHex = '', query = '') {
     await page.addInitScript(
         ([k, v]) => localStorage.setItem(k, JSON.stringify(v)),
         [STORAGE_KEY, { url: `${FIXTURES}/${fixture}/master.m3u8`, keyHex, prefetchDebug: false }] as const
     );
-    await page.goto('/');
+    await page.goto(`/${query}`);
     await page.getByRole('button', { name: 'Load', exact: true }).click();
 }
 
@@ -114,3 +114,14 @@ for (const [name, fixture, key] of [
         expect(bytes.audio, 'and so is the sound').toBeGreaterThan(0);
     });
 }
+
+test('an audio-only source shows a note on the black frame, and a video does not', async ({ page }) => {
+    // `?afs` starts the demo on the audio-only rendering.
+    await load(page, 'clear', '', '?afs=dark');
+    await expect(page.locator('.lmpl-audio-glyph')).toBeVisible();
+
+    await load(page, 'clear');
+    await expect(page.locator('.lmpl-root video, .lmpl-root hlsjs-video').first()).toBeAttached();
+    await expect.poll(() => page.locator('video').evaluate((v: HTMLVideoElement) => v.readyState), { timeout: 15_000 }).toBeGreaterThan(0);
+    await expect(page.locator('.lmpl-audio-glyph')).toHaveCount(0);
+});
