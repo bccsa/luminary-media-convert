@@ -271,7 +271,7 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
 
 <template>
     <div
-        class="lmpl-root"
+        class="lmpl-root lmpl-simple"
         :class="{ 'lmpl-windowed-bare': bare, 'lmpl-is-fullscreen': isFullscreen }"
         @dblclick="onFrameDoubleClick"
     >

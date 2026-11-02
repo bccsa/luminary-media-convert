@@ -1,5 +1,8 @@
-/* The surfaces this package draws itself; the controls are the stock Video.js 10 skin's. */
-.lmpl-root {
+/*
+ * The surfaces this package draws itself; the controls are the stock Video.js 10 skin's. Every rule hangs off
+ * `.lmpl-simple`: these styles load with the package, and an importer may draw its own `.lmpl-*` player.
+ */
+.lmpl-simple {
     --lmpl-text: #ffffff;
     --lmpl-surface: rgba(9, 9, 11, 0.72);
     --lmpl-border: rgba(255, 255, 255, 0.16);
@@ -17,8 +20,8 @@
     box-sizing: border-box;
 }
 
-.lmpl-root .lmpl-video-player,
-.lmpl-root .lmpl-skin {
+.lmpl-simple .lmpl-video-player,
+.lmpl-simple .lmpl-skin {
     position: absolute;
     inset: 0;
     display: block;
@@ -26,28 +29,28 @@
     height: 100%;
 }
 
-.lmpl-root .lmpl-media {
+.lmpl-simple .lmpl-media {
     display: block;
     width: 100%;
     height: 100%;
 }
 
 /* A bare windowed frame takes no pointer: the root below answers the double-click. */
-.lmpl-root.lmpl-windowed-bare .lmpl-skin {
+.lmpl-simple.lmpl-windowed-bare .lmpl-skin {
     pointer-events: none;
 }
 
-.lmpl-slot {
+.lmpl-simple .lmpl-slot {
     position: absolute;
     inset: 0;
     pointer-events: none;
 }
 
-.lmpl-slot > * {
+.lmpl-simple .lmpl-slot > * {
     pointer-events: auto;
 }
 
-.lmpl-panel {
+.lmpl-simple .lmpl-panel {
     position: absolute;
     inset: 0;
     display: flex;
@@ -62,14 +65,14 @@
     z-index: 3;
 }
 
-.lmpl-panel-text {
+.lmpl-simple .lmpl-panel-text {
     margin: 0;
     font-size: 1rem;
     line-height: 1.4;
     color: var(--lmpl-text);
 }
 
-.lmpl-btn {
+.lmpl-simple .lmpl-btn {
     appearance: none;
     border: 1px solid var(--lmpl-border);
     border-radius: var(--lmpl-radius-sm);
@@ -81,13 +84,13 @@
     transition: background var(--lmpl-transition);
 }
 
-.lmpl-btn:hover,
-.lmpl-btn:focus-visible {
+.lmpl-simple .lmpl-btn:hover,
+.lmpl-simple .lmpl-btn:focus-visible {
     background: rgba(255, 255, 255, 0.12);
 }
 
 /* An audio-only source: a note in the middle of the black frame. */
-.lmpl-root .lmpl-audio-glyph {
+.lmpl-simple .lmpl-audio-glyph {
     position: absolute;
     top: 50%;
     left: 50%;
