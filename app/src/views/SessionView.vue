@@ -2240,11 +2240,14 @@ onUnmounted(() => {
                                     </button>
                                 </div>
 
+                                <!--
+                                    Hidden rather than unmounted on the Chapters tab:
+                                    it holds edits not yet saved, and would read the
+                                    video again each time it came back.
+                                -->
                                 <AudioTracksPanel
-                                    v-if="
-                                        editsExistingVideo &&
-                                        editAsideTab === 'tracks'
-                                    "
+                                    v-if="editsExistingVideo"
+                                    v-show="editAsideTab === 'tracks'"
                                     :session-id="sessionId"
                                     :session-token="sessionToken"
                                     @saved="sessionPlayerStripRef?.reload?.()"
