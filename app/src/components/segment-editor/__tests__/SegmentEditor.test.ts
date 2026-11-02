@@ -2634,7 +2634,8 @@ describe('SegmentEditor — the trim delete button', () => {
 
         (w.vm as unknown as { undo: () => void }).undo();
         await flush();
-        expect(latestSegments(w).map((s) => s.id)).toEqual(['seg-1', 'seg-2']);
+        const restored = w.emitted('segment-restored');
+        expect((restored![0][0] as Segment).id).toBe('seg-1');
     });
 
     it('announces a keyboard deletion too, not just a clicked one', async () => {
@@ -2789,5 +2790,89 @@ describe('SegmentEditor — Clear All placement', () => {
         await flush();
 
         expect(document.querySelector('.se-confirm')).toBeNull();
+    });
+});
+
+describe('SegmentEditor — undoing a cut', () => {
+    const selectAndCut = async (w: ReturnType<typeof mountEditor>) => {
+        mouseAt(w.find('.se-segment').element as HTMLElement, 'mousedown', 15);
+        mouseAt(document.body, 'mouseup', 15);
+        await flush();
+        await w.find('.se-btn--danger').trigger('click');
+        await flush();
+    };
+
+    it('asks the host to bring the range back instead of restoring a stale selection', async () => {
+        const w = mountEditor({
+            segments: [seg(1, 10, 20)],
+            props: { mode: 'trim' },
+        });
+        await flush();
+        await selectAndCut(w);
+        expect(w.emitted('segment-removed')).toHaveLength(1);
+        const updates = w.emitted('update:modelValue')!.length;
+
+        w.vm.undo();
+        await flush();
+
+        const restored = w.emitted('segment-restored');
+        expect(restored).toHaveLength(1);
+        expect((restored![0][0] as Segment).id).toBe('seg-1');
+        // The snapshot describes the timeline before it was shortened.
+        expect(w.emitted('update:modelValue')!.length).toBe(updates);
+    });
+
+    it('cuts the range again on redo', async () => {
+        const w = mountEditor({
+            segments: [seg(1, 10, 20)],
+            props: { mode: 'trim' },
+        });
+        await flush();
+        await selectAndCut(w);
+        w.vm.undo();
+        await flush();
+        // The host has put the range back.
+        await w.setProps({ modelValue: [seg(1, 10, 20)] });
+        await flush();
+
+        w.vm.redo();
+        await flush();
+
+        expect(w.emitted('segment-removed')).toHaveLength(2);
+        expect(latestSegments(w)).toEqual([]);
+    });
+
+    it('still undoes selection edits from the snapshot', async () => {
+        const t = { value: 7 };
+        const w = mountEditor({
+            segments: [seg(1, 0, 10)],
+            currentTime: t,
+            props: { mode: 'trim' },
+        });
+        await flush();
+        w.vm.markOut();
+        await flush();
+
+        w.vm.undo();
+        await flush();
+
+        expect(w.emitted('segment-restored')).toBeUndefined();
+        expect(latestSegments(w)[0].outSec).toBe(10);
+    });
+
+    it('restores a removed chapter from the snapshot, which has no shortened timeline', async () => {
+        const w = mountEditor({
+            segments: [seg(1, 10, 20)],
+            props: { mode: 'chapters' },
+        });
+        await flush();
+        w.vm.removeSegment('seg-1');
+        await flush();
+
+        w.vm.undo();
+        await flush();
+
+        expect(w.emitted('segment-restored')).toBeUndefined();
+        expect(latestSegments(w).map((s) => s.id)).toEqual(['seg-1']);
     });
 });

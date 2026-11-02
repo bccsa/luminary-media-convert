@@ -86,6 +86,7 @@ Override the mode-derived defaults with `show-labels`, `allow-overlap`, or `ripp
 | `update:modelValue`| `Segment[]`        | Any mutation. |
 | `select`           | `string[]`         | Selection changes (segment ids). |
 | `seek`             | `number`           | The editor wants the player to seek. Also delivered via `onSeek` prop. |
+| `segment-restored` | `Segment`          | In `trim` mode, Undo of a removal. The host that took the range out on `segment-removed` puts it back; the editor does not restore it itself, because a cut changes the timeline its snapshot was taken on. |
 | `segment-commit`   | `Segment[]`        | After a drag, mark in/out, add, or remove — i.e., a user-intentioned commit (not every keystroke). |
 
 ## Slots
