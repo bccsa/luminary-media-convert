@@ -131,6 +131,7 @@ Active when the timeline has focus (or globally if `keyboardScope="global"`).
 | I / O                  | Mark In / Mark Out (DaVinci Resolve–style)          |
 | Alt + ← / →            | Nudge the selected segment's nearest edge           |
 | Delete / Backspace     | Remove selected segment(s)                          |
+| ↑ / ↓ in a title       | Move to the previous / next title                   |
 | ⌘ / Ctrl + Z           | Undo                                                |
 | ⌘ / Ctrl + Shift + Z   | Redo                                                |
 | + / −                  | Zoom in / out                                       |

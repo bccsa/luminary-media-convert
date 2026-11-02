@@ -2911,3 +2911,102 @@ describe('SegmentEditor — undoing a cut', () => {
         expect(latestSegments(w).map((s) => s.id)).toEqual(['seg-1']);
     });
 });
+
+describe('SegmentEditor — arrow keys between titles', () => {
+    const chapters = () =>
+        mountEditor({
+            segments: [seg(1, 0, 10, 'One'), seg(2, 10, 20, 'Two'), seg(3, 20, 30, 'Three')],
+            props: { mode: 'chapters' },
+        });
+    const fields = (w: ReturnType<typeof mountEditor>) =>
+        w.findAll('.se-label-field').map((f) => f.element as HTMLTextAreaElement);
+    const press = (el: HTMLElement, key: string, opts: KeyboardEventInit = {}) => {
+        const e = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...opts });
+        el.dispatchEvent(e);
+        return e;
+    };
+    /** Lays a field out as wrapped text; jsdom does no layout of its own. */
+    const wrap = (el: HTMLTextAreaElement) => {
+        el.style.lineHeight = '16px';
+        Object.defineProperty(el, 'scrollHeight', { value: 48, configurable: true });
+    };
+
+    it('moves down to the next title with the caret at its end', async () => {
+        const w = chapters();
+        await flush();
+        const [one, two] = fields(w);
+        one.focus();
+        const e = press(one, 'ArrowDown');
+        expect(document.activeElement).toBe(two);
+        expect(two.selectionStart).toBe(3);
+        expect(e.defaultPrevented).toBe(true);
+    });
+
+    it('moves up to the previous title', async () => {
+        const w = chapters();
+        await flush();
+        const [one, two] = fields(w);
+        two.focus();
+        press(two, 'ArrowUp');
+        expect(document.activeElement).toBe(one);
+    });
+
+    it('stays put at either end of the list', async () => {
+        const w = chapters();
+        await flush();
+        const [one, , three] = fields(w);
+        one.focus();
+        expect(press(one, 'ArrowUp').defaultPrevented).toBe(false);
+        expect(document.activeElement).toBe(one);
+        three.focus();
+        expect(press(three, 'ArrowDown').defaultPrevented).toBe(false);
+        expect(document.activeElement).toBe(three);
+    });
+
+    it('moves inside a wrapped title until the caret reaches its edge', async () => {
+        const w = chapters();
+        await flush();
+        const [one, two] = fields(w);
+        two.value = 'a long title that wraps';
+        wrap(two);
+        two.focus();
+        two.setSelectionRange(5, 5);
+        expect(press(two, 'ArrowDown').defaultPrevented).toBe(false);
+        expect(press(two, 'ArrowUp').defaultPrevented).toBe(false);
+        expect(document.activeElement).toBe(two);
+        two.setSelectionRange(0, 0);
+        press(two, 'ArrowUp');
+        expect(document.activeElement).toBe(one);
+    });
+
+    it('leaves a selection, and arrows with a modifier, to the browser', async () => {
+        const w = chapters();
+        await flush();
+        const [one] = fields(w);
+        one.focus();
+        expect(press(one, 'ArrowDown', { shiftKey: true }).defaultPrevented).toBe(false);
+        expect(press(one, 'ArrowDown', { metaKey: true }).defaultPrevented).toBe(false);
+        expect(document.activeElement).toBe(one);
+    });
+
+    it('adds no undo step for walking through titles', async () => {
+        const w = mountEditor({
+            segments: [seg(1, 0, 10, 'One'), seg(2, 10, 20, 'Two')],
+            props: { mode: 'chapters' },
+        });
+        await flush();
+        const [one, two] = fields(w);
+        one.focus();
+        one.value = 'Edited';
+        one.dispatchEvent(new Event('input', { bubbles: true }));
+        await flush();
+        press(one, 'ArrowDown');
+        press(two, 'ArrowUp');
+        press(one, 'ArrowDown');
+        await flush();
+
+        w.vm.undo();
+        await flush();
+        expect(latestSegments(w)[0].label).toBe('One');
+    });
+});
