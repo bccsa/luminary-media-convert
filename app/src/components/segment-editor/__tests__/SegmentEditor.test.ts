@@ -237,6 +237,41 @@ describe('SegmentEditor — mark in / mark out', () => {
         expect(segs[0].outSec).toBe(40);
     });
 
+    it('selects from the beginning to the playhead when Mark Out fires on an empty timeline', async () => {
+        const t = { value: 25 };
+        const w = mountEditor({ currentTime: t });
+        await flush();
+        w.vm.markOut();
+        await flush();
+        const segs = latestSegments(w);
+        expect(segs).toHaveLength(1);
+        expect(segs[0].inSec).toBe(0);
+        expect(segs[0].outSec).toBe(25);
+    });
+
+    it('adds nothing when Mark Out on an empty timeline is too close to the beginning', async () => {
+        const t = { value: 0 };
+        const w = mountEditor({ currentTime: t });
+        await flush();
+        w.vm.markOut();
+        await flush();
+        expect(w.find('.se-segment').exists()).toBe(false);
+    });
+
+    it('a pending In still sets the start on an empty timeline', async () => {
+        const t = { value: 12 };
+        const w = mountEditor({ currentTime: t });
+        await flush();
+        w.vm.markIn();
+        t.value = 30;
+        w.vm.markOut();
+        await flush();
+        const segs = latestSegments(w);
+        expect(segs).toHaveLength(1);
+        expect(segs[0].inSec).toBe(12);
+        expect(segs[0].outSec).toBe(30);
+    });
+
     it('no-ops Mark Out when no segment, no pending, no usable selection', async () => {
         const t = { value: 50 };
         const w = mountEditor({ segments: [seg(1, 10, 20)], currentTime: t });
