@@ -184,7 +184,7 @@ export class CmsController {
         if (encoding) {
             this.notifyHost(encoding.id);
             throw new ConflictException(
-                'This post is being encoded. Its chapters and audio tracks can be edited once the encode has finished.'
+                'This video is still being encoded. You can edit its chapters and audio tracks once the encode has finished — see Luminary Media Convert for its progress.'
             );
         }
 
