@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
     findThumbnailCue,
+    thumbnailsCoverDuration,
     parseThumbnailVtt,
     type ThumbnailSpriteCue,
 } from './thumbnail-vtt.js';
@@ -120,5 +121,32 @@ describe('parseThumbnailVtt', () => {
                 'https://cdn.example.com/out/sprite_0.jpg',
             );
         }
+    });
+});
+
+describe('thumbnailsCoverDuration', () => {
+    const cue = (endTime: number): ThumbnailSpriteCue => ({
+        startTime: 0,
+        endTime,
+        spriteUrl: 's.jpg',
+        x: 0,
+        y: 0,
+        w: 160,
+        h: 90,
+    });
+
+    it('accepts frames that reach the end of the video, or nearly', () => {
+        expect(thumbnailsCoverDuration([cue(100)], 100)).toBe(true);
+        expect(thumbnailsCoverDuration([cue(91)], 100)).toBe(true);
+    });
+
+    it('rejects frames that stop early', () => {
+        expect(thumbnailsCoverDuration([cue(250)], 6150)).toBe(false);
+    });
+
+    it('rejects no frames and an unknown length', () => {
+        expect(thumbnailsCoverDuration([], 100)).toBe(false);
+        expect(thumbnailsCoverDuration([cue(100)], 0)).toBe(false);
+        expect(thumbnailsCoverDuration([cue(100)], Number.NaN)).toBe(false);
     });
 });
