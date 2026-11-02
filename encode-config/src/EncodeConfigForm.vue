@@ -218,6 +218,20 @@ const editableAudioTracks = reactive<AudioTrackInfo[]>(
     props.probeResult.audioTracks.map((t) => ({ ...t }))
 );
 
+/**
+ * Source tracks left out of the output, by track index. Every suggestion is
+ * built from the tracks still included, so Re-analyze and the ladder dial
+ * cannot bring one back.
+ */
+const excludedVideo = reactive(new Set<number>());
+const excludedAudio = reactive(new Set<number>());
+const includedVideoTracks = computed(() =>
+    editableVideoTracks.filter((t) => !excludedVideo.has(t.index))
+);
+const includedAudioTracks = computed(() =>
+    editableAudioTracks.filter((t) => !excludedAudio.has(t.index))
+);
+
 /** Source track picker shown whenever there are multiple video tracks to choose from. */
 const showVideoRenditionSourceColumn = computed(
     () => editableVideoTracks.length > 1
@@ -336,12 +350,12 @@ function reanalyzeVideo() {
         const d = displayDimensionsOf(t);
         return d.width * d.height;
     };
-    const sortedVideoTracks = [...editableVideoTracks].sort(
+    const sortedVideoTracks = [...includedVideoTracks.value].sort(
         (a, b) => displayArea(b) - displayArea(a)
     );
 
     const newGroups = buildSuggestedAudioGroups(
-        editableAudioTracks,
+        includedAudioTracks.value,
         sortedVideoTracks.length
     );
     const tierIds = [...new Set(newGroups.map((g) => g.id))];
@@ -406,6 +420,9 @@ function reanalyzeVideo() {
                 height: rung.height,
                 videoBitrateKbps: rung.bitrateKbps,
                 copyStream: false,
+                // Only when another angle is left out: track 0 is the default,
+                // and naming it would change nothing but the config.
+                ...(track.index !== 0 ? { sourceTrackIndex: track.index } : {}),
                 audioGroupId,
                 vbr: true,
             };
@@ -436,8 +453,101 @@ function reanalyzeAudio() {
     audioGroups.splice(
         0,
         audioGroups.length,
-        ...buildSuggestedAudioGroups(editableAudioTracks, 0)
+        ...buildSuggestedAudioGroups(includedAudioTracks.value, 0)
     );
+}
+
+/** Angles can be chosen only for a video encode with more than one; one angle is Audio only's job. */
+const choosableVideo = computed(
+    () => encodingType.value === 'video' && editableVideoTracks.length > 1
+);
+const choosableAudio = computed(() => editableAudioTracks.length > 1);
+
+function trackCount(included: number, total: number): string {
+    return included === total ? String(total) : `${included} of ${total}`;
+}
+
+function includeTitle(kind: 'video' | 'audio', index: number): string {
+    if (!canExclude(kind, index))
+        return kind === 'video'
+            ? 'A video encode needs at least one angle'
+            : 'The encode needs at least one audio track';
+    return (kind === 'video' ? excludedVideo : excludedAudio).has(index)
+        ? 'Left out of the encode — tick to include it'
+        : 'Untick to leave this track out of the encode';
+}
+
+/** At least one angle and one audio track stay in: the API refuses a video encode without either. */
+function canExclude(kind: 'video' | 'audio', index: number): boolean {
+    if (kind === 'video')
+        return excludedVideo.has(index) || includedVideoTracks.value.length > 1;
+    return excludedAudio.has(index) || includedAudioTracks.value.length > 1;
+}
+
+/** Renditions pointing at an audio group that no longer exists take the first one left. */
+function repairAudioGroupRefs() {
+    const ids = new Set(audioGroups.map((g) => g.id));
+    const fallback = audioGroups[0]?.id;
+    if (!fallback) return;
+    for (const r of videoRenditions) {
+        if (!ids.has(r.audioGroupId)) r.audioGroupId = fallback;
+    }
+}
+
+/**
+ * Takes a source track in or out of the output. Only that track's rows change,
+ * so edits to the others stay. An angle is the exception when it changes
+ * between one angle and several: that turns copied angles into a ladder or
+ * back, so the video suggestion is made again.
+ */
+function setTrackIncluded(kind: 'video' | 'audio', index: number, included: boolean) {
+    if (!included && !canExclude(kind, index)) return;
+    if (kind === 'audio') {
+        if (included) excludedAudio.delete(index);
+        else excludedAudio.add(index);
+        if (!included) {
+            for (let i = audioGroups.length - 1; i >= 0; i--) {
+                if (audioGroups[i].sourceTrackIndex === index) audioGroups.splice(i, 1);
+            }
+        } else {
+            const angles = encodingType.value === 'video' ? includedVideoTracks.value.length : 0;
+            const suggested = buildSuggestedAudioGroups(includedAudioTracks.value, angles);
+            for (const g of suggested.filter((x) => x.sourceTrackIndex === index)) {
+                // After the last group of its tier, so each tier stays together.
+                let at = -1;
+                audioGroups.forEach((x, i) => {
+                    if (x.id === g.id) at = i;
+                });
+                if (at < 0) audioGroups.push(g);
+                else audioGroups.splice(at + 1, 0, g);
+            }
+        }
+        repairAudioGroupRefs();
+        return;
+    }
+    const angleCountBefore = includedVideoTracks.value.length;
+    if (included) excludedVideo.delete(index);
+    else excludedVideo.add(index);
+    const angleCountAfter = includedVideoTracks.value.length;
+    if (angleCountBefore <= 1 || angleCountAfter <= 1) {
+        reanalyzeVideo();
+        return;
+    }
+    if (!included) {
+        for (let i = videoRenditions.length - 1; i >= 0; i--) {
+            if ((videoRenditions[i].sourceTrackIndex ?? 0) === index) videoRenditions.splice(i, 1);
+        }
+    } else {
+        // The suggestion is made for its rows only: the other renditions and
+        // the audio groups are put back as they were.
+        const renditions = videoRenditions.map((r) => ({ ...r }));
+        const groups = audioGroups.map((g) => ({ ...g }));
+        reanalyzeVideo();
+        const back = videoRenditions.filter((r) => (r.sourceTrackIndex ?? 0) === index);
+        videoRenditions.splice(0, videoRenditions.length, ...renditions, ...back);
+        audioGroups.splice(0, audioGroups.length, ...groups);
+        repairAudioGroupRefs();
+    }
 }
 
 function reanalyze() {
@@ -1118,9 +1228,14 @@ function buildEncodeConfig(): EncodeConfig | null {
         segmentDuration: props.byteRange ? 6 : segmentDuration.value,
     };
 
+    // A row added by hand can still name a track that was left out.
+    const keptGroups = audioGroups.filter((g) => !excludedAudio.has(g.sourceTrackIndex));
+
     if (encodingType.value === 'video') {
-        config.videoRenditions = videoRenditions.map((r) => ({ ...r }));
-        config.audioGroups = audioGroups.map((g) => ({ ...g }));
+        config.videoRenditions = videoRenditions
+            .filter((r) => !excludedVideo.has(r.sourceTrackIndex ?? 0))
+            .map((r) => ({ ...r }));
+        config.audioGroups = keptGroups.map((g) => ({ ...g }));
         config.videoTrackNames = editableVideoTracks.map((t) => ({
             index: t.index,
             name: ((t.name || `Angle ${t.index}`).trim() ||
@@ -1132,7 +1247,7 @@ function buildEncodeConfig(): EncodeConfig | null {
             language: t.language,
         }));
     } else {
-        config.audioGroups = audioGroups.map((g) => ({ ...g }));
+        config.audioGroups = keptGroups.map((g) => ({ ...g }));
         config.audioTrackMetadata = editableAudioTracks.map((t) => ({
             index: t.index,
             name: t.name,
@@ -1271,12 +1386,14 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                 <span
                     v-if="editableVideoTracks.length > 0"
                     class="ecf-detect-badge ecf-detect-badge--video"
-                    >{{ editableVideoTracks.length }} video</span
+                    >{{ trackCount(includedVideoTracks.length, editableVideoTracks.length) }}
+                    video</span
                 >
                 <span
                     v-if="editableAudioTracks.length > 0"
                     class="ecf-detect-badge ecf-detect-badge--audio"
-                    >{{ editableAudioTracks.length }} audio</span
+                    >{{ trackCount(includedAudioTracks.length, editableAudioTracks.length) }}
+                    audio</span
                 >
                 <button
                     v-if="hasPreviousConfig"
@@ -1290,10 +1407,16 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
             <fieldset class="ecf-detect-body ecf-fieldset">
                 <div v-if="editableVideoTracks.length > 0">
                     <p class="ecf-detect-sub">Angle</p>
+                    <p v-if="choosableVideo" class="ecf-hint" data-test="include-hint-video">
+                        Untick an angle to leave it out of the encode. The others keep their settings.
+                    </p>
                     <div class="ecf-table-wrap">
                         <table class="ecf-table">
                             <thead class="ecf-thead">
                                 <tr>
+                                    <th v-if="choosableVideo" class="ecf-th ecf-th-include">
+                                        Include
+                                    </th>
                                     <th class="ecf-th">#</th>
                                     <th class="ecf-th">Codec</th>
                                     <th class="ecf-th">Resolution</th>
@@ -1307,7 +1430,22 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                                     v-for="t in editableVideoTracks"
                                     :key="t.index"
                                     class="ecf-tr"
+                                    :class="{ 'ecf-tr--excluded': choosableVideo && excludedVideo.has(t.index) }"
                                 >
+                                    <td v-if="choosableVideo" class="ecf-td ecf-td-include">
+                                        <input
+                                            type="checkbox"
+                                            class="ecf-checkbox"
+                                            data-test="track-include"
+                                            data-kind="video"
+                                            :data-track-index="t.index"
+                                            :checked="!excludedVideo.has(t.index)"
+                                            :disabled="!canExclude('video', t.index)"
+                                            :title="includeTitle('video', t.index)"
+                                            :aria-label="`Include angle ${t.index}`"
+                                            @change="setTrackIncluded('video', t.index, ($event.target as HTMLInputElement).checked)"
+                                        />
+                                    </td>
                                     <td class="ecf-td">{{ t.index }}</td>
                                     <td class="ecf-td">
                                         {{ t.codec
@@ -1346,10 +1484,16 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                 </div>
                 <div v-if="editableAudioTracks.length > 0">
                     <p class="ecf-detect-sub">Audio tracks</p>
+                    <p v-if="choosableAudio" class="ecf-hint" data-test="include-hint-audio">
+                        Untick a track to leave it out of the encode. The others keep their settings.
+                    </p>
                     <div class="ecf-table-wrap">
                         <table class="ecf-table">
                             <thead class="ecf-thead">
                                 <tr>
+                                    <th v-if="choosableAudio" class="ecf-th ecf-th-include">
+                                        Include
+                                    </th>
                                     <th class="ecf-th">#</th>
                                     <th class="ecf-th">Codec</th>
                                     <th class="ecf-th">Bitrate</th>
@@ -1364,7 +1508,22 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                                     v-for="(t, audioIdx) in editableAudioTracks"
                                     :key="t.index"
                                     class="ecf-tr"
+                                    :class="{ 'ecf-tr--excluded': excludedAudio.has(t.index) }"
                                 >
+                                    <td v-if="choosableAudio" class="ecf-td ecf-td-include">
+                                        <input
+                                            type="checkbox"
+                                            class="ecf-checkbox"
+                                            data-test="track-include"
+                                            data-kind="audio"
+                                            :data-track-index="t.index"
+                                            :checked="!excludedAudio.has(t.index)"
+                                            :disabled="!canExclude('audio', t.index)"
+                                            :title="includeTitle('audio', t.index)"
+                                            :aria-label="`Include audio track ${t.index}`"
+                                            @change="setTrackIncluded('audio', t.index, ($event.target as HTMLInputElement).checked)"
+                                        />
+                                    </td>
                                     <td class="ecf-td">{{ t.index }}</td>
                                     <td class="ecf-td">{{ t.codec }}</td>
                                     <td class="ecf-td">
@@ -1827,6 +1986,7 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                                                 v-model.number="
                                                     g.audioBitrateKbps
                                                 "
+                                                data-test="audio-group-bitrate"
                                                 type="number"
                                                 min="1"
                                                 class="ecf-input ecf-input-kbps"

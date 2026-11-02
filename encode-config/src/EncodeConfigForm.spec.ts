@@ -1908,3 +1908,106 @@ describe('EncodeConfigForm bitrate ladder', () => {
         });
     });
 });
+
+describe('EncodeConfigForm excluding source tracks', () => {
+    beforeEach(() => {
+        localStorage.clear();
+    });
+
+    const audio = (index: number, language: string): AudioTrackInfo => ({
+        index,
+        codec: 'aac',
+        bitrateKbps: 192,
+        channels: 2,
+        sampleRate: 48000,
+        language,
+        startTime: 0,
+    });
+    const languagesProbe = (): ProbeResult => ({
+        format: { duration: 120, bitrateKbps: 6000, formatName: 'mov,mp4' },
+        videoTracks: [videoTrack({ index: 0 })],
+        audioTracks: [audio(0, 'eng'), audio(1, 'deu'), audio(2, 'fra')],
+    });
+    const anglesProbe = (): ProbeResult => ({
+        ...misalignedProbe(),
+        audioTracks: [audio(0, 'eng')],
+        videoTracks: misalignedProbe().videoTracks.map((t) => ({ ...t, startTime: 0 })),
+    });
+
+    const config = (wrapper: ReturnType<typeof mount>) =>
+        (wrapper.vm as unknown as { buildEncodeConfig: () => EncodeConfig | null }).buildEncodeConfig();
+    const box = (wrapper: ReturnType<typeof mount>, kind: 'video' | 'audio', index: number) =>
+        wrapper.find(`[data-test="track-include"][data-kind="${kind}"][data-track-index="${index}"]`);
+    const audioSources = (wrapper: ReturnType<typeof mount>) =>
+        [...new Set((config(wrapper)?.audioGroups ?? []).map((g) => g.sourceTrackIndex))].sort();
+
+    it('leaves an unticked audio track out of every group', async () => {
+        const wrapper = mount(EncodeConfigForm, { props: { probeResult: languagesProbe() } });
+        expect(audioSources(wrapper)).toEqual([0, 1, 2]);
+
+        await box(wrapper, 'audio', 1).setValue(false);
+
+        expect(audioSources(wrapper)).toEqual([0, 2]);
+        expect(wrapper.text()).toContain('2 of 3 audio');
+    });
+
+    it('keeps the edits made to the other groups', async () => {
+        const wrapper = mount(EncodeConfigForm, { props: { probeResult: languagesProbe() } });
+        const first = config(wrapper)!.audioGroups!.find((g) => g.sourceTrackIndex === 0)!;
+        const input = wrapper.find('[data-test="audio-group-bitrate"]');
+        await input.setValue(77);
+
+        await box(wrapper, 'audio', 2).setValue(false);
+
+        const edited = config(wrapper)!.audioGroups!.filter((g) => g.sourceTrackIndex === 0 && g.id === first.id);
+        expect(edited.map((g) => g.audioBitrateKbps)).toContain(77);
+    });
+
+    it('brings the track back when it is ticked again', async () => {
+        const wrapper = mount(EncodeConfigForm, { props: { probeResult: languagesProbe() } });
+        const before = config(wrapper)!.audioGroups!.length;
+        await box(wrapper, 'audio', 1).setValue(false);
+        await box(wrapper, 'audio', 1).setValue(true);
+
+        expect(audioSources(wrapper)).toEqual([0, 1, 2]);
+        expect(config(wrapper)!.audioGroups!).toHaveLength(before);
+    });
+
+    it('keeps an unticked track out when the mapping is analysed again', async () => {
+        const wrapper = mount(EncodeConfigForm, { props: { probeResult: languagesProbe() } });
+        await box(wrapper, 'audio', 0).setValue(false);
+
+        const reanalyse = wrapper.findAll('button').find((b) => b.text() === 'Re-analyze Mapping')!;
+        await reanalyse.trigger('click');
+
+        expect(audioSources(wrapper)).toEqual([1, 2]);
+    });
+
+    it('will not untick the last audio track', async () => {
+        const wrapper = mount(EncodeConfigForm, { props: { probeResult: languagesProbe() } });
+        await box(wrapper, 'audio', 0).setValue(false);
+        await box(wrapper, 'audio', 1).setValue(false);
+
+        expect(box(wrapper, 'audio', 2).attributes('disabled')).toBeDefined();
+        expect(audioSources(wrapper)).toEqual([2]);
+    });
+
+    it('offers no box for the only angle', () => {
+        const wrapper = mount(EncodeConfigForm, { props: { probeResult: languagesProbe() } });
+        expect(box(wrapper, 'video', 0).exists()).toBe(false);
+        expect(wrapper.find('[data-test="include-hint-video"]').exists()).toBe(false);
+        expect(wrapper.find('[data-test="include-hint-audio"]').text()).toMatch(/leave it out/);
+    });
+
+    it('leaves an unticked angle out, encoding the other one from its own track', async () => {
+        const wrapper = mount(EncodeConfigForm, { props: { probeResult: anglesProbe() } });
+        expect((config(wrapper)?.videoRenditions ?? []).map((r) => r.sourceTrackIndex)).toEqual([0, 1]);
+
+        await box(wrapper, 'video', 0).setValue(false);
+
+        const renditions = config(wrapper)?.videoRenditions ?? [];
+        expect(renditions.length).toBeGreaterThan(0);
+        expect(renditions.every((r) => r.sourceTrackIndex === 1)).toBe(true);
+        expect(box(wrapper, 'video', 1).attributes('disabled')).toBeDefined();
+    });
+});
