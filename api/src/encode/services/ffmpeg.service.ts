@@ -2059,12 +2059,22 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
      * label. Ensures each tier×language combination gets its own stream
      * directory so that different quality tiers don't collide.
      */
+    /**
+     * The audio stream's directory name, also its `name:` in the stream map.
+     *
+     * The label can be a title read from the source file, so only letters,
+     * digits, `_` and `-` are kept: the stream map takes `,` and `:` as
+     * separators, and the name is a folder and a URL. Accents are folded first,
+     * so "Français" stays readable.
+     */
     private buildAudioStreamName(group: AudioGroupDto): string {
-        const label = (group.label ?? `${group.audioBitrateKbps}kbps`).replace(
-            /\s+/g,
-            '_'
-        );
-        return `${group.id}_${label}`;
+        const raw = group.label ?? `${group.audioBitrateKbps}kbps`;
+        const label = raw
+            .normalize('NFKD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^A-Za-z0-9_-]+/g, '_')
+            .replace(/^_+|_+$/g, '');
+        return `${group.id}_${label || `${group.audioBitrateKbps}kbps`}`;
     }
 
     killActiveProcess(): void {

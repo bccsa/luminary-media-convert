@@ -153,6 +153,31 @@ function normalizeLanguage(tag?: string): string | undefined {
 }
 
 /**
+ * What a muxer writes as a track's handler for every track alike, which names
+ * nothing a listener could choose by.
+ */
+const GENERIC_HANDLER =
+    /handler|^(core media|iso media|gpac|l-smash|bento4|mainconcept|apple|google)\b/i;
+
+/**
+ * A stream's own title, as the container records it: MKV calls it `title`, an
+ * MP4 `name`, and some muxers put it in `handler_name` — where most write a
+ * generic one instead, which is left out. Quotes and line breaks are dropped,
+ * since the name ends up in a playlist attribute that cannot hold them.
+ */
+function trackName(tags?: Record<string, string>): string | undefined {
+    if (!tags) return undefined;
+    const lower = new Map(Object.entries(tags).map(([k, v]) => [k.toLowerCase(), v]));
+    const handler = lower.get('handler_name')?.trim();
+    const raw =
+        lower.get('title') ??
+        lower.get('name') ??
+        (handler && !GENERIC_HANDLER.test(handler) ? handler : undefined);
+    const clean = raw?.replace(/["\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+    return clean || undefined;
+}
+
+/**
  * A stream's start time in seconds, with `N/A` and an absent tag both reading
  * as the top of the timeline.
  *
@@ -242,7 +267,7 @@ export class ProbeService {
                     ),
                     profile: s.profile,
                     language: normalizeLanguage(s.tags?.language),
-                    name: s.tags?.title,
+                    name: trackName(s.tags),
                     startTime: parseStartTime(s.start_time),
                     hasBFrames: s.has_b_frames,
                     pixFmt: s.pix_fmt,
@@ -258,7 +283,7 @@ export class ProbeService {
                         ? parseInt(s.sample_rate, 10)
                         : 44100,
                     language: normalizeLanguage(s.tags?.language),
-                    name: s.tags?.title,
+                    name: trackName(s.tags),
                     startTime: parseStartTime(s.start_time),
                 });
             }
