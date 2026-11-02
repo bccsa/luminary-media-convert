@@ -17,6 +17,13 @@ const THUMBS_PER_SPRITE = COLUMNS * ROWS;
 /** How long each frame lasts in the packing pass; any fixed value will do. */
 const PACK_FRAME_SECONDS = 0.04;
 
+/**
+ * How long a sampling pass may go without writing a thumbnail before it counts as stuck.
+ * The pass is judged on progress, not total time: how fast it walks the source depends
+ * on the machine, and a slow one must be allowed to finish, however long that takes.
+ */
+const STALL_MS = 180_000;
+
 /** Individual thumbs, one per sampled instant, as written at ingest. */
 const THUMB_FILE_RE = /^thumb_\d+\.(webp|jpg|jpeg|png)$/;
 
@@ -131,6 +138,9 @@ export class ThumbnailService {
     private spriteFormat: SpriteFormat | null | undefined = undefined;
     private readonly workDir =
         process.env.WORK_DIR || join(process.cwd(), 'work');
+    /** Overridable so tests need not wait minutes for a stall. */
+    private readonly stallMs = STALL_MS;
+    private readonly progressTickMs = 1000;
     /** In-flight generations keyed by sessionId, so two tabs share one ffmpeg pass. */
     private readonly inFlight = new Map<
         string,
@@ -324,25 +334,6 @@ export class ThumbnailService {
     }
 
     /**
-     * How long the storyboard pass is allowed to take.
-     *
-     * A fixed cap cannot work: the pass walks the entire source, so the work grows
-     * with runtime while the budget did not. Five minutes was enough for the short
-     * clips this was built against and cut an hour-long file off after a third of
-     * it, leaving a timeline whose thumbnails simply stopped. Allow a second of
-     * wall clock per four seconds of source, with the old five minutes as the
-     * floor and half an hour as a backstop against a pathological file.
-     *
-     * Rounded because durations are fractional — 3597.4s of video worked out to
-     * a timeout of 899340.25ms, and `execFile` rejects anything but an unsigned
-     * integer, so the pass died before ffmpeg was even started.
-     */
-    private timeoutFor(durationSeconds: number): number {
-        const scaled = (durationSeconds / 4) * 1000;
-        return Math.round(Math.min(Math.max(scaled, 300_000), 1_800_000));
-    }
-
-    /**
      * Whether decoding keyframes alone still yields a frame for every sampling
      * interval. `fps=1/N` makes ffmpeg decode the whole stream to keep one frame
      * in N * fps — for HEVC 1080p50 that was measured at 17x slower than
@@ -449,6 +440,9 @@ export class ThumbnailService {
         const args = [
             // A second pass writes over the first one's files.
             '-y',
+            // Progress lines would pile up in execFile's output buffer over a
+            // long pass on a slow machine, and overflowing it kills ffmpeg.
+            '-nostats',
             ...(keyframesOnly ? ['-skip_frame', 'nokey'] : []),
             '-i',
             opts.inputPath,
@@ -463,41 +457,48 @@ export class ThumbnailService {
             thumbPattern,
         ];
 
-        // Watch the directory fill while ffmpeg runs. `stopped` exists because
-        // the listing is async: a tick can be mid-readdir when the interval is
-        // cleared, and reporting a count after the final one below would walk
-        // the client's progress backwards.
+        // Watch the directory fill while ffmpeg runs: the count is both the
+        // progress reported to the client and the sign the pass is not stuck.
+        // `stopped` exists because the listing is async: a tick can be
+        // mid-readdir when the interval is cleared, and reporting a count after
+        // the final one below would walk the client's progress backwards.
         let stopped = false;
         // Zero is the state before the pass wrote anything, so it is the one
         // count worth staying quiet about — reporting it would wake a client up
         // to fetch a storyboard that is still empty.
         let reported = 0;
-        const watcher = opts.onProgress
-            ? setInterval(() => {
-                  void this.listThumbFiles(thumbnailDir)
-                      .then((files) => {
-                          if (stopped || files.length === reported) return;
-                          reported = files.length;
-                          opts.onProgress!(reported);
-                      })
-                      // A caller's callback throwing is its problem, not a
-                      // reason to abandon a generation pass that is working.
-                      .catch(() => {});
-              }, 1000)
-            : null;
+        let lastProgressAt = Date.now();
+        const abort = new AbortController();
+        const watcher = setInterval(() => {
+            void this.listThumbFiles(thumbnailDir)
+                .then((files) => {
+                    if (stopped) return;
+                    if (files.length === reported) {
+                        if (Date.now() - lastProgressAt > this.stallMs)
+                            abort.abort();
+                        return;
+                    }
+                    reported = files.length;
+                    lastProgressAt = Date.now();
+                    opts.onProgress?.(reported);
+                })
+                // A caller's callback throwing is its problem, not a reason to
+                // abandon a generation pass that is working.
+                .catch(() => {});
+        }, this.progressTickMs);
 
         try {
-            await execFileAsync(ffmpegBin(), args, {
-                timeout: this.timeoutFor(opts.duration),
-            });
+            await execFileAsync(ffmpegBin(), args, { signal: abort.signal });
         } catch (err) {
             this.logger.warn(
-                `FFmpeg thumbnail generation failed: ${(err as Error).message}`
+                abort.signal.aborted
+                    ? `FFmpeg thumbnail generation stalled: no thumbnail for ${this.stallMs / 1000}s after ${reported}`
+                    : `FFmpeg thumbnail generation failed: ${(err as Error).message}`
             );
             return null;
         } finally {
             stopped = true;
-            if (watcher) clearInterval(watcher);
+            clearInterval(watcher);
         }
 
         const thumbFiles = await this.listThumbFiles(thumbnailDir);

@@ -718,34 +718,110 @@ describe('ThumbnailService', () => {
             expect(passCalls(THUMBS)).toHaveLength(1);
         });
 
-        it('gives a long source proportionally longer to finish', async () => {
-            // The pass walks the whole file, so a fixed cap cut an hour-long
-            // video off after a third of it and left the timeline half-drawn.
-            await run({ duration: 3600 });
+        it('sets no time limit on the pass, which a slow machine needs', async () => {
+            // A budget scaled to the source still assumed a fast machine: on a
+            // slower one a 26-minute video was cut off at 4:09.
+            await run({ duration: 1562 });
 
-            expect(passCall(THUMBS)[2].timeout).toBe(900_000);
+            expect(passCall(THUMBS)[2].timeout).toBeUndefined();
+            expect(passCall(THUMBS)[2].signal).toBeInstanceOf(AbortSignal);
         });
 
-        it('gives execFile an integer, whatever the duration', async () => {
-            // Durations are fractional. This exact source scaled to 899340.25ms,
-            // which execFile rejects outright — killing the pass before ffmpeg
-            // was ever started.
-            await run({ duration: 3597.361 });
+        it('keeps ffmpeg from filling its output buffer with progress lines', async () => {
+            await run();
 
-            expect(Number.isInteger(passCall(THUMBS)[2].timeout)).toBe(true);
-            expect(passCall(THUMBS)[2].timeout).toBe(899_340);
+            expect(passArgs(THUMBS)).toContain('-nostats');
         });
 
-        it('keeps the old five minutes as the floor for short clips', async () => {
-            await run({ duration: 30 });
+        describe('a pass judged on its progress', () => {
+            beforeEach(() => {
+                (service as any).stallMs = 150;
+                (service as any).progressTickMs = 10;
+            });
 
-            expect(passCall(THUMBS)[2].timeout).toBe(300_000);
-        });
+            /** A pass that writes `count` thumbs, one every `everyMs`, then exits. */
+            function mockSlowPass(count: number, everyMs: number) {
+                mockExecFile.mockImplementation((...call: any[]) => {
+                    const cb = call[call.length - 1];
+                    const args = call[1] as string[];
+                    if (args[0] === '-encoders') {
+                        cb(null, { stdout: WEBP_ENCODERS, stderr: '' });
+                        return;
+                    }
+                    if (args.includes('packet=pts_time,flags')) {
+                        cb(null, { stdout: '', stderr: '' });
+                        return;
+                    }
+                    const pattern = args[args.length - 1]!;
+                    const signal: AbortSignal = call[2].signal;
+                    mkdirSync(dirname(pattern), { recursive: true });
+                    let written = 0;
+                    const timer = setInterval(() => {
+                        if (written === count) {
+                            clearInterval(timer);
+                            cb(null, { stdout: '', stderr: '' });
+                            return;
+                        }
+                        written++;
+                        writeFileSync(
+                            join(
+                                dirname(pattern),
+                                `thumb_${String(written).padStart(6, '0')}.webp`
+                            ),
+                            'fake-image'
+                        );
+                    }, everyMs);
+                    signal.addEventListener('abort', () => {
+                        clearInterval(timer);
+                        cb(
+                            Object.assign(
+                                new Error('The operation was aborted'),
+                                { name: 'AbortError' }
+                            )
+                        );
+                    });
+                });
+            }
 
-        it('caps the budget so a pathological source cannot hang forever', async () => {
-            await run({ duration: 36_000 });
+            async function sample(duration: number) {
+                const tmpDir = mkdtempSync(join(tmpdir(), 'thumb-stall-'));
+                try {
+                    const result = await service.generateIndividualThumbs({
+                        inputPath: '/tmp/test.mkv',
+                        outputDir: tmpDir,
+                        duration,
+                        trackIndex: 0,
+                        sourceWidth: 1920,
+                        sourceHeight: 1080,
+                    });
+                    return {
+                        result,
+                        thumbs: readdirSync(join(tmpDir, 'thumbnails')),
+                    };
+                } finally {
+                    rmSync(tmpDir, { recursive: true, force: true });
+                }
+            }
 
-            expect(passCall(THUMBS)[2].timeout).toBe(1_800_000);
+            it('lets a slow pass that keeps writing thumbnails run to the end', async () => {
+                // Ten thumbs at 50ms apiece take three times the stall limit in
+                // all, but none is ever more than a third of it late.
+                mockSlowPass(10, 50);
+
+                const { result, thumbs } = await sample(50);
+
+                expect(result).not.toBeNull();
+                expect(thumbs).toContain('thumbnails.vtt');
+            });
+
+            it('stops a pass that has written nothing for the stall limit', async () => {
+                mockSlowPass(10, 10_000);
+
+                const { result, thumbs } = await sample(50);
+
+                expect(result).toBeNull();
+                expect(thumbs).not.toContain('thumbnails.vtt');
+            });
         });
     });
 
@@ -1009,7 +1085,7 @@ describe('ThumbnailService', () => {
             expect(args[args.indexOf('-vf') + 1]).toBe('fps=1/5,scale=160:90');
             expect(args[args.indexOf('-vf') + 1]).not.toContain('tile=');
 
-            expect(opts).toEqual({ timeout: 300_000 });
+            expect(opts).toEqual({ signal: expect.any(AbortSignal) });
         });
 
         it('maps the chosen video track before the filter runs', async () => {
@@ -1184,13 +1260,13 @@ describe('ThumbnailService', () => {
             expect(onProgress).toHaveBeenCalledTimes(2);
         });
 
-        it('arms no watcher when nobody is listening', async () => {
+        it('watches the pass even when nobody listens for progress, to catch a stall', async () => {
             mockDeferredPass();
 
             const pass = sample();
             await until(() => finish !== null, 'the sampling pass to start');
 
-            expect(vi.getTimerCount()).toBe(0);
+            expect(vi.getTimerCount()).toBe(1);
 
             writeThumbs(thumbnailDir, 1);
             finish!();
