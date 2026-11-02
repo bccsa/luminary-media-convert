@@ -2494,7 +2494,7 @@ const splitRowFrame = computed(() =>
                 </div>
                 <div
                     ref="timelineTrackRef"
-                    class="se-timeline relative cursor-crosshair overflow-hidden rounded-md bg-slate-100 dark:bg-blue-950 select-none touch-pan-x"
+                    class="se-timeline relative cursor-crosshair overflow-hidden bg-slate-100 dark:bg-blue-950 select-none touch-pan-x"
                     :class="labelled ? 'se-timeline--subtitles h-13' : 'h-12'"
                     @mousedown="onTimelineMouseDown"
                     @mousemove="onTimelineHoverMove"
