@@ -1,4 +1,5 @@
 import type { AudioGroup, AudioTrackInfo } from './types';
+import { languageName } from './language-codes';
 
 export interface AudioGroupTier {
     minHeight: number;
@@ -126,7 +127,7 @@ export function buildSuggestedAudioGroups(
               })
             : audioTracks;
 
-        const labels = labelsForTier(perTier, tier.label);
+        const labels = labelsForTier(perTier);
 
         perTier.forEach((track, n) => {
             const lang = track.language || 'und';
@@ -158,15 +159,14 @@ export function buildSuggestedAudioGroups(
  * reaching the encode config named "NA". Anything that would appear twice in a
  * group is qualified by the source track it came from.
  */
-function labelsForTier(
-    tracks: readonly AudioTrackInfo[],
-    tierLabel: string
-): string[] {
+function labelsForTier(tracks: readonly AudioTrackInfo[]): string[] {
+    // The same in every tier: a listener picks a language, and the quality
+    // follows the video, so a tier in the name only changes it as they watch.
     const base = tracks.map((track) => {
         if (track.name) return track.name;
         const lang = track.language || 'und';
-        if (lang !== 'und') return `${lang.toUpperCase()} ${tierLabel}`;
-        return tierLabel;
+        if (lang !== 'und') return languageName(lang) ?? lang.toUpperCase();
+        return 'Audio';
     });
 
     const seen = new Map<string, number>();

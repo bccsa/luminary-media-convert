@@ -5058,3 +5058,25 @@ describe('FfmpegService — audio codecs for the merged master', () => {
         });
     });
 });
+
+describe('audio stream names', () => {
+    const service = new FfmpegService();
+    const name = (label?: string) =>
+        (service as any).buildAudioStreamName({ id: 'hd', label, audioBitrateKbps: 128 });
+
+    it('keeps the name a plain label always had', () => {
+        expect(name('ENG HD')).toBe('hd_ENG_HD');
+        expect(name('Bandwidth Saving')).toBe('hd_Bandwidth_Saving');
+        expect(name(undefined)).toBe('hd_128kbps');
+    });
+
+    it('makes a title from a file safe for a folder, a URL and the stream map', () => {
+        expect(name('Français')).toBe('hd_Francais');
+        expect(name('English, director\'s cut')).toBe('hd_English_director_s_cut');
+        expect(name('EN/FR: mixed')).toBe('hd_EN_FR_mixed');
+    });
+
+    it('still names a label made only of other scripts', () => {
+        expect(name('日本語')).toMatch(/^hd_[A-Za-z0-9_-]+$/);
+    });
+});

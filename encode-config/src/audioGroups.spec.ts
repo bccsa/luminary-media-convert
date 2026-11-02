@@ -262,3 +262,37 @@ describe('buildSuggestedAudioGroups', () => {
         });
     });
 });
+
+describe('names that stay the same in every tier', () => {
+    it('names an untitled track by its language, the same in every tier', () => {
+        const groups = buildSuggestedAudioGroups([track(0, { language: 'eng' }), track(1, { language: 'deu' })], 1);
+        const byTrack = (i: number) => [...new Set(groups.filter((g) => g.sourceTrackIndex === i).map((g) => g.label))];
+
+        expect(byTrack(0)).toEqual(['English']);
+        expect(byTrack(1)).toEqual(['German']);
+    });
+
+    it('keeps a title the source gives', () => {
+        const groups = buildSuggestedAudioGroups(
+            [track(0, { language: 'deu', name: 'Deutsch' }), track(1, { language: 'eng' })],
+            1
+        );
+        const labels = [...new Set(groups.filter((g) => g.sourceTrackIndex === 0).map((g) => g.label))];
+        expect(labels).toEqual(['Deutsch']);
+    });
+
+    it('falls back to the code for a language it has no name for', () => {
+        const groups = buildSuggestedAudioGroups([track(0, { language: 'qaa' }), track(1, { language: 'eng' })], 1);
+        expect(groups.find((g) => g.sourceTrackIndex === 0)?.label).toBe('QAA');
+    });
+});
+
+describe('untagged tracks', () => {
+    it('names a track with no name and no language the same in every tier', () => {
+        const groups = buildSuggestedAudioGroups([track(0), track(1)], 1);
+        const byTrack = (i: number) => [...new Set(groups.filter((g) => g.sourceTrackIndex === i).map((g) => g.label))];
+
+        expect(byTrack(0)).toEqual(['Audio (track 0)']);
+        expect(byTrack(1)).toEqual(['Audio (track 1)']);
+    });
+});

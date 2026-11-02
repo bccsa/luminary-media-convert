@@ -166,6 +166,65 @@ describe('ProbeService', () => {
         });
     });
 
+    describe('track names', () => {
+        async function namesFor(tags: Record<string, unknown>) {
+            mockExecFileResult(
+                makeFfprobeOutput({
+                    streams: [
+                        {
+                            index: 0,
+                            codec_type: 'video',
+                            codec_name: 'h264',
+                            width: 1920,
+                            height: 1080,
+                            avg_frame_rate: '25/1',
+                            tags,
+                        },
+                        {
+                            index: 1,
+                            codec_type: 'audio',
+                            codec_name: 'aac',
+                            channels: 2,
+                            sample_rate: '48000',
+                            tags,
+                        },
+                    ],
+                })
+            );
+            const result = await service.probe('/tmp/test.mp4');
+            return [result.videoTracks[0]?.name, result.audioTracks[0]?.name];
+        }
+
+        it('reads an MKV title', async () => {
+            expect(await namesFor({ title: 'English' })).toEqual(['English', 'English']);
+        });
+
+        it('reads the name an MP4 carries', async () => {
+            expect(await namesFor({ name: 'English', handler_name: 'SoundHandler' })).toEqual([
+                'English',
+                'English',
+            ]);
+        });
+
+        it('reads a handler name that is a real title', async () => {
+            expect(await namesFor({ handler_name: 'Commentary' })).toEqual(['Commentary', 'Commentary']);
+        });
+
+        it('ignores a handler name a muxer writes for every track', async () => {
+            for (const generic of ['SoundHandler', 'VideoHandler', 'Core Media Audio', 'ISO Media file produced by Google Inc.', 'GPAC ISO Audio Handler', 'Mainconcept MP4 Sound Media Handler']) {
+                expect(await namesFor({ handler_name: generic })).toEqual([undefined, undefined]);
+            }
+        });
+
+        it('does not rely on ffprobe\'s casing, and trims', async () => {
+            expect(await namesFor({ TITLE: '  Deutsch ' })).toEqual(['Deutsch', 'Deutsch']);
+        });
+
+        it('drops quotes and line breaks, which a playlist name cannot hold', async () => {
+            expect(await namesFor({ title: 'The "main" one\nhere' })).toEqual(['The main one here', 'The main one here']);
+        });
+    });
+
     describe('probe', () => {
         it('should parse a standard MP4 with 1 video + 1 audio track', async () => {
             mockExecFileResult(makeFfprobeOutput());
