@@ -10,6 +10,7 @@ export type {
 
 // Import + re-export ProbeResult and TrimSegment (both used by SessionStatusResponse below)
 import type {
+    EncodeConfig,
     ProbeResult,
     TrimSegment,
 } from '@luminary-media-converter/encode-config';
@@ -48,7 +49,8 @@ export type PipelinePhase =
     | 'thumbnails'
     | 'waveform'
     | 'encrypting-playlists'
-    | 'uploading-playlists';
+    | 'uploading-playlists'
+    | 'uploading-kept';
 
 export interface PipelineProgress {
     encoding: number;
@@ -143,6 +145,8 @@ export interface SessionStatusResponse {
     canResume?: boolean;
     /** With canResume: how far into the output it continues from, 0–100. */
     resumeFromPercent?: number;
+    /** With canRetry: the settings the failed encode was started with. */
+    encodeConfig?: EncodeConfig;
     byteRange?: boolean;
     probeResult?: ProbeResult;
     files?: string[];

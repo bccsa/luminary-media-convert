@@ -364,6 +364,56 @@ describe('SegmentPipeline — shared chunk chains', () => {
                 ).toEqual(init('avc1'));
             });
 
+            it('throws away the warm-up segment a continued audio stream starts with', async () => {
+                // This run began at segment 1 to warm the encoder up; 1 goes, 2 and 3 stay.
+                seedResumedRun('avc1');
+                writeFileSync(
+                    join(tmpDir, 'stream_720p', 'segment_00001.m4s'),
+                    fmp4Segment(0)
+                );
+                const playlistPath = join(
+                    tmpDir,
+                    'stream_720p',
+                    'playlist.m3u8'
+                );
+                writeFileSync(
+                    playlistPath,
+                    readFileSync(playlistPath, 'utf8').replace(
+                        '#EXTINF:6.000000,\nsegment_00002.m4s',
+                        '#EXTINF:6.000000,\nsegment_00001.m4s\n#EXTINF:6.000000,\nsegment_00002.m4s'
+                    )
+                );
+                writeFileSync(
+                    join(tmpDir, 'stream_720p', 'segment_00002.m4s'),
+                    fmp4Segment(540000)
+                );
+                writeFileSync(
+                    join(tmpDir, 'stream_720p', 'segment_00003.m4s'),
+                    fmp4Segment(1080000)
+                );
+                const durable: { index: number; tfdt?: number }[] = [];
+                const pipeline = makePipeline(tmpDir, {
+                    byteRange: true,
+                    streamChains: { stream_720p: 'v0' },
+                    attempt: 1,
+                    resume: resume('avc1'),
+                    onDurable: (segments) => durable.push(...segments),
+                });
+                captureUploads(pipeline);
+
+                await pipeline.drain();
+
+                expect(durable.map((d) => [d.index, d.tfdt])).toEqual([
+                    [2, 1080000],
+                    [3, 1620000],
+                ]);
+                const uris = readPlaylist('stream_720p').filter(
+                    (l) => l && !l.startsWith('#')
+                );
+                expect(uris).toHaveLength(4);
+                expect(uris).not.toContain('segment_00001.m4s');
+            });
+
             it('refuses to join when this run does not start at the restart segment', async () => {
                 seedResumedRun('avc1');
                 const pipeline = makePipeline(tmpDir, {
@@ -396,6 +446,83 @@ describe('SegmentPipeline — shared chunk chains', () => {
             expect(progress[0]).toEqual(
                 expect.objectContaining({ encrypting: 40, uploading: 40 })
             );
+        });
+
+        describe('keeping what never reached storage', () => {
+            it('hands on the open chunk, closed, with the segments it holds and the size it must have', async () => {
+                seedVideo('stream_720p', [0, 540000]);
+                const pipeline = makePipeline(tmpDir, {
+                    byteRange: true,
+                    streamChains: { stream_720p: 'v0' },
+                });
+                (pipeline as any).s3Service.uploadFile = vi.fn(
+                    () => new Promise(() => {})
+                );
+                // Chunk 0 closes only after 20 s worth; two 6 s segments stay open.
+                await (pipeline as any).poll();
+
+                pipeline.abort();
+                const kept = await pipeline.salvage();
+
+                expect(kept).toHaveLength(1);
+                expect(kept[0].objectKey).toBe('prefix/media/v0_0.m4s');
+                expect(kept[0].segments.map((s) => s.index)).toEqual([0, 1]);
+                expect(readFileSync(kept[0].filePath).length).toBe(
+                    kept[0].size
+                );
+            });
+
+            it('drops a file whose size is not what its segments say', async () => {
+                seedVideo('stream_720p', [0]);
+                const pipeline = makePipeline(tmpDir, {
+                    byteRange: true,
+                    streamChains: { stream_720p: 'v0' },
+                });
+                await (pipeline as any).poll();
+                pipeline.abort();
+                await Promise.all((pipeline as any).closing);
+                writeFileSync(join(tmpDir, 'media', 'v0_0.m4s'), 'truncated');
+
+                expect(await pipeline.salvage()).toEqual([]);
+            });
+
+            it('uploads a kept file and only then reports its segments as stored', async () => {
+                const file = join(tmpDir, 'kept.m4s');
+                writeFileSync(file, Buffer.alloc(32));
+                const durable: unknown[] = [];
+                const pipeline = makePipeline(tmpDir, {
+                    byteRange: true,
+                    onDurable: (segments) => durable.push(...segments),
+                });
+                const s3 = (pipeline as any).s3Service;
+
+                await pipeline.uploadSalvaged([
+                    {
+                        filePath: file,
+                        objectKey: 'prefix/media/v0_0.m4s',
+                        size: 32,
+                        segments: [
+                            {
+                                stream: 'stream_720p',
+                                file: 'segment_00000.m4s',
+                                index: 0,
+                                mediaFile: 'media/v0_0.m4s',
+                                offset: 0,
+                                length: 32,
+                            },
+                        ],
+                    },
+                ]);
+
+                expect(s3.uploadFile).toHaveBeenCalledWith(
+                    expect.anything(),
+                    'b',
+                    file,
+                    'prefix/media/v0_0.m4s',
+                    expect.any(Function)
+                );
+                expect(durable).toHaveLength(1);
+            });
         });
 
         it('starts no queued upload once aborted', async () => {

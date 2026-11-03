@@ -26,7 +26,10 @@ const MAX_BYTES = 5 * 1024 * 1024;
 /** Terminal colours: noise in a file. */
 const ANSI = /\x1b\[[0-9;]*m/g;
 
-type Writable = Pick<NodeJS.WriteStream, 'write'>;
+interface Writable {
+    write: NodeJS.WriteStream['write'];
+    on?(event: string, listener: (err: Error) => void): unknown;
+}
 
 /**
  * Copy every write to `streams` into `<dir>/main.log`, starting a new file when
@@ -65,7 +68,16 @@ export function teeConsoleToFile(
         if (size >= maxBytes) rotate();
     };
 
-    for (const stream of opts.streams ?? [process.stdout, process.stderr]) {
+    const streams: Writable[] = opts.streams ?? [
+        process.stdout,
+        process.stderr,
+    ];
+    for (const stream of streams) {
+        // A console nobody reads any more (the terminal that started the app
+        // has gone) fails every write with EPIPE. Unhandled, each one was an
+        // uncaught exception and an error dialog, one per log line. The
+        // console is best effort; the file is the record.
+        stream.on?.('error', () => {});
         const write = stream.write.bind(stream) as (
             ...args: unknown[]
         ) => boolean;
@@ -75,7 +87,11 @@ export function teeConsoleToFile(
             } catch {
                 // A log that cannot be written must not take the app down with it.
             }
-            return write(chunk, ...rest);
+            try {
+                return write(chunk, ...rest);
+            } catch {
+                return false;
+            }
         }) as Writable['write'];
     }
     return path;

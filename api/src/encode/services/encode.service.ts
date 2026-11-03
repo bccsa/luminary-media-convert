@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { LUMINARY_KEY_PLACEHOLDER_URI } from '@luminary-media-converter/hls-core';
 import {
     copyFileSync,
@@ -12,13 +12,14 @@ import {
     mkdir,
     readdir,
     readFile,
+    rename,
     rm,
     stat,
     writeFile,
 } from 'fs/promises';
-import { join, posix } from 'path';
+import { basename, join, posix } from 'path';
 import { estimateOutputBytes, formatBytes } from './output-estimate.js';
-import { failureMessage } from './failure-message.js';
+import { failureMessage, isNetworkFailure } from './failure-message.js';
 import { freeBytes } from './disk-space.js';
 import {
     SESSION_STATE_FILENAME,
@@ -27,6 +28,7 @@ import {
 } from './session.service.js';
 import {
     FfmpegService,
+    type EncodeRestart,
     type EncodeResult,
     type WaveLayout,
 } from './ffmpeg.service.js';
@@ -60,6 +62,7 @@ import {
 import {
     ResumeStore,
     fingerprint,
+    restartStreams,
     restorePlaylist,
     resumePlan,
     resumeRefusal,
@@ -85,11 +88,13 @@ interface PreparedRun {
     records?: ResumeRecord[];
     /** Segments a continue reuses, which the bars count as done from the start. */
     reusedSegments?: number;
+    /** The share of the encode a continue reuses, 0–1: where every bar starts. */
+    doneFraction?: number;
     pipelineResume?: PipelineResume;
-    ffmpegResume?: { fromSec: number; startNumber: number };
+    ffmpegResume?: EncodeRestart;
     waveResume?: {
         skip: number;
-        resume?: { fromSec: number; startNumber: number };
+        resume?: EncodeRestart;
     };
 }
 
@@ -99,7 +104,7 @@ interface Continuation {
     records: ResumeRecord[];
     inits: Record<string, Buffer>;
     /** Where the wave that restarts does so; absent when it runs from its start. */
-    resume?: { fromSec: number; startNumber: number };
+    resume?: EncodeRestart;
     /** How much of the encode is reused, as seconds of output. */
     doneSec: number;
 }
@@ -133,7 +138,7 @@ function reEncodedConfig(config: EncodeConfigDto): EncodeConfigDto {
 }
 
 @Injectable()
-export class EncodeService {
+export class EncodeService implements OnModuleInit {
     private readonly logger = new Logger(EncodeService.name);
     private readonly workDir =
         process.env.WORK_DIR || join(process.cwd(), 'work');
@@ -146,6 +151,23 @@ export class EncodeService {
         private readonly waveformService: WaveformService,
         private readonly segmentPipelineService: SegmentPipelineService
     ) {}
+
+    /**
+     * Work out, for encodes that were running when the encoder last stopped,
+     * whether they can carry on: they failed without this process seeing it,
+     * so nothing offered to continue them.
+     */
+    async onModuleInit(): Promise<void> {
+        for (const session of this.sessionService.list()) {
+            if (session.status !== 'failed' || session.resumeFromSec) continue;
+            if (!session.encodeConfig || !session.filePath) continue;
+            const from = await this.resumeFrom(
+                new ResumeStore(join(this.workDir, session.id)),
+                session
+            );
+            if (from) this.sessionService.setResumeFrom(session.id, from);
+        }
+    }
 
     private encryptionEnabled(session: {
         config: { encryption?: { enabled?: boolean } | null };
@@ -284,11 +306,19 @@ export class EncodeService {
 
             // Current pipeline progress state (updated by both FFmpeg and pipeline callbacks)
             // Initialize all bars so the UI shows them from the start
+            // A continue starts every bar at once at the share it reuses, rather
+            // than letting each arrive in turn from wherever it is measured.
+            const reused = Math.round((thisRun.doneFraction ?? 0) * 100);
             const currentProgress: PipelineProgress = {
-                encoding: 0,
-                ...(encryptionEnabled ? { encrypting: 0 } : {}),
-                uploading: 0,
+                encoding: reused,
+                ...(encryptionEnabled ? { encrypting: reused } : {}),
+                uploading: Math.round((reused * SEGMENT_UPLOAD_SHARE) / 100),
             };
+            if (reused > 0) {
+                this.sessionService.updatePipelineProgress(sessionId, {
+                    ...currentProgress,
+                });
+            }
 
             const segDur = session.encodeConfig.segmentDuration ?? 6;
             const duration = session.probeResult?.format?.duration ?? 0;
@@ -356,15 +386,30 @@ export class EncodeService {
                             }))
                         );
                     },
+                    // Only ever forward: the pipeline counts segments, and a
+                    // continue's starting share is measured in time, so a
+                    // first report can come in below where the bar stands.
                     onProgress: (pipelineUpdate) => {
                         if (pipelineUpdate.encrypting != null)
-                            currentProgress.encrypting =
-                                pipelineUpdate.encrypting;
+                            currentProgress.encrypting = Math.max(
+                                currentProgress.encrypting ?? 0,
+                                pipelineUpdate.encrypting
+                            );
+                        // A segment is encrypted only once encoded, but FFmpeg
+                        // reports once a second: a fast encode, audio above
+                        // all, would show encrypting ahead of encoding.
+                        currentProgress.encoding = Math.max(
+                            currentProgress.encoding ?? 0,
+                            currentProgress.encrypting ?? 0
+                        );
                         if (pipelineUpdate.uploading != null)
-                            currentProgress.uploading = Math.round(
-                                (pipelineUpdate.uploading *
-                                    SEGMENT_UPLOAD_SHARE) /
-                                    100
+                            currentProgress.uploading = Math.max(
+                                currentProgress.uploading ?? 0,
+                                Math.round(
+                                    (pipelineUpdate.uploading *
+                                        SEGMENT_UPLOAD_SHARE) /
+                                        100
+                                )
                             );
                         this.sessionService.updatePipelineProgress(sessionId, {
                             ...currentProgress,
@@ -432,7 +477,10 @@ export class EncodeService {
             };
 
             const onEncodeProgress = (percent: number): void => {
-                currentProgress.encoding = percent;
+                currentProgress.encoding = Math.max(
+                    percent,
+                    currentProgress.encrypting ?? 0
+                );
                 this.sessionService.updatePipelineProgress(sessionId, {
                     ...currentProgress,
                 });
@@ -847,7 +895,39 @@ export class EncodeService {
             const errorMsg = (err as Error).message || 'Unknown error';
             // The whole of it in the log; one sentence for whoever started the encode.
             this.logger.error(`Session ${sessionId} failed: ${errorMsg}`);
+            // What a continue can reuse is settled before the session is marked
+            // failed: a client looks at a failed session once, when it hears of
+            // it, and an offer worked out after that is never seen.
+            pipeline?.abort();
+            // Only for a session still here: a cancel or a delete has nothing to
+            // continue, and the queue should not wait on its uploads.
+            if (this.sessionService.get(sessionId)) {
+                try {
+                    // A chunk still sending when the encode failed is one a
+                    // continue need not make again, so it is given a moment to land.
+                    await pipeline?.settle();
+                    if (run?.recording && pipeline) {
+                        await this.keepSalvaged(run, pipeline);
+                    }
+                    this.sessionService.setResumeFrom(
+                        sessionId,
+                        run?.recording
+                            ? ((await this.resumeFrom(run.store, session)) ??
+                                  undefined)
+                            : undefined
+                    );
+                } catch (keepErr) {
+                    // Costs a continue its offer, never the failure being reported.
+                    this.logger.warn(
+                        `Session ${sessionId}: could not work out what a continue would reuse: ${(keepErr as Error).message}`
+                    );
+                }
+            }
             this.sessionService.setFailed(sessionId, failureMessage(errorMsg));
+            this.sessionService.setNetworkFailure(
+                sessionId,
+                isNetworkFailure(errorMsg)
+            );
         } finally {
             // A drain stops the poll timer on its way out; every other exit from
             // this method — an ffmpeg failure, a refused config, a throw from any
@@ -861,17 +941,6 @@ export class EncodeService {
             // the encode produced correctly. Aborting an already-drained
             // pipeline is a no-op, so this is unconditional.
             pipeline?.abort();
-            // A chunk still sending when the encode failed is one a continue
-            // need not make again, so it is given a moment to land.
-            if (this.sessionService.get(sessionId)?.status === 'failed') {
-                await pipeline?.settle();
-                if (run?.recording) {
-                    this.sessionService.setResumeFrom(
-                        sessionId,
-                        (await this.resumeFrom(run.store, session)) ?? undefined
-                    );
-                }
-            }
             await this.cleanupSessionFiles(sessionId);
         }
     }
@@ -949,6 +1018,23 @@ export class EncodeService {
                 (encryptionKey && !previous.ivHex
                     ? 'no IV was recorded'
                     : null);
+            // What the failed run kept goes up first; only then is it stored.
+            if (!refusal) {
+                const duration = session.probeResult?.format?.duration ?? 0;
+                const shareOf = (countPending: boolean) =>
+                    duration > 0
+                        ? (this.continuation(
+                              store,
+                              layout,
+                              session,
+                              countPending
+                          )?.doneSec ?? 0) / duration
+                        : 0;
+                await this.uploadPending(store, session, {
+                    stored: shareOf(false),
+                    reused: shareOf(true),
+                });
+            }
             const c = refusal
                 ? null
                 : this.continuation(store, layout, session);
@@ -983,6 +1069,10 @@ export class EncodeService {
                     layout,
                     skipWaves: c.plan.skip,
                     records: c.records,
+                    doneFraction:
+                        (session.probeResult?.format?.duration ?? 0) > 0
+                            ? c.doneSec / session.probeResult!.format!.duration!
+                            : 0,
                     reusedSegments:
                         Object.values(c.plan.point?.reused ?? {}).reduce(
                             (n, segments) => n + segments.length,
@@ -1075,13 +1165,29 @@ export class EncodeService {
     private continuation(
         store: ResumeStore,
         layout: WaveLayout[],
-        session: Session
+        session: Session,
+        countPending = false
     ): Continuation | null {
-        const records = store.readRecords();
+        const stored = store.readRecords();
+        // An offer counts the kept files a continue will upload first; a run
+        // only what has actually reached storage.
+        const records: ResumeRecord[] = countPending
+            ? [
+                  ...stored,
+                  ...store.pending(stored).flatMap((p) =>
+                      p.segments.map((s) => ({
+                          kind: 'durable' as const,
+                          ...s,
+                      }))
+                  ),
+              ]
+            : stored;
         const plan = resumePlan(layout, records);
         if (!plan) return null;
         const skipped = layout.slice(0, plan.skip);
-        const resumedVideo = plan.point ? layout[plan.skip]!.videoStreams : [];
+        const resumedVideo = plan.point
+            ? restartStreams(layout[plan.skip]!)
+            : [];
         const inits = this.readSavedInits(store, [
             ...resumedVideo,
             ...skipped.flatMap((w) => [...w.videoStreams, ...w.audioStreams]),
@@ -1100,12 +1206,23 @@ export class EncodeService {
         let resume: Continuation['resume'];
         if (plan.point) {
             const first = resumedVideo[0]!;
+            const timescale = readTrackTimescale(inits[first]);
+            // Restarted audio warms up on one frame grid (see
+            // audioWarmUpStart); tracks at other sample rates would join off it.
+            if (
+                layout[plan.skip]!.videoStreams.length === 0 &&
+                resumedVideo.some(
+                    (s) => readTrackTimescale(inits[s]) !== timescale
+                )
+            )
+                return null;
             resume = {
                 fromSec:
                     (plan.point.startTfdt[first] -
                         plan.point.reused[first][0].tfdt) /
-                    readTrackTimescale(inits[first]),
+                    timescale,
                 startNumber: plan.point.startIndex,
+                timescale,
             };
         }
         const duration = session.probeResult?.format?.duration ?? 0;
@@ -1131,7 +1248,8 @@ export class EncodeService {
             const c = this.continuation(
                 store,
                 this.ffmpegService.waveLayout(config),
-                session
+                session,
+                true
             );
             return c && c.doneSec > 0 ? c.doneSec : null;
         } catch {
@@ -1215,6 +1333,95 @@ export class EncodeService {
                 `Could not keep wave ${index}: ${(err as Error).message}`
             );
         }
+    }
+
+    /**
+     * Keep what a failed run made but never uploaded, beside its records, so a
+     * continue can upload it rather than make it again. Only files the
+     * pipeline closed in an orderly way and whose size matches their segments
+     * are kept; a run killed outright keeps nothing this way.
+     */
+    private async keepSalvaged(
+        run: PreparedRun,
+        pipeline: ReturnType<SegmentPipelineService['createPipeline']>
+    ): Promise<void> {
+        try {
+            const salvaged = await pipeline.salvage();
+            if (salvaged.length === 0) return;
+            await mkdir(run.store.pendingDir, { recursive: true });
+            for (const file of salvaged) {
+                const name = basename(file.objectKey);
+                await rename(file.filePath, join(run.store.pendingDir, name));
+                run.store.append([
+                    {
+                        kind: 'pending',
+                        name,
+                        objectKey: file.objectKey,
+                        size: file.size,
+                        segments: file.segments,
+                    },
+                ]);
+            }
+            this.logger.log(
+                `Kept ${salvaged.length} file(s) of segments that had not reached storage`
+            );
+        } catch (err) {
+            this.logger.warn(
+                `Could not keep the segments that had not reached storage: ${(err as Error).message}`
+            );
+        }
+    }
+
+    /** Upload what a failed run kept, recording each file's segments as stored once it is. */
+    private async uploadPending(
+        store: ResumeStore,
+        session: Session,
+        /** Shares of the encode, 0–1: already stored, and stored once these are up. */
+        share: { stored: number; reused: number }
+    ): Promise<void> {
+        const pending = store.pending(store.readRecords());
+        if (pending.length === 0) return;
+        const pipeline = this.segmentPipelineService.createPipeline({
+            outputDir: store.pendingDir,
+            s3Config: session.config.s3,
+            s3PathPrefix: S3Service.canonicalPrefix(
+                session.config.s3.pathPrefix
+            ),
+            byteRange: session.config.byteRange !== false,
+            byteRangeMaxFileSizeBytes: 0,
+            onDurable: (segments) =>
+                store.append(
+                    segments.map((s) => ({ kind: 'durable' as const, ...s }))
+                ),
+        });
+        // Shown as part of the encode, not as a wait in the queue: these
+        // segments are already encoded and encrypted, so those bars stand at the
+        // share they make up, and only the storage bar moves, up to it.
+        this.sessionService.updateStatus(session.id, 'encoding');
+        const reused = Math.round(share.reused * 100);
+        const report = (fraction: number) =>
+            this.sessionService.updatePipelineProgress(session.id, {
+                encoding: reused,
+                ...(this.encryptionEnabled(session)
+                    ? { encrypting: reused }
+                    : {}),
+                uploading: Math.round(
+                    SEGMENT_UPLOAD_SHARE *
+                        (share.stored +
+                            (share.reused - share.stored) * fraction)
+                ),
+                phase: 'uploading-kept',
+            });
+        report(0);
+        await pipeline.uploadSalvaged(
+            pending.map((p) => ({
+                filePath: join(store.pendingDir, p.name),
+                objectKey: p.objectKey,
+                size: p.size,
+                segments: p.segments,
+            })),
+            (done, total) => report(done / total)
+        );
     }
 
     /**

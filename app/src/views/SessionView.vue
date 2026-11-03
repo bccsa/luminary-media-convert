@@ -408,6 +408,16 @@ const canRetryEncode = computed(
     () => currentStatus.value === 'failed' && poller.canRetry.value === true
 );
 
+/**
+ * The settings a failed encode ran with, for the form to open on: "Encode
+ * again" then repeats that encode instead of a fresh suggestion for the source.
+ */
+const retryConfig = computed(() =>
+    canRetryEncode.value
+        ? (poller.retryConfig.value ?? session.value?.encodeConfig ?? null)
+        : null
+);
+
 /** A failed encode that can carry on from what already reached storage. */
 const canContinueEncode = computed(
     () => canRetryEncode.value && poller.canResume.value === true
@@ -1171,6 +1181,8 @@ const PIPELINE_PHASE_LABELS: Record<PipelinePhase, string | null> = {
     // bar restarts from 0 for the playlists and sprites, which are a different
     // set of files from the segments it was counting until then.
     'uploading-playlists': 'Uploading playlists & thumbnails…',
+    // Shown as the encode it is part of: the storage bar moving says enough.
+    'uploading-kept': null,
 };
 
 const pipelinePhaseLabel = computed(() => {
@@ -2509,6 +2521,7 @@ onUnmounted(() => {
                                         :trim-active="
                                             effectiveKeepRanges.length > 0
                                         "
+                                        :restore-config="retryConfig"
                                         @submit="onEncodeSubmit"
                                         @can-submit-change="
                                             onEncodeCanSubmitChange

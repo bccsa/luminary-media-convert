@@ -1,4 +1,10 @@
-import { appendFileSync, mkdtempSync, rmSync } from 'fs';
+import {
+    appendFileSync,
+    mkdirSync,
+    mkdtempSync,
+    rmSync,
+    writeFileSync,
+} from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import {
@@ -168,6 +174,14 @@ describe('resumePlan', () => {
         ).toBeNull();
     });
 
+    it('restarts an audio-only encode from its audio streams', () => {
+        const plan = resumePlan(
+            [{ videoStreams: [], audioStreams: ['stream_a'] }],
+            [...both('stream_a', 6, 4)]
+        );
+        expect(plan?.point?.startIndex).toBe(4);
+    });
+
     it('treats a single run as a ladder of one wave', () => {
         const plan = resumePlan(
             [waves[1]],
@@ -297,6 +311,30 @@ describe('ResumeStore', () => {
 
         await store.reset(state(2));
         expect(store.readRecords()).toEqual([]);
+    });
+
+    it('lists only the kept files still there at the size their record says', async () => {
+        const store = new ResumeStore(dir);
+        await store.reset(state(0));
+        mkdirSync(store.pendingDir, { recursive: true });
+        writeFileSync(join(store.pendingDir, 'v0_1.m4s'), Buffer.alloc(200));
+        writeFileSync(join(store.pendingDir, 'v0_2.m4s'), Buffer.alloc(50));
+        const pending = (name: string, size: number): ResumeRecord => ({
+            kind: 'pending',
+            name,
+            objectKey: `p/media/${name}`,
+            size,
+            segments: [],
+        });
+        store.append([
+            pending('v0_1.m4s', 200),
+            pending('v0_2.m4s', 99),
+            pending('v0_3.m4s', 10),
+        ]);
+
+        expect(store.pending(store.readRecords()).map((p) => p.name)).toEqual([
+            'v0_1.m4s',
+        ]);
     });
 
     it('skips the half-written line a crash leaves', async () => {

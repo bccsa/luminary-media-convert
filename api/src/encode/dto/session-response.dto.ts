@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Expose, Type } from 'class-transformer';
 import { ProbeResultDto } from './probe-result.dto.js';
+import { EncodeConfigDto } from './encode-config.dto.js';
 import type { PipelinePhase } from '../services/segment-pipeline.service.js';
 
 export class SessionResponseDto {
@@ -202,6 +203,16 @@ export class SessionStatusDto {
     })
     @Expose()
     resumeFromPercent?: number;
+
+    @ApiPropertyOptional({
+        description:
+            'With canRetry: the settings the failed encode was started with, so a ' +
+            'client can offer to run the same encode again.',
+        type: EncodeConfigDto,
+    })
+    @Type(() => EncodeConfigDto)
+    @Expose()
+    encodeConfig?: EncodeConfigDto;
 
     @ApiPropertyOptional({
         description:

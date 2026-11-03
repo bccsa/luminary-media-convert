@@ -46,6 +46,12 @@ const props = withDefaults(
          * the very path built for it.
          */
         trimActive?: boolean;
+        /**
+         * The settings an earlier encode of this source ran with. The form
+         * opens on them instead of a suggestion, so running it again repeats
+         * that encode rather than quietly making a different one.
+         */
+        restoreConfig?: EncodeConfig | null;
     }>(),
     {
         encodePrimaryAction: 'start-encoding',
@@ -613,6 +619,47 @@ reanalyze();
         );
         reanalyze();
     }
+}
+
+if (props.restoreConfig) restore(props.restoreConfig);
+
+/**
+ * Put the form back as `config` had it: its mode, rows and track names. The
+ * suggestion for that mode runs first, so whatever `config` leaves out keeps
+ * its default; the ladder dials then measure from the restored rows.
+ */
+function restore(config: EncodeConfig): void {
+    encodingType.value = config.type;
+    reanalyze();
+    if (config.segmentDuration) segmentDuration.value = config.segmentDuration;
+    if (config.type === 'video' && config.videoRenditions?.length) {
+        videoRenditions.splice(
+            0,
+            videoRenditions.length,
+            ...config.videoRenditions.map((r) => ({ ...r }))
+        );
+        const used = new Set(config.videoRenditions.map((r) => r.sourceTrackIndex ?? 0));
+        for (const t of editableVideoTracks) if (!used.has(t.index)) excludedVideo.add(t.index);
+        ladderBaseKbps.splice(
+            0,
+            ladderBaseKbps.length,
+            ...videoRenditions.map((r) => r.videoBitrateKbps)
+        );
+        ladderScaleNum = 1;
+        ladderScaleDen = 1;
+        ladderMax.value = suggestedLadderMax.value;
+        lastGoodLadderMax = ladderMax.value;
+    }
+    if (config.audioGroups?.length) {
+        audioGroups.splice(
+            0,
+            audioGroups.length,
+            ...config.audioGroups.map((g) => ({ ...g }))
+        );
+        const used = new Set(config.audioGroups.map((g) => g.sourceTrackIndex));
+        for (const t of editableAudioTracks) if (!used.has(t.index)) excludedAudio.add(t.index);
+    }
+    applySavedTrackLabels(config, editableVideoTracks, editableAudioTracks, true);
 }
 
 const uniqueAudioGroupOptions = computed(() => {

@@ -2011,3 +2011,61 @@ describe('EncodeConfigForm excluding source tracks', () => {
         expect(box(wrapper, 'video', 1).attributes('disabled')).toBeDefined();
     });
 });
+
+describe('EncodeConfigForm restoring a failed encode', () => {
+    beforeEach(() => {
+        localStorage.clear();
+    });
+
+    const audio = {
+        id: 'mid',
+        label: 'Standard',
+        audioBitrateKbps: 96,
+        channels: 1,
+        audioCodec: 'aac' as const,
+        sourceTrackIndex: 0,
+        vbr: true,
+    };
+
+    it('opens an audio-only encode of a video source as audio only', () => {
+        const restoreConfig: EncodeConfig = {
+            type: 'audio',
+            segmentDuration: 6,
+            audioGroups: [audio],
+        };
+        const wrapper = mount(EncodeConfigForm, {
+            props: { probeResult: misalignedProbe(), byteRange: true, restoreConfig },
+        });
+
+        const config = (wrapper.vm as any).buildEncodeConfig() as EncodeConfig;
+        expect(config.type).toBe('audio');
+        expect(config.audioGroups).toEqual([audio]);
+        expect(config.videoRenditions).toBeUndefined();
+    });
+
+    it('keeps the ladder it ran with, and the angle it left out stays out', () => {
+        const rendition: VideoRendition = {
+            width: 1280,
+            height: 720,
+            videoBitrateKbps: 1234,
+            copyStream: false,
+            sourceTrackIndex: 0,
+            audioGroupId: 'mid',
+            vbr: true,
+        };
+        const restoreConfig: EncodeConfig = {
+            type: 'video',
+            segmentDuration: 6,
+            videoRenditions: [rendition],
+            audioGroups: [audio],
+        };
+        const wrapper = mount(EncodeConfigForm, {
+            props: { probeResult: misalignedProbe(), byteRange: true, restoreConfig },
+        });
+
+        const config = (wrapper.vm as any).buildEncodeConfig() as EncodeConfig;
+        expect(config.type).toBe('video');
+        expect(config.videoRenditions).toEqual([rendition]);
+        expect(config.audioGroups).toEqual([audio]);
+    });
+});
