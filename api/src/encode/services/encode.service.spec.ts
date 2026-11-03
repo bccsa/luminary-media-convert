@@ -1899,3 +1899,199 @@ describe('EncodeService — the delivered waveform sidecar', () => {
         expect(uploadedSidecar.version).toBe(WAVEFORM_SIDECAR_VERSION);
     });
 });
+
+/*
+ * A ladder in waves, continued for real: the first run finishes its first wave
+ * with every segment in storage and then fails in the second; the second run
+ * must skip the first wave, put its playlists back pointed at the chunks they
+ * are in, and run only the second. Everything but ffmpeg and the uploads is
+ * the real thing: the records, the plan, the restore.
+ */
+describe('EncodeService — continuing a ladder in waves', () => {
+    let testWorkDir: string;
+    let sessionService: SessionService;
+    let service: EncodeService;
+    let pipelineConfig: any;
+    const encodes: any[] = [];
+
+    const waves = [
+        {
+            masterName: 'master_w0.m3u8',
+            videoStreams: ['stream_720p'],
+            audioStreams: ['stream_a'],
+        },
+        {
+            masterName: 'master_w1.m3u8',
+            videoStreams: ['stream_240p'],
+            audioStreams: [],
+        },
+    ];
+    const playlist = (init: string) =>
+        [
+            '#EXTM3U',
+            '#EXT-X-VERSION:7',
+            '#EXT-X-TARGETDURATION:6',
+            `#EXT-X-MAP:URI="${init}"`,
+            '#EXTINF:6.000000,',
+            'segment_00000.m4s',
+            '#EXTINF:6.000000,',
+            'segment_00001.m4s',
+            '#EXT-X-ENDLIST',
+            '',
+        ].join('\n');
+
+    /** The first wave as ffmpeg leaves it, every segment of it reported stored. */
+    async function finishFirstWave(
+        outputDir: string,
+        onWaveDone: (i: number) => Promise<void>
+    ) {
+        writeFileSync(join(outputDir, 'master_w0.m3u8'), '#EXTM3U\n');
+        for (const [stream, init] of [
+            ['stream_720p', 'init_0.mp4'],
+            ['stream_a', 'init_1.mp4'],
+        ]) {
+            mkdirSync(join(outputDir, stream), { recursive: true });
+            writeFileSync(join(outputDir, stream, init), `init of ${stream}`);
+            writeFileSync(
+                join(outputDir, stream, 'playlist.m3u8'),
+                playlist(init)
+            );
+            for (const index of [0, 1]) {
+                const segment = {
+                    stream,
+                    file: `segment_0000${index}.m4s`,
+                    index,
+                    ...(stream === 'stream_720p'
+                        ? { tfdt: index * 540000 }
+                        : {}),
+                    mediaFile:
+                        stream === 'stream_a'
+                            ? 'media/a_0.m4s'
+                            : 'media/v0_0.m4s',
+                    offset: index * 100,
+                    length: 100,
+                };
+                pipelineConfig.onSegment(segment);
+                pipelineConfig.onDurable([segment]);
+            }
+        }
+        await onWaveDone(0);
+    }
+
+    beforeEach(() => {
+        testWorkDir = mkdtempSync(join(tmpdir(), 'luminary-waves-'));
+        process.env.WORK_DIR = testWorkDir;
+        encodes.length = 0;
+        sessionService = new SessionService({ emit: () => {} } as any);
+
+        const ffmpegService = {
+            encode: vi.fn(async (opts: any) => {
+                encodes.push({
+                    ...opts,
+                    restored: existsSync(
+                        join(opts.outputDir, 'stream_720p', 'playlist.m3u8')
+                    )
+                        ? readFileSync(
+                              join(
+                                  opts.outputDir,
+                                  'stream_720p',
+                                  'playlist.m3u8'
+                              ),
+                              'utf8'
+                          )
+                        : null,
+                    restoredMaster: existsSync(
+                        join(opts.outputDir, 'master_w0.m3u8')
+                    ),
+                    restoredInit: existsSync(
+                        join(opts.outputDir, 'stream_720p', 'init_0.mp4')
+                    ),
+                });
+                mkdirSync(opts.outputDir, { recursive: true });
+                if (encodes.length === 1) {
+                    await finishFirstWave(opts.outputDir, opts.onWaveDone);
+                    throw new Error(
+                        'FFmpeg exited with code null (signal: SIGKILL). stderr tail:\n…'
+                    );
+                }
+                return {
+                    outputDir: opts.outputDir,
+                    masterPlaylist: 'master.m3u8',
+                    segmentFormat: 'fmp4',
+                    alignmentOffset: 0,
+                };
+            }),
+            canResume: vi.fn().mockReturnValue(true),
+            resumeBlocker: vi.fn().mockReturnValue(null),
+            waveLayout: vi.fn().mockReturnValue(waves),
+            videoStreamDirs: vi
+                .fn()
+                .mockReturnValue(['stream_720p', 'stream_240p']),
+            computeAlignmentOffset: vi.fn().mockResolvedValue(0),
+            buildStreamChainMap: vi.fn().mockReturnValue({}),
+        } as any;
+
+        service = new EncodeService(
+            sessionService,
+            ffmpegService,
+            {
+                generateKey: vi.fn().mockReturnValue(Buffer.alloc(16, 0xcd)),
+                generateIV: vi.fn().mockReturnValue(Buffer.alloc(16, 0xab)),
+                injectKeyTagsIntoPlaylists: vi
+                    .fn()
+                    .mockResolvedValue(undefined),
+                encryptTextAssets: vi.fn().mockResolvedValue([]),
+            } as any,
+            {
+                packForDelivery: vi.fn().mockResolvedValue(null),
+                removePreview: vi.fn().mockResolvedValue(undefined),
+            } as any,
+            {
+                generateWaveform: vi.fn().mockResolvedValue([]),
+                cachePath: vi.fn((id: string) =>
+                    join(testWorkDir, id, 'waveform.json')
+                ),
+            } as any,
+            {
+                createPipeline: vi.fn((config: any) => {
+                    pipelineConfig = config;
+                    return makeMockPipeline();
+                }),
+            } as any
+        );
+    });
+
+    afterEach(() => {
+        rmSync(testWorkDir, { recursive: true, force: true });
+        delete process.env.WORK_DIR;
+    });
+
+    it('skips the finished wave, restoring it, and runs only the next', async () => {
+        const session = sessionService.create(makeConfig());
+        const source = join(testWorkDir, 'source.mp4');
+        writeFileSync(source, 'video');
+        sessionService.setFilePath(session.id, source);
+        sessionService.setProbeResult(session.id, {
+            format: { duration: 120, bitrateKbps: 5000, formatName: 'mp4' },
+            videoTracks: [],
+            audioTracks: [],
+        } as any);
+        sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+
+        await service.processSession(session.id);
+        expect(sessionService.get(session.id)!.status).toBe('failed');
+        // Half the ladder, as seconds of output: the first wave of two.
+        expect(sessionService.get(session.id)!.resumeFromSec).toBe(60);
+
+        await service.processSession(session.id);
+
+        const second = encodes[1];
+        expect(second.waveResume).toEqual({ skip: 1, resume: undefined });
+        expect(second.restoredMaster).toBe(true);
+        expect(second.restoredInit).toBe(true);
+        expect(second.restored).toContain('#EXT-X-BYTERANGE:100@100');
+        expect(second.restored).toContain('../media/v0_0.m4s');
+        expect(second.restored).not.toContain('segment_00000.m4s');
+        expect(sessionService.get(session.id)!.status).toBe('completed');
+    });
+});
