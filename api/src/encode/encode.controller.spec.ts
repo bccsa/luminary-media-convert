@@ -522,6 +522,14 @@ describe('EncodeController', () => {
                 expect(result.canResume).toBeUndefined();
             });
 
+            it('sends the settings it ran with, for the form to open on', () => {
+                const result = controller.getStatus(
+                    failedAt().id,
+                    makeRequest()
+                );
+                expect(result.encodeConfig).toEqual(makeEncodeConfig());
+            });
+
             it('continues with the settings it was started with', async () => {
                 const session = failedAt(47);
                 const start = vi

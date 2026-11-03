@@ -1,6 +1,6 @@
-import { ref, readonly, onUnmounted } from 'vue';
+import { computed, ref, readonly, onUnmounted } from 'vue';
 import { getSessionStatus, subscribeSessionEvents } from '../api';
-import type { AccelMode, PipelineProgress, SegmentFormat, SessionStatus, SessionStatusResponse, TrimSegment } from '../types';
+import type { AccelMode, EncodeConfig, PipelineProgress, SegmentFormat, SessionStatus, SessionStatusResponse, TrimSegment } from '../types';
 import { errorMessage } from '../utils/errors';
 
 const TERMINAL_STATUSES: SessionStatus[] = ['completed', 'failed'];
@@ -27,6 +27,7 @@ export function useSessionPoller() {
     const canRetry = ref<boolean | undefined>();
     const canResume = ref<boolean | undefined>();
     const resumeFromPercent = ref<number | undefined>();
+    const retryConfig = ref<EncodeConfig | undefined>();
     const files = ref<string[] | undefined>();
     const masterPlaylist = ref<string | undefined>();
     const error = ref<string | undefined>();
@@ -66,6 +67,7 @@ export function useSessionPoller() {
         canRetry.value = data.canRetry;
         canResume.value = data.canResume;
         resumeFromPercent.value = data.resumeFromPercent;
+        retryConfig.value = data.encodeConfig;
         files.value = data.files;
         masterPlaylist.value = data.masterPlaylist;
         error.value = data.error;
@@ -120,6 +122,7 @@ export function useSessionPoller() {
         canRetry.value = undefined;
         canResume.value = undefined;
         resumeFromPercent.value = undefined;
+        retryConfig.value = undefined;
         files.value = undefined;
         masterPlaylist.value = undefined;
         error.value = undefined;
@@ -193,6 +196,8 @@ export function useSessionPoller() {
         canRetry: readonly(canRetry),
         canResume: readonly(canResume),
         resumeFromPercent: readonly(resumeFromPercent),
+        /** With canRetry: the settings the failed encode was started with. */
+        retryConfig: computed(() => retryConfig.value),
         files: readonly(files),
         masterPlaylist: readonly(masterPlaylist),
         error: readonly(error),

@@ -15,6 +15,8 @@ defineProps<{
     appearance?: 'default' | 'session';
     /** Something is cut, so the ladder is judged by the quick cut's rules. */
     trimActive?: boolean;
+    /** The settings of a failed encode, for the form to open on. */
+    restoreConfig?: EncodeConfig | null;
 }>();
 
 defineEmits<{
@@ -39,11 +41,13 @@ defineExpose({ encodeFormRef, getEncodeForm });
         <EncodeConfigForm
             v-if="showProbeConfig && probeResult"
             ref="encodeFormRef"
+            :key="restoreConfig ? 'restored' : 'suggested'"
             :probe-result="probeResult"
             :byte-range="byteRangeEnabled"
             :encode-primary-action="encodePrimaryAction"
             :appearance="appearance ?? 'default'"
             :trim-active="trimActive ?? false"
+            :restore-config="restoreConfig"
             @submit="$emit('submit', $event)"
             @back="$emit('back')"
             @next-to-trim="$emit('next-to-trim')"

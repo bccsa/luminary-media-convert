@@ -408,6 +408,16 @@ const canRetryEncode = computed(
     () => currentStatus.value === 'failed' && poller.canRetry.value === true
 );
 
+/**
+ * The settings a failed encode ran with, for the form to open on: "Encode
+ * again" then repeats that encode instead of a fresh suggestion for the source.
+ */
+const retryConfig = computed(() =>
+    canRetryEncode.value
+        ? (poller.retryConfig.value ?? session.value?.encodeConfig ?? null)
+        : null
+);
+
 /** A failed encode that can carry on from what already reached storage. */
 const canContinueEncode = computed(
     () => canRetryEncode.value && poller.canResume.value === true
@@ -2511,6 +2521,7 @@ onUnmounted(() => {
                                         :trim-active="
                                             effectiveKeepRanges.length > 0
                                         "
+                                        :restore-config="retryConfig"
                                         @submit="onEncodeSubmit"
                                         @can-submit-change="
                                             onEncodeCanSubmitChange

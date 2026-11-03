@@ -692,6 +692,7 @@ export class EncodeController {
             this.sessionService.hasUsableCredentials(session)
         ) {
             result.canRetry = true;
+            if (session.encodeConfig) result.encodeConfig = session.encodeConfig;
             const duration = session.probeResult?.format?.duration ?? 0;
             if ((session.resumeFromSec ?? 0) > 0 && duration > 0) {
                 result.canResume = true;
