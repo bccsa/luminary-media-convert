@@ -123,6 +123,138 @@ describe('SegmentPipeline — shared chunk chains', () => {
             '\n'
         );
 
+    describe('durable segments, for continuing a failed encode', () => {
+        /** A minimal fMP4 segment: styp, then a moof whose tfdt is `tfdt`. */
+        function fmp4Segment(tfdt: number): Buffer {
+            const box = (type: string, ...content: Buffer[]) => {
+                const body = Buffer.concat(content);
+                const head = Buffer.alloc(8);
+                head.writeUInt32BE(body.length + 8, 0);
+                head.write(type, 4, 4, 'latin1');
+                return Buffer.concat([head, body]);
+            };
+            const tfdtBox = Buffer.alloc(12);
+            tfdtBox.writeUInt8(1, 0);
+            tfdtBox.writeBigUInt64BE(BigInt(tfdt), 4);
+            return Buffer.concat([
+                box('styp', Buffer.from('msdh', 'latin1')),
+                box('moof', box('traf', box('tfdt', tfdtBox))),
+                box('mdat', Buffer.alloc(16)),
+            ]);
+        }
+
+        function seedVideo(dirName: string, starts: number[]): void {
+            const dir = join(tmpDir, dirName);
+            mkdirSync(dir, { recursive: true });
+            const lines = [
+                '#EXTM3U',
+                '#EXT-X-TARGETDURATION:6',
+                '#EXT-X-MAP:URI="init.mp4"',
+            ];
+            starts.forEach((start, i) => {
+                const name = `segment_${String(i).padStart(5, '0')}.m4s`;
+                writeFileSync(join(dir, name), fmp4Segment(start));
+                lines.push('#EXTINF:6.000000,', name);
+            });
+            lines.push('#EXT-X-ENDLIST', '');
+            writeFileSync(join(dir, 'playlist.m3u8'), lines.join('\n'));
+        }
+
+        it('reports segments only once the chunk holding them has uploaded, with their start times', async () => {
+            seedVideo('stream_720p', [0, 540000]);
+            const durable: unknown[] = [];
+            let release!: () => void;
+            const uploaded = new Promise<void>((r) => (release = r));
+            const pipeline = makePipeline(tmpDir, {
+                byteRange: true,
+                streamChains: { stream_720p: 'v0' },
+                onDurable: (segments) => durable.push(...segments),
+            });
+            (pipeline as any).s3Service.uploadFile = vi.fn(() => uploaded);
+
+            const draining = pipeline.drain();
+            await new Promise((r) => setTimeout(r, 50));
+            expect(durable).toEqual([]);
+
+            release();
+            await draining;
+            expect(durable).toEqual([
+                expect.objectContaining({
+                    stream: 'stream_720p',
+                    index: 0,
+                    tfdt: 0,
+                    mediaFile: 'media/v0_0.m4s',
+                    offset: 0,
+                }),
+                expect.objectContaining({
+                    stream: 'stream_720p',
+                    index: 1,
+                    tfdt: 540000,
+                    mediaFile: 'media/v0_0.m4s',
+                }),
+            ]);
+        });
+
+        it('reports nothing for a chunk whose upload failed', async () => {
+            vi.useFakeTimers({ shouldAdvanceTime: true });
+            seedVideo('stream_720p', [0]);
+            const durable: unknown[] = [];
+            const pipeline = makePipeline(tmpDir, {
+                byteRange: true,
+                streamChains: { stream_720p: 'v0' },
+                onDurable: (segments) => durable.push(...segments),
+            });
+            (pipeline as any).s3Service.uploadFile = vi
+                .fn()
+                .mockRejectedValue(new Error('offline'));
+
+            const draining = pipeline.drain().catch((e: Error) => e);
+            await vi.advanceTimersByTimeAsync(5000);
+            expect(await draining).toBeInstanceOf(Error);
+            expect(durable).toEqual([]);
+            vi.useRealTimers();
+        });
+
+        it("names a later run's chunks apart, so a late upload from a failed run cannot overwrite them", async () => {
+            seedVideo('stream_720p', [0]);
+            const pipeline = makePipeline(tmpDir, {
+                byteRange: true,
+                streamChains: { stream_720p: 'v0' },
+                attempt: 2,
+            });
+            const uploads = captureUploads(pipeline);
+
+            await pipeline.drain();
+
+            expect([...uploads.keys()]).toContain('prefix/media/v0_r2_0.m4s');
+        });
+
+        it('starts no queued upload once aborted', async () => {
+            seedVideo('stream_720p', [0]);
+            const pipeline = makePipeline(tmpDir, {
+                byteRange: false,
+                uploadConcurrency: 1,
+            });
+            const s3 = (pipeline as any).s3Service;
+            s3.uploadFile = vi.fn(() => new Promise(() => {}));
+            (pipeline as any).enqueueUpload({
+                filePath: 'a',
+                objectKey: 'k1',
+                deleteAfterUpload: false,
+            });
+            (pipeline as any).enqueueUpload({
+                filePath: 'b',
+                objectKey: 'k2',
+                deleteAfterUpload: false,
+            });
+
+            pipeline.abort();
+
+            expect(s3.uploadFile).toHaveBeenCalledTimes(1);
+            expect((pipeline as any).uploadQueue).toHaveLength(0);
+        });
+    });
+
     it('interleaves two renditions of an angle into one chunk, each at its own offsets', async () => {
         seedStream('stream_1080p', [10, 20]);
         seedStream('stream_720p', [5, 7]);

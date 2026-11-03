@@ -10,6 +10,7 @@ import {
 import type * as Minio from 'minio';
 import type { S3ConfigDto } from '../dto/s3-config.dto.js';
 import { EncryptionService } from './encryption.service.js';
+import { readBaseMediaDecodeTime } from './fmp4-timeline.js';
 import { S3Service } from './s3.service.js';
 
 /**
@@ -92,6 +93,37 @@ export interface SegmentPipelineConfig {
     pollIntervalMs?: number;
     uploadConcurrency?: number;
     onProgress?: (progress: PipelineProgress) => void;
+    /**
+     * Which run of the encode this is, counted from 0. Chunks of a later run are
+     * named apart (`<chain>_r<attempt>_<n>.m4s`), so an upload from an earlier,
+     * failed run that lands late can never overwrite one of this run's chunks.
+     */
+    attempt?: number;
+    /**
+     * Told about segments once they are safely in storage: when the chunk that
+     * holds them has uploaded, or, without byte ranges, the segment itself.
+     * What a failed encode can continue from.
+     */
+    onDurable?: (segments: DurableSegment[]) => void;
+}
+
+/** A segment that has reached storage, as a continued encode needs to know it. */
+export interface DurableSegment {
+    /** Its stream directory, e.g. `stream_720p_1280x720`. */
+    stream: string;
+    /** The file ffmpeg wrote, e.g. `segment_00012.m4s`. */
+    file: string;
+    /** Its number, from the file name. */
+    index: number;
+    /**
+     * When it starts, in its track's timescale. Video only: a continued encode
+     * restarts the video on a segment boundary and re-encodes the audio whole.
+     */
+    tfdt?: number;
+    /** Where its bytes are, relative to the output: `media/<chunk>` or `<stream>/<file>`. */
+    mediaFile: string;
+    offset?: number;
+    length: number;
 }
 
 interface ByteRangeEntry {
@@ -101,6 +133,10 @@ interface ByteRangeEntry {
     offset: number;
     mediaFile: string;
 }
+
+/** A video chain carries `tfdt` records; the audio chain is re-encoded whole on a continue. */
+const AUDIO_CHAIN = 'a';
+const SEGMENT_INDEX_RE = /^segment_(\d+)\./;
 
 /**
  * One chunk chain: a run of `<id>_<n>.m4s` files under `media/`, shared by every
@@ -120,6 +156,8 @@ interface ChainState {
     currentChunkStream: WriteStream | null;
     currentChunkFile: string;
     currentChunkSegmentCount: number;
+    /** What the open chunk holds, reported durable once it has uploaded. */
+    currentChunkSegments: DurableSegment[];
 }
 
 interface StreamState {
@@ -138,6 +176,8 @@ interface UploadTask {
     deleteAfterUpload: boolean;
     /** Number of segments this upload represents (for byte-range chunks) */
     segmentCount?: number;
+    /** Segments this upload makes durable. */
+    durable?: DurableSegment[];
 }
 
 @Injectable()
@@ -277,6 +317,9 @@ export class SegmentPipeline {
     abort(): void {
         this.aborted = true;
         this.running = false;
+        // Nothing new starts; what is already sending is left to finish, and
+        // `settle()` waits for it.
+        this.uploadQueue.length = 0;
         if (this.pollTimer) {
             clearInterval(this.pollTimer);
             this.pollTimer = null;
@@ -287,6 +330,18 @@ export class SegmentPipeline {
                 chain.currentChunkStream.end();
                 chain.currentChunkStream = null;
             }
+        }
+    }
+
+    /**
+     * Wait, for up to `timeoutMs`, for the uploads already sending when the
+     * pipeline was aborted. They are let finish rather than cut off: a chunk
+     * that does arrive is one a continued encode need not make again.
+     */
+    async settle(timeoutMs = 30_000): Promise<void> {
+        const until = Date.now() + timeoutMs;
+        while (this.activeUploads > 0 && Date.now() < until) {
+            await new Promise((r) => setTimeout(r, 100));
         }
     }
 
@@ -379,6 +434,14 @@ export class SegmentPipeline {
             state.processedSegments.add(filename);
             this.totalSegmentsProduced++;
 
+            // Read before encryption makes the box structure unreadable.
+            const durable = await this.describeSegment(
+                streamDirName,
+                filename,
+                segPath,
+                state.chain.id !== AUDIO_CHAIN
+            );
+
             // Encrypt if needed
             if (this.config.encryptionKey && this.config.encryptionIV) {
                 try {
@@ -397,7 +460,12 @@ export class SegmentPipeline {
             }
 
             if (this.config.byteRange) {
-                await this.appendToByteRangeChunk(state, filename, segPath);
+                await this.appendToByteRangeChunk(
+                    state,
+                    filename,
+                    segPath,
+                    durable
+                );
             } else {
                 // Upload individual segment
                 const objectKey = this.objectKey(streamDirName, filename);
@@ -405,11 +473,46 @@ export class SegmentPipeline {
                     filePath: segPath,
                     objectKey,
                     deleteAfterUpload: true,
+                    durable: [
+                        { ...durable, length: (await stat(segPath)).size },
+                    ],
                 });
             }
 
             this.emitProgress();
         }
+    }
+
+    /**
+     * A segment's identity and, for video, its start time. A start time that
+     * cannot be read is left out rather than failing the encode: it only means
+     * a continued encode cannot restart at this segment.
+     */
+    private async describeSegment(
+        stream: string,
+        file: string,
+        segPath: string,
+        video: boolean
+    ): Promise<DurableSegment> {
+        const index = Number(SEGMENT_INDEX_RE.exec(file)?.[1] ?? NaN);
+        let tfdt: number | undefined;
+        if (video) {
+            try {
+                tfdt = readBaseMediaDecodeTime(await readFile(segPath));
+            } catch (err) {
+                this.logger.debug(
+                    `[pipeline] ${stream}/${file}: no start time (${(err as Error).message})`
+                );
+            }
+        }
+        return {
+            stream,
+            file,
+            index,
+            ...(tfdt !== undefined ? { tfdt } : {}),
+            mediaFile: posix.join(stream, file),
+            length: 0,
+        };
     }
 
     /**
@@ -451,6 +554,7 @@ export class SegmentPipeline {
             currentChunkStream: null,
             currentChunkFile: '',
             currentChunkSegmentCount: 0,
+            currentChunkSegments: [],
         };
         this.chains.set(id, chain);
         return chain;
@@ -478,7 +582,8 @@ export class SegmentPipeline {
     private async appendToByteRangeChunk(
         state: StreamState,
         segmentFile: string,
-        segPath: string
+        segPath: string,
+        durable: DurableSegment
     ): Promise<void> {
         const chain = state.chain;
 
@@ -509,7 +614,11 @@ export class SegmentPipeline {
         // Ensure we have an open write stream
         if (!chain.currentChunkStream) {
             await mkdir(this.chunkDir, { recursive: true });
-            chain.currentChunkFile = `${chain.id}_${chain.currentChunkIndex}.m4s`;
+            const attempt = this.config.attempt ?? 0;
+            chain.currentChunkFile =
+                attempt > 0
+                    ? `${chain.id}_r${attempt}_${chain.currentChunkIndex}.m4s`
+                    : `${chain.id}_${chain.currentChunkIndex}.m4s`;
             chain.currentChunkStream = createWriteStream(
                 join(this.chunkDir, chain.currentChunkFile)
             );
@@ -526,6 +635,12 @@ export class SegmentPipeline {
             length: segSize,
             offset: chain.currentChunkOffset,
             mediaFile: chain.currentChunkFile,
+        });
+        chain.currentChunkSegments.push({
+            ...durable,
+            mediaFile: posix.join('media', chain.currentChunkFile),
+            offset: chain.currentChunkOffset,
+            length: segSize,
         });
         chain.currentChunkOffset += segSize;
         chain.currentChunkSegmentCount++;
@@ -572,11 +687,13 @@ export class SegmentPipeline {
             // Spans streams now, which the progress counter does not mind: it
             // counts segments uploaded, not segments of any one stream.
             segmentCount: chain.currentChunkSegmentCount,
+            durable: chain.currentChunkSegments,
         });
 
         chain.currentChunkIndex++;
         chain.currentChunkOffset = 0;
         chain.currentChunkSegmentCount = 0;
+        chain.currentChunkSegments = [];
     }
 
     /**
@@ -683,6 +800,16 @@ export class SegmentPipeline {
                 );
                 this.uploadedKeys.push(task.objectKey);
                 this.segmentsUploaded += task.segmentCount ?? 1;
+                if (task.durable?.length) {
+                    try {
+                        this.config.onDurable?.(task.durable);
+                    } catch (err) {
+                        // A record not kept costs a continue some work, never the encode.
+                        this.logger.warn(
+                            `[pipeline] could not record durable segments: ${(err as Error).message}`
+                        );
+                    }
+                }
 
                 // Delete local file after confirmed upload
                 if (task.deleteAfterUpload) {
