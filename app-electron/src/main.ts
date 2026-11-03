@@ -25,6 +25,7 @@ import { showLicences } from './licences';
 import { candidateBinaries, resolveFfmpegBinary } from './ffmpeg-location';
 import { resolveWindowTarget } from './window-target';
 import { type AvailableUpdate, checkForUpdate } from './update-check';
+import { teeConsoleToFile } from './log-file';
 
 const PROTOCOL = 'luminary-convert';
 
@@ -37,6 +38,9 @@ const PROTOCOL = 'luminary-convert';
  * drive the encoder.
  */
 const apiToken = randomBytes(32).toString('hex');
+
+/** Where the console is copied to, once it is; for the menu's Show Log File. */
+let logPath: string | null = null;
 
 let server: RunningServer | undefined;
 let mainWindow: BrowserWindow | undefined;
@@ -625,6 +629,12 @@ function buildMenu(): void {
             label: 'Clear Working Files…',
             click: () => void clearWorkingFiles(),
         },
+        // No ellipsis: it shows the file and asks nothing.
+        {
+            label: 'Show Log File',
+            enabled: !!logPath,
+            click: () => logPath && shell.showItemInFolder(logPath),
+        },
     ];
 
     Menu.setApplicationMenu(
@@ -815,6 +825,14 @@ function registerProtocolClient(): void {
 
 async function start(): Promise<void> {
     await app.whenReady();
+    try {
+        logPath = teeConsoleToFile(app.getPath('logs'));
+    } catch (err) {
+        console.warn('Could not open the log file:', err);
+    }
+    console.log(
+        `${app.name} ${app.getVersion()} on ${process.platform} ${process.arch}, ${new Date().toISOString()}`
+    );
     await loadSettings();
     registerIpc();
 
