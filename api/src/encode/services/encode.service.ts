@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { LUMINARY_KEY_PLACEHOLDER_URI } from '@luminary-media-converter/hls-core';
 import {
     copyFileSync,
@@ -134,7 +134,7 @@ function reEncodedConfig(config: EncodeConfigDto): EncodeConfigDto {
 }
 
 @Injectable()
-export class EncodeService {
+export class EncodeService implements OnModuleInit {
     private readonly logger = new Logger(EncodeService.name);
     private readonly workDir =
         process.env.WORK_DIR || join(process.cwd(), 'work');
@@ -147,6 +147,23 @@ export class EncodeService {
         private readonly waveformService: WaveformService,
         private readonly segmentPipelineService: SegmentPipelineService
     ) {}
+
+    /**
+     * Work out, for encodes that were running when the encoder last stopped,
+     * whether they can carry on: they failed without this process seeing it,
+     * so nothing offered to continue them.
+     */
+    async onModuleInit(): Promise<void> {
+        for (const session of this.sessionService.list()) {
+            if (session.status !== 'failed' || session.resumeFromSec) continue;
+            if (!session.encodeConfig || !session.filePath) continue;
+            const from = await this.resumeFrom(
+                new ResumeStore(join(this.workDir, session.id)),
+                session
+            );
+            if (from) this.sessionService.setResumeFrom(session.id, from);
+        }
+    }
 
     private encryptionEnabled(session: {
         config: { encryption?: { enabled?: boolean } | null };
@@ -1090,14 +1107,12 @@ export class EncodeService {
         const records: ResumeRecord[] = countPending
             ? [
                   ...stored,
-                  ...store
-                      .pending(stored)
-                      .flatMap((p) =>
-                          p.segments.map((s) => ({
-                              kind: 'durable' as const,
-                              ...s,
-                          }))
-                      ),
+                  ...store.pending(stored).flatMap((p) =>
+                      p.segments.map((s) => ({
+                          kind: 'durable' as const,
+                          ...s,
+                      }))
+                  ),
               ]
             : stored;
         const plan = resumePlan(layout, records);
