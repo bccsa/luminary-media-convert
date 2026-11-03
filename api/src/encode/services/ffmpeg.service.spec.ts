@@ -69,6 +69,7 @@ vi.mock('worker_threads', async (importOriginal) => {
 
 import {
     FfmpegService,
+    audioWarmUpStart,
     hlsOutputPath,
     isHardwareEncoderFailure,
     type AccelMode,
@@ -365,7 +366,7 @@ describe('FfmpegService', () => {
                     inputPath: '/tmp/input.mp4',
                     outputDir: '/tmp/output',
                     encodeConfig: config(),
-                    resume: { fromSec: 36, startNumber: 6 },
+                    resume: { fromSec: 36, startNumber: 6, timescale: 90000 },
                 });
 
                 const inputs = args.flatMap((a, i) => (a === '-i' ? [i] : []));
@@ -389,13 +390,41 @@ describe('FfmpegService', () => {
                         type: 'audio',
                         videoRenditions: [],
                     },
-                    resume: { fromSec: 36, startNumber: 6 },
+                    // Segment 10 of a 48 kHz encode starts at sample 2880512.
+                    resume: {
+                        fromSec: 2880512 / 48000,
+                        startNumber: 10,
+                        timescale: 48000,
+                    },
                 });
 
                 expect(args[args.indexOf('-i') - 2]).toBe('-ss');
-                // Exactly the boundary before: audio has no frame to miss.
-                expect(args[args.indexOf('-i') - 1]).toBe('30.000000');
-                expect(args[args.indexOf('-start_number') + 1]).toBe('5');
+                // 282 frames before the boundary, on the frame grid.
+                expect(args[args.indexOf('-i') - 1]).toBe('53.994667');
+                expect(args[args.indexOf('-start_number') + 1]).toBe('9');
+            });
+
+            describe('audioWarmUpStart', () => {
+                // Measured against an uninterrupted encode: these starts give
+                // joins that match it sample for sample.
+                it('starts a whole number of AAC frames before the boundary', () => {
+                    expect(
+                        audioWarmUpStart(2880512 / 48000, 48000, 6)
+                    ).toBeCloseTo(2531 * (1024 / 48000), 9);
+                    expect(
+                        audioWarmUpStart(6048768 / 48000, 48000, 6)
+                    ).toBeCloseTo(120, 9);
+                });
+
+                it('stays on the grid at other sample rates', () => {
+                    const frame = 1024 / 44100;
+                    const start = audioWarmUpStart(2600 * frame, 44100, 6);
+                    expect(start / frame).toBeCloseTo(2600 - 259, 9);
+                });
+
+                it('never starts before the source', () => {
+                    expect(audioWarmUpStart(2, 48000, 6)).toBe(0);
+                });
             });
 
             it('continues a trimmed encode from a range list of what is left, the audio from the whole', async () => {
@@ -410,7 +439,7 @@ describe('FfmpegService', () => {
                                 { inSec: 70, outSec: 100 },
                             ],
                         } as any),
-                        resume: { fromSec: 48, startNumber: 8 },
+                        resume: { fromSec: 48, startNumber: 8, timescale: 90000 },
                     });
 
                     const inputs = args.flatMap((a, i) =>

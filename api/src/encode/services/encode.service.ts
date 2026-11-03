@@ -28,6 +28,7 @@ import {
 } from './session.service.js';
 import {
     FfmpegService,
+    type EncodeRestart,
     type EncodeResult,
     type WaveLayout,
 } from './ffmpeg.service.js';
@@ -90,10 +91,10 @@ interface PreparedRun {
     /** The share of the encode a continue reuses, 0–1: where every bar starts. */
     doneFraction?: number;
     pipelineResume?: PipelineResume;
-    ffmpegResume?: { fromSec: number; startNumber: number };
+    ffmpegResume?: EncodeRestart;
     waveResume?: {
         skip: number;
-        resume?: { fromSec: number; startNumber: number };
+        resume?: EncodeRestart;
     };
 }
 
@@ -103,7 +104,7 @@ interface Continuation {
     records: ResumeRecord[];
     inits: Record<string, Buffer>;
     /** Where the wave that restarts does so; absent when it runs from its start. */
-    resume?: { fromSec: number; startNumber: number };
+    resume?: EncodeRestart;
     /** How much of the encode is reused, as seconds of output. */
     doneSec: number;
 }
@@ -1195,12 +1196,23 @@ export class EncodeService implements OnModuleInit {
         let resume: Continuation['resume'];
         if (plan.point) {
             const first = resumedVideo[0]!;
+            const timescale = readTrackTimescale(inits[first]);
+            // Restarted audio warms up on one frame grid (see
+            // audioWarmUpStart); tracks at other sample rates would join off it.
+            if (
+                layout[plan.skip]!.videoStreams.length === 0 &&
+                resumedVideo.some(
+                    (s) => readTrackTimescale(inits[s]) !== timescale
+                )
+            )
+                return null;
             resume = {
                 fromSec:
                     (plan.point.startTfdt[first] -
                         plan.point.reused[first][0].tfdt) /
-                    readTrackTimescale(inits[first]),
+                    timescale,
                 startNumber: plan.point.startIndex,
+                timescale,
             };
         }
         const duration = session.probeResult?.format?.duration ?? 0;

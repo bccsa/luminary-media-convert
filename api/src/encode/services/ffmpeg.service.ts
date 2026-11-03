@@ -55,6 +55,15 @@ const execFileAsync = promisify(execFile);
 
 dotenv.config();
 
+/** Where a continued encode restarts. */
+export interface EncodeRestart {
+    /** Seconds of output before the restart: segment `startNumber`'s start. */
+    fromSec: number;
+    startNumber: number;
+    /** Ticks per second of the restarted streams; audio's is its sample rate. */
+    timescale: number;
+}
+
 export interface EncodeOptions {
     sessionId: string;
     inputPath: string;
@@ -68,7 +77,7 @@ export interface EncodeOptions {
      * audio one segment earlier, to warm the encoder up. Honoured by a single
      * run only; see `canResume`.
      */
-    resume?: { fromSec: number; startNumber: number };
+    resume?: EncodeRestart;
     /**
      * Continue a failed encode run in waves: skip the first `skip` waves,
      * whose output is already in storage, and continue wave `skip` per
@@ -76,7 +85,7 @@ export interface EncodeOptions {
      */
     waveResume?: {
         skip: number;
-        resume?: { fromSec: number; startNumber: number };
+        resume?: EncodeRestart;
     };
     /** Told when a wave of a ladder run in waves has finished. */
     onWaveDone?: (index: number) => Promise<void> | void;
@@ -157,6 +166,34 @@ export interface EncodeResult {
      * in-points rather than added to them on a trimmed encode.
      */
     alignmentOffset: number;
+}
+
+/** Samples in one AAC-LC frame. */
+const AAC_FRAME_SAMPLES = 1024;
+
+/**
+ * Where a continued audio-only encode starts reading, in seconds of output, so
+ * that its second segment is sample for sample segment K of the failed run.
+ *
+ * The failed run's frames cover the source in steps of 1024 samples from t=0,
+ * and segment K starts on one of them. Starting the warm-up on that same grid,
+ * exactly one segment's worth of frames before it, gives frames with the same
+ * content and makes the muxer cut the warm-up segment at the boundary. Off the
+ * grid, every frame from the join on is shifted by the remainder (up to 21 ms
+ * at 48 kHz), heard as a jump.
+ *
+ * @param fromSec segment K's start, in seconds of output
+ * @param sampleRate the audio's sample rate (its track timescale)
+ */
+export function audioWarmUpStart(
+    fromSec: number,
+    sampleRate: number,
+    segmentDuration: number
+): number {
+    const frame = AAC_FRAME_SAMPLES / sampleRate;
+    const boundary = Math.round(fromSec / frame);
+    const warmUp = Math.ceil(segmentDuration / frame);
+    return Math.max(0, boundary - warmUp) * frame;
 }
 
 /**
@@ -1182,12 +1219,14 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             // An AAC encoder started at the boundary primes its first frame, which
             // plays as a gap at the join. Started one segment earlier, it is
             // warmed up by the boundary and its output from there is the same
-            // as an uninterrupted run's; the segment before is thrown away. An
-            // exact seek: audio has no frame to miss.
-            const warm = Math.max(
-                0,
-                alignmentOffset + resume.fromSec - segmentDuration
-            );
+            // as an uninterrupted run's; the segment before is thrown away.
+            const warm =
+                alignmentOffset +
+                audioWarmUpStart(
+                    resume.fromSec,
+                    resume.timescale,
+                    segmentDuration
+                );
             args.push('-ss', warm.toFixed(6), '-i', inputPath);
         } else if (alignmentOffset > 0) {
             // See buildVideoArgs: input-level, so it reaches copied streams too.
