@@ -19,7 +19,7 @@ import {
 } from 'fs/promises';
 import { basename, join, posix } from 'path';
 import { estimateOutputBytes, formatBytes } from './output-estimate.js';
-import { failureMessage } from './failure-message.js';
+import { failureMessage, isNetworkFailure } from './failure-message.js';
 import { freeBytes } from './disk-space.js';
 import {
     SESSION_STATE_FILENAME,
@@ -867,6 +867,10 @@ export class EncodeService implements OnModuleInit {
             // The whole of it in the log; one sentence for whoever started the encode.
             this.logger.error(`Session ${sessionId} failed: ${errorMsg}`);
             this.sessionService.setFailed(sessionId, failureMessage(errorMsg));
+            this.sessionService.setNetworkFailure(
+                sessionId,
+                isNetworkFailure(errorMsg)
+            );
         } finally {
             // A drain stops the poll timer on its way out; every other exit from
             // this method — an ffmpeg failure, a refused config, a throw from any

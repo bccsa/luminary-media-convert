@@ -31,11 +31,7 @@ export function failureMessage(technical: string): string {
     if (/^FFmpeg .*exited with code/i.test(text)) {
         return `The encoder could not encode this video. ${NEXT_STEP} If it fails again, the source may be damaged or in a format it cannot read.`;
     }
-    if (
-        /S3 upload failed|drain stalled|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up/i.test(
-            text
-        )
-    ) {
+    if (isNetworkFailure(text)) {
         return `The connection to storage was lost while uploading. Check the internet connection, then ${lowerFirst(NEXT_STEP)}`;
     }
     if (/Segment encryption failed/i.test(text)) {
@@ -43,6 +39,16 @@ export function failureMessage(technical: string): string {
     }
     if (!text.includes('\n') && text.length <= PLAIN_MAX_LENGTH) return text;
     return `The encode failed. ${NEXT_STEP} The log file has the details.`;
+}
+
+/**
+ * Whether a failure was the connection to storage, which tends to come back by
+ * itself: an upload that gave up, a drain that stalled, a network error.
+ */
+export function isNetworkFailure(technical: string): boolean {
+    return /S3 upload failed|drain stalled|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ENETUNREACH|socket hang up/i.test(
+        technical
+    );
 }
 
 function lowerFirst(sentence: string): string {
