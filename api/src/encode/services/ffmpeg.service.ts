@@ -61,6 +61,13 @@ export interface EncodeOptions {
     outputDir: string;
     encodeConfig: EncodeConfigDto;
     onProgress: (percent: number) => void;
+    /**
+     * Continue a failed encode: restart the video at `fromSec` of the output,
+     * numbering its segments from `startNumber`, and encode the audio again
+     * from the start. Honoured by a single-run video encode only; see
+     * `canResume`.
+     */
+    resume?: { fromSec: number; startNumber: number };
 }
 
 /**
@@ -739,6 +746,8 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         const sourceFrameRate = await this.probeFrameRate(inputPath);
         const gopFrames = Math.round(segmentDuration * sourceFrameRate);
         const trimming = !!encodeConfig.trimSegments?.length;
+        // Never alongside a trim, waves or copy streams: `canResume` keeps them apart.
+        const resume = trimming ? undefined : opts.resume;
 
         this.logger.log(
             `Source frame rate: ${sourceFrameRate.toFixed(2)} fps, GOP: ${gopFrames} frames (${segmentDuration}s segments)`
@@ -783,6 +792,25 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 '-i',
                 concatPath,
                 '-copyts'
+            );
+        } else if (resume) {
+            // The video restarts on the segment boundary at `fromSec`, half a
+            // frame early so an accurate seek keeps the frame on it; the forced
+            // GOP then puts every later boundary back on the original grid. The
+            // audio is read again from the head by a second input: restarting
+            // an AAC encoder mid-stream adds priming at the join, which players
+            // hear, and audio is cheap to encode again.
+            const seek = Math.max(
+                0,
+                alignmentOffset + resume.fromSec - 0.5 / sourceFrameRate
+            );
+            args.push('-ss', seek.toFixed(6), '-i', inputPath);
+            args.push(
+                ...(alignmentOffset > 0
+                    ? ['-ss', String(alignmentOffset)]
+                    : []),
+                '-i',
+                inputPath
             );
         } else if (alignmentOffset > 0) {
             // Input-level, hence in front of `-i`, and not a `-filter_complex`
@@ -936,7 +964,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 '-map',
                 trimming
                     ? `[aout${audioOutputIndex}]`
-                    : `0:a:${group.sourceTrackIndex}`
+                    : `${resume ? 1 : 0}:a:${group.sourceTrackIndex}`
             );
             if (group.copyStream) {
                 args.push(`-c:a:${audioOutputIndex}`, 'copy');
@@ -973,6 +1001,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             'hls',
             '-hls_time',
             String(segmentDuration),
+            ...(resume ? ['-start_number', String(resume.startNumber)] : []),
             '-hls_playlist_type',
             'vod',
             '-hls_flags',
@@ -1172,6 +1201,31 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         return null;
     }
 
+    /**
+     * Whether a failed encode of `config` can be continued rather than started
+     * over: a video encode in one pass, re-encoding every stream, with no trim.
+     * A copied stream cannot be cut on a chosen segment boundary, a trim is a
+     * different timeline, and a ladder in waves would have to be continued wave
+     * by wave.
+     */
+    canResume(config: EncodeConfigDto): boolean {
+        return (
+            config.type === 'video' &&
+            !config.trimSegments?.length &&
+            !(config.videoRenditions ?? []).some((r) => r.copyStream) &&
+            !(config.audioGroups ?? []).some((g) => g.copyStream) &&
+            planLadderWaves(config.videoRenditions ?? [], MAX_HARDWARE_SESSIONS)
+                .length <= 1
+        );
+    }
+
+    /** The video stream directories `config` writes, as the stream map names them. */
+    videoStreamDirs(config: EncodeConfigDto): string[] {
+        return Object.entries(this.buildStreamChainMap(config))
+            .filter(([, chain]) => chain !== 'a')
+            .map(([dir]) => dir);
+    }
+
     async encode(opts: EncodeOptions): Promise<EncodeResult> {
         const { outputDir, encodeConfig, onProgress } = opts;
         const type = encodeConfig.type;
@@ -1231,6 +1285,12 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                       MAX_HARDWARE_SESSIONS
                   )
                 : [];
+
+        if (opts.resume && (type !== 'video' || waves.length > 1)) {
+            throw new Error(
+                'A continued encode runs in one pass; this one would not, so it has to start over'
+            );
+        }
 
         if (waves.length > 1) {
             return await this.runLadderWaves(
