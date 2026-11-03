@@ -1207,6 +1207,37 @@ describe('EncodeService', () => {
         );
     });
 
+    it('never shows encoding behind encrypting', async () => {
+        let pipelineProgress: ((update: any) => void) | undefined;
+        (
+            segmentPipelineService.createPipeline as ReturnType<typeof vi.fn>
+        ).mockImplementation((opts: any) => {
+            pipelineProgress = opts.onProgress;
+            return mockPipeline;
+        });
+        const updateSpy = vi.spyOn(sessionService, 'updatePipelineProgress');
+        const reported: any[] = [];
+        const encode = ffmpegService.encode.getMockImplementation();
+        ffmpegService.encode.mockImplementation(async (opts: any) => {
+            // A fast encode: segments are encrypted before FFmpeg's first report.
+            pipelineProgress!({ encrypting: 17, uploading: 1 });
+            reported.push(updateSpy.mock.calls.at(-1)![1]);
+            opts.onProgress(5);
+            reported.push(updateSpy.mock.calls.at(-1)![1]);
+            opts.onProgress(40);
+            reported.push(updateSpy.mock.calls.at(-1)![1]);
+            return encode!(opts);
+        });
+
+        const session = sessionService.create(makeConfig());
+        sessionService.setFilePath(session.id, '/tmp/input.mp4');
+        sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+
+        await service.processSession(session.id);
+
+        expect(reported.map((p) => p.encoding)).toEqual([17, 17, 40]);
+    });
+
     it('reports encoding progress through the session pipeline progress', async () => {
         let capturedOnProgress: ((percent: number) => void) | undefined;
         ffmpegService.encode.mockImplementation(async (opts: any) => {

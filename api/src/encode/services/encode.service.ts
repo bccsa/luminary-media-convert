@@ -395,6 +395,13 @@ export class EncodeService implements OnModuleInit {
                                 currentProgress.encrypting ?? 0,
                                 pipelineUpdate.encrypting
                             );
+                        // A segment is encrypted only once encoded, but FFmpeg
+                        // reports once a second: a fast encode, audio above
+                        // all, would show encrypting ahead of encoding.
+                        currentProgress.encoding = Math.max(
+                            currentProgress.encoding ?? 0,
+                            currentProgress.encrypting ?? 0
+                        );
                         if (pipelineUpdate.uploading != null)
                             currentProgress.uploading = Math.max(
                                 currentProgress.uploading ?? 0,
@@ -470,7 +477,10 @@ export class EncodeService implements OnModuleInit {
             };
 
             const onEncodeProgress = (percent: number): void => {
-                currentProgress.encoding = percent;
+                currentProgress.encoding = Math.max(
+                    percent,
+                    currentProgress.encrypting ?? 0
+                );
                 this.sessionService.updatePipelineProgress(sessionId, {
                     ...currentProgress,
                 });
