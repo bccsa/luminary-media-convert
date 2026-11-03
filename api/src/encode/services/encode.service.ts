@@ -4,6 +4,7 @@ import { existsSync } from 'fs';
 import { readdir, rm, writeFile } from 'fs/promises';
 import { join, posix } from 'path';
 import { estimateOutputBytes, formatBytes } from './output-estimate.js';
+import { failureMessage } from './failure-message.js';
 import { freeBytes } from './disk-space.js';
 import {
     SESSION_STATE_FILENAME,
@@ -705,8 +706,9 @@ export class EncodeService {
             this.logger.log(`Session ${sessionId} completed successfully`);
         } catch (err) {
             const errorMsg = (err as Error).message || 'Unknown error';
+            // The whole of it in the log; one sentence for whoever started the encode.
             this.logger.error(`Session ${sessionId} failed: ${errorMsg}`);
-            this.sessionService.setFailed(sessionId, errorMsg);
+            this.sessionService.setFailed(sessionId, failureMessage(errorMsg));
         } finally {
             // A drain stops the poll timer on its way out; every other exit from
             // this method — an ffmpeg failure, a refused config, a throw from any

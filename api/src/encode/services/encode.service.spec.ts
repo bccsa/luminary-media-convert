@@ -602,7 +602,10 @@ describe('EncodeService', () => {
 
         const updated = sessionService.get(session.id)!;
         expect(updated.status).toBe('failed');
-        expect(updated.error).toBe('FFmpeg exited with code 1');
+        // A sentence for the editor; the ffmpeg text stays in the log.
+        expect(updated.error).toMatch(
+            /^The encoder could not encode this video\./
+        );
     });
 
     it('should mark session as failed when pipeline drain errors', async () => {
