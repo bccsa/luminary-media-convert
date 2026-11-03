@@ -148,6 +148,12 @@ export class ThumbnailService {
     >();
     /** Stops the in-flight generation of a session, for a regenerate to start over. */
     private readonly stops = new Map<string, AbortController>();
+    /**
+     * A regenerate clearing the old storyboard. A request arriving meanwhile
+     * waits for it: otherwise it would serve the old frames as complete, or start
+     * a pass of its own into the directory being removed.
+     */
+    private readonly clearing = new Map<string, Promise<void>>();
 
     /** Where a session's pre-encode storyboard lives. */
     previewDir(sessionId: string): string {
@@ -182,8 +188,17 @@ export class ThumbnailService {
         opts: Parameters<ThumbnailService['getOrGeneratePreview']>[1]
     ): Promise<void> {
         this.stops.get(sessionId)?.abort();
-        await this.inFlight.get(sessionId)?.catch(() => null);
-        await this.removePreview(sessionId);
+        const previous = this.inFlight.get(sessionId);
+        const clear = (async () => {
+            await previous?.catch(() => null);
+            await this.removePreview(sessionId);
+        })();
+        this.clearing.set(sessionId, clear);
+        try {
+            await clear;
+        } finally {
+            this.clearing.delete(sessionId);
+        }
         await this.getOrGeneratePreview(sessionId, opts);
     }
 
@@ -215,6 +230,7 @@ export class ThumbnailService {
             onProgress?: (thumbCount: number, complete?: boolean) => void;
         }
     ): Promise<PreviewThumbnails | null> {
+        await this.clearing.get(sessionId);
         const dir = this.previewDir(sessionId);
         // generateIndividualThumbs writes into <outputDir>/thumbnails. The
         // finished VTT lands there too — looking for it one level up meant the

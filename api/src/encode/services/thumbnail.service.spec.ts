@@ -899,6 +899,59 @@ describe('ThumbnailService', () => {
                 rmSync(workDir, { recursive: true, force: true });
             }
         });
+
+        it('keeps a read that lands meanwhile from serving the old storyboard', async () => {
+            // The client asks again the moment the regenerate is accepted. Served
+            // the old, finished storyboard, it stopped following, and the frames
+            // it held were then deleted under it.
+            const workDir = mkdtempSync(join(tmpdir(), 'thumb-regen-race-'));
+            (service as any).workDir = workDir;
+            const thumbsDir = join(
+                workDir,
+                's1',
+                'preview-thumbnails',
+                'thumbnails'
+            );
+            mkdirSync(thumbsDir, { recursive: true });
+            writeFileSync(join(thumbsDir, 'thumb_000001.webp'), 'old');
+            writeFileSync(join(thumbsDir, 'thumbnails.vtt'), 'WEBVTT\n');
+            let passes = 0;
+            let finish: (() => void) | null = null;
+            mockExecFile.mockImplementation((...call: any[]) => {
+                const cb = call[call.length - 1];
+                const args = call[1] as string[];
+                if (args[0] === '-encoders') {
+                    cb(null, { stdout: WEBP_ENCODERS, stderr: '' });
+                    return;
+                }
+                if (args.includes('packet=pts_time,flags')) {
+                    cb(null, { stdout: '', stderr: '' });
+                    return;
+                }
+                passes++;
+                finish = () => cb(null, { stdout: '', stderr: '' });
+            });
+            const opts = {
+                inputPath: '/tmp/test.mkv',
+                duration: 10,
+                trackIndex: 0,
+                sourceWidth: 1920,
+                sourceHeight: 1080,
+            };
+
+            try {
+                const regenerating = service.regeneratePreview('s1', opts);
+                const read = await service.getOrGeneratePreview('s1', opts);
+                await regenerating;
+
+                expect(read?.complete).not.toBe(true);
+                await until(() => finish !== null, 'the new pass to start');
+                expect(passes).toBe(1);
+            } finally {
+                (finish as (() => void) | null)?.();
+                rmSync(workDir, { recursive: true, force: true });
+            }
+        });
     });
 
     describe('detectSpriteFormat (via generateIndividualThumbs)', () => {

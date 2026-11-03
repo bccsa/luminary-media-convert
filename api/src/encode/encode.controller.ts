@@ -1353,9 +1353,11 @@ export class EncodeController {
         }
 
         // Back to nothing at once, so the timeline lets go of the old frames
-        // rather than showing them until the first new one arrives.
+        // rather than showing them until the first new one arrives. Answered
+        // only once the old frames are gone and the new pass has started, so
+        // the client's next read finds the new storyboard, not the old one.
         this.sessionService.updateStoryboardProgress(sessionId, 0);
-        void this.thumbnailService
+        await this.thumbnailService
             .regeneratePreview(sessionId, {
                 inputPath: session.filePath,
                 duration,
