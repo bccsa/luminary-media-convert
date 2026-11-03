@@ -525,6 +525,42 @@ export class EncodeController {
         };
     }
 
+    @Post(':sessionId/continue')
+    @HttpCode(HttpStatus.ACCEPTED)
+    @UseGuards(AuthResolverGuard)
+    @AuthTypes('instance', 'session')
+    @ApiSecurity('apikey')
+    @ApiOperation({
+        summary: 'Continue a failed encode',
+        description:
+            'Runs a failed encode again with the settings it was started with, ' +
+            'continuing from what already reached storage when it can (see ' +
+            'canResume) and starting over when it cannot.',
+    })
+    @ApiParam({ name: 'sessionId', description: 'Session ID' })
+    @ApiResponse({ status: 202, type: EncodeStartResponseDto })
+    @ApiResponse({
+        status: 400,
+        description:
+            'Not a failed encode with its source and settings still here.',
+    })
+    @ApiResponse({ status: 404, description: 'Session not found.' })
+    async continueEncode(
+        @Param('sessionId') sessionId: string
+    ): Promise<EncodeStartResponseDto> {
+        const session = this.sessionService.get(sessionId);
+        if (!session) {
+            throw new NotFoundException(`Session ${sessionId} not found`);
+        }
+        if (session.status !== 'failed' || !session.encodeConfig) {
+            throw new BadRequestException(
+                'Only a failed encode can be continued'
+            );
+        }
+        // The same checks a start makes, on the settings already stored.
+        return this.startEncode(sessionId, session.encodeConfig);
+    }
+
     @SkipAllThrottles()
     @Sse(':sessionId/events')
     @ApiOperation({
@@ -656,6 +692,14 @@ export class EncodeController {
             this.sessionService.hasUsableCredentials(session)
         ) {
             result.canRetry = true;
+            const duration = session.probeResult?.format?.duration ?? 0;
+            if ((session.resumeFromSec ?? 0) > 0 && duration > 0) {
+                result.canResume = true;
+                result.resumeFromPercent = Math.min(
+                    99,
+                    Math.floor((session.resumeFromSec! / duration) * 100)
+                );
+            }
         }
 
         if (session.status === 'queued') {

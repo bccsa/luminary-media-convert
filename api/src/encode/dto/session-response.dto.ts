@@ -187,6 +187,24 @@ export class SessionStatusDto {
 
     @ApiPropertyOptional({
         description:
+            'Present and true when a failed encode can continue from what already ' +
+            'reached storage, with the settings it was started with ' +
+            '(POST /api/sessions/{id}/continue), rather than start over.',
+        example: true,
+    })
+    @Expose()
+    canResume?: boolean;
+
+    @ApiPropertyOptional({
+        description:
+            'With canResume: how far into the output the encode continues from, 0–100.',
+        example: 47,
+    })
+    @Expose()
+    resumeFromPercent?: number;
+
+    @ApiPropertyOptional({
+        description:
             'Whether the output will use byte-range HLS. Set at session creation ' +
             'and not editable afterwards, so this response is the only way for the ' +
             'client to learn it rather than assuming the API default.',

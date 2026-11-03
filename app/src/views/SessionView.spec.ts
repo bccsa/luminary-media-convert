@@ -685,12 +685,16 @@ describe('SessionView', () => {
      * problem in the first place.
      */
     describe('retrying a failed encode', () => {
-        function failedSession(canRetry: boolean | undefined) {
+        function failedSession(
+            canRetry: boolean | undefined,
+            resume: { canResume?: boolean; resumeFromPercent?: number } = {}
+        ) {
             detail.mockResolvedValue(uploadedSession({ status: 'failed' }));
             status.mockResolvedValue({
                 status: 'failed',
                 error: 'Not enough disk space on the encoder',
                 canRetry,
+                ...resume,
                 probeResult: uploadedSession().probeResult,
             });
         }
@@ -710,6 +714,25 @@ describe('SessionView', () => {
             await flushPromises();
 
             expect(canStart(wrapper)).toBe(true);
+        });
+
+        it('offers to continue, and from where, when the encoder can reuse what was uploaded', async () => {
+            failedSession(true, { canResume: true, resumeFromPercent: 23 });
+
+            const wrapper = await mountView();
+            await flushPromises();
+
+            expect(wrapper.attributes('data-continue-from')).toBe('23');
+        });
+
+        it('offers only to encode again when nothing can be reused', async () => {
+            failedSession(true);
+
+            const wrapper = await mountView();
+            await flushPromises();
+
+            expect(canStart(wrapper)).toBe(true);
+            expect(wrapper.attributes('data-continue-from')).toBeUndefined();
         });
 
         it('does not offer it when the source is gone', async () => {

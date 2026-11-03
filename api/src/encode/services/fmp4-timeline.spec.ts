@@ -15,6 +15,7 @@ import { promisify } from 'util';
 import {
     Fmp4BoxError,
     neutralizeEditList,
+    readBaseMediaDecodeTime,
     readTrackTimescale,
     shiftBaseMediaDecodeTime,
 } from './fmp4-timeline.js';
@@ -210,6 +211,29 @@ describe('neutralizeEditList', () => {
         const init = syntheticInit({ withEdts: false });
         const before = Buffer.from(init);
         expect(differingBytes(before, neutralizeEditList(init))).toEqual([]);
+    });
+});
+
+describe('readBaseMediaDecodeTime', () => {
+    it("reads the segment's first fragment's start, either version", () => {
+        expect(
+            readBaseMediaDecodeTime(syntheticSegment([[540000], [1080000]]))
+        ).toBe(540000);
+        expect(readBaseMediaDecodeTime(syntheticSegment([[90000]], 0))).toBe(
+            90000
+        );
+    });
+
+    it('reads back what a shift wrote', () => {
+        const segment = syntheticSegment([[0]]);
+        shiftBaseMediaDecodeTime(segment, 270000);
+        expect(readBaseMediaDecodeTime(segment)).toBe(270000);
+    });
+
+    it('refuses a segment with no moof', () => {
+        expect(() => readBaseMediaDecodeTime(box('styp', u32(0)))).toThrow(
+            /no moof/
+        );
     });
 });
 

@@ -183,6 +183,20 @@ export function readTrackTimescale(init: Buffer): number {
 }
 
 /**
+ * The track's sample description (`stsd`), as bytes: the codec and its
+ * parameters. Two inits that agree on it decode each other's segments.
+ */
+export function sampleDescription(init: Buffer): Buffer {
+    const moov = onlyChild(init, null, 'moov', 'moov');
+    const trak = onlyChild(init, moov, 'trak', 'moov > trak');
+    const mdia = onlyChild(init, trak, 'mdia', 'moov > trak > mdia');
+    const minf = onlyChild(init, mdia, 'minf', 'moov > trak > mdia > minf');
+    const stbl = onlyChild(init, minf, 'stbl', '… > minf > stbl');
+    const stsd = onlyChild(init, stbl, 'stsd', '… > stbl > stsd');
+    return init.subarray(stsd.start, stsd.end);
+}
+
+/**
  * Take the edit list out of play, in place.
  *
  * The `edts` box's *type* is overwritten with `free`, which every reader skips
@@ -257,6 +271,43 @@ export function shiftBaseMediaDecodeTime(
     }
 
     return segment;
+}
+
+/**
+ * When a segment starts, in its track's timescale: the `tfdt` of its first
+ * fragment. Only the head of the segment is needed, since the `moof` comes
+ * before its `mdat`.
+ */
+export function readBaseMediaDecodeTime(segment: Buffer): number {
+    const moof = readBoxes(segment, 0, segment.length).find(
+        (box) => box.type === 'moof'
+    );
+    if (!moof) throw new Fmp4BoxError('Segment holds no moof box');
+    const traf = childrenOf(segment, moof, 'traf')[0];
+    const tfdt = traf && childrenOf(segment, traf, 'tfdt')[0];
+    if (!tfdt) {
+        throw new Fmp4BoxError(
+            `moof at offset ${moof.start} holds no tfdt box`
+        );
+    }
+    const version = segment.readUInt8(tfdt.contentStart);
+    if (version === 1) {
+        requireContent(tfdt, 12, 'tfdt (version 1)');
+        const value = segment.readBigUInt64BE(tfdt.contentStart + 4);
+        if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
+            throw new Fmp4BoxError(
+                `tfdt at offset ${tfdt.start} is too large to read`
+            );
+        }
+        return Number(value);
+    }
+    if (version !== 0) {
+        throw new Fmp4BoxError(
+            `tfdt at offset ${tfdt.start} declares version ${version}`
+        );
+    }
+    requireContent(tfdt, 8, 'tfdt (version 0)');
+    return segment.readUInt32BE(tfdt.contentStart + 4);
 }
 
 function shiftOneTfdt(segment: Buffer, tfdt: Box, offsetTicks: number): void {

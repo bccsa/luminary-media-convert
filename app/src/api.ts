@@ -197,6 +197,18 @@ export async function getThumbnailsRegenerate(
     );
 }
 
+/** Run a failed encode again with its own settings, continuing where it can. */
+export async function continueEncode(
+    sessionId: string,
+    sessionToken: string
+): Promise<EncodeStartResponse> {
+    return requestJson(`${API_BASE}/api/sessions/${sessionId}/continue`, {
+        method: 'POST',
+        token: sessionToken,
+        errorPrefix: 'Could not continue the encode',
+    });
+}
+
 /**
  * Cancel a running session, or dismiss a finished one. Either way the work
  * directory goes with it, which is the only way its disk is reclaimed.

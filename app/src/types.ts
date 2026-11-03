@@ -139,6 +139,10 @@ export interface SessionStatusResponse {
     pipelineProgress?: PipelineProgress;
     queuePosition?: number;
     canRetry?: boolean;
+    /** A failed encode can continue from what reached storage (POST …/continue). */
+    canResume?: boolean;
+    /** With canResume: how far into the output it continues from, 0–100. */
+    resumeFromPercent?: number;
     byteRange?: boolean;
     probeResult?: ProbeResult;
     files?: string[];

@@ -330,6 +330,117 @@ describe('FfmpegService', () => {
             return (service as any).buildVideoArgs(opts);
         };
 
+        describe('continuing a failed encode', () => {
+            const config = (
+                over: Partial<EncodeConfigDto> = {}
+            ): EncodeConfigDto => ({
+                type: 'video',
+                segmentDuration: 6,
+                videoRenditions: [
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 2500,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: '720p',
+                    },
+                ],
+                audioGroups: [
+                    {
+                        id: 'hd',
+                        label: 'HD',
+                        audioBitrateKbps: 128,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
+                ],
+                ...over,
+            });
+
+            it('restarts the video at the segment boundary and reads the audio again from the head', async () => {
+                const args = await buildVideoArgs({
+                    inputPath: '/tmp/input.mp4',
+                    outputDir: '/tmp/output',
+                    encodeConfig: config(),
+                    resume: { fromSec: 36, startNumber: 6 },
+                });
+
+                const inputs = args.flatMap((a, i) => (a === '-i' ? [i] : []));
+                expect(inputs).toHaveLength(2);
+                // A millisecond early, so the frame on the boundary is kept and no
+                // extra one is made to fill a gap before it.
+                expect(args[inputs[0] - 2]).toBe('-ss');
+                expect(Number(args[inputs[0] - 1])).toBeCloseTo(35.999, 6);
+                expect(args[inputs[1] - 2]).not.toBe('-ss');
+                expect(args).toContain('1:a:0');
+                expect(args).not.toContain('0:a:0');
+                expect(args[args.indexOf('-start_number') + 1]).toBe('6');
+            });
+
+            it('changes nothing when not continuing', async () => {
+                const args = await buildVideoArgs({
+                    inputPath: '/tmp/input.mp4',
+                    outputDir: '/tmp/output',
+                    encodeConfig: config(),
+                });
+                expect(args.filter((a) => a === '-i')).toHaveLength(1);
+                expect(args).toContain('0:a:0');
+                expect(args).not.toContain('-start_number');
+            });
+
+            it('continues only an encode in one pass that re-encodes every stream, with no trim', () => {
+                expect(service.canResume(config())).toBe(true);
+                expect(
+                    service.canResume(config({ type: 'audio' } as any))
+                ).toBe(false);
+                expect(
+                    service.canResume(
+                        config({
+                            trimSegments: [{ inSec: 0, outSec: 10 }],
+                        } as any)
+                    )
+                ).toBe(false);
+                const copied = config();
+                copied.videoRenditions![0].copyStream = true;
+                expect(service.canResume(copied)).toBe(false);
+            });
+
+            it('lays a ladder over the session cap out in waves, the audio with the first', () => {
+                const sizes = [1080, 720, 480, 360, 240];
+                const ladder = config({
+                    videoRenditions: sizes.map((h) => ({
+                        width: Math.round((h * 16) / 9 / 2) * 2,
+                        height: h,
+                        videoBitrateKbps: h * 4,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: `${h}p`,
+                    })),
+                });
+
+                const layout = service.waveLayout(ladder);
+
+                expect(layout.map((w) => w.videoStreams.length)).toEqual([
+                    3, 2,
+                ]);
+                expect(layout.map((w) => w.masterName)).toEqual([
+                    'master_w0.m3u8',
+                    'master_w1.m3u8',
+                ]);
+                expect(layout[0].audioStreams).toEqual(['stream_hd_HD']);
+                expect(layout[1].audioStreams).toEqual([]);
+                expect(service.canResume(ladder)).toBe(true);
+            });
+
+            it('names the video stream directories it would check', () => {
+                expect(service.videoStreamDirs(config())).toEqual([
+                    'stream_720p_1280x720',
+                ]);
+            });
+        });
+
         it('keeps two renditions of the same name and size in separate directories', async () => {
             // The form's Add rendition adds a 480p row at 854x480 beside the
             // ladder's own: named alike, both wrote stream_480p_854x480/.
