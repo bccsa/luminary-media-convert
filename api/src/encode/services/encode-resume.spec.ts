@@ -174,6 +174,14 @@ describe('resumePlan', () => {
         ).toBeNull();
     });
 
+    it('restarts an audio-only encode from its audio streams', () => {
+        const plan = resumePlan(
+            [{ videoStreams: [], audioStreams: ['stream_a'] }],
+            [...both('stream_a', 6, 4)]
+        );
+        expect(plan?.point?.startIndex).toBe(4);
+    });
+
     it('treats a single run as a ladder of one wave', () => {
         const plan = resumePlan(
             [waves[1]],

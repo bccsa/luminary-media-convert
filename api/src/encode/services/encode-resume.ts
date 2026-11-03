@@ -171,6 +171,14 @@ export interface ResumeWave {
     audioStreams: string[];
 }
 
+/**
+ * The streams whose segments decide where a wave restarts: its video, which
+ * the audio beside it follows, or its audio when it has nothing else.
+ */
+export function restartStreams(wave: ResumeWave): string[] {
+    return wave.videoStreams.length > 0 ? wave.videoStreams : wave.audioStreams;
+}
+
 /** What a continued encode skips and where it restarts. */
 export interface ResumePlan {
     /** Waves 0..skip-1 are wholly in storage and are not run again. */
@@ -219,7 +227,7 @@ export function resumePlan(
     while (skip < waves.length && complete(skip)) skip++;
     const point =
         skip < waves.length
-            ? resumePoint(waves[skip]!.videoStreams, records)
+            ? resumePoint(restartStreams(waves[skip]!), records)
             : null;
     return skip === 0 && !point ? null : { skip, point };
 }

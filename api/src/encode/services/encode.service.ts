@@ -61,6 +61,7 @@ import {
 import {
     ResumeStore,
     fingerprint,
+    restartStreams,
     restorePlaylist,
     resumePlan,
     resumeRefusal,
@@ -1118,7 +1119,9 @@ export class EncodeService implements OnModuleInit {
         const plan = resumePlan(layout, records);
         if (!plan) return null;
         const skipped = layout.slice(0, plan.skip);
-        const resumedVideo = plan.point ? layout[plan.skip]!.videoStreams : [];
+        const resumedVideo = plan.point
+            ? restartStreams(layout[plan.skip]!)
+            : [];
         const inits = this.readSavedInits(store, [
             ...resumedVideo,
             ...skipped.flatMap((w) => [...w.videoStreams, ...w.audioStreams]),

@@ -178,8 +178,6 @@ interface ByteRangeEntry {
     mediaFile: string;
 }
 
-/** A video chain carries `tfdt` records; the audio chain is re-encoded whole on a continue. */
-const AUDIO_CHAIN = 'a';
 const SEGMENT_INDEX_RE = /^segment_(\d+)\./;
 
 /**
@@ -571,9 +569,20 @@ export class SegmentPipeline {
             state.processedSegments.add(filename);
             this.totalSegmentsProduced++;
 
+            // A continued audio stream starts a segment early to warm its
+            // encoder up; that segment is only the warm-up, and goes.
+            const resumed =
+                this.config.resume?.startTfdt[streamDirName] !== undefined;
+            const index = Number(SEGMENT_INDEX_RE.exec(filename)?.[1] ?? NaN);
+            if (resumed && index < this.config.resume!.startIndex) {
+                this.totalSegmentsProduced--;
+                await unlink(segPath).catch(() => {});
+                continue;
+            }
+
             // A continued stream's segments are moved onto the timeline of the
             // run it continues, so the two halves play as one.
-            if (this.config.resume?.startTfdt[streamDirName] !== undefined) {
+            if (resumed) {
                 try {
                     await this.alignToResume(
                         state,
@@ -593,8 +602,7 @@ export class SegmentPipeline {
             const durable = await this.describeSegment(
                 streamDirName,
                 filename,
-                segPath,
-                state.chain.id !== AUDIO_CHAIN
+                segPath
             );
 
             try {
@@ -734,7 +742,12 @@ export class SegmentPipeline {
                 ? { byteRange: { offset: r.offset, length: r.length } }
                 : {}),
         }));
-        const after: Entry[] = playlist.segments.map((s) => ({
+        // The warm-up segment a continued audio stream began with is not played.
+        const kept = playlist.segments.filter((s) => {
+            const index = Number(SEGMENT_INDEX_RE.exec(s.uri)?.[1] ?? NaN);
+            return !(index < resume.startIndex);
+        });
+        const after: Entry[] = kept.map((s) => ({
             uri: s.uri,
             duration: s.duration,
             ...(s.byteRange ? { byteRange: s.byteRange } : {}),
@@ -766,26 +779,23 @@ export class SegmentPipeline {
     }
 
     /**
-     * A segment's identity and, for video, its start time. A start time that
+     * A segment's identity and its start time. A start time that
      * cannot be read is left out rather than failing the encode: it only means
      * a continued encode cannot restart at this segment.
      */
     private async describeSegment(
         stream: string,
         file: string,
-        segPath: string,
-        video: boolean
+        segPath: string
     ): Promise<DurableSegment> {
         const index = Number(SEGMENT_INDEX_RE.exec(file)?.[1] ?? NaN);
         let tfdt: number | undefined;
-        if (video) {
-            try {
-                tfdt = readBaseMediaDecodeTime(await readFile(segPath));
-            } catch (err) {
-                this.logger.debug(
-                    `[pipeline] ${stream}/${file}: no start time (${(err as Error).message})`
-                );
-            }
+        try {
+            tfdt = readBaseMediaDecodeTime(await readFile(segPath));
+        } catch (err) {
+            this.logger.debug(
+                `[pipeline] ${stream}/${file}: no start time (${(err as Error).message})`
+            );
         }
         return {
             stream,

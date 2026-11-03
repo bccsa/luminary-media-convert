@@ -62,10 +62,11 @@ export interface EncodeOptions {
     encodeConfig: EncodeConfigDto;
     onProgress: (percent: number) => void;
     /**
-     * Continue a failed encode: restart the video at `fromSec` of the output,
-     * numbering its segments from `startNumber`, and encode the audio again
-     * from the start. Honoured by a single-run video encode only; see
-     * `canResume`.
+     * Continue a failed encode: restart at `fromSec` of the output, numbering
+     * segments from `startNumber`. A video encode restarts its video there and
+     * encodes its audio again from the start; an audio-only one restarts its
+     * audio one segment earlier, to warm the encoder up. Honoured by a single
+     * run only; see `canResume`.
      */
     resume?: { fromSec: number; startNumber: number };
     /**
@@ -1102,6 +1103,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         const audioGroups = encodeConfig.audioGroups!;
         const segmentDuration = encodeConfig.segmentDuration ?? 6;
         const trimming = !!encodeConfig.trimSegments?.length;
+        const resume = trimming ? undefined : opts.resume;
         const args: string[] = [];
 
         if (trimming) {
@@ -1125,6 +1127,17 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 concatPath,
                 '-copyts'
             );
+        } else if (resume) {
+            // An AAC encoder started at the boundary primes its first frame, which
+            // plays as a gap at the join. Started one segment earlier, it is
+            // warmed up by the boundary and its output from there is the same
+            // as an uninterrupted run's; the segment before is thrown away. An
+            // exact seek: audio has no frame to miss.
+            const warm = Math.max(
+                0,
+                alignmentOffset + resume.fromSec - segmentDuration
+            );
+            args.push('-ss', warm.toFixed(6), '-i', inputPath);
         } else if (alignmentOffset > 0) {
             // See buildVideoArgs: input-level, so it reaches copied streams too.
             args.push('-ss', String(alignmentOffset), '-i', inputPath);
@@ -1194,6 +1207,10 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             'hls',
             '-hls_time',
             String(segmentDuration),
+            // From the warm-up segment, which the pipeline throws away.
+            ...(resume
+                ? ['-start_number', String(resume.startNumber - 1)]
+                : []),
             '-hls_playlist_type',
             'vod',
             '-hls_flags',
@@ -1250,7 +1267,6 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
 
     /** Why a failed encode of `config` would have to start over, or null when it can continue. */
     resumeBlocker(config: EncodeConfigDto): string | null {
-        if (config.type !== 'video') return 'an audio-only encode starts over';
         if (config.trimSegments?.length) return 'a trimmed encode starts over';
         if (
             (config.videoRenditions ?? []).some((r) => r.copyStream) ||
@@ -1358,7 +1374,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                   )
                 : [];
 
-        if (opts.resume && (type !== 'video' || waves.length > 1)) {
+        if (opts.resume && waves.length > 1) {
             throw new Error(
                 'A continued encode of a ladder in waves is continued wave by wave'
             );

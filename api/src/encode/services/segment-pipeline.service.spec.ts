@@ -364,6 +364,56 @@ describe('SegmentPipeline — shared chunk chains', () => {
                 ).toEqual(init('avc1'));
             });
 
+            it('throws away the warm-up segment a continued audio stream starts with', async () => {
+                // This run began at segment 1 to warm the encoder up; 1 goes, 2 and 3 stay.
+                seedResumedRun('avc1');
+                writeFileSync(
+                    join(tmpDir, 'stream_720p', 'segment_00001.m4s'),
+                    fmp4Segment(0)
+                );
+                const playlistPath = join(
+                    tmpDir,
+                    'stream_720p',
+                    'playlist.m3u8'
+                );
+                writeFileSync(
+                    playlistPath,
+                    readFileSync(playlistPath, 'utf8').replace(
+                        '#EXTINF:6.000000,\nsegment_00002.m4s',
+                        '#EXTINF:6.000000,\nsegment_00001.m4s\n#EXTINF:6.000000,\nsegment_00002.m4s'
+                    )
+                );
+                writeFileSync(
+                    join(tmpDir, 'stream_720p', 'segment_00002.m4s'),
+                    fmp4Segment(540000)
+                );
+                writeFileSync(
+                    join(tmpDir, 'stream_720p', 'segment_00003.m4s'),
+                    fmp4Segment(1080000)
+                );
+                const durable: { index: number; tfdt?: number }[] = [];
+                const pipeline = makePipeline(tmpDir, {
+                    byteRange: true,
+                    streamChains: { stream_720p: 'v0' },
+                    attempt: 1,
+                    resume: resume('avc1'),
+                    onDurable: (segments) => durable.push(...segments),
+                });
+                captureUploads(pipeline);
+
+                await pipeline.drain();
+
+                expect(durable.map((d) => [d.index, d.tfdt])).toEqual([
+                    [2, 1080000],
+                    [3, 1620000],
+                ]);
+                const uris = readPlaylist('stream_720p').filter(
+                    (l) => l && !l.startsWith('#')
+                );
+                expect(uris).toHaveLength(4);
+                expect(uris).not.toContain('segment_00001.m4s');
+            });
+
             it('refuses to join when this run does not start at the restart segment', async () => {
                 seedResumedRun('avc1');
                 const pipeline = makePipeline(tmpDir, {
