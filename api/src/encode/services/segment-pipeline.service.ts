@@ -1202,7 +1202,13 @@ export class SegmentPipeline {
             // in a finally, so `pack-list.txt` is belt-and-braces — a crashed
             // pack must not put its scratch file in the delivered output.
             const name = posix.basename(relativePath);
-            if (name === 'concat.txt' || name === 'pack-list.txt') continue;
+            if (
+                name === 'concat.txt' ||
+                name === 'concat-resume.txt' ||
+                name === 'pack-list.txt'
+            ) {
+                continue;
+            }
 
             const objectKey = this.config.s3PathPrefix
                 ? posix.join(this.config.s3PathPrefix, relativePath)
