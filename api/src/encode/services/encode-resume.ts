@@ -19,12 +19,17 @@ import { createHash } from 'crypto';
 import { appendFileSync, existsSync, readFileSync } from 'fs';
 import { mkdir, readFile, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
+import {
+    buildMediaPlaylist,
+    parseMediaPlaylist,
+} from '@luminary-media-converter/hls-core';
 import type { DurableSegment } from './segment-pipeline.service.js';
 
 export const RESUME_DIR = 'resume';
 const STATE_FILE = 'state.json';
 const SEGMENTS_FILE = 'segments.jsonl';
 export const INITS_DIR = 'inits';
+export const WAVES_DIR = 'waves';
 
 /** Who ran, and with what, so a continue can tell it would be the same encode. */
 export interface ResumeState {
@@ -47,7 +52,9 @@ export interface ResumeState {
 /** One line of `segments.jsonl`. */
 export type ResumeRecord =
     | { kind: 'seen'; stream: string; index: number; tfdt: number }
-    | ({ kind: 'durable' } & DurableSegment);
+    | ({ kind: 'durable' } & DurableSegment)
+    /** A wave of a ladder in waves finished, writing this many segments per stream. */
+    | { kind: 'waveDone'; wave: number; counts: Record<string, number> };
 
 /** Where a continue restarts the video, and what it reuses. */
 export interface ResumePoint {
@@ -106,7 +113,7 @@ export function resumePoint(
         if (r.kind === 'seen') {
             if (!seen.has(r.stream)) seen.set(r.stream, new Map());
             seen.get(r.stream)!.set(r.index, r.tfdt);
-        } else {
+        } else if (r.kind === 'durable') {
             if (!durable.has(r.stream)) durable.set(r.stream, new Map());
             durable.get(r.stream)!.set(r.index, r);
         }
@@ -143,6 +150,93 @@ export function resumePoint(
         }));
     }
     return { startIndex: k, startTfdt, reused };
+}
+
+/** One run of ffmpeg, as `FfmpegService.waveLayout` describes it. */
+export interface ResumeWave {
+    videoStreams: string[];
+    audioStreams: string[];
+}
+
+/** What a continued encode skips and where it restarts. */
+export interface ResumePlan {
+    /** Waves 0..skip-1 are wholly in storage and are not run again. */
+    skip: number;
+    /** Where wave `skip` restarts; null runs it from the start. */
+    point: ResumePoint | null;
+}
+
+/**
+ * How a failed encode continues, or null when it would only start over.
+ *
+ * A wave is skipped when it finished and every segment of every stream it
+ * wrote is in storage. The first wave that is not restarts where its video
+ * streams allow; the waves after it run again. A single run is a ladder of one
+ * wave, which never finishes before failing, so only its restart point counts.
+ */
+export function resumePlan(
+    waves: ResumeWave[],
+    records: ResumeRecord[]
+): ResumePlan | null {
+    const stored = new Map<string, Set<number>>();
+    const done = new Map<number, Record<string, number>>();
+    for (const r of records) {
+        if (r.kind === 'durable') {
+            if (!stored.has(r.stream)) stored.set(r.stream, new Set());
+            stored.get(r.stream)!.add(r.index);
+        } else if (r.kind === 'waveDone') {
+            done.set(r.wave, r.counts);
+        }
+    }
+    const complete = (index: number) => {
+        const counts = done.get(index);
+        if (!counts) return false;
+        const wave = waves[index]!;
+        return [...wave.videoStreams, ...wave.audioStreams].every((stream) => {
+            const count = counts[stream];
+            if (!(count > 0)) return false;
+            for (let i = 0; i < count; i++) {
+                if (!stored.get(stream)?.has(i)) return false;
+            }
+            return true;
+        });
+    };
+
+    let skip = 0;
+    while (skip < waves.length && complete(skip)) skip++;
+    const point =
+        skip < waves.length
+            ? resumePoint(waves[skip]!.videoStreams, records)
+            : null;
+    return skip === 0 && !point ? null : { skip, point };
+}
+
+/**
+ * A skipped wave's playlist for one stream: the one ffmpeg wrote when the wave
+ * finished, its segments pointed at where they are in storage. Without byte
+ * ranges a segment is its own object, under the name the playlist already has.
+ */
+export function restorePlaylist(
+    ffmpegPlaylist: string,
+    stream: string,
+    records: ResumeRecord[],
+    byteRange: boolean
+): string {
+    const playlist = parseMediaPlaylist(ffmpegPlaylist);
+    if (!byteRange) return buildMediaPlaylist(playlist);
+    const where = new Map<string, DurableSegment>();
+    for (const r of records) {
+        if (r.kind === 'durable' && r.stream === stream) where.set(r.file, r);
+    }
+    for (const segment of playlist.segments) {
+        const record = where.get(segment.uri);
+        if (!record || record.offset === undefined) {
+            throw new Error(`${stream}: ${segment.uri} is not in storage`);
+        }
+        segment.uri = `../${record.mediaFile}`;
+        segment.byteRange = { offset: record.offset, length: record.length };
+    }
+    return buildMediaPlaylist(playlist);
 }
 
 /**
@@ -183,6 +277,11 @@ export class ResumeStore {
 
     initsDir(stream: string): string {
         return join(this.dir, INITS_DIR, stream);
+    }
+
+    /** Where a finished wave's playlists are kept: its master, and one per stream. */
+    waveDir(index: number): string {
+        return join(this.dir, WAVES_DIR, String(index));
     }
 
     async readState(): Promise<ResumeState | null> {

@@ -3,6 +3,8 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import {
     ResumeStore,
+    restorePlaylist,
+    resumePlan,
     resumePoint,
     resumeRefusal,
     stableHash,
@@ -86,6 +88,144 @@ describe('resumePoint', () => {
                 both('stream_720p', 6, 5)
             )
         ).toBeNull();
+    });
+});
+
+describe('resumePlan', () => {
+    const waves = [
+        {
+            videoStreams: ['stream_1080p', 'stream_720p', 'stream_480p'],
+            audioStreams: ['stream_a'],
+        },
+        { videoStreams: ['stream_360p', 'stream_240p'], audioStreams: [] },
+    ];
+    const waveDone = (
+        wave: number,
+        count: number,
+        streams: string[]
+    ): ResumeRecord => ({
+        kind: 'waveDone',
+        wave,
+        counts: Object.fromEntries(streams.map((s) => [s, count])),
+    });
+    const firstWave = [...waves[0].videoStreams, ...waves[0].audioStreams];
+
+    it('skips a finished wave that is wholly in storage and continues the next one', () => {
+        const records = [
+            ...firstWave.flatMap((s) => both(s, 10, 10)),
+            waveDone(0, 10, firstWave),
+            ...both('stream_360p', 6, 4),
+            ...both('stream_240p', 6, 5),
+        ];
+
+        const plan = resumePlan(waves, records);
+
+        expect(plan?.skip).toBe(1);
+        expect(plan?.point?.startIndex).toBe(4);
+    });
+
+    it('does not skip a finished wave whose last chunk never reached storage', () => {
+        // Chunks are shared across waves, so the first wave's tail can still be
+        // waiting in a chunk the second wave was filling.
+        const records = [
+            ...firstWave.flatMap((s) => both(s, 10, 8)),
+            waveDone(0, 10, firstWave),
+            ...both('stream_360p', 6, 4),
+            ...both('stream_240p', 6, 4),
+        ];
+
+        const plan = resumePlan(waves, records);
+
+        expect(plan?.skip).toBe(0);
+        expect(plan?.point?.startIndex).toBe(8);
+    });
+
+    it('runs the next wave from its start when nothing of it is stored', () => {
+        const records = [
+            ...firstWave.flatMap((s) => both(s, 10, 10)),
+            waveDone(0, 10, firstWave),
+        ];
+        expect(resumePlan(waves, records)).toEqual({ skip: 1, point: null });
+    });
+
+    it('runs nothing again when every wave finished and is stored', () => {
+        const secondWave = waves[1].videoStreams;
+        const records = [
+            ...firstWave.flatMap((s) => both(s, 10, 10)),
+            waveDone(0, 10, firstWave),
+            ...secondWave.flatMap((s) => both(s, 10, 10)),
+            waveDone(1, 10, secondWave),
+        ];
+        expect(resumePlan(waves, records)).toEqual({ skip: 2, point: null });
+    });
+
+    it('has nothing to continue when the first wave stored nothing', () => {
+        expect(
+            resumePlan(
+                waves,
+                firstWave.flatMap((s) => both(s, 3, 0))
+            )
+        ).toBeNull();
+    });
+
+    it('treats a single run as a ladder of one wave', () => {
+        const plan = resumePlan(
+            [waves[1]],
+            [...both('stream_360p', 6, 3), ...both('stream_240p', 6, 4)]
+        );
+        expect(plan).toEqual(
+            expect.objectContaining({
+                skip: 0,
+                point: expect.objectContaining({ startIndex: 3 }),
+            })
+        );
+    });
+});
+
+describe('restorePlaylist', () => {
+    const ffmpegPlaylist = [
+        '#EXTM3U',
+        '#EXT-X-VERSION:7',
+        '#EXT-X-TARGETDURATION:6',
+        '#EXT-X-MAP:URI="init_3.mp4"',
+        '#EXTINF:6.000000,',
+        'segment_00000.m4s',
+        '#EXTINF:4.200000,',
+        'segment_00001.m4s',
+        '#EXT-X-ENDLIST',
+        '',
+    ].join('\n');
+
+    it('points each segment at where it is in storage, keeping its duration', () => {
+        const text = restorePlaylist(
+            ffmpegPlaylist,
+            'stream_720p',
+            both('stream_720p', 2, 2),
+            true
+        );
+
+        expect(text).toContain('#EXTINF:4.200000,');
+        expect(text).toContain('#EXT-X-BYTERANGE:100@100');
+        expect(
+            text.split('\n').filter((l) => l.startsWith('../media/'))
+        ).toHaveLength(2);
+        expect(text).toContain('#EXT-X-MAP:URI="init_3.mp4"');
+    });
+
+    it('refuses a segment that is not in storage', () => {
+        expect(() =>
+            restorePlaylist(
+                ffmpegPlaylist,
+                'stream_720p',
+                both('stream_720p', 2, 1),
+                true
+            )
+        ).toThrow(/segment_00001.m4s is not in storage/);
+    });
+
+    it('leaves a playlist without byte ranges pointing at the segments by name', () => {
+        const text = restorePlaylist(ffmpegPlaylist, 'stream_720p', [], false);
+        expect(text).toContain('segment_00001.m4s');
     });
 });
 

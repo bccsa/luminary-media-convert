@@ -68,6 +68,25 @@ export interface EncodeOptions {
      * `canResume`.
      */
     resume?: { fromSec: number; startNumber: number };
+    /**
+     * Continue a failed encode run in waves: skip the first `skip` waves,
+     * whose output is already in storage, and continue wave `skip` per
+     * `resume` (or run it from the start when absent).
+     */
+    waveResume?: {
+        skip: number;
+        resume?: { fromSec: number; startNumber: number };
+    };
+    /** Told when a wave of a ladder run in waves has finished. */
+    onWaveDone?: (index: number) => Promise<void> | void;
+}
+
+/** One run of ffmpeg in an encode, by the stream directories it writes. */
+export interface WaveLayout {
+    /** What it calls its master playlist. */
+    masterName: string;
+    videoStreams: string[];
+    audioStreams: string[];
 }
 
 /**
@@ -805,13 +824,16 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 alignmentOffset + resume.fromSec - 0.5 / sourceFrameRate
             );
             args.push('-ss', seek.toFixed(6), '-i', inputPath);
-            args.push(
-                ...(alignmentOffset > 0
-                    ? ['-ss', String(alignmentOffset)]
-                    : []),
-                '-i',
-                inputPath
-            );
+            // A wave after the first carries no audio, and needs no second input.
+            if (audioGroups.length > 0) {
+                args.push(
+                    ...(alignmentOffset > 0
+                        ? ['-ss', String(alignmentOffset)]
+                        : []),
+                    '-i',
+                    inputPath
+                );
+            }
         } else if (alignmentOffset > 0) {
             // Input-level, hence in front of `-i`, and not a `-filter_complex`
             // trim: a copy-mode rendition never passes through the filter graph
@@ -1222,13 +1244,37 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         ) {
             return 'an encode with copied streams starts over';
         }
-        if (
-            planLadderWaves(config.videoRenditions ?? [], MAX_HARDWARE_SESSIONS)
-                .length > 1
-        ) {
-            return 'a ladder encoded in several passes starts over';
-        }
         return null;
+    }
+
+    /**
+     * The runs of ffmpeg a video encode of `config` makes, in order, with the
+     * stream directories each writes: one for a ladder within the session cap,
+     * one per wave otherwise. The audio rides with the first.
+     */
+    waveLayout(config: EncodeConfigDto): WaveLayout[] {
+        const names = this.videoStreamNames(config.videoRenditions ?? []);
+        const audio = (config.audioGroups ?? []).map(
+            (g) => `stream_${this.buildAudioStreamName(g)}`
+        );
+        const waves = planLadderWaves(
+            config.videoRenditions ?? [],
+            MAX_HARDWARE_SESSIONS
+        );
+        if (waves.length <= 1) {
+            return [
+                {
+                    masterName: 'master.m3u8',
+                    videoStreams: [...names.values()].map((n) => `stream_${n}`),
+                    audioStreams: audio,
+                },
+            ];
+        }
+        return waves.map((wave) => ({
+            masterName: wave.masterName,
+            videoStreams: wave.renditions.map((r) => `stream_${names.get(r)!}`),
+            audioStreams: wave.includeAudio ? audio : [],
+        }));
     }
 
     /** The video stream directories `config` writes, as the stream map names them. */
@@ -1300,7 +1346,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
 
         if (opts.resume && (type !== 'video' || waves.length > 1)) {
             throw new Error(
-                'A continued encode runs in one pass; this one would not, so it has to start over'
+                'A continued encode of a ladder in waves is continued wave by wave'
             );
         }
 
@@ -1371,12 +1417,24 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             encodeConfig.audioGroups?.length ?? 0
         );
         let base = 0;
+        const skip = opts.waveResume?.skip ?? 0;
         for (const [index, wave] of waves.entries()) {
-            const args = await this.buildVideoArgs(opts, alignmentOffset, wave);
-
             const span = shares[index]! * 100;
             const waveBase = base;
             base += span;
+            // Already in storage, from the run this continues.
+            if (index < skip) {
+                onProgress(Math.min(99.9, base));
+                continue;
+            }
+            const args = await this.buildVideoArgs(
+                index === skip && opts.waveResume?.resume
+                    ? { ...opts, resume: opts.waveResume.resume }
+                    : opts,
+                alignmentOffset,
+                wave
+            );
+
             const waveOpts: EncodeOptions = {
                 ...opts,
                 onProgress: (percent) =>
@@ -1397,6 +1455,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             } finally {
                 release();
             }
+            await opts.onWaveDone?.(index);
         }
 
         await this.mergeWaveMasterPlaylists(outputDir, waves, encodeConfig);

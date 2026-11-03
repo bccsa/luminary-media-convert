@@ -7,7 +7,15 @@ import {
     readdirSync,
     readFileSync,
 } from 'fs';
-import { readdir, rm, stat, writeFile } from 'fs/promises';
+import {
+    copyFile,
+    mkdir,
+    readdir,
+    readFile,
+    rm,
+    stat,
+    writeFile,
+} from 'fs/promises';
 import { join, posix } from 'path';
 import { estimateOutputBytes, formatBytes } from './output-estimate.js';
 import { freeBytes } from './disk-space.js';
@@ -16,7 +24,11 @@ import {
     SessionService,
     type Session,
 } from './session.service.js';
-import { FfmpegService, type EncodeResult } from './ffmpeg.service.js';
+import {
+    FfmpegService,
+    type EncodeResult,
+    type WaveLayout,
+} from './ffmpeg.service.js';
 import {
     isQuickTrimConfig,
     isQuickTrimRejection,
@@ -47,11 +59,15 @@ import {
 import {
     ResumeStore,
     fingerprint,
-    resumePoint,
+    restorePlaylist,
+    resumePlan,
     resumeRefusal,
     stableHash,
+    type ResumePlan,
+    type ResumeRecord,
     type ResumeState,
 } from './encode-resume.js';
+import { parseMediaPlaylist } from '@luminary-media-converter/hls-core';
 import { readTrackTimescale, sampleDescription } from './fmp4-timeline.js';
 
 /** One run of an encode: its attempt, its IV, and whether it continues an earlier one. */
@@ -61,8 +77,28 @@ interface PreparedRun {
     ivHex?: string;
     /** Whether this run's segments are recorded, for a later run to continue from. */
     recording: boolean;
+    /** The runs of ffmpeg the encode makes, when it is one that can be continued. */
+    layout?: WaveLayout[];
+    /** Waves 0..skipWaves-1 are in storage already and are restored, not run. */
+    skipWaves?: number;
+    records?: ResumeRecord[];
     pipelineResume?: PipelineResume;
     ffmpegResume?: { fromSec: number; startNumber: number };
+    waveResume?: {
+        skip: number;
+        resume?: { fromSec: number; startNumber: number };
+    };
+}
+
+/** How a run continues from what is in storage. */
+interface Continuation {
+    plan: ResumePlan;
+    records: ResumeRecord[];
+    inits: Record<string, Buffer>;
+    /** Where the wave that restarts does so; absent when it runs from its start. */
+    resume?: { fromSec: number; startNumber: number };
+    /** How much of the encode is reused, as seconds of output. */
+    doneSec: number;
 }
 
 const INIT_FILE_RE = /^init.*\.mp4$/;
@@ -215,6 +251,13 @@ export class EncodeService {
             if (encryptionKey) encryptionIV = Buffer.from(run.ivHex!, 'hex');
             const thisRun = run;
             const initsSaved = new Set<string>();
+            if (thisRun.skipWaves) {
+                await this.restoreSkippedWaves(
+                    thisRun,
+                    outputDir,
+                    session.config.byteRange !== false
+                );
+            }
 
             this.sessionService.updateStatus(sessionId, 'encoding');
             this.sessionService.setOutputDir(sessionId, outputDir);
@@ -495,6 +538,15 @@ export class EncodeService {
                     onProgress: onEncodeProgress,
                     ...(thisRun.ffmpegResume
                         ? { resume: thisRun.ffmpegResume }
+                        : {}),
+                    ...(thisRun.waveResume
+                        ? { waveResume: thisRun.waveResume }
+                        : {}),
+                    ...(thisRun.layout && thisRun.layout.length > 1
+                        ? {
+                              onWaveDone: (index: number) =>
+                                  this.keepWave(thisRun, outputDir, index),
+                          }
                         : {}),
                 });
             }
@@ -795,7 +847,7 @@ export class EncodeService {
                 if (run?.recording) {
                     this.sessionService.setResumeFrom(
                         sessionId,
-                        (await this.resumeFrom(run.store)) ?? undefined
+                        (await this.resumeFrom(run.store, session)) ?? undefined
                     );
                 }
             }
@@ -821,6 +873,7 @@ export class EncodeService {
         // Cleared until this run fails and works out a new one.
         this.sessionService.setResumeFrom(session.id, undefined);
         let next: Omit<ResumeState, 'attempt' | 'ivHex'> | null = null;
+        let layout: WaveLayout[] | undefined;
         const blocker = isQuickTrimConfig(config)
             ? 'a quick cut starts over'
             : this.ffmpegService.resumeBlocker(config);
@@ -832,6 +885,7 @@ export class EncodeService {
         if (session.filePath && !blocker) {
             try {
                 const source = await stat(session.filePath);
+                layout = this.ffmpegService.waveLayout(config);
                 next = {
                     // What decides the output's bytes and where they go.
                     configHash: stableHash({
@@ -857,31 +911,28 @@ export class EncodeService {
                             session.filePath,
                             config
                         ),
-                    videoStreams: this.ffmpegService.videoStreamDirs(config),
+                    videoStreams: layout.flatMap((w) => w.videoStreams),
                     segmentDuration: config.segmentDuration ?? 6,
                 };
             } catch (err) {
+                next = null;
                 this.logger.warn(
                     `Session ${session.id}: this run cannot be continued later (${(err as Error).message})`
                 );
             }
         }
 
-        if (next && previous) {
+        if (next && layout && previous) {
             const refusal =
                 resumeRefusal(previous, next) ??
                 (encryptionKey && !previous.ivHex
                     ? 'no IV was recorded'
                     : null);
-            const point = refusal
+            const c = refusal
                 ? null
-                : resumePoint(next.videoStreams, store.readRecords());
-            const previousInits = point
-                ? this.readSavedInits(store, next.videoStreams)
-                : null;
+                : this.continuation(store, layout, session);
             const continued =
-                point &&
-                previousInits &&
+                !!c &&
                 (await store
                     .continueWith({ ...next, attempt, ivHex: previous.ivHex })
                     .then(
@@ -893,29 +944,47 @@ export class EncodeService {
                             return false;
                         }
                     ));
-            if (point && previousInits && continued) {
-                const first = next.videoStreams[0];
-                const fromSec =
-                    (point.startTfdt[first] - point.reused[first][0].tfdt) /
-                    readTrackTimescale(previousInits[first]);
+            if (c && continued) {
                 this.logger.log(
-                    `Session ${session.id}: continuing from segment ${point.startIndex} (${fromSec.toFixed(1)}s), attempt ${attempt}`
+                    `Session ${session.id}: continuing, attempt ${attempt}: ` +
+                        (layout.length > 1
+                            ? `${c.plan.skip} of ${layout.length} wave(s) already in storage, `
+                            : '') +
+                        (c.resume
+                            ? `restarting at segment ${c.resume.startNumber} (${c.resume.fromSec.toFixed(1)}s)`
+                            : 'the next wave from its start')
                 );
                 return {
                     store,
                     attempt,
                     ivHex: previous.ivHex,
                     recording: true,
-                    pipelineResume: { ...point, previousInits },
-                    ffmpegResume: { fromSec, startNumber: point.startIndex },
+                    layout,
+                    skipWaves: c.plan.skip,
+                    records: c.records,
+                    ...(c.plan.point
+                        ? {
+                              pipelineResume: {
+                                  ...c.plan.point,
+                                  previousInits: c.inits,
+                              },
+                          }
+                        : {}),
+                    ...(layout.length === 1
+                        ? c.resume
+                            ? { ffmpegResume: c.resume }
+                            : {}
+                        : {
+                              waveResume: {
+                                  skip: c.plan.skip,
+                                  resume: c.resume,
+                              },
+                          }),
                 };
             }
             this.logger.log(
                 `Session ${session.id}: starting over (${
-                    refusal ??
-                    (point
-                        ? 'an init segment is missing'
-                        : 'nothing in storage to continue from')
+                    refusal ?? 'nothing in storage to continue from'
                 })`
             );
         }
@@ -943,25 +1012,162 @@ export class EncodeService {
                 `Session ${session.id}: could not keep what a later run would continue from (${(err as Error).message})`
             );
         }
-        return { store, attempt, ivHex, recording };
+        return {
+            store,
+            attempt,
+            ivHex,
+            recording,
+            ...(next ? { layout } : {}),
+        };
     }
 
-    /** Where a continue would restart, in seconds of output, or null when it would start over. */
-    private async resumeFrom(store: ResumeStore): Promise<number | null> {
+    /**
+     * How a run would continue from what `store` holds, or null when it would
+     * start over: what it skips and restarts, and everything that has to be
+     * there to do so, the init segments and the finished waves' playlists.
+     */
+    private continuation(
+        store: ResumeStore,
+        layout: WaveLayout[],
+        session: Session
+    ): Continuation | null {
+        const records = store.readRecords();
+        const plan = resumePlan(layout, records);
+        if (!plan) return null;
+        const skipped = layout.slice(0, plan.skip);
+        const resumedVideo = plan.point ? layout[plan.skip]!.videoStreams : [];
+        const inits = this.readSavedInits(store, [
+            ...resumedVideo,
+            ...skipped.flatMap((w) => [...w.videoStreams, ...w.audioStreams]),
+        ]);
+        if (!inits) return null;
+        for (const [n, wave] of skipped.entries()) {
+            const files = [
+                ...(layout.length > 1 ? [wave.masterName] : []),
+                ...[...wave.videoStreams, ...wave.audioStreams].map(
+                    (s) => `${s}.m3u8`
+                ),
+            ];
+            if (files.some((f) => !existsSync(join(store.waveDir(n), f))))
+                return null;
+        }
+        let resume: Continuation['resume'];
+        if (plan.point) {
+            const first = resumedVideo[0]!;
+            resume = {
+                fromSec:
+                    (plan.point.startTfdt[first] -
+                        plan.point.reused[first][0].tfdt) /
+                    readTrackTimescale(inits[first]),
+                startNumber: plan.point.startIndex,
+            };
+        }
+        const duration = session.probeResult?.format?.duration ?? 0;
+        const waveFraction =
+            duration > 0 && resume ? resume.fromSec / duration : 0;
+        return {
+            plan,
+            records,
+            inits,
+            resume,
+            doneSec: ((plan.skip + waveFraction) / layout.length) * duration,
+        };
+    }
+
+    /** Where a continue would restart, as seconds of output reused, or null when it would start over. */
+    private async resumeFrom(
+        store: ResumeStore,
+        session: Session
+    ): Promise<number | null> {
         try {
-            const state = await store.readState();
-            if (!state) return null;
-            const point = resumePoint(state.videoStreams, store.readRecords());
-            const inits =
-                point && this.readSavedInits(store, state.videoStreams);
-            if (!point || !inits) return null;
-            const first = state.videoStreams[0];
-            return (
-                (point.startTfdt[first] - point.reused[first][0].tfdt) /
-                readTrackTimescale(inits[first])
+            const config = session.encodeConfig;
+            if (!config || (await store.readState()) === null) return null;
+            const c = this.continuation(
+                store,
+                this.ffmpegService.waveLayout(config),
+                session
             );
+            return c && c.doneSec > 0 ? c.doneSec : null;
         } catch {
             return null;
+        }
+    }
+
+    /**
+     * Put the waves a continue skips back into the output: their master and,
+     * per stream, its init and the playlist ffmpeg wrote, pointed at where its
+     * segments are in storage. They upload with everything else at the end.
+     */
+    private async restoreSkippedWaves(
+        run: PreparedRun,
+        outputDir: string,
+        byteRange: boolean
+    ): Promise<void> {
+        const layout = run.layout!;
+        for (let n = 0; n < (run.skipWaves ?? 0); n++) {
+            const wave = layout[n]!;
+            const waveDir = run.store.waveDir(n);
+            await mkdir(outputDir, { recursive: true });
+            if (layout.length > 1) {
+                await copyFile(
+                    join(waveDir, wave.masterName),
+                    join(outputDir, wave.masterName)
+                );
+            }
+            for (const stream of [...wave.videoStreams, ...wave.audioStreams]) {
+                const streamDir = join(outputDir, stream);
+                await mkdir(streamDir, { recursive: true });
+                const initsDir = run.store.initsDir(stream);
+                const init = readdirSync(initsDir)[0]!;
+                await copyFile(join(initsDir, init), join(streamDir, init));
+                await writeFile(
+                    join(streamDir, 'playlist.m3u8'),
+                    restorePlaylist(
+                        await readFile(join(waveDir, `${stream}.m3u8`), 'utf8'),
+                        stream,
+                        run.records ?? [],
+                        byteRange
+                    )
+                );
+            }
+        }
+    }
+
+    /**
+     * Keep a finished wave's playlists, as ffmpeg wrote them, so a later
+     * continue can skip it. Not for the wave a continue restarted: its
+     * playlist holds only the segments this run made, and a later continue
+     * restarts it from its records instead.
+     */
+    private async keepWave(
+        run: PreparedRun,
+        outputDir: string,
+        index: number
+    ): Promise<void> {
+        if (!run.recording || !run.layout) return;
+        if (run.waveResume?.resume && index === run.waveResume.skip) return;
+        try {
+            const wave = run.layout[index]!;
+            const waveDir = run.store.waveDir(index);
+            await mkdir(waveDir, { recursive: true });
+            await copyFile(
+                join(outputDir, wave.masterName),
+                join(waveDir, wave.masterName)
+            );
+            const counts: Record<string, number> = {};
+            for (const stream of [...wave.videoStreams, ...wave.audioStreams]) {
+                const text = await readFile(
+                    join(outputDir, stream, 'playlist.m3u8'),
+                    'utf8'
+                );
+                await writeFile(join(waveDir, `${stream}.m3u8`), text);
+                counts[stream] = parseMediaPlaylist(text).segments.length;
+            }
+            run.store.append([{ kind: 'waveDone', wave: index, counts }]);
+        } catch (err) {
+            this.logger.warn(
+                `Could not keep wave ${index}: ${(err as Error).message}`
+            );
         }
     }
 

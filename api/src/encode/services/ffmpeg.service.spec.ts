@@ -409,6 +409,33 @@ describe('FfmpegService', () => {
                 expect(service.canResume(copied)).toBe(false);
             });
 
+            it('lays a ladder over the session cap out in waves, the audio with the first', () => {
+                const sizes = [1080, 720, 480, 360, 240];
+                const ladder = config({
+                    videoRenditions: sizes.map((h) => ({
+                        width: Math.round((h * 16) / 9 / 2) * 2,
+                        height: h,
+                        videoBitrateKbps: h * 4,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: `${h}p`,
+                    })),
+                });
+
+                const layout = service.waveLayout(ladder);
+
+                expect(layout.map((w) => w.videoStreams.length)).toEqual([
+                    3, 2,
+                ]);
+                expect(layout.map((w) => w.masterName)).toEqual([
+                    'master_w0.m3u8',
+                    'master_w1.m3u8',
+                ]);
+                expect(layout[0].audioStreams).toEqual(['stream_hd_HD']);
+                expect(layout[1].audioStreams).toEqual([]);
+                expect(service.canResume(ladder)).toBe(true);
+            });
+
             it('names the video stream directories it would check', () => {
                 expect(service.videoStreamDirs(config())).toEqual([
                     'stream_720p_1280x720',

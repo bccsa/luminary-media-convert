@@ -112,7 +112,7 @@ export interface SegmentPipelineConfig {
      * What a failed encode can continue from.
      */
     onDurable?: (segments: DurableSegment[]) => void;
-    /** Told about every video segment as it is processed, with its start time. */
+    /** Told about every segment as it is processed; a video one with its start time. */
     onSegment?: (segment: DurableSegment) => void;
     /**
      * Continue a failed encode: the video streams named here restart at
@@ -501,14 +501,12 @@ export class SegmentPipeline {
                 state.chain.id !== AUDIO_CHAIN
             );
 
-            if (durable.tfdt !== undefined) {
-                try {
-                    this.config.onSegment?.(durable);
-                } catch (err) {
-                    this.logger.warn(
-                        `[pipeline] could not record ${streamDirName}/${filename}: ${(err as Error).message}`
-                    );
-                }
+            try {
+                this.config.onSegment?.(durable);
+            } catch (err) {
+                this.logger.warn(
+                    `[pipeline] could not record ${streamDirName}/${filename}: ${(err as Error).message}`
+                );
             }
 
             // Encrypt if needed
