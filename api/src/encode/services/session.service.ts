@@ -506,7 +506,16 @@ export class SessionService implements OnModuleInit {
                 // alive so an age-based sweep could delete it hours later, while
                 // whatever remained of its work directory sat on the disk. Boot
                 // is the natural moment to be rid of both.
-                if (TERMINAL.includes(session.status)) {
+                //
+                // Except a failed encode that can carry on from what it left in
+                // storage: purging it throws that work away. It stays until the
+                // sweep ages it out, as any other session does.
+                const continuable =
+                    session.status === 'failed' &&
+                    (session.resumeFromSec ?? 0) > 0 &&
+                    !!session.filePath &&
+                    existsSync(session.filePath);
+                if (TERMINAL.includes(session.status) && !continuable) {
                     this.purge(session.id);
                     discarded++;
                     continue;
