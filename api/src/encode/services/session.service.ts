@@ -123,6 +123,11 @@ export interface Session {
      * `error`, which says the session produced nothing.
      */
     fallbackNote?: string;
+    /**
+     * Where a failed encode can continue from, in seconds of output; absent
+     * when it would have to start over. Worked out once, when it failed.
+     */
+    resumeFromSec?: number;
     segmentFormat?: SegmentFormat;
     ingestTotalBytes?: number;
     /**
@@ -837,6 +842,14 @@ export class SessionService implements OnModuleInit {
      * outlive the event, because the session it explains is one the user comes
      * back to after it has finished.
      */
+    setResumeFrom(id: string, resumeFromSec: number | undefined): void {
+        const session = this.sessions.get(id);
+        if (session) {
+            session.resumeFromSec = resumeFromSec;
+            this.persist(session);
+        }
+    }
+
     setFallbackNote(id: string, fallbackNote: string): void {
         const session = this.sessions.get(id);
         if (session) {

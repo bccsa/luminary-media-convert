@@ -477,6 +477,77 @@ describe('EncodeController', () => {
             expect(result.probeResult).toBeDefined();
         });
 
+        describe('a failed encode that can continue', () => {
+            let dir: string;
+            beforeEach(() => {
+                dir = mkdtempSync(join(tmpdir(), 'resume-status-'));
+                writeFileSync(join(dir, 'source.mp4'), 'video');
+            });
+            afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+            function failedAt(resumeFromSec?: number) {
+                const session = sessionService.create(makeConfig());
+                sessionService.setFilePath(session.id, join(dir, 'source.mp4'));
+                sessionService.setProbeResult(session.id, {
+                    format: {
+                        duration: 200,
+                        bitrateKbps: 3000,
+                        formatName: 'mp4',
+                    },
+                    videoTracks: [],
+                    audioTracks: [],
+                });
+                sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+                sessionService.setFailed(session.id, 'ffmpeg was killed');
+                sessionService.setResumeFrom(session.id, resumeFromSec);
+                return session;
+            }
+
+            it('says how far it can continue from', () => {
+                const result = controller.getStatus(
+                    failedAt(47).id,
+                    makeRequest()
+                );
+                expect(result.canRetry).toBe(true);
+                expect(result.canResume).toBe(true);
+                expect(result.resumeFromPercent).toBe(23);
+            });
+
+            it('offers only a retry when nothing can be reused', () => {
+                const result = controller.getStatus(
+                    failedAt().id,
+                    makeRequest()
+                );
+                expect(result.canRetry).toBe(true);
+                expect(result.canResume).toBeUndefined();
+            });
+
+            it('continues with the settings it was started with', async () => {
+                const session = failedAt(47);
+                const start = vi
+                    .spyOn(controller, 'startEncode')
+                    .mockResolvedValue({
+                        sessionId: session.id,
+                        status: 'queued',
+                        queuePosition: 1,
+                    } as any);
+
+                await controller.continueEncode(session.id);
+
+                expect(start).toHaveBeenCalledWith(
+                    session.id,
+                    makeEncodeConfig()
+                );
+            });
+
+            it('continues only a failed encode', async () => {
+                const session = sessionService.create(makeConfig());
+                await expect(
+                    controller.continueEncode(session.id)
+                ).rejects.toThrow(/Only a failed encode/);
+            });
+        });
+
         it('should include queuePosition when session is queued', () => {
             const session = sessionService.create(makeConfig());
             sessionService.updateStatus(session.id, 'queued');

@@ -792,6 +792,12 @@ export class EncodeService {
             // need not make again, so it is given a moment to land.
             if (this.sessionService.get(sessionId)?.status === 'failed') {
                 await pipeline?.settle();
+                if (run?.recording) {
+                    this.sessionService.setResumeFrom(
+                        sessionId,
+                        (await this.resumeFrom(run.store)) ?? undefined
+                    );
+                }
             }
             await this.cleanupSessionFiles(sessionId);
         }
@@ -812,12 +818,18 @@ export class EncodeService {
         const previous = await store.readState();
         const attempt = previous ? previous.attempt + 1 : 0;
 
+        // Cleared until this run fails and works out a new one.
+        this.sessionService.setResumeFrom(session.id, undefined);
         let next: Omit<ResumeState, 'attempt' | 'ivHex'> | null = null;
-        if (
-            session.filePath &&
-            !isQuickTrimConfig(config) &&
-            this.ffmpegService.canResume(config)
-        ) {
+        const blocker = isQuickTrimConfig(config)
+            ? 'a quick cut starts over'
+            : this.ffmpegService.resumeBlocker(config);
+        if (previous && blocker) {
+            this.logger.log(
+                `Session ${session.id}: starting over (${blocker})`
+            );
+        }
+        if (session.filePath && !blocker) {
             try {
                 const source = await stat(session.filePath);
                 next = {
@@ -932,6 +944,25 @@ export class EncodeService {
             );
         }
         return { store, attempt, ivHex, recording };
+    }
+
+    /** Where a continue would restart, in seconds of output, or null when it would start over. */
+    private async resumeFrom(store: ResumeStore): Promise<number | null> {
+        try {
+            const state = await store.readState();
+            if (!state) return null;
+            const point = resumePoint(state.videoStreams, store.readRecords());
+            const inits =
+                point && this.readSavedInits(store, state.videoStreams);
+            if (!point || !inits) return null;
+            const first = state.videoStreams[0];
+            return (
+                (point.startTfdt[first] - point.reused[first][0].tfdt) /
+                readTrackTimescale(inits[first])
+            );
+        } catch {
+            return null;
+        }
     }
 
     /**

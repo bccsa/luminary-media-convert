@@ -1209,14 +1209,26 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
      * by wave.
      */
     canResume(config: EncodeConfigDto): boolean {
-        return (
-            config.type === 'video' &&
-            !config.trimSegments?.length &&
-            !(config.videoRenditions ?? []).some((r) => r.copyStream) &&
-            !(config.audioGroups ?? []).some((g) => g.copyStream) &&
+        return this.resumeBlocker(config) === null;
+    }
+
+    /** Why a failed encode of `config` would have to start over, or null when it can continue. */
+    resumeBlocker(config: EncodeConfigDto): string | null {
+        if (config.type !== 'video') return 'an audio-only encode starts over';
+        if (config.trimSegments?.length) return 'a trimmed encode starts over';
+        if (
+            (config.videoRenditions ?? []).some((r) => r.copyStream) ||
+            (config.audioGroups ?? []).some((g) => g.copyStream)
+        ) {
+            return 'an encode with copied streams starts over';
+        }
+        if (
             planLadderWaves(config.videoRenditions ?? [], MAX_HARDWARE_SESSIONS)
-                .length <= 1
-        );
+                .length > 1
+        ) {
+            return 'a ladder encoded in several passes starts over';
+        }
+        return null;
     }
 
     /** The video stream directories `config` writes, as the stream map names them. */

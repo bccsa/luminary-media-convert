@@ -119,6 +119,7 @@ describe('EncodeService', () => {
             // audio group. The real method is exercised in
             // `ffmpeg.service.spec.ts`; here it only has to reach the pipeline.
             canResume: vi.fn().mockReturnValue(false),
+            resumeBlocker: vi.fn().mockReturnValue('not resumable in this test'),
             videoStreamDirs: vi.fn().mockReturnValue([]),
             computeAlignmentOffset: vi.fn().mockResolvedValue(0),
             buildStreamChainMap: vi.fn().mockReturnValue({
@@ -1297,6 +1298,7 @@ describe('EncodeService — encrypting the text assets last', () => {
                 segmentFormat: 'fmp4',
             }),
             canResume: vi.fn().mockReturnValue(false),
+            resumeBlocker: vi.fn().mockReturnValue('not resumable in this test'),
             videoStreamDirs: vi.fn().mockReturnValue([]),
             computeAlignmentOffset: vi.fn().mockResolvedValue(0),
             buildStreamChainMap: vi.fn().mockReturnValue({}),
@@ -1474,6 +1476,7 @@ describe('EncodeService — naming the finalize phases', () => {
                 };
             }),
             canResume: vi.fn().mockReturnValue(false),
+            resumeBlocker: vi.fn().mockReturnValue('not resumable in this test'),
             videoStreamDirs: vi.fn().mockReturnValue([]),
             computeAlignmentOffset: vi.fn().mockResolvedValue(0),
             buildStreamChainMap: vi.fn().mockReturnValue({}),
@@ -1732,6 +1735,7 @@ describe('EncodeService — the delivered waveform sidecar', () => {
                 };
             }),
             canResume: vi.fn().mockReturnValue(false),
+            resumeBlocker: vi.fn().mockReturnValue('not resumable in this test'),
             videoStreamDirs: vi.fn().mockReturnValue([]),
             computeAlignmentOffset: vi.fn().mockResolvedValue(0),
             buildStreamChainMap: vi.fn().mockReturnValue({}),
