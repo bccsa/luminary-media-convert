@@ -582,7 +582,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
      * question ffprobe would not answer is worse than encoding as we always
      * did.
      */
-    private async computeAlignmentOffset(
+    async computeAlignmentOffset(
         inputPath: string,
         encodeConfig: EncodeConfigDto
     ): Promise<number> {

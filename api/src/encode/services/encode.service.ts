@@ -1,7 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { LUMINARY_KEY_PLACEHOLDER_URI } from '@luminary-media-converter/hls-core';
-import { existsSync } from 'fs';
-import { readdir, rm, writeFile } from 'fs/promises';
+import {
+    copyFileSync,
+    existsSync,
+    mkdirSync,
+    readdirSync,
+    readFileSync,
+} from 'fs';
+import { readdir, rm, stat, writeFile } from 'fs/promises';
 import { join, posix } from 'path';
 import { estimateOutputBytes, formatBytes } from './output-estimate.js';
 import { freeBytes } from './disk-space.js';
@@ -36,7 +42,30 @@ import {
     SegmentPipelineService,
     type PipelinePhase,
     type PipelineProgress,
+    type PipelineResume,
 } from './segment-pipeline.service.js';
+import {
+    ResumeStore,
+    fingerprint,
+    resumePoint,
+    resumeRefusal,
+    stableHash,
+    type ResumeState,
+} from './encode-resume.js';
+import { readTrackTimescale, sampleDescription } from './fmp4-timeline.js';
+
+/** One run of an encode: its attempt, its IV, and whether it continues an earlier one. */
+interface PreparedRun {
+    store: ResumeStore;
+    attempt: number;
+    ivHex?: string;
+    /** Whether this run's segments are recorded, for a later run to continue from. */
+    recording: boolean;
+    pipelineResume?: PipelineResume;
+    ffmpegResume?: { fromSec: number; startNumber: number };
+}
+
+const INIT_FILE_RE = /^init.*\.mp4$/;
 
 /**
  * The same config with every stream re-encoded — what a quick cut falls back to.
@@ -162,6 +191,7 @@ export class EncodeService {
         let pipeline:
             | ReturnType<SegmentPipelineService['createPipeline']>
             | undefined;
+        let run: PreparedRun | undefined;
 
         try {
             const encryptionEnabled = this.encryptionEnabled(session);
@@ -179,8 +209,12 @@ export class EncodeService {
                     this.sessionService.get(sessionId)!.encryptionKeyHex!,
                     'hex'
                 );
-                encryptionIV = this.encryptionService.generateIV();
             }
+            // Before the IV, which a continued run takes from the run it continues.
+            run = await this.prepareRun(session, encryptionKey);
+            if (encryptionKey) encryptionIV = Buffer.from(run.ivHex!, 'hex');
+            const thisRun = run;
+            const initsSaved = new Set<string>();
 
             this.sessionService.updateStatus(sessionId, 'encoding');
             this.sessionService.setOutputDir(sessionId, outputDir);
@@ -240,6 +274,34 @@ export class EncodeService {
                         1024,
                     segmentDurationSeconds: segDur,
                     estimatedTotalSegments,
+                    attempt: thisRun.attempt,
+                    resume: thisRun.pipelineResume,
+                    onSegment: (segment) => {
+                        if (!thisRun.recording) return;
+                        if (!initsSaved.has(segment.stream)) {
+                            initsSaved.add(segment.stream);
+                            this.saveInit(thisRun, outputDir, segment.stream);
+                        }
+                        if (thisRun.recording && segment.tfdt !== undefined) {
+                            thisRun.store.append([
+                                {
+                                    kind: 'seen',
+                                    stream: segment.stream,
+                                    index: segment.index,
+                                    tfdt: segment.tfdt,
+                                },
+                            ]);
+                        }
+                    },
+                    onDurable: (segments) => {
+                        if (!thisRun.recording) return;
+                        thisRun.store.append(
+                            segments.map((s) => ({
+                                kind: 'durable' as const,
+                                ...s,
+                            }))
+                        );
+                    },
                     onProgress: (pipelineUpdate) => {
                         if (pipelineUpdate.encrypting != null)
                             currentProgress.encrypting =
@@ -431,6 +493,9 @@ export class EncodeService {
                     outputDir,
                     encodeConfig,
                     onProgress: onEncodeProgress,
+                    ...(thisRun.ffmpegResume
+                        ? { resume: thisRun.ffmpegResume }
+                        : {}),
                 });
             }
 
@@ -702,6 +767,9 @@ export class EncodeService {
                     );
                 });
 
+            // Nothing is left to continue.
+            await thisRun.store.clear().catch(() => {});
+
             this.logger.log(`Session ${sessionId} completed successfully`);
         } catch (err) {
             const errorMsg = (err as Error).message || 'Unknown error';
@@ -720,8 +788,206 @@ export class EncodeService {
             // the encode produced correctly. Aborting an already-drained
             // pipeline is a no-op, so this is unconditional.
             pipeline?.abort();
+            // A chunk still sending when the encode failed is one a continue
+            // need not make again, so it is given a moment to land.
+            if (this.sessionService.get(sessionId)?.status === 'failed') {
+                await pipeline?.settle();
+            }
             await this.cleanupSessionFiles(sessionId);
         }
+    }
+
+    /**
+     * Decide how this run starts: continuing the run before it when that one
+     * failed partway with the same settings and source, or afresh. Either way
+     * it gets an attempt number of its own, which names its chunks apart from
+     * any earlier run's.
+     */
+    private async prepareRun(
+        session: Session,
+        encryptionKey: Buffer | undefined
+    ): Promise<PreparedRun> {
+        const store = new ResumeStore(join(this.workDir, session.id));
+        const config = session.encodeConfig!;
+        const previous = await store.readState();
+        const attempt = previous ? previous.attempt + 1 : 0;
+
+        let next: Omit<ResumeState, 'attempt' | 'ivHex'> | null = null;
+        if (
+            session.filePath &&
+            !isQuickTrimConfig(config) &&
+            this.ffmpegService.canResume(config)
+        ) {
+            try {
+                const source = await stat(session.filePath);
+                next = {
+                    // What decides the output's bytes and where they go.
+                    configHash: stableHash({
+                        encodeConfig: config,
+                        s3: {
+                            endPoint: session.config.s3.endPoint,
+                            bucket: session.config.s3.bucket,
+                            pathPrefix: session.config.s3.pathPrefix,
+                        },
+                        byteRange: session.config.byteRange,
+                        byteRangeMaxFileSizeMB:
+                            session.config.byteRangeMaxFileSizeMB,
+                        audioByteRangeMaxFileSizeMB:
+                            session.config.audioByteRangeMaxFileSizeMB,
+                        encryption: session.config.encryption ?? null,
+                    }),
+                    keyFingerprint: encryptionKey
+                        ? fingerprint(encryptionKey.toString('hex'))
+                        : undefined,
+                    source: { size: source.size, mtimeMs: source.mtimeMs },
+                    alignmentOffset:
+                        await this.ffmpegService.computeAlignmentOffset(
+                            session.filePath,
+                            config
+                        ),
+                    videoStreams: this.ffmpegService.videoStreamDirs(config),
+                    segmentDuration: config.segmentDuration ?? 6,
+                };
+            } catch (err) {
+                this.logger.warn(
+                    `Session ${session.id}: this run cannot be continued later (${(err as Error).message})`
+                );
+            }
+        }
+
+        if (next && previous) {
+            const refusal =
+                resumeRefusal(previous, next) ??
+                (encryptionKey && !previous.ivHex
+                    ? 'no IV was recorded'
+                    : null);
+            const point = refusal
+                ? null
+                : resumePoint(next.videoStreams, store.readRecords());
+            const previousInits = point
+                ? this.readSavedInits(store, next.videoStreams)
+                : null;
+            const continued =
+                point &&
+                previousInits &&
+                (await store
+                    .continueWith({ ...next, attempt, ivHex: previous.ivHex })
+                    .then(
+                        () => true,
+                        (err: Error) => {
+                            this.logger.warn(
+                                `Session ${session.id}: could not keep the state to continue (${err.message})`
+                            );
+                            return false;
+                        }
+                    ));
+            if (point && previousInits && continued) {
+                const first = next.videoStreams[0];
+                const fromSec =
+                    (point.startTfdt[first] - point.reused[first][0].tfdt) /
+                    readTrackTimescale(previousInits[first]);
+                this.logger.log(
+                    `Session ${session.id}: continuing from segment ${point.startIndex} (${fromSec.toFixed(1)}s), attempt ${attempt}`
+                );
+                return {
+                    store,
+                    attempt,
+                    ivHex: previous.ivHex,
+                    recording: true,
+                    pipelineResume: { ...point, previousInits },
+                    ffmpegResume: { fromSec, startNumber: point.startIndex },
+                };
+            }
+            this.logger.log(
+                `Session ${session.id}: starting over (${
+                    refusal ??
+                    (point
+                        ? 'an init segment is missing'
+                        : 'nothing in storage to continue from')
+                })`
+            );
+        }
+
+        const ivHex = encryptionKey
+            ? this.encryptionService.generateIV().toString('hex')
+            : undefined;
+        // Not being able to keep the state costs a later continue, never this encode.
+        let recording = !!next;
+        try {
+            await store.reset({
+                ...(next ?? {
+                    configHash: '',
+                    source: { size: 0, mtimeMs: 0 },
+                    alignmentOffset: 0,
+                    videoStreams: [],
+                    segmentDuration: 0,
+                }),
+                attempt,
+                ivHex,
+            });
+        } catch (err) {
+            recording = false;
+            this.logger.warn(
+                `Session ${session.id}: could not keep what a later run would continue from (${(err as Error).message})`
+            );
+        }
+        return { store, attempt, ivHex, recording };
+    }
+
+    /**
+     * Keep a stream's init beside the records, the first time one of its
+     * segments is seen: ffmpeg writes the init before the first segment, and
+     * the segments in storage cannot play without it. A continued run keeps
+     * the one saved; if its own differs, its segments could not be joined to a
+     * later run with that init, so recording stops and a later failure starts
+     * over.
+     */
+    private saveInit(
+        run: PreparedRun,
+        outputDir: string,
+        stream: string
+    ): void {
+        try {
+            const streamDir = join(outputDir, stream);
+            const name = readdirSync(streamDir).find((f) =>
+                INIT_FILE_RE.test(f)
+            );
+            if (!name) return;
+            const dir = run.store.initsDir(stream);
+            const saved = existsSync(dir) ? readdirSync(dir)[0] : undefined;
+            if (saved) {
+                const same = sampleDescription(
+                    readFileSync(join(dir, saved))
+                ).equals(
+                    sampleDescription(readFileSync(join(streamDir, name)))
+                );
+                if (!same) {
+                    run.recording = false;
+                    void run.store.clear();
+                }
+                return;
+            }
+            mkdirSync(dir, { recursive: true });
+            copyFileSync(join(streamDir, name), join(dir, name));
+        } catch (err) {
+            this.logger.warn(
+                `Could not keep the init of ${stream}: ${(err as Error).message}`
+            );
+        }
+    }
+
+    private readSavedInits(
+        store: ResumeStore,
+        streams: string[]
+    ): Record<string, Buffer> | null {
+        const inits: Record<string, Buffer> = {};
+        for (const stream of streams) {
+            const dir = store.initsDir(stream);
+            const name = existsSync(dir) ? readdirSync(dir)[0] : undefined;
+            if (!name) return null;
+            inits[stream] = readFileSync(join(dir, name));
+        }
+        return inits;
     }
 
     /**

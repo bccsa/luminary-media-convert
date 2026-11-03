@@ -42,6 +42,7 @@ function makeMockPipeline(
     return {
         start: vi.fn(),
         drain: vi.fn().mockResolvedValue(keys),
+        settle: vi.fn().mockResolvedValue(undefined),
         abort: vi.fn(),
         uploadRemainingFiles: vi.fn().mockResolvedValue([]),
         get error() {
@@ -117,6 +118,9 @@ describe('EncodeService', () => {
             // Matches `makeEncodeConfig`: one 720p rendition off track 0, one
             // audio group. The real method is exercised in
             // `ffmpeg.service.spec.ts`; here it only has to reach the pipeline.
+            canResume: vi.fn().mockReturnValue(false),
+            videoStreamDirs: vi.fn().mockReturnValue([]),
+            computeAlignmentOffset: vi.fn().mockResolvedValue(0),
             buildStreamChainMap: vi.fn().mockReturnValue({
                 stream_720p_1280x720: 'v0',
                 stream_hd_HD_Audio: 'a',
@@ -1237,6 +1241,7 @@ describe('EncodeService', () => {
         const errorPipeline = {
             start: vi.fn(),
             drain: vi.fn().mockResolvedValue([]),
+            settle: vi.fn().mockResolvedValue(undefined),
             abort: vi.fn(),
             uploadRemainingFiles: vi.fn().mockResolvedValue([]),
             get error() {
@@ -1291,6 +1296,9 @@ describe('EncodeService — encrypting the text assets last', () => {
                 masterPlaylist: 'master.m3u8',
                 segmentFormat: 'fmp4',
             }),
+            canResume: vi.fn().mockReturnValue(false),
+            videoStreamDirs: vi.fn().mockReturnValue([]),
+            computeAlignmentOffset: vi.fn().mockResolvedValue(0),
             buildStreamChainMap: vi.fn().mockReturnValue({}),
         } as any;
 
@@ -1325,6 +1333,7 @@ describe('EncodeService — encrypting the text assets last', () => {
                 calls.push('drain');
                 return [];
             }),
+            settle: vi.fn().mockResolvedValue(undefined),
             abort: vi.fn(),
             uploadRemainingFiles: vi.fn(async () => {
                 calls.push('uploadRemainingFiles');
@@ -1464,6 +1473,9 @@ describe('EncodeService — naming the finalize phases', () => {
                     segmentFormat: 'fmp4',
                 };
             }),
+            canResume: vi.fn().mockReturnValue(false),
+            videoStreamDirs: vi.fn().mockReturnValue([]),
+            computeAlignmentOffset: vi.fn().mockResolvedValue(0),
             buildStreamChainMap: vi.fn().mockReturnValue({}),
         } as any;
 
@@ -1491,6 +1503,7 @@ describe('EncodeService — naming the finalize phases', () => {
         mockPipeline = {
             start: vi.fn(),
             drain: vi.fn().mockResolvedValue([]),
+            settle: vi.fn().mockResolvedValue(undefined),
             abort: vi.fn(),
             uploadRemainingFiles: vi.fn(async (_dir: string, opts?: any) => {
                 onFileProgress = opts?.onFileProgress;
@@ -1718,6 +1731,9 @@ describe('EncodeService — the delivered waveform sidecar', () => {
                     alignmentOffset,
                 };
             }),
+            canResume: vi.fn().mockReturnValue(false),
+            videoStreamDirs: vi.fn().mockReturnValue([]),
+            computeAlignmentOffset: vi.fn().mockResolvedValue(0),
             buildStreamChainMap: vi.fn().mockReturnValue({}),
         } as any;
 
