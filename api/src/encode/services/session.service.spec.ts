@@ -405,38 +405,6 @@ describe('SessionService — restoring after a restart', () => {
         }
     );
 
-    it('keeps a failed encode that can carry on, with its source', () => {
-        // Purging it would throw away what it already put in storage.
-        const source = join(workDir, 'continuable', 'source.mp4');
-        seedOnDisk({
-            id: 'continuable',
-            status: 'failed',
-            resumeFromSec: 30,
-            filePath: source,
-        });
-        writeFileSync(source, 'video');
-
-        const service = build();
-        service.onModuleInit();
-
-        expect(service.get('continuable')?.status).toBe('failed');
-        expect(existsSync(source)).toBe(true);
-    });
-
-    it('still discards a failed encode that could carry on once its source is gone', () => {
-        seedOnDisk({
-            id: 'sourceless',
-            status: 'failed',
-            resumeFromSec: 30,
-            filePath: join(workDir, 'sourceless', 'gone.mp4'),
-        });
-
-        const service = build();
-        service.onModuleInit();
-
-        expect(service.get('sourceless')).toBeUndefined();
-    });
-
     it.each([
         'uploading',
         'queued',

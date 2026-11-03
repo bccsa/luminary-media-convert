@@ -141,16 +141,6 @@ export interface PipelineResume {
     previousInits: Record<string, Buffer>;
 }
 
-/** A file of segments that never reached storage, as `salvage()` hands it on. */
-export interface SalvagedUpload {
-    filePath: string;
-    /** Where it was going. */
-    objectKey: string;
-    /** What it must measure: the end of its last segment. */
-    size: number;
-    segments: DurableSegment[];
-}
-
 /** A segment that has reached storage, as a continued encode needs to know it. */
 export interface DurableSegment {
     /** Its stream directory, e.g. `stream_720p_1280x720`. */
@@ -178,6 +168,8 @@ interface ByteRangeEntry {
     mediaFile: string;
 }
 
+/** A video chain carries `tfdt` records; the audio chain is re-encoded whole on a continue. */
+const AUDIO_CHAIN = 'a';
 const SEGMENT_INDEX_RE = /^segment_(\d+)\./;
 
 /**
@@ -269,10 +261,6 @@ export class SegmentPipeline {
 
     // Upload queue
     private readonly uploadQueue: UploadTask[] = [];
-    /** Open chunks an abort closed, finishing their writes. */
-    private readonly closing: Promise<void>[] = [];
-    /** What an abort stopped from starting, for `salvage()` to hand on. */
-    private readonly abandoned: UploadTask[] = [];
     private activeUploads = 0;
     /**
      * Silences the segment-oriented progress emitter while `uploadRemainingFiles`
@@ -381,91 +369,19 @@ export class SegmentPipeline {
         this.aborted = true;
         this.running = false;
         // Nothing new starts; what is already sending is left to finish, and
-        // `settle()` waits for it. What never started is kept for `salvage()`.
-        this.abandoned.push(...this.uploadQueue.splice(0));
+        // `settle()` waits for it.
+        this.uploadQueue.length = 0;
         if (this.pollTimer) {
             clearInterval(this.pollTimer);
             this.pollTimer = null;
         }
-        // Close any open chunk streams. `salvage()` waits for them to finish.
+        // Close any open chunk streams
         for (const chain of this.chains.values()) {
             if (chain.currentChunkStream) {
-                const stream = chain.currentChunkStream;
-                this.closing.push(
-                    new Promise<void>((resolve) => {
-                        if (stream.writableFinished) return resolve();
-                        stream.once('finish', resolve);
-                        stream.once('error', () => resolve());
-                    })
-                );
-                stream.end();
+                chain.currentChunkStream.end();
                 chain.currentChunkStream = null;
-                if (chain.currentChunkSegments.length > 0) {
-                    this.abandoned.push({
-                        filePath: join(this.chunkDir, chain.currentChunkFile),
-                        objectKey: this.chainObjectKey(chain.currentChunkFile),
-                        deleteAfterUpload: true,
-                        segmentCount: chain.currentChunkSegmentCount,
-                        durable: chain.currentChunkSegments,
-                    });
-                }
             }
         }
-    }
-
-    /**
-     * Upload files an earlier run of the encode salvaged, as any chunk is
-     * uploaded (three attempts), each reported through `onDurable` once it is
-     * in storage. One that still fails is left where it is.
-     */
-    async uploadSalvaged(files: SalvagedUpload[]): Promise<void> {
-        for (const file of files) {
-            try {
-                await this.executeUpload({
-                    filePath: file.filePath,
-                    objectKey: file.objectKey,
-                    deleteAfterUpload: true,
-                    durable: file.segments,
-                });
-            } catch (err) {
-                this.logger.warn(
-                    `[pipeline] could not upload kept ${file.objectKey}: ${(err as Error).message}`
-                );
-            }
-        }
-    }
-
-    /**
-     * After an abort: the files that hold segments but never reached storage,
-     * the chunks closed and waiting, and those still open, now closed, each
-     * with the segments in it and the size it must have. A continue can upload
-     * them instead of making their segments again.
-     */
-    async salvage(): Promise<SalvagedUpload[]> {
-        await Promise.all(this.closing.splice(0));
-        const out: SalvagedUpload[] = [];
-        for (const task of this.abandoned.splice(0)) {
-            const segments = task.durable ?? [];
-            if (segments.length === 0) continue;
-            try {
-                const size = (await stat(task.filePath)).size;
-                const expected = Math.max(
-                    ...segments.map((s) => (s.offset ?? 0) + s.length)
-                );
-                // Bytes the records do not describe, or fewer than they do,
-                // mean the file is not what it claims to be.
-                if (size !== expected) continue;
-                out.push({
-                    filePath: task.filePath,
-                    objectKey: task.objectKey,
-                    size,
-                    segments,
-                });
-            } catch {
-                // Gone already; nothing to hand on.
-            }
-        }
-        return out;
     }
 
     /**
@@ -569,20 +485,9 @@ export class SegmentPipeline {
             state.processedSegments.add(filename);
             this.totalSegmentsProduced++;
 
-            // A continued audio stream starts a segment early to warm its
-            // encoder up; that segment is only the warm-up, and goes.
-            const resumed =
-                this.config.resume?.startTfdt[streamDirName] !== undefined;
-            const index = Number(SEGMENT_INDEX_RE.exec(filename)?.[1] ?? NaN);
-            if (resumed && index < this.config.resume!.startIndex) {
-                this.totalSegmentsProduced--;
-                await unlink(segPath).catch(() => {});
-                continue;
-            }
-
             // A continued stream's segments are moved onto the timeline of the
             // run it continues, so the two halves play as one.
-            if (resumed) {
+            if (this.config.resume?.startTfdt[streamDirName] !== undefined) {
                 try {
                     await this.alignToResume(
                         state,
@@ -602,7 +507,8 @@ export class SegmentPipeline {
             const durable = await this.describeSegment(
                 streamDirName,
                 filename,
-                segPath
+                segPath,
+                state.chain.id !== AUDIO_CHAIN
             );
 
             try {
@@ -742,12 +648,7 @@ export class SegmentPipeline {
                 ? { byteRange: { offset: r.offset, length: r.length } }
                 : {}),
         }));
-        // The warm-up segment a continued audio stream began with is not played.
-        const kept = playlist.segments.filter((s) => {
-            const index = Number(SEGMENT_INDEX_RE.exec(s.uri)?.[1] ?? NaN);
-            return !(index < resume.startIndex);
-        });
-        const after: Entry[] = kept.map((s) => ({
+        const after: Entry[] = playlist.segments.map((s) => ({
             uri: s.uri,
             duration: s.duration,
             ...(s.byteRange ? { byteRange: s.byteRange } : {}),
@@ -779,23 +680,26 @@ export class SegmentPipeline {
     }
 
     /**
-     * A segment's identity and its start time. A start time that
+     * A segment's identity and, for video, its start time. A start time that
      * cannot be read is left out rather than failing the encode: it only means
      * a continued encode cannot restart at this segment.
      */
     private async describeSegment(
         stream: string,
         file: string,
-        segPath: string
+        segPath: string,
+        video: boolean
     ): Promise<DurableSegment> {
         const index = Number(SEGMENT_INDEX_RE.exec(file)?.[1] ?? NaN);
         let tfdt: number | undefined;
-        try {
-            tfdt = readBaseMediaDecodeTime(await readFile(segPath));
-        } catch (err) {
-            this.logger.debug(
-                `[pipeline] ${stream}/${file}: no start time (${(err as Error).message})`
-            );
+        if (video) {
+            try {
+                tfdt = readBaseMediaDecodeTime(await readFile(segPath));
+            } catch (err) {
+                this.logger.debug(
+                    `[pipeline] ${stream}/${file}: no start time (${(err as Error).message})`
+                );
+            }
         }
         return {
             stream,
@@ -1202,13 +1106,7 @@ export class SegmentPipeline {
             // in a finally, so `pack-list.txt` is belt-and-braces — a crashed
             // pack must not put its scratch file in the delivered output.
             const name = posix.basename(relativePath);
-            if (
-                name === 'concat.txt' ||
-                name === 'concat-resume.txt' ||
-                name === 'pack-list.txt'
-            ) {
-                continue;
-            }
+            if (name === 'concat.txt' || name === 'pack-list.txt') continue;
 
             const objectKey = this.config.s3PathPrefix
                 ? posix.join(this.config.s3PathPrefix, relativePath)

@@ -62,11 +62,10 @@ export interface EncodeOptions {
     encodeConfig: EncodeConfigDto;
     onProgress: (percent: number) => void;
     /**
-     * Continue a failed encode: restart at `fromSec` of the output, numbering
-     * segments from `startNumber`. A video encode restarts its video there and
-     * encodes its audio again from the start; an audio-only one restarts its
-     * audio one segment earlier, to warm the encoder up. Honoured by a single
-     * run only; see `canResume`.
+     * Continue a failed encode: restart the video at `fromSec` of the output,
+     * numbering its segments from `startNumber`, and encode the audio again
+     * from the start. Honoured by a single-run video encode only; see
+     * `canResume`.
      */
     resume?: { fromSec: number; startNumber: number };
     /**
@@ -80,35 +79,6 @@ export interface EncodeOptions {
     };
     /** Told when a wave of a ladder run in waves has finished. */
     onWaveDone?: (index: number) => Promise<void> | void;
-}
-
-/**
- * The kept ranges still to encode from `fromSec` of a trimmed output: the
- * output is the ranges laid end to end (each clamped to the alignment, as the
- * concat file writes them), so `fromSec` falls inside one of them, which then
- * starts there, and every range after it follows whole.
- */
-export function remainingTrimSegments(
-    segments: TrimSegmentDto[],
-    alignmentOffset: number,
-    fromSec: number
-): TrimSegmentDto[] {
-    const out: TrimSegmentDto[] = [];
-    let elapsed = 0;
-    for (const seg of segments) {
-        const inSec = Math.max(seg.inSec, alignmentOffset);
-        const length = Math.max(0, seg.outSec - inSec);
-        if (out.length > 0) {
-            out.push({ inSec, outSec: seg.outSec });
-        } else if (fromSec < elapsed + length) {
-            out.push({
-                inSec: inSec + Math.max(0, fromSec - elapsed),
-                outSec: seg.outSec,
-            });
-        }
-        elapsed += length;
-    }
-    return out;
 }
 
 /**
@@ -750,8 +720,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         inputPath: string,
         segments: TrimSegmentDto[],
         outputDir: string,
-        alignmentOffset = 0,
-        fileName = 'concat.txt'
+        alignmentOffset = 0
     ): Promise<string> {
         const lines = ['ffconcat version 1.0'];
         /*
@@ -785,7 +754,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             lines.push(`inpoint ${Math.max(seg.inSec, alignmentOffset)}`);
             lines.push(`outpoint ${seg.outSec}`);
         }
-        const concatPath = join(outputDir, fileName);
+        const concatPath = join(outputDir, 'concat.txt');
         await writeFile(concatPath, lines.join('\n'), 'utf-8');
         return concatPath;
     }
@@ -811,8 +780,8 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         const sourceFrameRate = await this.probeFrameRate(inputPath);
         const gopFrames = Math.round(segmentDuration * sourceFrameRate);
         const trimming = !!encodeConfig.trimSegments?.length;
-        // Never alongside copy streams: `canResume` keeps them apart.
-        const resume = opts.resume;
+        // Never alongside a trim, waves or copy streams: `canResume` keeps them apart.
+        const resume = trimming ? undefined : opts.resume;
 
         this.logger.log(
             `Source frame rate: ${sourceFrameRate.toFixed(2)} fps, GOP: ${gopFrames} frames (${segmentDuration}s segments)`
@@ -847,7 +816,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             // cut a window displaced by up to a GOP (verified by frame
             // comparison, not a theory). The stitched clock already starts at
             // zero, so downstream muxing is unaffected.
-            const concatInput = (path: string) => [
+            args.push(
                 '-f',
                 'concat',
                 '-safe',
@@ -855,30 +824,9 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 '-segment_time_metadata',
                 '1',
                 '-i',
-                path,
-            ];
-            if (resume) {
-                // The video reads only what is left to encode, from the boundary
-                // a millisecond early (see the untrimmed case below); the audio
-                // reads every kept range again, as an untrimmed continue does.
-                const remaining = await this.buildConcatFile(
-                    inputPath,
-                    remainingTrimSegments(
-                        encodeConfig.trimSegments!,
-                        alignmentOffset,
-                        resume.fromSec - 0.001
-                    ),
-                    outputDir,
-                    0,
-                    'concat-resume.txt'
-                );
-                args.push(...concatInput(remaining));
-                if (audioGroups.length > 0)
-                    args.push(...concatInput(concatPath));
-            } else {
-                args.push(...concatInput(concatPath));
-            }
-            args.push('-copyts');
+                concatPath,
+                '-copyts'
+            );
         } else if (resume) {
             // The video restarts on the segment boundary at `fromSec`, a
             // millisecond early so rounding cannot seek past the frame on it.
@@ -1040,8 +988,8 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 const labels = outs.map((i) => `[aout${i}]`).join('');
                 audioParts.push(
                     outs.length === 1
-                        ? `[${resume ? 1 : 0}:a:${trackIdx}]aselect=concatdec_select${labels}`
-                        : `[${resume ? 1 : 0}:a:${trackIdx}]aselect=concatdec_select,asplit=${outs.length}${labels}`
+                        ? `[0:a:${trackIdx}]aselect=concatdec_select${labels}`
+                        : `[0:a:${trackIdx}]aselect=concatdec_select,asplit=${outs.length}${labels}`
                 );
             }
             args.push('-filter_complex', audioParts.join(';'));
@@ -1154,7 +1102,6 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         const audioGroups = encodeConfig.audioGroups!;
         const segmentDuration = encodeConfig.segmentDuration ?? 6;
         const trimming = !!encodeConfig.trimSegments?.length;
-        const resume = trimming ? undefined : opts.resume;
         const args: string[] = [];
 
         if (trimming) {
@@ -1178,17 +1125,6 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 concatPath,
                 '-copyts'
             );
-        } else if (resume) {
-            // An AAC encoder started at the boundary primes its first frame, which
-            // plays as a gap at the join. Started one segment earlier, it is
-            // warmed up by the boundary and its output from there is the same
-            // as an uninterrupted run's; the segment before is thrown away. An
-            // exact seek: audio has no frame to miss.
-            const warm = Math.max(
-                0,
-                alignmentOffset + resume.fromSec - segmentDuration
-            );
-            args.push('-ss', warm.toFixed(6), '-i', inputPath);
         } else if (alignmentOffset > 0) {
             // See buildVideoArgs: input-level, so it reaches copied streams too.
             args.push('-ss', String(alignmentOffset), '-i', inputPath);
@@ -1258,10 +1194,6 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             'hls',
             '-hls_time',
             String(segmentDuration),
-            // From the warm-up segment, which the pipeline throws away.
-            ...(resume
-                ? ['-start_number', String(resume.startNumber - 1)]
-                : []),
             '-hls_playlist_type',
             'vod',
             '-hls_flags',
@@ -1318,9 +1250,8 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
 
     /** Why a failed encode of `config` would have to start over, or null when it can continue. */
     resumeBlocker(config: EncodeConfigDto): string | null {
-        if (config.type !== 'video' && config.trimSegments?.length) {
-            return 'a trimmed audio-only encode starts over';
-        }
+        if (config.type !== 'video') return 'an audio-only encode starts over';
+        if (config.trimSegments?.length) return 'a trimmed encode starts over';
         if (
             (config.videoRenditions ?? []).some((r) => r.copyStream) ||
             (config.audioGroups ?? []).some((g) => g.copyStream)
@@ -1427,7 +1358,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                   )
                 : [];
 
-        if (opts.resume && waves.length > 1) {
+        if (opts.resume && (type !== 'video' || waves.length > 1)) {
             throw new Error(
                 'A continued encode of a ladder in waves is continued wave by wave'
             );

@@ -73,7 +73,6 @@ import {
     isHardwareEncoderFailure,
     type AccelMode,
     type EncodeOptions,
-    remainingTrimSegments,
 } from './ffmpeg.service.js';
 
 const flushPromises = async () => {
@@ -380,59 +379,6 @@ describe('FfmpegService', () => {
                 expect(args[args.indexOf('-start_number') + 1]).toBe('6');
             });
 
-            it('starts an audio-only encode one segment early, to warm the encoder up', async () => {
-                const args = await (service as any).buildAudioArgs({
-                    inputPath: '/tmp/input.mp3',
-                    outputDir: '/tmp/output',
-                    encodeConfig: {
-                        ...config(),
-                        type: 'audio',
-                        videoRenditions: [],
-                    },
-                    resume: { fromSec: 36, startNumber: 6 },
-                });
-
-                expect(args[args.indexOf('-i') - 2]).toBe('-ss');
-                // Exactly the boundary before: audio has no frame to miss.
-                expect(args[args.indexOf('-i') - 1]).toBe('30.000000');
-                expect(args[args.indexOf('-start_number') + 1]).toBe('5');
-            });
-
-            it('continues a trimmed encode from a range list of what is left, the audio from the whole', async () => {
-                const dir = mkdtempSync(join(tmpdir(), 'resume-trim-'));
-                try {
-                    const args = await buildVideoArgs({
-                        inputPath: '/tmp/input.mp4',
-                        outputDir: dir,
-                        encodeConfig: config({
-                            trimSegments: [
-                                { inSec: 10, outSec: 50 },
-                                { inSec: 70, outSec: 100 },
-                            ],
-                        } as any),
-                        resume: { fromSec: 48, startNumber: 8 },
-                    });
-
-                    const inputs = args.flatMap((a, i) =>
-                        a === '-i' ? [args[i + 1]] : []
-                    );
-                    expect(inputs).toEqual([
-                        join(dir, 'concat-resume.txt'),
-                        join(dir, 'concat.txt'),
-                    ]);
-                    expect(
-                        readFileSync(join(dir, 'concat-resume.txt'), 'utf8')
-                    ).toContain('inpoint 77.999');
-                    expect(args.join(' ')).toContain(
-                        '[1:a:0]aselect=concatdec_select'
-                    );
-                    expect(args.filter((a) => a === '-copyts')).toHaveLength(1);
-                    expect(args[args.indexOf('-start_number') + 1]).toBe('8');
-                } finally {
-                    rmSync(dir, { recursive: true, force: true });
-                }
-            });
-
             it('changes nothing when not continuing', async () => {
                 const args = await buildVideoArgs({
                     inputPath: '/tmp/input.mp4',
@@ -444,29 +390,21 @@ describe('FfmpegService', () => {
                 expect(args).not.toContain('-start_number');
             });
 
-            it('continues an encode that re-encodes every stream, trimmed or not', () => {
+            it('continues only an encode in one pass that re-encodes every stream, with no trim', () => {
                 expect(service.canResume(config())).toBe(true);
                 expect(
                     service.canResume(config({ type: 'audio' } as any))
-                ).toBe(true);
+                ).toBe(false);
                 expect(
                     service.canResume(
                         config({
-                            trimSegments: [{ inSec: 0, outSec: 10 }],
-                        } as any)
-                    )
-                ).toBe(true);
-                const copied = config();
-                copied.videoRenditions![0].copyStream = true;
-                expect(service.canResume(copied)).toBe(false);
-                expect(
-                    service.canResume(
-                        config({
-                            type: 'audio',
                             trimSegments: [{ inSec: 0, outSec: 10 }],
                         } as any)
                     )
                 ).toBe(false);
+                const copied = config();
+                copied.videoRenditions![0].copyStream = true;
+                expect(service.canResume(copied)).toBe(false);
             });
 
             it('lays a ladder over the session cap out in waves, the audio with the first', () => {
@@ -5319,33 +5257,5 @@ describe('audio stream names', () => {
 
     it('still names a label made only of other scripts', () => {
         expect(name('日本語')).toMatch(/^hd_[A-Za-z0-9_-]+$/);
-    });
-});
-
-describe('remainingTrimSegments', () => {
-    const trims = [
-        { inSec: 10, outSec: 50 },
-        { inSec: 70, outSec: 100 },
-    ];
-
-    it('starts inside the range the output time falls in, and keeps the rest whole', () => {
-        expect(remainingTrimSegments(trims, 0, 30)).toEqual([
-            { inSec: 40, outSec: 50 },
-            { inSec: 70, outSec: 100 },
-        ]);
-        expect(remainingTrimSegments(trims, 0, 48)).toEqual([
-            { inSec: 78, outSec: 100 },
-        ]);
-    });
-
-    it('counts a range as clamped to the alignment, as the concat file writes it', () => {
-        // The first range keeps 12..50 once the head up to 12 s is seeked past.
-        expect(remainingTrimSegments(trims, 12, 38)).toEqual([
-            { inSec: 70, outSec: 100 },
-        ]);
-    });
-
-    it('leaves nothing once the output time is past the end', () => {
-        expect(remainingTrimSegments(trims, 0, 70)).toEqual([]);
     });
 });
