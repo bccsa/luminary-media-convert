@@ -117,6 +117,21 @@ describe('key delivery', () => {
         expect(requestKey().failed).toBe(true);
     });
 
+    it('builds a new engine for a source with a different key: hls.js would keep the last one', async () => {
+        const OTHER_KEY_HEX = 'ffeeddccbbaa99887766554433221100';
+        await adapter.loadSource(adapterSource({ url: 'blob:one', keyHex: KEY_HEX }));
+        await adapter.loadSource(adapterSource({ url: 'blob:clear' }));
+        expect(engineConfig()).not.toHaveProperty('engineGeneration');
+        await adapter.loadSource(adapterSource({ url: 'blob:two', keyHex: OTHER_KEY_HEX }));
+        expect(engineConfig().engineGeneration).toBe(1);
+    });
+
+    it('keeps the engine for a source with the same key, as an angle switch is', async () => {
+        await adapter.loadSource(adapterSource({ url: 'blob:one', keyHex: KEY_HEX }));
+        await adapter.loadSource(adapterSource({ url: 'blob:two', keyHex: KEY_HEX }));
+        expect(engineConfig()).not.toHaveProperty('engineGeneration');
+    });
+
     it('advertises memory delivery, so the wrapper never mints a key blob URL', () => {
         expect(adapter.capabilities).toMatchObject({ keyDelivery: 'memory', nativeHls: false, variantSwitching: true });
     });

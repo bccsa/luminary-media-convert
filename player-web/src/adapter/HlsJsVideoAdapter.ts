@@ -110,6 +110,11 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
     /** Bumped to rebuild the engine for the same source; hls.js reads its config only at construction. */
     private engineGeneration = 0;
     /**
+     * The last key the current engine was handed. hls.js caches an AES-128 key by URI for its lifetime, and every
+     * source's URI is `luminary://key`, so a source with a different key needs a new engine.
+     */
+    private engineKeyHex: string | undefined;
+    /**
      * The element's audio tracks still belong to the source being replaced: a track selected there
      * is loaded by an engine about to be torn down, so the list reads as empty and selections are
      * refused until the element has rebuilt it.
@@ -194,6 +199,10 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
             return;
         }
 
+        if (src.keyHex) {
+            if (this.engineKeyHex && this.engineKeyHex !== src.keyHex) this.engineGeneration++;
+            this.engineKeyHex = src.keyHex;
+        }
         this.retireAudioTracks();
         this.setElementSource(src.url);
     }
