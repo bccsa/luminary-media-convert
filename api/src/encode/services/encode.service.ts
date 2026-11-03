@@ -12,11 +12,12 @@ import {
     mkdir,
     readdir,
     readFile,
+    rename,
     rm,
     stat,
     writeFile,
 } from 'fs/promises';
-import { join, posix } from 'path';
+import { basename, join, posix } from 'path';
 import { estimateOutputBytes, formatBytes } from './output-estimate.js';
 import { failureMessage } from './failure-message.js';
 import { freeBytes } from './disk-space.js';
@@ -865,6 +866,9 @@ export class EncodeService {
             // need not make again, so it is given a moment to land.
             if (this.sessionService.get(sessionId)?.status === 'failed') {
                 await pipeline?.settle();
+                if (run?.recording && pipeline) {
+                    await this.keepSalvaged(run, pipeline);
+                }
                 if (run?.recording) {
                     this.sessionService.setResumeFrom(
                         sessionId,
@@ -949,6 +953,8 @@ export class EncodeService {
                 (encryptionKey && !previous.ivHex
                     ? 'no IV was recorded'
                     : null);
+            // What the failed run kept goes up first; only then is it stored.
+            if (!refusal) await this.uploadPending(store, session);
             const c = refusal
                 ? null
                 : this.continuation(store, layout, session);
@@ -1075,9 +1081,25 @@ export class EncodeService {
     private continuation(
         store: ResumeStore,
         layout: WaveLayout[],
-        session: Session
+        session: Session,
+        countPending = false
     ): Continuation | null {
-        const records = store.readRecords();
+        const stored = store.readRecords();
+        // An offer counts the kept files a continue will upload first; a run
+        // only what has actually reached storage.
+        const records: ResumeRecord[] = countPending
+            ? [
+                  ...stored,
+                  ...store
+                      .pending(stored)
+                      .flatMap((p) =>
+                          p.segments.map((s) => ({
+                              kind: 'durable' as const,
+                              ...s,
+                          }))
+                      ),
+              ]
+            : stored;
         const plan = resumePlan(layout, records);
         if (!plan) return null;
         const skipped = layout.slice(0, plan.skip);
@@ -1131,7 +1153,8 @@ export class EncodeService {
             const c = this.continuation(
                 store,
                 this.ffmpegService.waveLayout(config),
-                session
+                session,
+                true
             );
             return c && c.doneSec > 0 ? c.doneSec : null;
         } catch {
@@ -1215,6 +1238,83 @@ export class EncodeService {
                 `Could not keep wave ${index}: ${(err as Error).message}`
             );
         }
+    }
+
+    /**
+     * Keep what a failed run made but never uploaded, beside its records, so a
+     * continue can upload it rather than make it again. Only files the
+     * pipeline closed in an orderly way and whose size matches their segments
+     * are kept; a run killed outright keeps nothing this way.
+     */
+    private async keepSalvaged(
+        run: PreparedRun,
+        pipeline: ReturnType<SegmentPipelineService['createPipeline']>
+    ): Promise<void> {
+        try {
+            const salvaged = await pipeline.salvage();
+            if (salvaged.length === 0) return;
+            await mkdir(run.store.pendingDir, { recursive: true });
+            for (const file of salvaged) {
+                const name = basename(file.objectKey);
+                await rename(file.filePath, join(run.store.pendingDir, name));
+                run.store.append([
+                    {
+                        kind: 'pending',
+                        name,
+                        objectKey: file.objectKey,
+                        size: file.size,
+                        segments: file.segments,
+                    },
+                ]);
+            }
+            this.logger.log(
+                `Kept ${salvaged.length} file(s) of segments that had not reached storage`
+            );
+        } catch (err) {
+            this.logger.warn(
+                `Could not keep the segments that had not reached storage: ${(err as Error).message}`
+            );
+        }
+    }
+
+    /** Upload what a failed run kept, recording each file's segments as stored once it is. */
+    private async uploadPending(
+        store: ResumeStore,
+        session: Session
+    ): Promise<void> {
+        const pending = store.pending(store.readRecords());
+        if (pending.length === 0) return;
+        const pipeline = this.segmentPipelineService.createPipeline({
+            outputDir: store.pendingDir,
+            s3Config: session.config.s3,
+            s3PathPrefix: S3Service.canonicalPrefix(
+                session.config.s3.pathPrefix
+            ),
+            byteRange: session.config.byteRange !== false,
+            byteRangeMaxFileSizeBytes: 0,
+            onDurable: (segments) =>
+                store.append(
+                    segments.map((s) => ({ kind: 'durable' as const, ...s }))
+                ),
+        });
+        // Shown as part of the encode, not as a wait in the queue.
+        this.sessionService.updateStatus(session.id, 'encoding');
+        const report = (uploading: number) =>
+            this.sessionService.updatePipelineProgress(session.id, {
+                encoding: 0,
+                uploading,
+                phase: 'uploading-kept',
+            });
+        report(0);
+        await pipeline.uploadSalvaged(
+            pending.map((p) => ({
+                filePath: join(store.pendingDir, p.name),
+                objectKey: p.objectKey,
+                size: p.size,
+                segments: p.segments,
+            })),
+            (done, total) => report(Math.round((done / total) * 100))
+        );
     }
 
     /**

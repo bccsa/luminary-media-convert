@@ -48,7 +48,8 @@ export type PipelinePhase =
     | 'thumbnails'
     | 'waveform'
     | 'encrypting-playlists'
-    | 'uploading-playlists';
+    | 'uploading-playlists'
+    | 'uploading-kept';
 
 export interface PipelineProgress {
     encoding: number;
