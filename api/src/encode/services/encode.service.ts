@@ -87,6 +87,8 @@ interface PreparedRun {
     records?: ResumeRecord[];
     /** Segments a continue reuses, which the bars count as done from the start. */
     reusedSegments?: number;
+    /** The share of the encode a continue reuses, 0–1: where every bar starts. */
+    doneFraction?: number;
     pipelineResume?: PipelineResume;
     ffmpegResume?: { fromSec: number; startNumber: number };
     waveResume?: {
@@ -303,11 +305,19 @@ export class EncodeService implements OnModuleInit {
 
             // Current pipeline progress state (updated by both FFmpeg and pipeline callbacks)
             // Initialize all bars so the UI shows them from the start
+            // A continue starts every bar at once at the share it reuses, rather
+            // than letting each arrive in turn from wherever it is measured.
+            const reused = Math.round((thisRun.doneFraction ?? 0) * 100);
             const currentProgress: PipelineProgress = {
-                encoding: 0,
-                ...(encryptionEnabled ? { encrypting: 0 } : {}),
-                uploading: 0,
+                encoding: reused,
+                ...(encryptionEnabled ? { encrypting: reused } : {}),
+                uploading: Math.round((reused * SEGMENT_UPLOAD_SHARE) / 100),
             };
+            if (reused > 0) {
+                this.sessionService.updatePipelineProgress(sessionId, {
+                    ...currentProgress,
+                });
+            }
 
             const segDur = session.encodeConfig.segmentDuration ?? 6;
             const duration = session.probeResult?.format?.duration ?? 0;
@@ -375,15 +385,23 @@ export class EncodeService implements OnModuleInit {
                             }))
                         );
                     },
+                    // Only ever forward: the pipeline counts segments, and a
+                    // continue's starting share is measured in time, so a
+                    // first report can come in below where the bar stands.
                     onProgress: (pipelineUpdate) => {
                         if (pipelineUpdate.encrypting != null)
-                            currentProgress.encrypting =
-                                pipelineUpdate.encrypting;
+                            currentProgress.encrypting = Math.max(
+                                currentProgress.encrypting ?? 0,
+                                pipelineUpdate.encrypting
+                            );
                         if (pipelineUpdate.uploading != null)
-                            currentProgress.uploading = Math.round(
-                                (pipelineUpdate.uploading *
-                                    SEGMENT_UPLOAD_SHARE) /
-                                    100
+                            currentProgress.uploading = Math.max(
+                                currentProgress.uploading ?? 0,
+                                Math.round(
+                                    (pipelineUpdate.uploading *
+                                        SEGMENT_UPLOAD_SHARE) /
+                                        100
+                                )
                             );
                         this.sessionService.updatePipelineProgress(sessionId, {
                             ...currentProgress,
@@ -976,7 +994,22 @@ export class EncodeService implements OnModuleInit {
                     ? 'no IV was recorded'
                     : null);
             // What the failed run kept goes up first; only then is it stored.
-            if (!refusal) await this.uploadPending(store, session);
+            if (!refusal) {
+                const duration = session.probeResult?.format?.duration ?? 0;
+                const shareOf = (countPending: boolean) =>
+                    duration > 0
+                        ? (this.continuation(
+                              store,
+                              layout,
+                              session,
+                              countPending
+                          )?.doneSec ?? 0) / duration
+                        : 0;
+                await this.uploadPending(store, session, {
+                    stored: shareOf(false),
+                    reused: shareOf(true),
+                });
+            }
             const c = refusal
                 ? null
                 : this.continuation(store, layout, session);
@@ -1011,6 +1044,10 @@ export class EncodeService implements OnModuleInit {
                     layout,
                     skipWaves: c.plan.skip,
                     records: c.records,
+                    doneFraction:
+                        (session.probeResult?.format?.duration ?? 0) > 0
+                            ? c.doneSec / session.probeResult!.format!.duration!
+                            : 0,
                     reusedSegments:
                         Object.values(c.plan.point?.reused ?? {}).reduce(
                             (n, segments) => n + segments.length,
@@ -1302,7 +1339,9 @@ export class EncodeService implements OnModuleInit {
     /** Upload what a failed run kept, recording each file's segments as stored once it is. */
     private async uploadPending(
         store: ResumeStore,
-        session: Session
+        session: Session,
+        /** Shares of the encode, 0–1: already stored, and stored once these are up. */
+        share: { stored: number; reused: number }
     ): Promise<void> {
         const pending = store.pending(store.readRecords());
         if (pending.length === 0) return;
@@ -1319,12 +1358,22 @@ export class EncodeService implements OnModuleInit {
                     segments.map((s) => ({ kind: 'durable' as const, ...s }))
                 ),
         });
-        // Shown as part of the encode, not as a wait in the queue.
+        // Shown as part of the encode, not as a wait in the queue: these
+        // segments are already encoded and encrypted, so those bars stand at the
+        // share they make up, and only the storage bar moves, up to it.
         this.sessionService.updateStatus(session.id, 'encoding');
-        const report = (uploading: number) =>
+        const reused = Math.round(share.reused * 100);
+        const report = (fraction: number) =>
             this.sessionService.updatePipelineProgress(session.id, {
-                encoding: 0,
-                uploading,
+                encoding: reused,
+                ...(this.encryptionEnabled(session)
+                    ? { encrypting: reused }
+                    : {}),
+                uploading: Math.round(
+                    SEGMENT_UPLOAD_SHARE *
+                        (share.stored +
+                            (share.reused - share.stored) * fraction)
+                ),
                 phase: 'uploading-kept',
             });
         report(0);
@@ -1335,7 +1384,7 @@ export class EncodeService implements OnModuleInit {
                 size: p.size,
                 segments: p.segments,
             })),
-            (done, total) => report(Math.round((done / total) * 100))
+            (done, total) => report(done / total)
         );
     }
 

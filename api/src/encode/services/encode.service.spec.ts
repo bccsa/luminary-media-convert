@@ -1149,6 +1149,16 @@ describe('EncodeService', () => {
         });
 
         const updateSpy = vi.spyOn(sessionService, 'updatePipelineProgress');
+        const reported: any[] = [];
+        // Reported while ffmpeg runs, as the pipeline does.
+        const encode = ffmpegService.encode.getMockImplementation();
+        ffmpegService.encode.mockImplementation(async (opts: any) => {
+            capturedOnProgress!({ encrypting: 30, uploading: 20 });
+            reported.push(updateSpy.mock.calls.at(-1)![1]);
+            capturedOnProgress!({ encrypting: 25, uploading: 10 });
+            reported.push(updateSpy.mock.calls.at(-1)![1]);
+            return encode!(opts);
+        });
 
         const session = sessionService.create(makeConfig());
         sessionService.setFilePath(session.id, '/tmp/input.mp4');
@@ -1156,17 +1166,13 @@ describe('EncodeService', () => {
 
         await service.processSession(session.id);
 
-        expect(capturedOnProgress).toBeDefined();
-        // Invoke the pipeline onProgress callback with encrypting/uploading values
-        capturedOnProgress!({ encrypting: 30, uploading: 20 });
-
-        expect(updateSpy).toHaveBeenCalledWith(
-            session.id,
-            expect.objectContaining({
-                encrypting: 30,
-                // The segments fill 95% of the storage bar; the final files the rest.
-                uploading: 19,
-            })
+        // The segments fill 95% of the storage bar; the final files the rest.
+        expect(reported[0]).toEqual(
+            expect.objectContaining({ encrypting: 30, uploading: 19 })
+        );
+        // A lower count does not move a bar back.
+        expect(reported[1]).toEqual(
+            expect.objectContaining({ encrypting: 30, uploading: 19 })
         );
     });
 
