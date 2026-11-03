@@ -82,6 +82,8 @@ interface PreparedRun {
     /** Waves 0..skipWaves-1 are in storage already and are restored, not run. */
     skipWaves?: number;
     records?: ResumeRecord[];
+    /** Segments a continue reuses, which the bars count as done from the start. */
+    reusedSegments?: number;
     pipelineResume?: PipelineResume;
     ffmpegResume?: { fromSec: number; startNumber: number };
     waveResume?: {
@@ -102,6 +104,13 @@ interface Continuation {
 }
 
 const INIT_FILE_RE = /^init.*\.mp4$/;
+
+/**
+ * The share of the storage bar the segments fill; the playlists, sprites and
+ * sidecars uploaded at the end fill the rest. One bar that only moves forward,
+ * rather than two that each start from zero.
+ */
+const SEGMENT_UPLOAD_SHARE = 95;
 
 /**
  * The same config with every stream re-encoded — what a quick cut falls back to.
@@ -319,6 +328,7 @@ export class EncodeService {
                     estimatedTotalSegments,
                     attempt: thisRun.attempt,
                     resume: thisRun.pipelineResume,
+                    alreadyDone: thisRun.reusedSegments ?? 0,
                     onSegment: (segment) => {
                         if (!thisRun.recording) return;
                         if (!initsSaved.has(segment.stream)) {
@@ -350,8 +360,11 @@ export class EncodeService {
                             currentProgress.encrypting =
                                 pipelineUpdate.encrypting;
                         if (pipelineUpdate.uploading != null)
-                            currentProgress.uploading =
-                                pipelineUpdate.uploading;
+                            currentProgress.uploading = Math.round(
+                                (pipelineUpdate.uploading *
+                                    SEGMENT_UPLOAD_SHARE) /
+                                    100
+                            );
                         this.sessionService.updatePipelineProgress(sessionId, {
                             ...currentProgress,
                         });
@@ -767,7 +780,7 @@ export class EncodeService {
             // caption exists to prevent.
             finishPhase();
             currentProgress.phase = 'uploading-playlists';
-            currentProgress.uploading = 0;
+            currentProgress.uploading = SEGMENT_UPLOAD_SHARE;
             this.sessionService.updatePipelineProgress(sessionId, {
                 ...currentProgress,
             });
@@ -776,7 +789,13 @@ export class EncodeService {
             await pipeline.uploadRemainingFiles(outputDir, {
                 onFileProgress: (done, total) => {
                     currentProgress.uploading =
-                        total > 0 ? Math.round((done / total) * 100) : 100;
+                        total > 0
+                            ? Math.round(
+                                  SEGMENT_UPLOAD_SHARE +
+                                      ((100 - SEGMENT_UPLOAD_SHARE) * done) /
+                                          total
+                              )
+                            : 100;
                     this.sessionService.updatePipelineProgress(sessionId, {
                         ...currentProgress,
                     });
@@ -962,6 +981,31 @@ export class EncodeService {
                     layout,
                     skipWaves: c.plan.skip,
                     records: c.records,
+                    reusedSegments:
+                        Object.values(c.plan.point?.reused ?? {}).reduce(
+                            (n, segments) => n + segments.length,
+                            0
+                        ) +
+                        c.records
+                            .filter(
+                                (
+                                    r
+                                ): r is Extract<
+                                    ResumeRecord,
+                                    { kind: 'waveDone' }
+                                > =>
+                                    r.kind === 'waveDone' &&
+                                    r.wave < c.plan.skip
+                            )
+                            .reduce(
+                                (n, r) =>
+                                    n +
+                                    Object.values(r.counts).reduce(
+                                        (a, b) => a + b,
+                                        0
+                                    ),
+                                0
+                            ),
                     ...(c.plan.point
                         ? {
                               pipelineResume: {

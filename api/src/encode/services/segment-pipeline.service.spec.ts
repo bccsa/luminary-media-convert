@@ -380,6 +380,24 @@ describe('SegmentPipeline — shared chunk chains', () => {
             });
         });
 
+        it('starts the bars where the run it continues left off', () => {
+            const progress: unknown[] = [];
+            const pipeline = makePipeline(tmpDir, {
+                byteRange: true,
+                encryptionKey: Buffer.alloc(16),
+                estimatedTotalSegments: 100,
+                alreadyDone: 40,
+                onProgress: (p) => progress.push(p),
+            });
+
+            pipeline.start();
+            pipeline.abort();
+
+            expect(progress[0]).toEqual(
+                expect.objectContaining({ encrypting: 40, uploading: 40 })
+            );
+        });
+
         it('starts no queued upload once aborted', async () => {
             seedVideo('stream_720p', [0]);
             const pipeline = makePipeline(tmpDir, {

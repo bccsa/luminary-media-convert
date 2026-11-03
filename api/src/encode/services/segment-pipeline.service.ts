@@ -112,6 +112,11 @@ export interface SegmentPipelineConfig {
      * What a failed encode can continue from.
      */
     onDurable?: (segments: DurableSegment[]) => void;
+    /**
+     * Segments a continued encode reuses from the run it continues, counted as
+     * already encrypted and uploaded, so the bars start where that run left off.
+     */
+    alreadyDone?: number;
     /** Told about every segment as it is processed; a video one with its start time. */
     onSegment?: (segment: DurableSegment) => void;
     /**
@@ -272,6 +277,9 @@ export class SegmentPipeline {
         private readonly logger: Logger
     ) {
         this.pollIntervalMs = config.pollIntervalMs ?? 2000;
+        this.totalSegmentsProduced = config.alreadyDone ?? 0;
+        this.segmentsEncrypted = config.alreadyDone ?? 0;
+        this.segmentsUploaded = config.alreadyDone ?? 0;
         this.uploadConcurrency = config.uploadConcurrency ?? 5;
         this.s3Client = this.s3Service.createClient(config.s3Config);
     }
@@ -287,6 +295,8 @@ export class SegmentPipeline {
     start(): void {
         if (this.running) return;
         this.running = true;
+        // What a continue reuses shows at once, not when the next segment lands.
+        if (this.config.alreadyDone) this.emitProgress();
         this.pollTimer = setInterval(() => {
             if (this.polling) return; // Skip if previous poll is still running
             this.polling = true;

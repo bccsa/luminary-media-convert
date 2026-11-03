@@ -81,6 +81,21 @@ export interface EncodeOptions {
     onWaveDone?: (index: number) => Promise<void> | void;
 }
 
+/**
+ * A continued run's progress, on the whole encode's scale: the share already
+ * done, then the run's own 0-100 across the rest. Reported at once, so the bar
+ * starts where the earlier run left off rather than at zero.
+ */
+function continuedProgress(
+    onProgress: (percent: number) => void,
+    doneFraction: number
+): (percent: number) => void {
+    const done = Math.min(1, Math.max(0, doneFraction)) * 100;
+    if (done === 0) return onProgress;
+    onProgress(done);
+    return (percent) => onProgress(done + (percent * (100 - done)) / 100);
+}
+
 /** One run of ffmpeg in an encode, by the stream directories it writes. */
 export interface WaveLayout {
     /** What it calls its master playlist. */
@@ -1372,7 +1387,15 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         try {
             return await this.runEncode(
                 args,
-                opts,
+                opts.resume
+                    ? {
+                          ...opts,
+                          onProgress: continuedProgress(
+                              opts.onProgress,
+                              opts.resume.fromSec / (totalDuration || 1)
+                          ),
+                      }
+                    : opts,
                 totalDuration,
                 alignmentOffset
             );
@@ -1435,12 +1458,19 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 wave
             );
 
+            const resumed =
+                index === skip && opts.waveResume?.resume
+                    ? opts.waveResume.resume.fromSec / (totalDuration || 1)
+                    : 0;
             const waveOpts: EncodeOptions = {
                 ...opts,
-                onProgress: (percent) =>
-                    onProgress(
-                        Math.min(99.9, waveBase + (percent * span) / 100)
-                    ),
+                onProgress: continuedProgress(
+                    (percent) =>
+                        onProgress(
+                            Math.min(99.9, waveBase + (percent * span) / 100)
+                        ),
+                    resumed
+                ),
             };
 
             const release = await acquireEncoderSessions(wave.sessionCount);

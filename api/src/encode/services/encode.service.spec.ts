@@ -119,7 +119,9 @@ describe('EncodeService', () => {
             // audio group. The real method is exercised in
             // `ffmpeg.service.spec.ts`; here it only has to reach the pipeline.
             canResume: vi.fn().mockReturnValue(false),
-            resumeBlocker: vi.fn().mockReturnValue('not resumable in this test'),
+            resumeBlocker: vi
+                .fn()
+                .mockReturnValue('not resumable in this test'),
             videoStreamDirs: vi.fn().mockReturnValue([]),
             computeAlignmentOffset: vi.fn().mockResolvedValue(0),
             buildStreamChainMap: vi.fn().mockReturnValue({
@@ -1159,7 +1161,8 @@ describe('EncodeService', () => {
             session.id,
             expect.objectContaining({
                 encrypting: 30,
-                uploading: 20,
+                // The segments fill 95% of the storage bar; the final files the rest.
+                uploading: 19,
             })
         );
     });
@@ -1298,7 +1301,9 @@ describe('EncodeService — encrypting the text assets last', () => {
                 segmentFormat: 'fmp4',
             }),
             canResume: vi.fn().mockReturnValue(false),
-            resumeBlocker: vi.fn().mockReturnValue('not resumable in this test'),
+            resumeBlocker: vi
+                .fn()
+                .mockReturnValue('not resumable in this test'),
             videoStreamDirs: vi.fn().mockReturnValue([]),
             computeAlignmentOffset: vi.fn().mockResolvedValue(0),
             buildStreamChainMap: vi.fn().mockReturnValue({}),
@@ -1476,7 +1481,9 @@ describe('EncodeService — naming the finalize phases', () => {
                 };
             }),
             canResume: vi.fn().mockReturnValue(false),
-            resumeBlocker: vi.fn().mockReturnValue('not resumable in this test'),
+            resumeBlocker: vi
+                .fn()
+                .mockReturnValue('not resumable in this test'),
             videoStreamDirs: vi.fn().mockReturnValue([]),
             computeAlignmentOffset: vi.fn().mockResolvedValue(0),
             buildStreamChainMap: vi.fn().mockReturnValue({}),
@@ -1642,7 +1649,8 @@ describe('EncodeService — naming the finalize phases', () => {
             onFileProgress!(3, 4);
             onFileProgress!(4, 4);
 
-            expect(emissions.map((p) => p.uploading)).toEqual([25, 75, 100]);
+            // The segments filled the bar to 95; these files take it the rest of the way.
+            expect(emissions.map((p) => p.uploading)).toEqual([96, 99, 100]);
             expect(
                 emissions.every((p) => p.phase === 'uploading-playlists')
             ).toBe(true);
@@ -1657,15 +1665,13 @@ describe('EncodeService — naming the finalize phases', () => {
             expect(emissions.at(-1)?.uploading).toBe(100);
         });
 
-        it('starts the bar from zero, because it is counting different files', async () => {
-            // Until now it counted segments; these are playlists and sprites.
-            // The phase text is what explains the reset to the user.
+        it('carries on from where the segment uploads left the bar, never back to zero', async () => {
             await run(makeFullConfig());
 
             const uploadPhase = emissions.filter(
                 (p) => p.phase === 'uploading-playlists'
             );
-            expect(uploadPhase[0].uploading).toBe(0);
+            expect(uploadPhase[0].uploading).toBe(95);
         });
     });
 });
@@ -1735,7 +1741,9 @@ describe('EncodeService — the delivered waveform sidecar', () => {
                 };
             }),
             canResume: vi.fn().mockReturnValue(false),
-            resumeBlocker: vi.fn().mockReturnValue('not resumable in this test'),
+            resumeBlocker: vi
+                .fn()
+                .mockReturnValue('not resumable in this test'),
             videoStreamDirs: vi.fn().mockReturnValue([]),
             computeAlignmentOffset: vi.fn().mockResolvedValue(0),
             buildStreamChainMap: vi.fn().mockReturnValue({}),
