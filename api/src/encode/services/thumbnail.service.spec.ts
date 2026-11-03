@@ -825,6 +825,135 @@ describe('ThumbnailService', () => {
         });
     });
 
+    describe('regeneratePreview', () => {
+        it('stops the pass running, throws its frames away and samples again', async () => {
+            const workDir = mkdtempSync(join(tmpdir(), 'thumb-regen-'));
+            (service as any).workDir = workDir;
+            (service as any).progressTickMs = 10;
+            const passes: AbortSignal[] = [];
+            mockExecFile.mockImplementation((...call: any[]) => {
+                const cb = call[call.length - 1];
+                const args = call[1] as string[];
+                if (args[0] === '-encoders') {
+                    cb(null, { stdout: WEBP_ENCODERS, stderr: '' });
+                    return;
+                }
+                if (args.includes('packet=pts_time,flags')) {
+                    cb(null, { stdout: '', stderr: '' });
+                    return;
+                }
+                const dir = dirname(args[args.length - 1]!);
+                mkdirSync(dir, { recursive: true });
+                const signal: AbortSignal = call[2].signal;
+                passes.push(signal);
+                if (passes.length === 1) {
+                    // A pass that would run for ever, with one stale frame.
+                    writeFileSync(join(dir, 'thumb_000001.webp'), 'old');
+                    signal.addEventListener('abort', () =>
+                        cb(
+                            Object.assign(new Error('aborted'), {
+                                name: 'AbortError',
+                            })
+                        )
+                    );
+                    return;
+                }
+                for (let i = 1; i <= 2; i++) {
+                    writeFileSync(join(dir, `thumb_00000${i}.webp`), 'new');
+                }
+                cb(null, { stdout: '', stderr: '' });
+            });
+            const opts = {
+                inputPath: '/tmp/test.mkv',
+                duration: 10,
+                trackIndex: 0,
+                sourceWidth: 1920,
+                sourceHeight: 1080,
+            };
+            const thumbsDir = join(
+                workDir,
+                's1',
+                'preview-thumbnails',
+                'thumbnails'
+            );
+
+            try {
+                await service.getOrGeneratePreview('s1', opts);
+                await until(
+                    () => passes.length === 1,
+                    'the first pass to start'
+                );
+
+                await service.regeneratePreview('s1', opts);
+                await until(
+                    () => existsSync(join(thumbsDir, 'thumbnails.vtt')),
+                    'the second pass to finish'
+                );
+
+                expect(passes[0]!.aborted).toBe(true);
+                expect(passes).toHaveLength(2);
+                expect(
+                    readFileSync(join(thumbsDir, 'thumb_000001.webp'), 'utf-8')
+                ).toBe('new');
+            } finally {
+                rmSync(workDir, { recursive: true, force: true });
+            }
+        });
+
+        it('keeps a read that lands meanwhile from serving the old storyboard', async () => {
+            // The client asks again the moment the regenerate is accepted. Served
+            // the old, finished storyboard, it stopped following, and the frames
+            // it held were then deleted under it.
+            const workDir = mkdtempSync(join(tmpdir(), 'thumb-regen-race-'));
+            (service as any).workDir = workDir;
+            const thumbsDir = join(
+                workDir,
+                's1',
+                'preview-thumbnails',
+                'thumbnails'
+            );
+            mkdirSync(thumbsDir, { recursive: true });
+            writeFileSync(join(thumbsDir, 'thumb_000001.webp'), 'old');
+            writeFileSync(join(thumbsDir, 'thumbnails.vtt'), 'WEBVTT\n');
+            let passes = 0;
+            let finish: (() => void) | null = null;
+            mockExecFile.mockImplementation((...call: any[]) => {
+                const cb = call[call.length - 1];
+                const args = call[1] as string[];
+                if (args[0] === '-encoders') {
+                    cb(null, { stdout: WEBP_ENCODERS, stderr: '' });
+                    return;
+                }
+                if (args.includes('packet=pts_time,flags')) {
+                    cb(null, { stdout: '', stderr: '' });
+                    return;
+                }
+                passes++;
+                finish = () => cb(null, { stdout: '', stderr: '' });
+            });
+            const opts = {
+                inputPath: '/tmp/test.mkv',
+                duration: 10,
+                trackIndex: 0,
+                sourceWidth: 1920,
+                sourceHeight: 1080,
+            };
+
+            try {
+                const regenerating = service.regeneratePreview('s1', opts);
+                const read = await service.getOrGeneratePreview('s1', opts);
+                await regenerating;
+
+                expect(read?.complete).not.toBe(true);
+                await until(() => finish !== null, 'the new pass to start');
+                expect(passes).toBe(1);
+            } finally {
+                (finish as (() => void) | null)?.();
+                rmSync(workDir, { recursive: true, force: true });
+            }
+        });
+    });
+
     describe('detectSpriteFormat (via generateIndividualThumbs)', () => {
         const sample = (outputDir: string, dims = [1920, 1080]) =>
             service.generateIndividualThumbs({

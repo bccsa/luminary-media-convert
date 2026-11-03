@@ -22,6 +22,7 @@ import {
     BAR_JOG_ICON,
     BAR_PLAY,
     BAR_PLAY_ICON,
+    EDITOR_ICON_BUTTON,
     STRIP_BUTTON,
     STRIP_JOG,
     STRIP_JOG_ICON,
@@ -3170,7 +3171,7 @@ const splitRowFrame = computed(() =>
                     <button
                         v-if="showHelp && !showHeader"
                         type="button"
-                        class="se-btn se-btn--icon se-controls-bar__help appearance-none inline-flex items-center gap-1 px-2 py-1 text-xs font-medium font-[inherit] text-zinc-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-slate-100 dark:enabled:hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                        :class="`se-btn se-btn--icon se-controls-bar__help ${EDITOR_ICON_BUTTON} ${BAR_BUTTON} shrink-0`"
                         title="Keyboard shortcuts (?)"
                         @click="helpOpen = !helpOpen"
                     >

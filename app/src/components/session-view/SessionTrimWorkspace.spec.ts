@@ -31,7 +31,9 @@ function mountTimeline(editsChapters: boolean) {
 }
 
 const editorProps = (editsChapters: boolean) =>
-    mountTimeline(editsChapters).findComponent({ name: 'SegmentEditor' }).props();
+    mountTimeline(editsChapters)
+        .findComponent({ name: 'SegmentEditor' })
+        .props();
 
 describe('SessionTrimWorkspace timeline', () => {
     it('edits trim ranges before the encode', () => {
@@ -62,5 +64,79 @@ describe('SessionTrimWorkspace timeline', () => {
         // default — so not passing the prop gives the right answer in both.
         expect(editorProps(false).showLabels).toBeUndefined();
         expect(editorProps(true).showLabels).toBeUndefined();
+    });
+});
+
+describe('SessionTrimWorkspace regenerate thumbnails', () => {
+    function mountToolbar(props: Record<string, unknown>) {
+        return shallowMount(SessionTrimWorkspace, {
+            props: {
+                section: 'timeline',
+                showTrimSegmentEditor: true,
+                editorSegments: [],
+                showChaptersSidePanel: false,
+                chaptersIsDirty: false,
+                chaptersIsSaving: false,
+                chaptersSaveError: null,
+                probeDuration: 120,
+                getCurrentTime: () => 0,
+                onSeek: () => {},
+                onPlayPause: () => {},
+                isPreviewPlaying: false,
+                segmentEditorProbeFps: 25,
+                ...props,
+            },
+            global: {
+                stubs: {
+                    // Renders the controls-bar slot the button lives in.
+                    SegmentEditor: {
+                        template:
+                            '<div><slot name="controls-end" /></div>',
+                    },
+                },
+            },
+        });
+    }
+
+    it('offers to make the thumbnails again while the source is here', async () => {
+        const wrapper = mountToolbar({ canRegenerateThumbnails: true });
+
+        await wrapper
+            .find('[data-test="regenerateThumbnails"]')
+            .trigger('click');
+
+        expect(wrapper.emitted('regenerateThumbnails')).toHaveLength(1);
+    });
+
+    it('does not offer it while thumbnails are still being made', () => {
+        const wrapper = mountToolbar({
+            canRegenerateThumbnails: true,
+            storyboardPending: true,
+        });
+
+        expect(
+            wrapper.find('[data-test="regenerateThumbnails"]').exists()
+        ).toBe(false);
+        expect(wrapper.text()).toContain('Generating thumbnails');
+    });
+
+    it('does not offer it once the source is gone or an encode has started', () => {
+        const wrapper = mountToolbar({ canRegenerateThumbnails: false });
+
+        expect(
+            wrapper.find('[data-test="regenerateThumbnails"]').exists()
+        ).toBe(false);
+    });
+
+    it('says why the last attempt failed', () => {
+        const wrapper = mountToolbar({
+            canRegenerateThumbnails: true,
+            regenerateThumbnailsError:
+                'The source file for this session is no longer on disk',
+        });
+
+        expect(
+            wrapper.find('[data-test="regenerateThumbnailsError"]').text()
+        ).toContain('no longer on disk');
     });
 });

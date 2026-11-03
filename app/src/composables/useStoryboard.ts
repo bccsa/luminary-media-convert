@@ -63,9 +63,10 @@ export function useStoryboard(opts: {
     /** A push arrived mid-fetch; follow up as soon as the current one lands. */
     let pushQueued = false;
 
-    const doFetch = () => (opts.fetcher ?? fetch)(opts.url.value as string, {
-        cache: 'no-store',
-    });
+    const doFetch = () =>
+        (opts.fetcher ?? fetch)(opts.url.value as string, {
+            cache: 'no-store',
+        });
 
     /** Versioned so a partial storyboard is never mistaken for the finished one. */
     const versionedUrl = computed(() => {
@@ -185,5 +186,14 @@ export function useStoryboard(opts: {
         stop();
     });
 
-    return { versionedUrl, complete, pending, hasFrames, stop };
+    /** Follow a storyboard being sampled again, after one already finished. */
+    function restart(): void {
+        stop();
+        complete.value = false;
+        attempts = 0;
+        lastCues = -1;
+        void poll();
+    }
+
+    return { versionedUrl, complete, pending, hasFrames, stop, restart };
 }

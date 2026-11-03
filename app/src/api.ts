@@ -167,6 +167,21 @@ export async function startEncode(
     });
 }
 
+/** Throw the source's thumbnails away and sample them again; progress arrives as before. */
+export async function regenerateThumbnails(
+    sessionId: string,
+    sessionToken: string
+): Promise<void> {
+    return requestVoid(
+        `${API_BASE}/api/sessions/${sessionId}/thumbnails/regenerate`,
+        {
+            method: 'POST',
+            token: sessionToken,
+            errorPrefix: 'Could not make the thumbnails again',
+        }
+    );
+}
+
 /**
  * Cancel a running session, or dismiss a finished one. Either way the work
  * directory goes with it, which is the only way its disk is reclaimed.

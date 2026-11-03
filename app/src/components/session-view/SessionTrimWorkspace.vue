@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue';
 import { SegmentEditor } from '../segment-editor';
 import type { Segment } from '../segment-editor';
+import { EDITOR_ICON_BUTTON } from '../segment-editor/buttonStyles';
 
 const props = withDefaults(
     defineProps<{
@@ -37,6 +38,10 @@ const props = withDefaults(
          * only part of the timeline and more frames are on the way.
          */
         storyboardPending?: boolean;
+        /** The source is still here to sample the thumbnails from again. */
+        canRegenerateThumbnails?: boolean;
+        /** Why the last attempt to make them again failed. */
+        regenerateThumbnailsError?: string | null;
         /** The timeline edits chapters, from the moment the encode is submitted, rather than trim ranges. */
         editsChapters?: boolean;
         /**
@@ -58,6 +63,7 @@ const editorSegments = defineModel<Segment[]>('editorSegments', { required: true
 const emit = defineEmits<{
     segmentRemoved: [segment: Segment];
     segmentRestored: [segment: Segment];
+    regenerateThumbnails: [];
 }>();
 
 const showToolbarSection = () => props.section !== 'timeline';
@@ -161,10 +167,6 @@ const trimToolbarHasVisibleContent = computed(() => {
                 The app header that used to hold it is gone.
             -->
             <template #controls-end>
-                <slot name="timeline-end" />
-            </template>
-
-            <template #toolbar-before-clear>
                 <!--
                     Without this a half-drawn filmstrip looks like a failure. It
                     takes minutes to sample a long source, and the frames arrive
@@ -175,7 +177,23 @@ const trimToolbarHasVisibleContent = computed(() => {
                     class="storyboard-pending-pill"
                     title="Frames are sampled from the source after upload; the timeline fills in as they arrive."
                 >Generating thumbnails…</span>
+                <button
+                    v-else-if="canRegenerateThumbnails"
+                    type="button"
+                    :class="`${EDITOR_ICON_BUTTON} min-h-9 box-border shrink-0`"
+                    title="Throw these thumbnails away and make them again from the source"
+                    data-test="regenerateThumbnails"
+                    @click="emit('regenerateThumbnails')"
+                >Regenerate thumbnails</button>
+                <span
+                    v-if="regenerateThumbnailsError"
+                    class="text-xs text-red-600 dark:text-red-400"
+                    data-test="regenerateThumbnailsError"
+                >{{ regenerateThumbnailsError }}</span>
+                <slot name="timeline-end" />
             </template>
+
+
         </SegmentEditor>
     </div>
 </div>
@@ -185,10 +203,14 @@ const trimToolbarHasVisibleContent = computed(() => {
 .storyboard-pending-pill {
     display: inline-flex;
     align-items: center;
-    border-radius: 9999px;
+    /* The buttons' rounded-md, so it reads as one of the row. */
+    border-radius: 0.375rem;
     border: 1px solid rgb(226 232 240);
     background: rgb(248 250 252);
-    padding: 0.125rem 0.5rem;
+    /* As tall as the buttons it sits beside in the controls bar. */
+    box-sizing: border-box;
+    min-height: 2.25rem;
+    padding: 0 0.75rem;
     font-size: 0.6875rem;
     font-weight: 500;
     color: rgb(100 116 139);

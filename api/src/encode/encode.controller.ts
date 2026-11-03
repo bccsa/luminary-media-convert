@@ -1297,6 +1297,87 @@ export class EncodeController {
         result.stream.pipe(res);
     }
 
+    @Post(':sessionId/thumbnails/regenerate')
+    @HttpCode(HttpStatus.ACCEPTED)
+    @UseGuards(AuthResolverGuard)
+    @AuthTypes('instance', 'session')
+    @ApiSecurity('apikey')
+    @ApiOperation({
+        summary: 'Sample the source storyboard again',
+        description:
+            'Throws the source storyboard away and samples the source again, ' +
+            'stopping a pass still running. Progress arrives as for the first ' +
+            'pass: storyboardThumbCount on the session and its event stream.',
+    })
+    @ApiParam({ name: 'sessionId', description: 'Session ID' })
+    @ApiResponse({ status: 202, description: 'Sampling started.' })
+    @ApiResponse({
+        status: 400,
+        description:
+            'The source is no longer on disk, or has no video to sample.',
+    })
+    @ApiResponse({ status: 404, description: 'Session not found.' })
+    @ApiResponse({
+        status: 409,
+        description:
+            'The session is encoding, finished, or edits an existing video.',
+    })
+    async regenerateThumbnails(
+        @Param('sessionId') sessionId: string
+    ): Promise<void> {
+        const session = this.sessionService.get(sessionId);
+        if (!session) {
+            throw new NotFoundException(`Session ${sessionId} not found`);
+        }
+        this.assertEncodes(session);
+        // An encode packs these frames into the delivered storyboard, so they
+        // stay put from the moment it starts.
+        if (session.status !== 'uploaded' && session.status !== 'failed') {
+            throw new ConflictException(
+                'Thumbnails can be made again before an encode starts, or after one fails'
+            );
+        }
+        if (
+            !session.filePath ||
+            !existsSync(session.filePath) ||
+            !session.probeResult
+        ) {
+            throw new BadRequestException(
+                'The source file for this session is no longer on disk'
+            );
+        }
+        const video = selectStoryboardTrack(session.probeResult.videoTracks);
+        const duration = session.probeResult.format?.duration ?? 0;
+        if (!video || duration <= 0) {
+            throw new BadRequestException('Source has no usable video track');
+        }
+
+        // Back to nothing at once, so the timeline lets go of the old frames
+        // rather than showing them until the first new one arrives. Answered
+        // only once the old frames are gone and the new pass has started, so
+        // the client's next read finds the new storyboard, not the old one.
+        this.sessionService.updateStoryboardProgress(sessionId, 0);
+        await this.thumbnailService
+            .regeneratePreview(sessionId, {
+                inputPath: session.filePath,
+                duration,
+                trackIndex: video.index,
+                sourceWidth: video.width,
+                sourceHeight: video.height,
+                onProgress: (count, complete) =>
+                    this.sessionService.updateStoryboardProgress(
+                        sessionId,
+                        count,
+                        complete
+                    ),
+            })
+            .catch((err: Error) =>
+                this.logger.warn(
+                    `Regenerating the storyboard of ${sessionId} failed: ${err.message}`
+                )
+            );
+    }
+
     @Get(':sessionId/thumbnails/thumbnails.vtt')
     @SkipAllThrottles()
     @ApiOperation({
