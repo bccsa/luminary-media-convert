@@ -141,6 +141,16 @@ export interface PipelineResume {
     previousInits: Record<string, Buffer>;
 }
 
+/** A file of segments that never reached storage, as `salvage()` hands it on. */
+export interface SalvagedUpload {
+    filePath: string;
+    /** Where it was going. */
+    objectKey: string;
+    /** What it must measure: the end of its last segment. */
+    size: number;
+    segments: DurableSegment[];
+}
+
 /** A segment that has reached storage, as a continued encode needs to know it. */
 export interface DurableSegment {
     /** Its stream directory, e.g. `stream_720p_1280x720`. */
@@ -261,6 +271,10 @@ export class SegmentPipeline {
 
     // Upload queue
     private readonly uploadQueue: UploadTask[] = [];
+    /** Open chunks an abort closed, finishing their writes. */
+    private readonly closing: Promise<void>[] = [];
+    /** What an abort stopped from starting, for `salvage()` to hand on. */
+    private readonly abandoned: UploadTask[] = [];
     private activeUploads = 0;
     /**
      * Silences the segment-oriented progress emitter while `uploadRemainingFiles`
@@ -369,19 +383,91 @@ export class SegmentPipeline {
         this.aborted = true;
         this.running = false;
         // Nothing new starts; what is already sending is left to finish, and
-        // `settle()` waits for it.
-        this.uploadQueue.length = 0;
+        // `settle()` waits for it. What never started is kept for `salvage()`.
+        this.abandoned.push(...this.uploadQueue.splice(0));
         if (this.pollTimer) {
             clearInterval(this.pollTimer);
             this.pollTimer = null;
         }
-        // Close any open chunk streams
+        // Close any open chunk streams. `salvage()` waits for them to finish.
         for (const chain of this.chains.values()) {
             if (chain.currentChunkStream) {
-                chain.currentChunkStream.end();
+                const stream = chain.currentChunkStream;
+                this.closing.push(
+                    new Promise<void>((resolve) => {
+                        if (stream.writableFinished) return resolve();
+                        stream.once('finish', resolve);
+                        stream.once('error', () => resolve());
+                    })
+                );
+                stream.end();
                 chain.currentChunkStream = null;
+                if (chain.currentChunkSegments.length > 0) {
+                    this.abandoned.push({
+                        filePath: join(this.chunkDir, chain.currentChunkFile),
+                        objectKey: this.chainObjectKey(chain.currentChunkFile),
+                        deleteAfterUpload: true,
+                        segmentCount: chain.currentChunkSegmentCount,
+                        durable: chain.currentChunkSegments,
+                    });
+                }
             }
         }
+    }
+
+    /**
+     * Upload files an earlier run of the encode salvaged, as any chunk is
+     * uploaded (three attempts), each reported through `onDurable` once it is
+     * in storage. One that still fails is left where it is.
+     */
+    async uploadSalvaged(files: SalvagedUpload[]): Promise<void> {
+        for (const file of files) {
+            try {
+                await this.executeUpload({
+                    filePath: file.filePath,
+                    objectKey: file.objectKey,
+                    deleteAfterUpload: true,
+                    durable: file.segments,
+                });
+            } catch (err) {
+                this.logger.warn(
+                    `[pipeline] could not upload kept ${file.objectKey}: ${(err as Error).message}`
+                );
+            }
+        }
+    }
+
+    /**
+     * After an abort: the files that hold segments but never reached storage,
+     * the chunks closed and waiting, and those still open, now closed, each
+     * with the segments in it and the size it must have. A continue can upload
+     * them instead of making their segments again.
+     */
+    async salvage(): Promise<SalvagedUpload[]> {
+        await Promise.all(this.closing.splice(0));
+        const out: SalvagedUpload[] = [];
+        for (const task of this.abandoned.splice(0)) {
+            const segments = task.durable ?? [];
+            if (segments.length === 0) continue;
+            try {
+                const size = (await stat(task.filePath)).size;
+                const expected = Math.max(
+                    ...segments.map((s) => (s.offset ?? 0) + s.length)
+                );
+                // Bytes the records do not describe, or fewer than they do,
+                // mean the file is not what it claims to be.
+                if (size !== expected) continue;
+                out.push({
+                    filePath: task.filePath,
+                    objectKey: task.objectKey,
+                    size,
+                    segments,
+                });
+            } catch {
+                // Gone already; nothing to hand on.
+            }
+        }
+        return out;
     }
 
     /**

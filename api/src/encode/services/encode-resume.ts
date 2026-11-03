@@ -16,7 +16,7 @@
  * Pure apart from the file reads and writes, so the decisions are testable.
  */
 import { createHash } from 'crypto';
-import { appendFileSync, existsSync, readFileSync } from 'fs';
+import { appendFileSync, existsSync, readFileSync, statSync } from 'fs';
 import { mkdir, readFile, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
 import {
@@ -30,6 +30,7 @@ const STATE_FILE = 'state.json';
 const SEGMENTS_FILE = 'segments.jsonl';
 export const INITS_DIR = 'inits';
 export const WAVES_DIR = 'waves';
+export const PENDING_DIR = 'pending';
 
 /** Who ran, and with what, so a continue can tell it would be the same encode. */
 export interface ResumeState {
@@ -54,7 +55,19 @@ export type ResumeRecord =
     | { kind: 'seen'; stream: string; index: number; tfdt: number }
     | ({ kind: 'durable' } & DurableSegment)
     /** A wave of a ladder in waves finished, writing this many segments per stream. */
-    | { kind: 'waveDone'; wave: number; counts: Record<string, number> };
+    | { kind: 'waveDone'; wave: number; counts: Record<string, number> }
+    /**
+     * A file of segments that never reached storage, kept in `pending/` under
+     * `name` for a continue to upload to `objectKey`. Its segments count as
+     * stored only once that upload has succeeded.
+     */
+    | {
+          kind: 'pending';
+          name: string;
+          objectKey: string;
+          size: number;
+          segments: DurableSegment[];
+      };
 
 /** Where a continue restarts the video, and what it reuses. */
 export interface ResumePoint {
@@ -277,6 +290,28 @@ export class ResumeStore {
 
     initsDir(stream: string): string {
         return join(this.dir, INITS_DIR, stream);
+    }
+
+    get pendingDir(): string {
+        return join(this.dir, PENDING_DIR);
+    }
+
+    /** Pending files still waiting, whose size is what their record says. */
+    pending(
+        records: ResumeRecord[]
+    ): Extract<ResumeRecord, { kind: 'pending' }>[] {
+        return records.filter(
+            (r): r is Extract<ResumeRecord, { kind: 'pending' }> => {
+                if (r.kind !== 'pending') return false;
+                try {
+                    return (
+                        statSync(join(this.pendingDir, r.name)).size === r.size
+                    );
+                } catch {
+                    return false;
+                }
+            }
+        );
     }
 
     /** Where a finished wave's playlists are kept: its master, and one per stream. */
