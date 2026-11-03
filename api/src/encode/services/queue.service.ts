@@ -3,12 +3,6 @@ import { SessionService } from './session.service.js';
 import { EncodeService } from './encode.service.js';
 import { SessionEventsService } from './session-events.service.js';
 
-/** How long to wait before each automatic try after a lost connection. */
-export const AUTOMATIC_TRY_DELAYS_MS = [30_000, 120_000, 300_000];
-
-const formatDelay = (ms: number) =>
-    ms < 60_000 ? `${ms / 1000} s` : `${ms / 60_000} min`;
-
 @Injectable()
 export class QueueService implements OnModuleDestroy {
     private readonly logger = new Logger(QueueService.name);
@@ -16,8 +10,6 @@ export class QueueService implements OnModuleDestroy {
     private processing = false;
     private shuttingDown = false;
     private drainPromise: Promise<void> | null = null;
-    /** Automatic tries made so far, per session that keeps losing its connection. */
-    private readonly automaticTries = new Map<string, number>();
 
     constructor(
         private readonly sessionService: SessionService,
@@ -109,7 +101,6 @@ export class QueueService implements OnModuleDestroy {
 
                 try {
                     await this.encodeService.processSession(sessionId);
-                    this.tryAgainIfConnectionLost(sessionId);
                 } catch (err) {
                     // This should not happen since encodeService.processSession
                     // catches all errors internally, but guard against it anyway
@@ -126,40 +117,6 @@ export class QueueService implements OnModuleDestroy {
             this.processing = false;
             this.drainPromise = null;
         }
-    }
-
-    /**
-     * After an encode lost its connection to storage, put it back in the queue
-     * after a pause, a few times, longer each time: the connection usually
-     * comes back, and the next run continues from what is already in storage.
-     * Anything else that happens to the session in the meantime (a continue by
-     * hand, a delete) wins, because the try only runs if it is still failed.
-     */
-    private tryAgainIfConnectionLost(sessionId: string): void {
-        const session = this.sessionService.get(sessionId);
-        if (session?.status !== 'failed' || !session.networkFailure) {
-            this.automaticTries.delete(sessionId);
-            return;
-        }
-        const tries = this.automaticTries.get(sessionId) ?? 0;
-        if (tries >= AUTOMATIC_TRY_DELAYS_MS.length) {
-            this.automaticTries.delete(sessionId);
-            return;
-        }
-        this.automaticTries.set(sessionId, tries + 1);
-        const delay = AUTOMATIC_TRY_DELAYS_MS[tries]!;
-        this.sessionService.appendToError(
-            sessionId,
-            `Trying again by itself in ${formatDelay(delay)} (attempt ${tries + 1} of ${AUTOMATIC_TRY_DELAYS_MS.length}).`
-        );
-        this.logger.log(
-            `Session ${sessionId} lost its connection to storage; trying again in ${delay / 1000}s`
-        );
-        setTimeout(() => {
-            if (this.shuttingDown) return;
-            if (this.sessionService.get(sessionId)?.status !== 'failed') return;
-            this.enqueue(sessionId);
-        }, delay).unref?.();
     }
 
     /**

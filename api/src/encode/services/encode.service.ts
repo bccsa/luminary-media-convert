@@ -1,4 +1,4 @@
-import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { LUMINARY_KEY_PLACEHOLDER_URI } from '@luminary-media-converter/hls-core';
 import {
     copyFileSync,
@@ -12,14 +12,13 @@ import {
     mkdir,
     readdir,
     readFile,
-    rename,
     rm,
     stat,
     writeFile,
 } from 'fs/promises';
-import { basename, join, posix } from 'path';
+import { join, posix } from 'path';
 import { estimateOutputBytes, formatBytes } from './output-estimate.js';
-import { failureMessage, isNetworkFailure } from './failure-message.js';
+import { failureMessage } from './failure-message.js';
 import { freeBytes } from './disk-space.js';
 import {
     SESSION_STATE_FILENAME,
@@ -61,7 +60,6 @@ import {
 import {
     ResumeStore,
     fingerprint,
-    restartStreams,
     restorePlaylist,
     resumePlan,
     resumeRefusal,
@@ -135,7 +133,7 @@ function reEncodedConfig(config: EncodeConfigDto): EncodeConfigDto {
 }
 
 @Injectable()
-export class EncodeService implements OnModuleInit {
+export class EncodeService {
     private readonly logger = new Logger(EncodeService.name);
     private readonly workDir =
         process.env.WORK_DIR || join(process.cwd(), 'work');
@@ -148,23 +146,6 @@ export class EncodeService implements OnModuleInit {
         private readonly waveformService: WaveformService,
         private readonly segmentPipelineService: SegmentPipelineService
     ) {}
-
-    /**
-     * Work out, for encodes that were running when the encoder last stopped,
-     * whether they can carry on: they failed without this process seeing it,
-     * so nothing offered to continue them.
-     */
-    async onModuleInit(): Promise<void> {
-        for (const session of this.sessionService.list()) {
-            if (session.status !== 'failed' || session.resumeFromSec) continue;
-            if (!session.encodeConfig || !session.filePath) continue;
-            const from = await this.resumeFrom(
-                new ResumeStore(join(this.workDir, session.id)),
-                session
-            );
-            if (from) this.sessionService.setResumeFrom(session.id, from);
-        }
-    }
 
     private encryptionEnabled(session: {
         config: { encryption?: { enabled?: boolean } | null };
@@ -867,10 +848,6 @@ export class EncodeService implements OnModuleInit {
             // The whole of it in the log; one sentence for whoever started the encode.
             this.logger.error(`Session ${sessionId} failed: ${errorMsg}`);
             this.sessionService.setFailed(sessionId, failureMessage(errorMsg));
-            this.sessionService.setNetworkFailure(
-                sessionId,
-                isNetworkFailure(errorMsg)
-            );
         } finally {
             // A drain stops the poll timer on its way out; every other exit from
             // this method — an ffmpeg failure, a refused config, a throw from any
@@ -888,9 +865,6 @@ export class EncodeService implements OnModuleInit {
             // need not make again, so it is given a moment to land.
             if (this.sessionService.get(sessionId)?.status === 'failed') {
                 await pipeline?.settle();
-                if (run?.recording && pipeline) {
-                    await this.keepSalvaged(run, pipeline);
-                }
                 if (run?.recording) {
                     this.sessionService.setResumeFrom(
                         sessionId,
@@ -975,8 +949,6 @@ export class EncodeService implements OnModuleInit {
                 (encryptionKey && !previous.ivHex
                     ? 'no IV was recorded'
                     : null);
-            // What the failed run kept goes up first; only then is it stored.
-            if (!refusal) await this.uploadPending(store, session);
             const c = refusal
                 ? null
                 : this.continuation(store, layout, session);
@@ -1103,29 +1075,13 @@ export class EncodeService implements OnModuleInit {
     private continuation(
         store: ResumeStore,
         layout: WaveLayout[],
-        session: Session,
-        countPending = false
+        session: Session
     ): Continuation | null {
-        const stored = store.readRecords();
-        // An offer counts the kept files a continue will upload first; a run
-        // only what has actually reached storage.
-        const records: ResumeRecord[] = countPending
-            ? [
-                  ...stored,
-                  ...store.pending(stored).flatMap((p) =>
-                      p.segments.map((s) => ({
-                          kind: 'durable' as const,
-                          ...s,
-                      }))
-                  ),
-              ]
-            : stored;
+        const records = store.readRecords();
         const plan = resumePlan(layout, records);
         if (!plan) return null;
         const skipped = layout.slice(0, plan.skip);
-        const resumedVideo = plan.point
-            ? restartStreams(layout[plan.skip]!)
-            : [];
+        const resumedVideo = plan.point ? layout[plan.skip]!.videoStreams : [];
         const inits = this.readSavedInits(store, [
             ...resumedVideo,
             ...skipped.flatMap((w) => [...w.videoStreams, ...w.audioStreams]),
@@ -1175,8 +1131,7 @@ export class EncodeService implements OnModuleInit {
             const c = this.continuation(
                 store,
                 this.ffmpegService.waveLayout(config),
-                session,
-                true
+                session
             );
             return c && c.doneSec > 0 ? c.doneSec : null;
         } catch {
@@ -1260,73 +1215,6 @@ export class EncodeService implements OnModuleInit {
                 `Could not keep wave ${index}: ${(err as Error).message}`
             );
         }
-    }
-
-    /**
-     * Keep what a failed run made but never uploaded, beside its records, so a
-     * continue can upload it rather than make it again. Only files the
-     * pipeline closed in an orderly way and whose size matches their segments
-     * are kept; a run killed outright keeps nothing this way.
-     */
-    private async keepSalvaged(
-        run: PreparedRun,
-        pipeline: ReturnType<SegmentPipelineService['createPipeline']>
-    ): Promise<void> {
-        try {
-            const salvaged = await pipeline.salvage();
-            if (salvaged.length === 0) return;
-            await mkdir(run.store.pendingDir, { recursive: true });
-            for (const file of salvaged) {
-                const name = basename(file.objectKey);
-                await rename(file.filePath, join(run.store.pendingDir, name));
-                run.store.append([
-                    {
-                        kind: 'pending',
-                        name,
-                        objectKey: file.objectKey,
-                        size: file.size,
-                        segments: file.segments,
-                    },
-                ]);
-            }
-            this.logger.log(
-                `Kept ${salvaged.length} file(s) of segments that had not reached storage`
-            );
-        } catch (err) {
-            this.logger.warn(
-                `Could not keep the segments that had not reached storage: ${(err as Error).message}`
-            );
-        }
-    }
-
-    /** Upload what a failed run kept, recording each file's segments as stored once it is. */
-    private async uploadPending(
-        store: ResumeStore,
-        session: Session
-    ): Promise<void> {
-        const pending = store.pending(store.readRecords());
-        if (pending.length === 0) return;
-        const pipeline = this.segmentPipelineService.createPipeline({
-            outputDir: store.pendingDir,
-            s3Config: session.config.s3,
-            s3PathPrefix: S3Service.canonicalPrefix(
-                session.config.s3.pathPrefix
-            ),
-            byteRange: session.config.byteRange !== false,
-            byteRangeMaxFileSizeBytes: 0,
-            onDurable: (segments) =>
-                store.append(
-                    segments.map((s) => ({ kind: 'durable' as const, ...s }))
-                ),
-        });
-        await pipeline.uploadSalvaged(
-            pending.map((p) => ({
-                filePath: join(store.pendingDir, p.name),
-                objectKey: p.objectKey,
-                size: p.size,
-                segments: p.segments,
-            }))
-        );
     }
 
     /**

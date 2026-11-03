@@ -128,8 +128,6 @@ export interface Session {
      * when it would have to start over. Worked out once, when it failed.
      */
     resumeFromSec?: number;
-    /** It failed for want of a connection to storage, so trying again may be all it needs. */
-    networkFailure?: boolean;
     segmentFormat?: SegmentFormat;
     ingestTotalBytes?: number;
     /**
@@ -508,16 +506,7 @@ export class SessionService implements OnModuleInit {
                 // alive so an age-based sweep could delete it hours later, while
                 // whatever remained of its work directory sat on the disk. Boot
                 // is the natural moment to be rid of both.
-                //
-                // Except a failed encode that can carry on from what it left in
-                // storage: purging it throws that work away. It stays until the
-                // sweep ages it out, as any other session does.
-                const continuable =
-                    session.status === 'failed' &&
-                    (session.resumeFromSec ?? 0) > 0 &&
-                    !!session.filePath &&
-                    existsSync(session.filePath);
-                if (TERMINAL.includes(session.status) && !continuable) {
+                if (TERMINAL.includes(session.status)) {
                     this.purge(session.id);
                     discarded++;
                     continue;
@@ -853,24 +842,6 @@ export class SessionService implements OnModuleInit {
      * outlive the event, because the session it explains is one the user comes
      * back to after it has finished.
      */
-    setNetworkFailure(id: string, networkFailure: boolean): void {
-        const session = this.sessions.get(id);
-        if (session) {
-            session.networkFailure = networkFailure || undefined;
-            this.persist(session);
-        }
-    }
-
-    /** Add a sentence to a failed session's error, for whoever is watching it. */
-    appendToError(id: string, sentence: string): void {
-        const session = this.sessions.get(id);
-        if (session?.error) {
-            session.error = `${session.error} ${sentence}`;
-            this.persist(session);
-            this.emitEvent(session);
-        }
-    }
-
     setResumeFrom(id: string, resumeFromSec: number | undefined): void {
         const session = this.sessions.get(id);
         if (session) {

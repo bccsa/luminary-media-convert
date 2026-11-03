@@ -43,23 +43,13 @@ const SPRITES = 'sprite_%03d';
 const realSetTimeout = globalThis.setTimeout;
 const settle = () => new Promise((resolve) => realSetTimeout(resolve, 1));
 
-/**
- * Wait for something the service does off the awaited path. By the clock,
- * not a count of short sleeps: under a loaded full-suite run the filesystem
- * work behind it can take longer than any fixed number of them.
- */
+/** Wait for something the service does off the awaited path. */
 async function until(condition: () => boolean, what: string): Promise<void> {
-    const deadline = Date.now() + 5000;
-    while (Date.now() < deadline) {
+    for (let i = 0; i < 200; i++) {
         if (condition()) return;
         await settle();
     }
     throw new Error(`timed out waiting for ${what}`);
-}
-
-/** Stop the passes a test left running, so their watchers do not outlive it. */
-function stopPasses(svc: ThumbnailService): void {
-    for (const stop of (svc as any).stops.values()) stop.abort();
 }
 
 /** The individual thumbnails an ingest pass would have left on disk. */
@@ -314,8 +304,6 @@ describe('ThumbnailService', () => {
                 stdout: ' V..... libwebp          libwebp WebP',
                 stderr: '',
             });
-
-            afterEach(() => stopPasses(service));
         });
     });
 
@@ -492,7 +480,6 @@ describe('ThumbnailService', () => {
         });
 
         afterEach(() => {
-            stopPasses(svc);
             rmSync(workDir, { recursive: true, force: true });
             delete process.env.WORK_DIR;
         });
@@ -1483,7 +1470,6 @@ describe('ThumbnailService', () => {
         });
 
         afterEach(() => {
-            stopPasses(svc);
             rmSync(workDir, { recursive: true, force: true });
             rmSync(outputDir, { recursive: true, force: true });
             delete process.env.WORK_DIR;

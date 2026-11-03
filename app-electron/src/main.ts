@@ -26,7 +26,6 @@ import { candidateBinaries, resolveFfmpegBinary } from './ffmpeg-location';
 import { resolveWindowTarget } from './window-target';
 import { type AvailableUpdate, checkForUpdate } from './update-check';
 import { teeConsoleToFile } from './log-file';
-import { menuTemplate } from './menu';
 
 const PROTOCOL = 'luminary-convert';
 
@@ -601,23 +600,86 @@ async function clearWorkingFiles(): Promise<void> {
 }
 
 function buildMenu(): void {
+    const isMac = process.platform === 'darwin';
+    // No ellipsis. Apple's convention reserves it for an item that needs more
+    // input before it can act; this opens a window and asks for nothing. The
+    // FFmpeg picker below keeps its ellipsis for exactly that reason.
+    const licences = {
+        label: 'Licences',
+        click: () => showLicences(mainWindow),
+    };
+    // Deliberately a plain item rather than anything prominent: the licence
+    // asks that substitution be possible, not that we recommend it.
+    const ffmpegItems: Electron.MenuItemConstructorOptions[] = [
+        { label: 'Choose FFmpeg…', click: () => void chooseFfmpegDirectory() },
+        {
+            label: 'Use the bundled FFmpeg',
+            enabled: !!settings.ffmpegDir,
+            click: () => void applyFfmpegDirectory(null),
+        },
+    ];
+
+    // Ellipsis: it asks before it acts.
+    const maintenanceItems: Electron.MenuItemConstructorOptions[] = [
+        {
+            label: 'Check for Updates…',
+            click: () => void checkForUpdates(true),
+        },
+        {
+            label: 'Clear Working Files…',
+            click: () => void clearWorkingFiles(),
+        },
+        // No ellipsis: it shows the file and asks nothing.
+        {
+            label: 'Show Log File',
+            enabled: !!logPath,
+            click: () => logPath && shell.showItemInFolder(logPath),
+        },
+    ];
+
     Menu.setApplicationMenu(
-        Menu.buildFromTemplate(
-            menuTemplate({
-                isMac: process.platform === 'darwin',
-                appName: app.name,
-                ffmpegDirChosen: !!settings.ffmpegDir,
-                logPath,
-                actions: {
-                    licences: () => showLicences(mainWindow),
-                    chooseFfmpeg: () => void chooseFfmpegDirectory(),
-                    useBundledFfmpeg: () => void applyFfmpegDirectory(null),
-                    checkForUpdates: () => void checkForUpdates(true),
-                    clearWorkingFiles: () => void clearWorkingFiles(),
-                    showLog: () => logPath && shell.showItemInFolder(logPath),
-                },
-            })
-        )
+        Menu.buildFromTemplate([
+            ...(isMac
+                ? ([
+                      {
+                          label: app.name,
+                          submenu: [
+                              { role: 'about' },
+                              { type: 'separator' },
+                              ...ffmpegItems,
+                              { type: 'separator' },
+                              ...maintenanceItems,
+                              { type: 'separator' },
+                              { role: 'services' },
+                              { type: 'separator' },
+                              { role: 'hide' },
+                              { role: 'hideOthers' },
+                              { role: 'unhide' },
+                              { type: 'separator' },
+                              { role: 'quit' },
+                          ],
+                      },
+                  ] as Electron.MenuItemConstructorOptions[])
+                : []),
+            { role: 'fileMenu' },
+            { role: 'editMenu' },
+            { role: 'viewMenu' },
+            { role: 'windowMenu' },
+            {
+                role: 'help',
+                submenu: isMac
+                    ? [licences]
+                    : [
+                          licences,
+                          { type: 'separator' },
+                          ...ffmpegItems,
+                          { type: 'separator' },
+                          ...maintenanceItems,
+                          { type: 'separator' },
+                          { role: 'about' },
+                      ],
+            },
+        ] as Electron.MenuItemConstructorOptions[])
     );
 }
 

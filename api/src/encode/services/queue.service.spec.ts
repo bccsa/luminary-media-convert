@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AUTOMATIC_TRY_DELAYS_MS, QueueService } from './queue.service.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { QueueService } from './queue.service.js';
 import type { SessionService } from './session.service.js';
 import type { EncodeService } from './encode.service.js';
 import type { SessionEventsService } from './session-events.service.js';
@@ -9,15 +9,8 @@ const setFailed = vi.fn();
 const processSession = vi.fn<(id: string) => Promise<void>>();
 const emit = vi.fn();
 const prepareDelivery = vi.fn();
-const get = vi.fn();
-const appendToError = vi.fn();
 
-const sessions = {
-    updateStatus,
-    setFailed,
-    get,
-    appendToError,
-} as unknown as SessionService;
+const sessions = { updateStatus, setFailed } as unknown as SessionService;
 const encoder = {
     processSession,
     prepareDelivery,
@@ -46,8 +39,6 @@ beforeEach(() => {
     emit.mockReset();
     prepareDelivery.mockReset();
     processSession.mockReset().mockResolvedValue(undefined);
-    get.mockReset().mockReturnValue({ status: 'completed' });
-    appendToError.mockReset();
 });
 
 describe('QueueService — enqueueing', () => {
@@ -302,69 +293,6 @@ describe('QueueService — shutdown', () => {
 
         // 'b' is left queued for the next boot rather than started during
         // shutdown, where it could not finish.
-        expect(processSession).toHaveBeenCalledTimes(1);
-    });
-});
-
-describe('QueueService — trying again after a lost connection', () => {
-    const lostConnection = { status: 'failed', networkFailure: true };
-
-    beforeEach(() => vi.useFakeTimers());
-    afterEach(() => vi.useRealTimers());
-
-    it('puts the encode back in the queue after a pause, and says so', async () => {
-        get.mockReturnValue(lostConnection);
-        const queue = build();
-
-        queue.enqueue('a');
-        await vi.advanceTimersByTimeAsync(0);
-        expect(processSession).toHaveBeenCalledTimes(1);
-        expect(appendToError).toHaveBeenCalledWith(
-            'a',
-            expect.stringMatching(
-                /Trying again by itself in 30 s \(attempt 1 of 3\)/
-            )
-        );
-
-        await vi.advanceTimersByTimeAsync(AUTOMATIC_TRY_DELAYS_MS[0]);
-        expect(processSession).toHaveBeenCalledTimes(2);
-    });
-
-    it('gives up after its tries, waiting longer before each', async () => {
-        get.mockReturnValue(lostConnection);
-        const queue = build();
-
-        queue.enqueue('a');
-        for (const delay of AUTOMATIC_TRY_DELAYS_MS) {
-            await vi.advanceTimersByTimeAsync(delay);
-        }
-        await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
-
-        expect(processSession).toHaveBeenCalledTimes(
-            1 + AUTOMATIC_TRY_DELAYS_MS.length
-        );
-    });
-
-    it('does not try again after a failure that was not the connection', async () => {
-        get.mockReturnValue({ status: 'failed' });
-        const queue = build();
-
-        queue.enqueue('a');
-        await vi.advanceTimersByTimeAsync(AUTOMATIC_TRY_DELAYS_MS[0] * 2);
-
-        expect(processSession).toHaveBeenCalledTimes(1);
-        expect(appendToError).not.toHaveBeenCalled();
-    });
-
-    it('leaves alone an encode someone continued or deleted meanwhile', async () => {
-        get.mockReturnValueOnce(lostConnection).mockReturnValue({
-            status: 'encoding',
-        });
-        const queue = build();
-
-        queue.enqueue('a');
-        await vi.advanceTimersByTimeAsync(AUTOMATIC_TRY_DELAYS_MS[0]);
-
         expect(processSession).toHaveBeenCalledTimes(1);
     });
 });
