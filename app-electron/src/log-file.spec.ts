@@ -27,6 +27,28 @@ describe('teeConsoleToFile', () => {
         );
     });
 
+    it('keeps logging to the file when the console it copies has gone', () => {
+        // The terminal that started the app closed: every console write fails.
+        const listeners: ((err: Error) => void)[] = [];
+        const broken = {
+            write: vi.fn((_chunk: unknown) => {
+                throw Object.assign(new Error('write EPIPE'), {
+                    code: 'EPIPE',
+                });
+            }),
+            on: vi.fn((_event: 'error', listener: (err: Error) => void) => {
+                listeners.push(listener);
+            }),
+        };
+        const path = teeConsoleToFile(dir, { streams: [broken] });
+
+        expect(() => broken.write('still recorded\n')).not.toThrow();
+        // And an EPIPE the stream reports later, as an event, is handled.
+        expect(listeners).toHaveLength(1);
+        expect(() => listeners[0]!(new Error('write EPIPE'))).not.toThrow();
+        expect(readFileSync(path, 'utf8')).toBe('still recorded\n');
+    });
+
     it('leaves the terminal colours out of the file', () => {
         const out = stream();
         const path = teeConsoleToFile(dir, { streams: [out] });
