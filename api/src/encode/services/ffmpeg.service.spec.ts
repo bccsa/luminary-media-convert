@@ -379,6 +379,24 @@ describe('FfmpegService', () => {
                 expect(args[args.indexOf('-start_number') + 1]).toBe('6');
             });
 
+            it('starts an audio-only encode one segment early, to warm the encoder up', async () => {
+                const args = await (service as any).buildAudioArgs({
+                    inputPath: '/tmp/input.mp3',
+                    outputDir: '/tmp/output',
+                    encodeConfig: {
+                        ...config(),
+                        type: 'audio',
+                        videoRenditions: [],
+                    },
+                    resume: { fromSec: 36, startNumber: 6 },
+                });
+
+                expect(args[args.indexOf('-i') - 2]).toBe('-ss');
+                // Exactly the boundary before: audio has no frame to miss.
+                expect(args[args.indexOf('-i') - 1]).toBe('30.000000');
+                expect(args[args.indexOf('-start_number') + 1]).toBe('5');
+            });
+
             it('changes nothing when not continuing', async () => {
                 const args = await buildVideoArgs({
                     inputPath: '/tmp/input.mp4',
@@ -390,11 +408,11 @@ describe('FfmpegService', () => {
                 expect(args).not.toContain('-start_number');
             });
 
-            it('continues only an encode in one pass that re-encodes every stream, with no trim', () => {
+            it('continues an encode in one pass that re-encodes every stream, with no trim', () => {
                 expect(service.canResume(config())).toBe(true);
                 expect(
                     service.canResume(config({ type: 'audio' } as any))
-                ).toBe(false);
+                ).toBe(true);
                 expect(
                     service.canResume(
                         config({
