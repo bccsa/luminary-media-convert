@@ -42,6 +42,7 @@ import {
     listSessions,
     regenerateThumbnails,
     startEncode,
+    continueEncode,
     deleteSession,
 } from '../api';
 import {
@@ -406,6 +407,28 @@ const remoteIngestLabel = computed<string>(() => {
 const canRetryEncode = computed(
     () => currentStatus.value === 'failed' && poller.canRetry.value === true
 );
+
+/** A failed encode that can carry on from what already reached storage. */
+const canContinueEncode = computed(
+    () => canRetryEncode.value && poller.canResume.value === true
+);
+
+/**
+ * Continue with the settings the encode was started with, which the encoder
+ * holds: the form below may show others, and those would start over.
+ */
+async function onContinueEncode(): Promise<void> {
+    if (!sessionToken.value) return;
+    submitting.value = true;
+    submissionError.value = null;
+    try {
+        await continueEncode(sessionId.value, sessionToken.value);
+    } catch (e) {
+        submissionError.value = errorMessage(e);
+    } finally {
+        submitting.value = false;
+    }
+}
 
 /**
  * The session can be configured: probed, waiting to encode (or retryable).
@@ -1901,6 +1924,7 @@ onUnmounted(() => {
 <template>
     <div
         :data-retry-available="canRetryEncode || undefined"
+        :data-continue-from="canContinueEncode ? (poller.resumeFromPercent.value ?? 0) : undefined"
         :class="
             headerLayout === 'session-trim'
                 ? 'flex h-full w-full flex-col'
@@ -2136,6 +2160,21 @@ onUnmounted(() => {
                             >
                                 <div class="flex flex-wrap items-center gap-2">
                                     <button
+                                        v-if="canContinueEncode"
+                                        type="button"
+                                        data-testid="continue-encoding"
+                                        class="shrink-0 cursor-pointer rounded-lg bg-sky-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-700 dark:hover:bg-slate-600 sm:px-5 sm:py-2.5 sm:text-sm"
+                                        :disabled="submitting"
+                                        title="Carry on from what was already uploaded, with the settings this encode was started with"
+                                        @click="onContinueEncode"
+                                    >
+                                        {{
+                                            submitting
+                                                ? 'Starting…'
+                                                : `Continue encode (from ${poller.resumeFromPercent.value ?? 0}%)`
+                                        }}
+                                    </button>
+                                    <button
                                         v-if="showProbeConfig"
                                         type="button"
                                         data-testid="start-encoding"
@@ -2148,7 +2187,13 @@ onUnmounted(() => {
                                         "
                                         @click="onStartEncodingFromTrim"
                                     >
-                                        {{ submitting ? 'Starting…' : 'Start encoding' }}
+                                        {{
+                                            submitting
+                                                ? 'Starting…'
+                                                : canRetryEncode
+                                                  ? 'Encode again'
+                                                  : 'Start encoding'
+                                        }}
                                     </button>
                                     <button
                                         v-if="canDiscardSession"
