@@ -884,6 +884,34 @@ export class EncodeService implements OnModuleInit {
             const errorMsg = (err as Error).message || 'Unknown error';
             // The whole of it in the log; one sentence for whoever started the encode.
             this.logger.error(`Session ${sessionId} failed: ${errorMsg}`);
+            // What a continue can reuse is settled before the session is marked
+            // failed: a client looks at a failed session once, when it hears of
+            // it, and an offer worked out after that is never seen.
+            pipeline?.abort();
+            // Only for a session still here: a cancel or a delete has nothing to
+            // continue, and the queue should not wait on its uploads.
+            if (this.sessionService.get(sessionId)) {
+                try {
+                    // A chunk still sending when the encode failed is one a
+                    // continue need not make again, so it is given a moment to land.
+                    await pipeline?.settle();
+                    if (run?.recording && pipeline) {
+                        await this.keepSalvaged(run, pipeline);
+                    }
+                    this.sessionService.setResumeFrom(
+                        sessionId,
+                        run?.recording
+                            ? ((await this.resumeFrom(run.store, session)) ??
+                                  undefined)
+                            : undefined
+                    );
+                } catch (keepErr) {
+                    // Costs a continue its offer, never the failure being reported.
+                    this.logger.warn(
+                        `Session ${sessionId}: could not work out what a continue would reuse: ${(keepErr as Error).message}`
+                    );
+                }
+            }
             this.sessionService.setFailed(sessionId, failureMessage(errorMsg));
             this.sessionService.setNetworkFailure(
                 sessionId,
@@ -902,20 +930,6 @@ export class EncodeService implements OnModuleInit {
             // the encode produced correctly. Aborting an already-drained
             // pipeline is a no-op, so this is unconditional.
             pipeline?.abort();
-            // A chunk still sending when the encode failed is one a continue
-            // need not make again, so it is given a moment to land.
-            if (this.sessionService.get(sessionId)?.status === 'failed') {
-                await pipeline?.settle();
-                if (run?.recording && pipeline) {
-                    await this.keepSalvaged(run, pipeline);
-                }
-                if (run?.recording) {
-                    this.sessionService.setResumeFrom(
-                        sessionId,
-                        (await this.resumeFrom(run.store, session)) ?? undefined
-                    );
-                }
-            }
             await this.cleanupSessionFiles(sessionId);
         }
     }

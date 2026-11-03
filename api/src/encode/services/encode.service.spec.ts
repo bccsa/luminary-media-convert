@@ -615,6 +615,37 @@ describe('EncodeService', () => {
         );
     });
 
+    it('still reports the failure when keeping what a continue would reuse goes wrong', async () => {
+        ffmpegService.encode.mockRejectedValue(
+            new Error('FFmpeg exited with code 1')
+        );
+        (mockPipeline.settle as ReturnType<typeof vi.fn>).mockRejectedValue(
+            new Error('settle broke')
+        );
+
+        const session = sessionService.create(makeConfig());
+        sessionService.setFilePath(session.id, '/tmp/input.mp4');
+        sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+
+        await service.processSession(session.id);
+
+        expect(sessionService.get(session.id)!.status).toBe('failed');
+    });
+
+    it('does not wait on the uploads of a session deleted meanwhile', async () => {
+        const session = sessionService.create(makeConfig());
+        sessionService.setFilePath(session.id, '/tmp/input.mp4');
+        sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+        ffmpegService.encode.mockImplementation(async () => {
+            sessionService.remove(session.id);
+            throw new Error('FFmpeg exited with code null (signal: SIGTERM)');
+        });
+
+        await service.processSession(session.id);
+
+        expect(mockPipeline.settle).not.toHaveBeenCalled();
+    });
+
     it('should mark session as failed when pipeline drain errors', async () => {
         (mockPipeline.drain as ReturnType<typeof vi.fn>).mockRejectedValue(
             new Error('S3 connection refused')
@@ -2070,6 +2101,32 @@ describe('EncodeService — continuing a ladder in waves', () => {
     afterEach(() => {
         rmSync(testWorkDir, { recursive: true, force: true });
         delete process.env.WORK_DIR;
+    });
+
+    it('has the continue offer ready when the session is reported failed', async () => {
+        // A client looks at a failed session once, when it hears of it.
+        const session = sessionService.create(makeConfig());
+        const source = join(testWorkDir, 'source.mp4');
+        writeFileSync(source, 'video');
+        sessionService.setFilePath(session.id, source);
+        sessionService.setProbeResult(session.id, {
+            format: { duration: 120, bitrateKbps: 5000, formatName: 'mp4' },
+            videoTracks: [],
+            audioTracks: [],
+        } as any);
+        sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+        let offerWhenFailed: number | undefined;
+        const setFailed = sessionService.setFailed.bind(sessionService);
+        vi.spyOn(sessionService, 'setFailed').mockImplementation(
+            (id, error) => {
+                offerWhenFailed = sessionService.get(id)?.resumeFromSec;
+                setFailed(id, error);
+            }
+        );
+
+        await service.processSession(session.id);
+
+        expect(offerWhenFailed).toBe(60);
     });
 
     it('skips the finished wave, restoring it, and runs only the next', async () => {
