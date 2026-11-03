@@ -183,6 +183,20 @@ export function readTrackTimescale(init: Buffer): number {
 }
 
 /**
+ * The track's sample description (`stsd`), as bytes: the codec and its
+ * parameters. Two inits that agree on it decode each other's segments.
+ */
+export function sampleDescription(init: Buffer): Buffer {
+    const moov = onlyChild(init, null, 'moov', 'moov');
+    const trak = onlyChild(init, moov, 'trak', 'moov > trak');
+    const mdia = onlyChild(init, trak, 'mdia', 'moov > trak > mdia');
+    const minf = onlyChild(init, mdia, 'minf', 'moov > trak > mdia > minf');
+    const stbl = onlyChild(init, minf, 'stbl', '… > minf > stbl');
+    const stsd = onlyChild(init, stbl, 'stsd', '… > stbl > stsd');
+    return init.subarray(stsd.start, stsd.end);
+}
+
+/**
  * Take the edit list out of play, in place.
  *
  * The `edts` box's *type* is overwritten with `free`, which every reader skips

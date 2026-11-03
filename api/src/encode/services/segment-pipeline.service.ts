@@ -4,13 +4,20 @@ import { mkdir, readdir, readFile, stat, unlink, writeFile } from 'fs/promises';
 import { pipeline } from 'stream/promises';
 import { join, relative, posix } from 'path';
 import {
+    assembleSplicedMediaPlaylist,
     buildMediaPlaylist,
     parseMediaPlaylist,
+    type HlsByteRange,
 } from '@luminary-media-converter/hls-core';
 import type * as Minio from 'minio';
 import type { S3ConfigDto } from '../dto/s3-config.dto.js';
 import { EncryptionService } from './encryption.service.js';
-import { readBaseMediaDecodeTime } from './fmp4-timeline.js';
+import {
+    readBaseMediaDecodeTime,
+    readTrackTimescale,
+    sampleDescription,
+    shiftBaseMediaDecodeTime,
+} from './fmp4-timeline.js';
 import { S3Service } from './s3.service.js';
 
 /**
@@ -105,6 +112,28 @@ export interface SegmentPipelineConfig {
      * What a failed encode can continue from.
      */
     onDurable?: (segments: DurableSegment[]) => void;
+    /** Told about every video segment as it is processed, with its start time. */
+    onSegment?: (segment: DurableSegment) => void;
+    /**
+     * Continue a failed encode: the video streams named here restart at
+     * segment `startIndex`, and their earlier segments, already in storage,
+     * are put back in front of them in the playlist.
+     */
+    resume?: PipelineResume;
+}
+
+/** What a continued encode reuses from the run it continues. */
+export interface PipelineResume {
+    startIndex: number;
+    /** Per resumed video stream: when segment `startIndex` starts, in track ticks. */
+    startTfdt: Record<string, number>;
+    /** Per resumed video stream: segments 0..startIndex-1, with the next one's start. */
+    reused: Record<
+        string,
+        (DurableSegment & { tfdt: number; nextTfdt: number })[]
+    >;
+    /** Per resumed video stream: the init its reused segments were muxed against. */
+    previousInits: Record<string, Buffer>;
 }
 
 /** A segment that has reached storage, as a continued encode needs to know it. */
@@ -168,6 +197,8 @@ interface StreamState {
      */
     byteRangeEntries: ByteRangeEntry[];
     chain: ChainState;
+    /** Ticks added to each new segment of a resumed stream, set by its first segment. */
+    tfdtShift?: number;
 }
 
 interface UploadTask {
@@ -310,6 +341,16 @@ export class SegmentPipeline {
             }
         }
 
+        // A continued encode's playlists only hold what this run wrote.
+        if (this.config.resume) {
+            for (const streamDir of this.streamStates.keys()) {
+                await this.stitchResumedPlaylist(
+                    streamDir.split(/[\\/]/).pop()!,
+                    streamDir
+                );
+            }
+        }
+
         this.running = false;
         return [...this.uploadedKeys];
     }
@@ -434,6 +475,24 @@ export class SegmentPipeline {
             state.processedSegments.add(filename);
             this.totalSegmentsProduced++;
 
+            // A continued stream's segments are moved onto the timeline of the
+            // run it continues, so the two halves play as one.
+            if (this.config.resume?.startTfdt[streamDirName] !== undefined) {
+                try {
+                    await this.alignToResume(
+                        state,
+                        streamDirName,
+                        filename,
+                        segPath
+                    );
+                } catch (err) {
+                    this.pipelineError = new Error(
+                        `Could not continue ${streamDirName} at ${filename}: ${(err as Error).message}`
+                    );
+                    return;
+                }
+            }
+
             // Read before encryption makes the box structure unreadable.
             const durable = await this.describeSegment(
                 streamDirName,
@@ -441,6 +500,16 @@ export class SegmentPipeline {
                 segPath,
                 state.chain.id !== AUDIO_CHAIN
             );
+
+            if (durable.tfdt !== undefined) {
+                try {
+                    this.config.onSegment?.(durable);
+                } catch (err) {
+                    this.logger.warn(
+                        `[pipeline] could not record ${streamDirName}/${filename}: ${(err as Error).message}`
+                    );
+                }
+            }
 
             // Encrypt if needed
             if (this.config.encryptionKey && this.config.encryptionIV) {
@@ -481,6 +550,125 @@ export class SegmentPipeline {
 
             this.emitProgress();
         }
+    }
+
+    /**
+     * Shift a continued stream's segment onto the earlier run's timeline. The
+     * first one fixes the shift: it is segment `startIndex`, and must start
+     * where that segment did.
+     */
+    private async alignToResume(
+        state: StreamState,
+        stream: string,
+        file: string,
+        segPath: string
+    ): Promise<void> {
+        const resume = this.config.resume!;
+        const buffer = await readFile(segPath);
+        if (state.tfdtShift === undefined) {
+            const index = Number(SEGMENT_INDEX_RE.exec(file)?.[1] ?? NaN);
+            if (index !== resume.startIndex) {
+                throw new Error(
+                    `expected segment ${resume.startIndex} first, got ${file}`
+                );
+            }
+            state.tfdtShift =
+                resume.startTfdt[stream] - readBaseMediaDecodeTime(buffer);
+        }
+        if (state.tfdtShift !== 0) {
+            shiftBaseMediaDecodeTime(buffer, state.tfdtShift);
+            await writeFile(segPath, buffer);
+        }
+    }
+
+    /**
+     * Put a continued stream's reused segments back in front of the new ones.
+     * One init serves both halves when their sample descriptions agree; when
+     * they do not, the reused half keeps its own (`init_r0.mp4`) behind an
+     * `#EXT-X-DISCONTINUITY`. Every other stream only has its media sequence
+     * set back to 0, which `-start_number` moved.
+     */
+    private async stitchResumedPlaylist(
+        streamDirName: string,
+        streamDir: string
+    ): Promise<void> {
+        const resume = this.config.resume!;
+        const playlistPath = join(streamDir, 'playlist.m3u8');
+        let content: string;
+        try {
+            content = await readFile(playlistPath, 'utf-8');
+        } catch {
+            return;
+        }
+        const playlist = parseMediaPlaylist(content);
+        const reused = resume.reused[streamDirName];
+        if (!reused) {
+            playlist.mediaSequence = 0;
+            await writeFile(
+                playlistPath,
+                buildMediaPlaylist(playlist),
+                'utf-8'
+            );
+            return;
+        }
+
+        const previousInit = resume.previousInits[streamDirName];
+        const newInitUri = playlist.maps[0]?.uri;
+        if (!previousInit || !newInitUri) {
+            throw new Error(
+                `${streamDirName}: no init to play the reused segments with`
+            );
+        }
+        const newInit = await readFile(join(streamDir, newInitUri));
+        const sameInit = sampleDescription(previousInit).equals(
+            sampleDescription(newInit)
+        );
+        if (!sameInit) {
+            await writeFile(join(streamDir, 'init_r0.mp4'), previousInit);
+        }
+        const timescale = readTrackTimescale(previousInit);
+
+        type Entry = {
+            uri: string;
+            duration: number;
+            byteRange?: HlsByteRange;
+        };
+        const before: Entry[] = reused.map((r) => ({
+            uri: this.config.byteRange ? `../${r.mediaFile}` : r.file,
+            duration: (r.nextTfdt - r.tfdt) / timescale,
+            ...(r.offset !== undefined
+                ? { byteRange: { offset: r.offset, length: r.length } }
+                : {}),
+        }));
+        const after: Entry[] = playlist.segments.map((s) => ({
+            uri: s.uri,
+            duration: s.duration,
+            ...(s.byteRange ? { byteRange: s.byteRange } : {}),
+        }));
+        const parts = sameInit
+            ? [{ mapUri: newInitUri, segments: [...before, ...after] }]
+            : [
+                  { mapUri: 'init_r0.mp4', segments: before },
+                  { mapUri: newInitUri, segments: after },
+              ];
+        const joined = assembleSplicedMediaPlaylist(
+            parts.map((p) => ({
+                mapUri: p.mapUri,
+                segments: p.segments.map(({ uri, duration }) => ({
+                    uri,
+                    duration,
+                })),
+            })),
+            {
+                version: playlist.version ?? 7,
+                independentSegments: playlist.independentSegments !== false,
+            }
+        );
+        const entries = parts.flatMap((p) => p.segments);
+        joined.segments.forEach((segment, i) => {
+            if (entries[i].byteRange) segment.byteRange = entries[i].byteRange;
+        });
+        await writeFile(playlistPath, buildMediaPlaylist(joined), 'utf-8');
     }
 
     /**
