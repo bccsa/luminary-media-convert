@@ -88,10 +88,10 @@ describe('SessionTrimWorkspace regenerate thumbnails', () => {
             },
             global: {
                 stubs: {
-                    // Renders the toolbar slot the button lives in.
+                    // Renders the controls-bar slot the button lives in.
                     SegmentEditor: {
                         template:
-                            '<div><slot name="toolbar-before-clear" /></div>',
+                            '<div><slot name="controls-end" /></div>',
                     },
                 },
             },

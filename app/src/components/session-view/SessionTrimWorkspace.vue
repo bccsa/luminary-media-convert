@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue';
 import { SegmentEditor } from '../segment-editor';
 import type { Segment } from '../segment-editor';
+import { EDITOR_ICON_BUTTON } from '../segment-editor/buttonStyles';
 
 const props = withDefaults(
     defineProps<{
@@ -166,10 +167,6 @@ const trimToolbarHasVisibleContent = computed(() => {
                 The app header that used to hold it is gone.
             -->
             <template #controls-end>
-                <slot name="timeline-end" />
-            </template>
-
-            <template #toolbar-before-clear>
                 <!--
                     Without this a half-drawn filmstrip looks like a failure. It
                     takes minutes to sample a long source, and the frames arrive
@@ -183,7 +180,7 @@ const trimToolbarHasVisibleContent = computed(() => {
                 <button
                     v-else-if="canRegenerateThumbnails"
                     type="button"
-                    class="appearance-none inline-flex items-center gap-1 px-2 py-1 text-xs font-medium font-[inherit] text-zinc-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] hover:bg-slate-100 dark:hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400"
+                    :class="`${EDITOR_ICON_BUTTON} min-h-9 box-border shrink-0`"
                     title="Throw these thumbnails away and make them again from the source"
                     data-test="regenerateThumbnails"
                     @click="emit('regenerateThumbnails')"
@@ -193,7 +190,10 @@ const trimToolbarHasVisibleContent = computed(() => {
                     class="text-xs text-red-600 dark:text-red-400"
                     data-test="regenerateThumbnailsError"
                 >{{ regenerateThumbnailsError }}</span>
+                <slot name="timeline-end" />
             </template>
+
+
         </SegmentEditor>
     </div>
 </div>
@@ -203,10 +203,14 @@ const trimToolbarHasVisibleContent = computed(() => {
 .storyboard-pending-pill {
     display: inline-flex;
     align-items: center;
-    border-radius: 9999px;
+    /* The buttons' rounded-md, so it reads as one of the row. */
+    border-radius: 0.375rem;
     border: 1px solid rgb(226 232 240);
     background: rgb(248 250 252);
-    padding: 0.125rem 0.5rem;
+    /* As tall as the buttons it sits beside in the controls bar. */
+    box-sizing: border-box;
+    min-height: 2.25rem;
+    padding: 0 0.75rem;
     font-size: 0.6875rem;
     font-weight: 500;
     color: rgb(100 116 139);
