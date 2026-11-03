@@ -423,6 +423,8 @@ async function onContinueEncode(): Promise<void> {
     submissionError.value = null;
     try {
         await continueEncode(sessionId.value, sessionToken.value);
+        // Followed again from here, as after a start: a failed session is not.
+        poller.start(sessionId.value, sessionToken.value);
     } catch (e) {
         submissionError.value = errorMessage(e);
     } finally {
