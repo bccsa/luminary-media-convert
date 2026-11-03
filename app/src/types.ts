@@ -93,6 +93,12 @@ export interface AudioTrackEdit {
 }
 
 /** Where an audio track being added to an existing video has got to. */
+/** Making an existing video's thumbnails again, in an edit session. */
+export interface ThumbnailsRegenerateJob {
+    state: 'running' | 'done' | 'failed';
+    error?: string;
+}
+
 export interface AddAudioTrackJob {
     state: 'running' | 'done' | 'failed';
     phase: 'reading' | 'encoding' | 'uploading' | 'saving' | 'done';

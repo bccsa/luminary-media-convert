@@ -1,9 +1,12 @@
 import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import {
     S3Client,
+    DeleteObjectsCommand,
     GetObjectCommand,
     PutObjectCommand,
     HeadObjectCommand,
+    ListObjectsV2Command,
+    type _Object as S3Object,
 } from '@aws-sdk/client-s3';
 import type { S3ConfigDto } from '../encode/dto/s3-config.dto.js';
 
@@ -130,6 +133,47 @@ export class S3EtagService {
                 });
             }
             throw err;
+        }
+    }
+
+    /** Every key under `prefix`, across as many list pages as it takes. */
+    async listKeys(config: S3ConfigDto, prefix: string): Promise<string[]> {
+        const client = this.createClient(config);
+        const out: string[] = [];
+        let continuationToken: string | undefined;
+        do {
+            const resp = await client.send(
+                new ListObjectsV2Command({
+                    Bucket: config.bucket,
+                    Prefix: prefix,
+                    ContinuationToken: continuationToken,
+                })
+            );
+            for (const obj of (resp.Contents ?? []) as S3Object[]) {
+                if (obj.Key) out.push(obj.Key);
+            }
+            continuationToken = resp.IsTruncated
+                ? resp.NextContinuationToken
+                : undefined;
+        } while (continuationToken);
+        return out;
+    }
+
+    /** Delete `keys`, a thousand to a request as S3 allows. */
+    async deleteObjects(config: S3ConfigDto, keys: string[]): Promise<void> {
+        const client = this.createClient(config);
+        for (let i = 0; i < keys.length; i += 1000) {
+            await client.send(
+                new DeleteObjectsCommand({
+                    Bucket: config.bucket,
+                    Delete: {
+                        Objects: keys
+                            .slice(i, i + 1000)
+                            .map((Key) => ({ Key })),
+                        Quiet: true,
+                    },
+                })
+            );
         }
     }
 

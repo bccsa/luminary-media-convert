@@ -38,6 +38,7 @@ import {
     getSessionKey,
     getSessionStatus,
     ingestLocalFile,
+    getThumbnailsRegenerate,
     listSessions,
     regenerateThumbnails,
     startEncode,
@@ -1030,7 +1031,10 @@ const rawThumbnailVttUrl = computed(() => {
     if (sourceStoryboardActive.value) return storyboard.versionedUrl.value;
     const base = deliveryBaseUrl.value;
     if (!displayThumbnailsVtt.value || !base) return null;
-    return `${base}/${displayThumbnailsVtt.value}`;
+    const url = `${base}/${displayThumbnailsVtt.value}`;
+    return existingThumbnailsVersion.value
+        ? `${url}?r=${existingThumbnailsVersion.value}`
+        : url;
 });
 
 /**
@@ -1065,12 +1069,22 @@ const storyboardPending = computed(
     () => storyboard.pending.value && !storyboard.complete.value
 );
 
-/** Until an encode starts packing them, the source's thumbnails can be made again. */
+/** An existing video's thumbnails are being made again: a job on the encoder, followed here. */
+const regeneratingExistingThumbnails = ref(false);
+/** Bumped when an existing video's thumbnails are replaced, so the timeline reads them again. */
+const existingThumbnailsVersion = ref(0);
+
+/**
+ * The source's thumbnails can be made again until an encode starts packing
+ * them; an existing video's, from the video itself, at any time.
+ */
 const canRegenerateThumbnails = computed(
     () =>
-        sourceStoryboardActive.value &&
         !!sessionToken.value &&
-        (currentStatus.value === 'uploaded' || canRetryEncode.value)
+        !regeneratingExistingThumbnails.value &&
+        (editsExistingVideo.value ||
+            (sourceStoryboardActive.value &&
+                (currentStatus.value === 'uploaded' || canRetryEncode.value)))
 );
 const regenerateThumbnailsError = ref<string | null>(null);
 
@@ -1078,11 +1092,33 @@ async function onRegenerateThumbnails(): Promise<void> {
     const token = sessionToken.value;
     if (!token) return;
     regenerateThumbnailsError.value = null;
+    if (!editsExistingVideo.value) {
+        try {
+            await regenerateThumbnails(sessionId.value, token);
+            storyboard.restart();
+        } catch (e) {
+            regenerateThumbnailsError.value = errorMessage(e);
+        }
+        return;
+    }
+    const followed = sessionId.value;
+    regeneratingExistingThumbnails.value = true;
     try {
-        await regenerateThumbnails(sessionId.value, token);
-        storyboard.restart();
+        await regenerateThumbnails(followed, token);
+        for (;;) {
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+            // Moved on to another session: this one's outcome is not ours to show.
+            if (sessionId.value !== followed) return;
+            const job = await getThumbnailsRegenerate(followed, token);
+            if (job?.state === 'running') continue;
+            if (job?.state === 'failed') throw new Error(job.error);
+            existingThumbnailsVersion.value++;
+            return;
+        }
     } catch (e) {
         regenerateThumbnailsError.value = errorMessage(e);
+    } finally {
+        regeneratingExistingThumbnails.value = false;
     }
 }
 
@@ -2708,7 +2744,7 @@ onUnmounted(() => {
                         :chapters-save-error="chaptersSaveError"
                         :show-trim-segment-editor="showTrimSegmentEditor"
                         :thumbnail-vtt-url="thumbnailVttUrl"
-                        :storyboard-pending="storyboardPending"
+                        :storyboard-pending="storyboardPending || regeneratingExistingThumbnails"
                         :can-regenerate-thumbnails="canRegenerateThumbnails"
                         :regenerate-thumbnails-error="regenerateThumbnailsError"
                         @regenerate-thumbnails="onRegenerateThumbnails"

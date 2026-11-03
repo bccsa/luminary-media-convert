@@ -7,6 +7,7 @@ import type {
     AudioTrackEdit,
     AddAudioTrackJob,
     AudioSource,
+    ThumbnailsRegenerateJob,
     EncodedMedia,
 } from './types';
 
@@ -178,6 +179,20 @@ export async function regenerateThumbnails(
             method: 'POST',
             token: sessionToken,
             errorPrefix: 'Could not make the thumbnails again',
+        }
+    );
+}
+
+/** How far making an existing video's thumbnails again has got; null before it starts. */
+export async function getThumbnailsRegenerate(
+    sessionId: string,
+    sessionToken: string
+): Promise<ThumbnailsRegenerateJob | null> {
+    return requestJsonOrNull(
+        `${API_BASE}/api/sessions/${sessionId}/thumbnails/regenerate`,
+        {
+            token: sessionToken,
+            errorPrefix: 'Could not read how the thumbnails are getting on',
         }
     );
 }

@@ -854,6 +854,16 @@ export class SessionService implements OnModuleInit {
         }
     }
 
+    /** Point the session at a storyboard made again beside its video. */
+    setThumbnailsVtt(id: string, thumbnailsVtt: string): void {
+        const session = this.sessions.get(id);
+        if (session) {
+            session.thumbnailsVtt = thumbnailsVtt;
+            this.persist(session);
+            this.emitEvent(session);
+        }
+    }
+
     setCompleted(
         id: string,
         files: string[],

@@ -62,6 +62,10 @@ import {
     AddAudioTrackService,
     type AudioSource,
 } from './services/add-audio-track.service.js';
+import {
+    ExistingThumbnailsService,
+    type ExistingThumbnailsJob,
+} from './services/existing-thumbnails.service.js';
 import { hasAllowedExtension } from './services/media-extensions.js';
 import {
     copyModeRejection,
@@ -130,7 +134,8 @@ export class EncodeController {
         private readonly hlsEditService: HlsEditService,
         private readonly waveformService: WaveformService,
         private readonly thumbnailService: ThumbnailService,
-        private readonly addAudioTrackService: AddAudioTrackService
+        private readonly addAudioTrackService: AddAudioTrackService,
+        private readonly existingThumbnailsService: ExistingThumbnailsService
     ) {}
 
     /**
@@ -1303,11 +1308,14 @@ export class EncodeController {
     @AuthTypes('instance', 'session')
     @ApiSecurity('apikey')
     @ApiOperation({
-        summary: 'Sample the source storyboard again',
+        summary: 'Make the storyboard again',
         description:
-            'Throws the source storyboard away and samples the source again, ' +
-            'stopping a pass still running. Progress arrives as for the first ' +
-            'pass: storyboardThumbCount on the session and its event stream.',
+            'Before an encode, or after one failed: throws the source storyboard ' +
+            'away and samples the source again, stopping a pass still running; ' +
+            'progress arrives as for the first pass, as storyboardThumbCount. ' +
+            "In an edit session: makes the existing video's storyboard again from " +
+            'the video itself and replaces it beside the video; GET this route ' +
+            'for how far that has got.',
     })
     @ApiParam({ name: 'sessionId', description: 'Session ID' })
     @ApiResponse({ status: 202, description: 'Sampling started.' })
@@ -1329,7 +1337,14 @@ export class EncodeController {
         if (!session) {
             throw new NotFoundException(`Session ${sessionId} not found`);
         }
-        this.assertEncodes(session);
+        // The source is gone by now: the frames come from the video itself.
+        if (session.edit) {
+            this.existingThumbnailsService.start(
+                sessionId,
+                this.editedVideo(sessionId)
+            );
+            return;
+        }
         // An encode packs these frames into the delivered storyboard, so they
         // stay put from the moment it starts.
         if (session.status !== 'uploaded' && session.status !== 'failed') {
@@ -1376,6 +1391,30 @@ export class EncodeController {
                     `Regenerating the storyboard of ${sessionId} failed: ${err.message}`
                 )
             );
+    }
+
+    @Get(':sessionId/thumbnails/regenerate')
+    @UseGuards(AuthResolverGuard)
+    @AuthTypes('instance', 'session')
+    @ApiSecurity('apikey')
+    @ApiOperation({
+        summary: "How far making an existing video's storyboard again has got",
+        description: '404 until one is started in this edit session.',
+    })
+    @ApiParam({ name: 'sessionId', description: 'Session ID' })
+    getThumbnailsRegenerate(
+        @Param('sessionId') sessionId: string
+    ): ExistingThumbnailsJob {
+        if (!this.sessionService.get(sessionId)) {
+            throw new NotFoundException(`Session ${sessionId} not found`);
+        }
+        const job = this.existingThumbnailsService.job(sessionId);
+        if (!job) {
+            throw new NotFoundException(
+                'No thumbnails are being made again in this session'
+            );
+        }
+        return job;
     }
 
     @Get(':sessionId/thumbnails/thumbnails.vtt')

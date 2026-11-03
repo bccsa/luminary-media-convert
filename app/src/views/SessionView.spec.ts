@@ -14,7 +14,16 @@ import { shallowMount, flushPromises } from '@vue/test-utils';
  * about this view's own wiring.
  */
 
-const { detail, status, waveform, subscribe, push, deleteSessionMock } =
+const {
+    detail,
+    status,
+    waveform,
+    subscribe,
+    push,
+    deleteSessionMock,
+    regenerate,
+    regenerateJob,
+} =
     vi.hoisted(() => ({
         detail: vi.fn(),
         status: vi.fn(),
@@ -26,6 +35,8 @@ const { detail, status, waveform, subscribe, push, deleteSessionMock } =
         // that the view did *not* navigate.
         push: vi.fn(),
         deleteSessionMock: vi.fn(),
+        regenerate: vi.fn(),
+        regenerateJob: vi.fn(),
     }));
 
 vi.mock('vue-router', () => ({
@@ -46,6 +57,8 @@ vi.mock('../api', () => ({
     subscribeSessionEvents: subscribe,
     getChapters: vi.fn().mockResolvedValue(null),
     putChapters: vi.fn().mockResolvedValue(undefined),
+    regenerateThumbnails: regenerate,
+    getThumbnailsRegenerate: regenerateJob,
 }));
 
 import SessionView from './SessionView.vue';
@@ -329,6 +342,46 @@ describe('SessionView', () => {
             expect(
                 wrapper.findComponent({ name: 'AudioTracksPanel' }).props()
             ).toMatchObject({ sessionId: 'sess-1', sessionToken: 'sess_token' });
+        });
+
+        it("makes an existing video's thumbnails again, and reads the new ones once they are in", async () => {
+            const editSession = {
+                status: 'completed',
+                mode: 'edit',
+                masterPlaylist: 'master.m3u8',
+                hlsUrl: HLS_URL,
+                thumbnailsVtt: 'thumbnails/thumbnails.vtt',
+            };
+            detail.mockResolvedValue(uploadedSession(editSession));
+            status.mockResolvedValue(editSession);
+            regenerate.mockResolvedValue(undefined);
+            regenerateJob
+                .mockResolvedValueOnce({ state: 'running' })
+                .mockResolvedValueOnce({ state: 'done' });
+            const wrapper = await mountView();
+            await flushPromises();
+            const timeline = () =>
+                wrapper.findComponent({ name: 'SessionTrimWorkspace' });
+            expect(timeline().props('canRegenerateThumbnails')).toBe(true);
+            const before = timeline().props('thumbnailVttUrl');
+
+            vi.useFakeTimers();
+            try {
+                timeline().vm.$emit('regenerateThumbnails');
+                await flushPromises();
+                expect(regenerate).toHaveBeenCalledWith('sess-1', 'sess_token');
+                expect(timeline().props('storyboardPending')).toBe(true);
+
+                await vi.advanceTimersByTimeAsync(1500);
+                await vi.advanceTimersByTimeAsync(1500);
+                await flushPromises();
+            } finally {
+                vi.useRealTimers();
+            }
+
+            expect(regenerateJob).toHaveBeenCalledTimes(2);
+            expect(timeline().props('storyboardPending')).toBe(false);
+            expect(timeline().props('thumbnailVttUrl')).not.toBe(before);
         });
 
         it('keeps the audio tracks panel, and its unsaved edits, across a visit to Chapters', async () => {

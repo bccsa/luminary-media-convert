@@ -2430,6 +2430,27 @@ describe('EncodeController — source storyboard', () => {
             expect(thumbnailService.regeneratePreview).not.toHaveBeenCalled();
         });
 
+        it("takes an existing video's frames from the video itself, in an edit session", async () => {
+            const session = onDisk();
+            (session as any).edit = {
+                masterKey: 'posts/p1/master.m3u8',
+                encrypted: true,
+            };
+            const video = {
+                s3: {},
+                masterKey: 'posts/p1/master.m3u8',
+                keyHex: 'k',
+            };
+            vi.spyOn(ctrl as any, 'editedVideo').mockReturnValue(video);
+            const start = vi.fn();
+            (ctrl as any).existingThumbnailsService = { start };
+
+            await ctrl.regenerateThumbnails(session.id);
+
+            expect(start).toHaveBeenCalledWith(session.id, video);
+            expect(thumbnailService.regeneratePreview).not.toHaveBeenCalled();
+        });
+
         it('says so when the source is gone', async () => {
             const session = onDisk();
             rmSync(source);
