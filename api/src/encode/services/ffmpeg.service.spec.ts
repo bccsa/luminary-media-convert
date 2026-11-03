@@ -369,12 +369,10 @@ describe('FfmpegService', () => {
 
                 const inputs = args.flatMap((a, i) => (a === '-i' ? [i] : []));
                 expect(inputs).toHaveLength(2);
-                // Half a frame early at 30 fps, so the frame on the boundary is kept.
+                // A millisecond early, so the frame on the boundary is kept and no
+                // extra one is made to fill a gap before it.
                 expect(args[inputs[0] - 2]).toBe('-ss');
-                expect(Number(args[inputs[0] - 1])).toBeCloseTo(
-                    36 - 0.5 / 30,
-                    5
-                );
+                expect(Number(args[inputs[0] - 1])).toBeCloseTo(35.999, 6);
                 expect(args[inputs[1] - 2]).not.toBe('-ss');
                 expect(args).toContain('1:a:0');
                 expect(args).not.toContain('0:a:0');

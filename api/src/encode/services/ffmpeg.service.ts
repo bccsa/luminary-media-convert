@@ -828,16 +828,15 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 '-copyts'
             );
         } else if (resume) {
-            // The video restarts on the segment boundary at `fromSec`, half a
-            // frame early so an accurate seek keeps the frame on it; the forced
-            // GOP then puts every later boundary back on the original grid. The
-            // audio is read again from the head by a second input: restarting
-            // an AAC encoder mid-stream adds priming at the join, which players
-            // hear, and audio is cheap to encode again.
-            const seek = Math.max(
-                0,
-                alignmentOffset + resume.fromSec - 0.5 / sourceFrameRate
-            );
+            // The video restarts on the segment boundary at `fromSec`, a
+            // millisecond early so rounding cannot seek past the frame on it.
+            // No earlier: under constant frame rate the gap before that frame
+            // is filled with an extra one, and the run comes out a frame long.
+            // The forced GOP then puts every later boundary back on the
+            // original grid. The audio is read again from the head by a second
+            // input: restarting an AAC encoder mid-stream adds priming at the
+            // join, which players hear, and audio is cheap to encode again.
+            const seek = Math.max(0, alignmentOffset + resume.fromSec - 0.001);
             args.push('-ss', seek.toFixed(6), '-i', inputPath);
             // A wave after the first carries no audio, and needs no second input.
             if (audioGroups.length > 0) {
