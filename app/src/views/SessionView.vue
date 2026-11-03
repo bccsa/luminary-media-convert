@@ -39,6 +39,7 @@ import {
     getSessionStatus,
     ingestLocalFile,
     listSessions,
+    regenerateThumbnails,
     startEncode,
     deleteSession,
 } from '../api';
@@ -1063,6 +1064,27 @@ const thumbnailVttUrl = computed(() => storyboardVtt.url.value);
 const storyboardPending = computed(
     () => storyboard.pending.value && !storyboard.complete.value
 );
+
+/** Until an encode starts packing them, the source's thumbnails can be made again. */
+const canRegenerateThumbnails = computed(
+    () =>
+        sourceStoryboardActive.value &&
+        !!sessionToken.value &&
+        (currentStatus.value === 'uploaded' || canRetryEncode.value)
+);
+const regenerateThumbnailsError = ref<string | null>(null);
+
+async function onRegenerateThumbnails(): Promise<void> {
+    const token = sessionToken.value;
+    if (!token) return;
+    regenerateThumbnailsError.value = null;
+    try {
+        await regenerateThumbnails(sessionId.value, token);
+        storyboard.restart();
+    } catch (e) {
+        regenerateThumbnailsError.value = errorMessage(e);
+    }
+}
 
 /**
  * What the encoder is doing after the segment pipeline has drained.
@@ -2687,6 +2709,9 @@ onUnmounted(() => {
                         :show-trim-segment-editor="showTrimSegmentEditor"
                         :thumbnail-vtt-url="thumbnailVttUrl"
                         :storyboard-pending="storyboardPending"
+                        :can-regenerate-thumbnails="canRegenerateThumbnails"
+                        :regenerate-thumbnails-error="regenerateThumbnailsError"
+                        @regenerate-thumbnails="onRegenerateThumbnails"
                         :waveform-peaks="timelineWaveformPeaks"
                         @segment-removed="onTimelineSegmentRemoved"
                         @segment-restored="trimDeletions.restore($event.id)"

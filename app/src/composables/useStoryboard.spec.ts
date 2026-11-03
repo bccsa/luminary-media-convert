@@ -61,6 +61,22 @@ describe('useStoryboard', () => {
         expect(fetcher).toHaveBeenCalledTimes(1);
     });
 
+    it('follows a storyboard sampled again after one finished', async () => {
+        const fetcher = vi.fn().mockResolvedValue(respond(25, true));
+        const s = useStoryboard({ url: url(), active: ref(true), fetcher });
+        await settle();
+        const finished = s.versionedUrl.value;
+
+        fetcher.mockResolvedValue(respond(2, false));
+        s.restart();
+        await settle();
+
+        expect(s.complete.value).toBe(false);
+        expect(s.versionedUrl.value).not.toBe(finished);
+        await vi.advanceTimersByTimeAsync(3_000);
+        expect(fetcher).toHaveBeenCalledTimes(3);
+    });
+
     it('moves the url on only when there are more cues to draw', async () => {
         const fetcher = vi
             .fn()

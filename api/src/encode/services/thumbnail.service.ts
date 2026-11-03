@@ -146,6 +146,8 @@ export class ThumbnailService {
         string,
         Promise<ThumbnailResult | null>
     >();
+    /** Stops the in-flight generation of a session, for a regenerate to start over. */
+    private readonly stops = new Map<string, AbortController>();
 
     /** Where a session's pre-encode storyboard lives. */
     previewDir(sessionId: string): string {
@@ -168,6 +170,21 @@ export class ThumbnailService {
                 `Could not remove source storyboard for ${sessionId}: ${(err as Error).message}`
             );
         }
+    }
+
+    /**
+     * Throw the source storyboard away and sample it again: for frames that came
+     * out wrong, or a pass that stopped short. A pass still running is stopped
+     * and waited for first, or the two would write over each other's frames.
+     */
+    async regeneratePreview(
+        sessionId: string,
+        opts: Parameters<ThumbnailService['getOrGeneratePreview']>[1]
+    ): Promise<void> {
+        this.stops.get(sessionId)?.abort();
+        await this.inFlight.get(sessionId)?.catch(() => null);
+        await this.removePreview(sessionId);
+        await this.getOrGeneratePreview(sessionId, opts);
     }
 
     /**
@@ -221,7 +238,10 @@ export class ThumbnailService {
         }
 
         if (!this.inFlight.has(sessionId)) {
+            const stop = new AbortController();
+            this.stops.set(sessionId, stop);
             const run = this.generateIndividualThumbs({
+                signal: stop.signal,
                 inputPath: opts.inputPath,
                 outputDir: dir,
                 duration: opts.duration,
@@ -238,6 +258,7 @@ export class ThumbnailService {
                 })
                 .finally(() => {
                     this.inFlight.delete(sessionId);
+                    this.stops.delete(sessionId);
                 });
             this.inFlight.set(sessionId, run);
         }
@@ -417,6 +438,8 @@ export class ThumbnailService {
         onProgress?: (thumbCount: number, complete?: boolean) => void;
         /** Decode every frame even when the keyframes look dense enough to skip the rest. */
         fullDecode?: boolean;
+        /** Stops the pass, leaving whatever it has written. */
+        signal?: AbortSignal;
     }): Promise<ThumbnailResult | null> {
         const format = await this.detectSpriteFormat();
         if (!format) return null;
@@ -469,6 +492,8 @@ export class ThumbnailService {
         let reported = 0;
         let lastProgressAt = Date.now();
         const abort = new AbortController();
+        const stopPass = () => abort.abort();
+        opts.signal?.addEventListener('abort', stopPass);
         const watcher = setInterval(() => {
             void this.listThumbFiles(thumbnailDir)
                 .then((files) => {
@@ -491,14 +516,17 @@ export class ThumbnailService {
             await execFileAsync(ffmpegBin(), args, { signal: abort.signal });
         } catch (err) {
             this.logger.warn(
-                abort.signal.aborted
-                    ? `FFmpeg thumbnail generation stalled: no thumbnail for ${this.stallMs / 1000}s after ${reported}`
-                    : `FFmpeg thumbnail generation failed: ${(err as Error).message}`
+                opts.signal?.aborted
+                    ? `FFmpeg thumbnail generation stopped after ${reported} thumbnail(s)`
+                    : abort.signal.aborted
+                      ? `FFmpeg thumbnail generation stalled: no thumbnail for ${this.stallMs / 1000}s after ${reported}`
+                      : `FFmpeg thumbnail generation failed: ${(err as Error).message}`
             );
             return null;
         } finally {
             stopped = true;
             clearInterval(watcher);
+            opts.signal?.removeEventListener('abort', stopPass);
         }
 
         const thumbFiles = await this.listThumbFiles(thumbnailDir);

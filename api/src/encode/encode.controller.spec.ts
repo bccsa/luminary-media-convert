@@ -2369,6 +2369,76 @@ describe('EncodeController — source storyboard', () => {
             )
         ).rejects.toThrow(UnauthorizedException);
     });
+
+    describe('regenerating it', () => {
+        let dir: string;
+        let source: string;
+
+        beforeEach(() => {
+            dir = mkdtempSync(join(tmpdir(), 'regen-'));
+            source = join(dir, 'source.mp4');
+            writeFileSync(source, 'video');
+            thumbnailService.regeneratePreview = vi
+                .fn()
+                .mockResolvedValue(undefined);
+        });
+        afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+        function onDisk(status = 'uploaded') {
+            const session = uploadedSession();
+            (session as any).filePath = source;
+            (session as any).status = status;
+            return session;
+        }
+
+        it('samples the source again, starting the timeline from nothing', async () => {
+            const session = onDisk();
+            const progress = vi.spyOn(
+                sessionService,
+                'updateStoryboardProgress'
+            );
+
+            await ctrl.regenerateThumbnails(session.id);
+
+            expect(progress).toHaveBeenCalledWith(session.id, 0);
+            expect(thumbnailService.regeneratePreview).toHaveBeenCalledWith(
+                session.id,
+                expect.objectContaining({
+                    inputPath: source,
+                    duration: 120,
+                    trackIndex: 0,
+                    sourceWidth: 1920,
+                    sourceHeight: 1080,
+                })
+            );
+        });
+
+        it('is offered again after a failed encode', async () => {
+            const session = onDisk('failed');
+
+            await ctrl.regenerateThumbnails(session.id);
+
+            expect(thumbnailService.regeneratePreview).toHaveBeenCalled();
+        });
+
+        it('leaves an encode alone: it packs these frames', async () => {
+            const session = onDisk('encoding');
+
+            await expect(ctrl.regenerateThumbnails(session.id)).rejects.toThrow(
+                /before an encode starts/
+            );
+            expect(thumbnailService.regeneratePreview).not.toHaveBeenCalled();
+        });
+
+        it('says so when the source is gone', async () => {
+            const session = onDisk();
+            rmSync(source);
+
+            await expect(ctrl.regenerateThumbnails(session.id)).rejects.toThrow(
+                /no longer on disk/
+            );
+        });
+    });
 });
 
 describe('EncodeController — storyboard sprite headers', () => {

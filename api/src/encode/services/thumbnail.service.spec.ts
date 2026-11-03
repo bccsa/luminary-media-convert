@@ -825,6 +825,82 @@ describe('ThumbnailService', () => {
         });
     });
 
+    describe('regeneratePreview', () => {
+        it('stops the pass running, throws its frames away and samples again', async () => {
+            const workDir = mkdtempSync(join(tmpdir(), 'thumb-regen-'));
+            (service as any).workDir = workDir;
+            (service as any).progressTickMs = 10;
+            const passes: AbortSignal[] = [];
+            mockExecFile.mockImplementation((...call: any[]) => {
+                const cb = call[call.length - 1];
+                const args = call[1] as string[];
+                if (args[0] === '-encoders') {
+                    cb(null, { stdout: WEBP_ENCODERS, stderr: '' });
+                    return;
+                }
+                if (args.includes('packet=pts_time,flags')) {
+                    cb(null, { stdout: '', stderr: '' });
+                    return;
+                }
+                const dir = dirname(args[args.length - 1]!);
+                mkdirSync(dir, { recursive: true });
+                const signal: AbortSignal = call[2].signal;
+                passes.push(signal);
+                if (passes.length === 1) {
+                    // A pass that would run for ever, with one stale frame.
+                    writeFileSync(join(dir, 'thumb_000001.webp'), 'old');
+                    signal.addEventListener('abort', () =>
+                        cb(
+                            Object.assign(new Error('aborted'), {
+                                name: 'AbortError',
+                            })
+                        )
+                    );
+                    return;
+                }
+                for (let i = 1; i <= 2; i++) {
+                    writeFileSync(join(dir, `thumb_00000${i}.webp`), 'new');
+                }
+                cb(null, { stdout: '', stderr: '' });
+            });
+            const opts = {
+                inputPath: '/tmp/test.mkv',
+                duration: 10,
+                trackIndex: 0,
+                sourceWidth: 1920,
+                sourceHeight: 1080,
+            };
+            const thumbsDir = join(
+                workDir,
+                's1',
+                'preview-thumbnails',
+                'thumbnails'
+            );
+
+            try {
+                await service.getOrGeneratePreview('s1', opts);
+                await until(
+                    () => passes.length === 1,
+                    'the first pass to start'
+                );
+
+                await service.regeneratePreview('s1', opts);
+                await until(
+                    () => existsSync(join(thumbsDir, 'thumbnails.vtt')),
+                    'the second pass to finish'
+                );
+
+                expect(passes[0]!.aborted).toBe(true);
+                expect(passes).toHaveLength(2);
+                expect(
+                    readFileSync(join(thumbsDir, 'thumb_000001.webp'), 'utf-8')
+                ).toBe('new');
+            } finally {
+                rmSync(workDir, { recursive: true, force: true });
+            }
+        });
+    });
+
     describe('detectSpriteFormat (via generateIndividualThumbs)', () => {
         const sample = (outputDir: string, dims = [1920, 1080]) =>
             service.generateIndividualThumbs({

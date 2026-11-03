@@ -37,6 +37,10 @@ const props = withDefaults(
          * only part of the timeline and more frames are on the way.
          */
         storyboardPending?: boolean;
+        /** The source is still here to sample the thumbnails from again. */
+        canRegenerateThumbnails?: boolean;
+        /** Why the last attempt to make them again failed. */
+        regenerateThumbnailsError?: string | null;
         /** The timeline edits chapters, from the moment the encode is submitted, rather than trim ranges. */
         editsChapters?: boolean;
         /**
@@ -58,6 +62,7 @@ const editorSegments = defineModel<Segment[]>('editorSegments', { required: true
 const emit = defineEmits<{
     segmentRemoved: [segment: Segment];
     segmentRestored: [segment: Segment];
+    regenerateThumbnails: [];
 }>();
 
 const showToolbarSection = () => props.section !== 'timeline';
@@ -175,6 +180,19 @@ const trimToolbarHasVisibleContent = computed(() => {
                     class="storyboard-pending-pill"
                     title="Frames are sampled from the source after upload; the timeline fills in as they arrive."
                 >Generating thumbnails…</span>
+                <button
+                    v-else-if="canRegenerateThumbnails"
+                    type="button"
+                    class="appearance-none inline-flex items-center gap-1 px-2 py-1 text-xs font-medium font-[inherit] text-zinc-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] hover:bg-slate-100 dark:hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400"
+                    title="Throw these thumbnails away and make them again from the source"
+                    data-test="regenerateThumbnails"
+                    @click="emit('regenerateThumbnails')"
+                >Regenerate thumbnails</button>
+                <span
+                    v-if="regenerateThumbnailsError"
+                    class="text-xs text-red-600 dark:text-red-400"
+                    data-test="regenerateThumbnailsError"
+                >{{ regenerateThumbnailsError }}</span>
             </template>
         </SegmentEditor>
     </div>
