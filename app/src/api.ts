@@ -210,6 +210,20 @@ export async function continueEncode(
 }
 
 /**
+ * Stop a running encode and keep it: it then continues like a failed one.
+ */
+export async function stopEncode(
+    sessionId: string,
+    sessionToken: string
+): Promise<void> {
+    return requestVoid(`${API_BASE}/api/sessions/${sessionId}/stop`, {
+        method: 'POST',
+        token: sessionToken,
+        errorPrefix: 'Could not stop the encode',
+    });
+}
+
+/**
  * Cancel a running session, or dismiss a finished one. Either way the work
  * directory goes with it, which is the only way its disk is reclaimed.
  */

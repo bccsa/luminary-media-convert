@@ -42,6 +42,7 @@ import {
     listSessions,
     regenerateThumbnails,
     startEncode,
+    stopEncode,
     continueEncode,
     deleteSession,
 } from '../api';
@@ -416,6 +417,13 @@ const retryConfig = computed(() =>
     canRetryEncode.value
         ? (poller.retryConfig.value ?? session.value?.encodeConfig ?? null)
         : null
+);
+
+/** The badge's status: a failed encode someone stopped reads as stopped. */
+const toplineStatus = computed(() =>
+    currentStatus.value === 'failed' && poller.stopped.value === true
+        ? 'stopped'
+        : currentStatus.value
 );
 
 /** A failed encode that can carry on from what already reached storage. */
@@ -1651,6 +1659,17 @@ const discardLabel = computed(() =>
  * poller restarts if the delete fails, because the session is still running and
  * the view has to keep telling the truth about it.
  */
+/** Stop the encode and keep it; the session then offers to continue. */
+async function onStopEncode() {
+    if (!sessionToken.value) return;
+    cancelError.value = null;
+    try {
+        await stopEncode(sessionId.value, sessionToken.value);
+    } catch (e) {
+        cancelError.value = errorMessage(e);
+    }
+}
+
 async function onCancelEncode() {
     cancelError.value = null;
     poller.stop();
@@ -2063,7 +2082,7 @@ onUnmounted(() => {
                         class="px-4 pt-3"
                         :session-name="sessionName"
                         :session-id="sessionId"
-                        :status="currentStatus"
+                        :status="toplineStatus"
                         :created-at="summary?.createdAt"
                         :can-discard="canDiscardSession"
                         :discard-label="discardLabel"
@@ -2142,7 +2161,7 @@ onUnmounted(() => {
                                 <SessionTopline
                                     :session-name="sessionName"
                                     :session-id="sessionId"
-                                    :status="currentStatus"
+                                    :status="toplineStatus"
                                     :created-at="summary?.createdAt"
                                     :can-discard="false"
                                     :discard-label="discardLabel"
@@ -2208,6 +2227,16 @@ onUnmounted(() => {
                                                   ? 'Encode again'
                                                   : 'Start encoding'
                                         }}
+                                    </button>
+                                    <button
+                                        v-if="currentStatus === 'encoding'"
+                                        type="button"
+                                        data-testid="stop-encoding"
+                                        class="shrink-0 cursor-pointer rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-transparent dark:text-slate-300 dark:hover:bg-slate-800"
+                                        title="Stop now and keep what is done, to continue later"
+                                        @click="onStopEncode"
+                                    >
+                                        Stop
                                     </button>
                                     <button
                                         v-if="canDiscardSession"
@@ -2983,6 +3012,7 @@ onUnmounted(() => {
                                     :poller-error="poller.error.value"
                                     :is-encrypted="isEncrypted"
                                     @cancel-encode="onCancelEncode"
+                                    @stop-encode="onStopEncode"
                                 />
                             </div>
                         </div>

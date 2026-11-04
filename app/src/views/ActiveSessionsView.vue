@@ -43,7 +43,15 @@ const statusColors: Record<string, string> = {
     completed:
         'border-emerald-200 bg-emerald-100 text-emerald-900 dark:border-emerald-600/50 dark:bg-emerald-900/40 dark:text-emerald-400',
     failed: 'border-red-200 bg-red-100 text-red-800 dark:border-red-800/50 dark:bg-red-900/40 dark:text-red-400',
+    stopped: 'border-amber-200 bg-amber-100 text-amber-800 dark:border-amber-800/50 dark:bg-amber-900/40 dark:text-amber-400',
 };
+
+/** A failed session someone stopped reads as stopped. */
+function shownStatus(session: SessionSummary): string {
+    return session.status === 'failed' && session.stopped
+        ? 'stopped'
+        : session.status;
+}
 
 function badgeClasses(status: string): string {
     const color =
@@ -222,7 +230,7 @@ onUnmounted(() => {
                                     >
                                         {{ sessionLabel(session) }}
                                     </span>
-                                    <span :class="badgeClasses(session.status)">
+                                    <span :class="badgeClasses(shownStatus(session))">
                                         <svg
                                             v-if="session.status === 'completed'"
                                             class="h-3.5 w-3.5 shrink-0 opacity-90"
@@ -240,7 +248,7 @@ onUnmounted(() => {
                                         </svg>
                                         <svg
                                             v-else-if="
-                                                session.status === 'failed'
+                                                shownStatus(session) === 'failed'
                                             "
                                             class="h-3.5 w-3.5 shrink-0 opacity-90"
                                             fill="none"
@@ -262,7 +270,7 @@ onUnmounted(() => {
                                             class="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-current opacity-80"
                                             aria-hidden="true"
                                         />
-                                        {{ statusLabel(session.status) }}
+                                        {{ statusLabel(shownStatus(session)) }}
                                     </span>
                                     <span
                                         class="shrink-0 text-xs text-slate-500 dark:text-slate-400"

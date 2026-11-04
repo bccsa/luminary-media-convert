@@ -103,6 +103,14 @@ export class QueueService implements OnModuleDestroy {
     }
 
     /**
+     * Stop the encode running for a session, keeping it to continue later.
+     * @returns whether it was encoding
+     */
+    stop(sessionId: string): boolean {
+        return this.encodeService.stop(sessionId);
+    }
+
+    /**
      * Drain the queue: process one job at a time in FIFO order.
      * Never throws -- individual job failures are caught and the queue continues.
      */
@@ -181,19 +189,22 @@ export class QueueService implements OnModuleDestroy {
     /**
      * Tell the host how an encode ended, once that is final: done, or failed
      * with no automatic try still to come. A session deleted meanwhile (a
-     * cancel) has nothing to report.
+     * cancel) or stopped by hand has nothing to report.
      */
     private reportOutcome(sessionId: string): void {
         if (!this.onFinished || this.shuttingDown) return;
         const session = this.sessionService.get(sessionId);
         if (!session) return;
+        // A stop is what the person asked for; telling them is noise.
+        if (session.status === 'failed' && session.stopped) return;
         const failedForGood =
             session.status === 'failed' && !this.automaticTries.has(sessionId);
         if (session.status !== 'completed' && !failedForGood) return;
         try {
             this.onFinished({
                 sessionId,
-                outcome: session.status === 'completed' ? 'completed' : 'failed',
+                outcome:
+                    session.status === 'completed' ? 'completed' : 'failed',
                 title: session.title,
                 fileName: session.filePath
                     ? basename(session.filePath)

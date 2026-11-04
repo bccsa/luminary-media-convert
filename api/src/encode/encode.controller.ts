@@ -213,6 +213,9 @@ export class EncodeController {
             hlsUrl: session.hlsUrl,
             error: session.error,
             ...(session.edit ? { mode: 'edit' as const } : {}),
+            ...(session.status === 'failed' && session.stopped
+                ? { stopped: true }
+                : {}),
         }));
     }
 
@@ -561,6 +564,33 @@ export class EncodeController {
         return this.startEncode(sessionId, session.encodeConfig);
     }
 
+    @Post(':sessionId/stop')
+    @HttpCode(HttpStatus.ACCEPTED)
+    @UseGuards(AuthResolverGuard)
+    @AuthTypes('instance', 'session')
+    @ApiSecurity('apikey')
+    @ApiOperation({
+        summary: 'Stop an encode, to continue it later',
+        description:
+            'Ends a running encode and keeps the session and what it has made. ' +
+            'The session becomes "failed" with stopped: true, and continues with ' +
+            'POST /api/sessions/{id}/continue like any failed encode.',
+    })
+    @ApiParam({ name: 'sessionId', description: 'Session ID' })
+    @ApiResponse({ status: 202, description: 'Stopping.' })
+    @ApiResponse({ status: 400, description: 'The session is not encoding.' })
+    @ApiResponse({ status: 404, description: 'Session not found.' })
+    stopEncode(@Param('sessionId') sessionId: string): void {
+        if (!this.sessionService.get(sessionId)) {
+            throw new NotFoundException(`Session ${sessionId} not found`);
+        }
+        if (!this.queueService.stop(sessionId)) {
+            throw new BadRequestException(
+                'Only an encode that is encoding can be stopped'
+            );
+        }
+    }
+
     @SkipAllThrottles()
     @Sse(':sessionId/events')
     @ApiOperation({
@@ -692,6 +722,7 @@ export class EncodeController {
             this.sessionService.hasUsableCredentials(session)
         ) {
             result.canRetry = true;
+            if (session.stopped) result.stopped = true;
             if (session.encodeConfig) result.encodeConfig = session.encodeConfig;
             const duration = session.probeResult?.format?.duration ?? 0;
             if ((session.resumeFromSec ?? 0) > 0 && duration > 0) {

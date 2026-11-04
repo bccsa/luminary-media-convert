@@ -141,6 +141,7 @@ describe('EncodeController', () => {
             enqueue: vi.fn().mockReturnValue(1),
             getPosition: vi.fn().mockReturnValue(null),
             dequeue: vi.fn().mockReturnValue(true),
+            stop: vi.fn().mockReturnValue(true),
             length: 0,
             isProcessing: false,
         } as any;
@@ -520,6 +521,28 @@ describe('EncodeController', () => {
                 );
                 expect(result.canRetry).toBe(true);
                 expect(result.canResume).toBeUndefined();
+            });
+
+            it('says when it was stopped rather than failing', () => {
+                const session = failedAt(47);
+                sessionService.setStopped(session.id, true);
+                const result = controller.getStatus(session.id, makeRequest());
+                expect(result.stopped).toBe(true);
+                expect(result.canResume).toBe(true);
+            });
+
+            it('stops an encode through the queue', () => {
+                const session = failedAt();
+                controller.stopEncode(session.id);
+                expect(queueService.stop).toHaveBeenCalledWith(session.id);
+            });
+
+            it('refuses to stop what is not encoding', () => {
+                const session = failedAt();
+                (queueService.stop as any).mockReturnValueOnce(false);
+                expect(() => controller.stopEncode(session.id)).toThrow(
+                    /Only an encode that is encoding/
+                );
             });
 
             it('sends the settings it ran with, for the form to open on', () => {

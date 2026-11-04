@@ -13,6 +13,9 @@
 const NEXT_STEP =
     'Open Luminary Media Convert to continue the encode or run it again.';
 
+/** What a stopped encode reports: nothing went wrong, and it waits to continue. */
+export const STOPPED_MESSAGE = `The encode was stopped. ${NEXT_STEP}`;
+
 /** A message this short, on one line, was already written for a person. */
 const PLAIN_MAX_LENGTH = 240;
 

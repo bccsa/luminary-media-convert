@@ -632,6 +632,66 @@ describe('EncodeService', () => {
         expect(sessionService.get(session.id)!.status).toBe('failed');
     });
 
+    describe('stopping an encode to continue later', () => {
+        function encoding() {
+            const session = sessionService.create(makeConfig());
+            sessionService.setFilePath(session.id, '/tmp/input.mp4');
+            sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+            ffmpegService.killActiveProcess = vi.fn();
+            return session;
+        }
+
+        it('keeps the session as a stopped one, ready to continue', async () => {
+            const session = encoding();
+            ffmpegService.encode.mockImplementation(async () => {
+                expect(service.stop(session.id)).toBe(true);
+                throw new Error(
+                    'FFmpeg exited with code null (signal: SIGKILL)'
+                );
+            });
+
+            await service.processSession(session.id);
+
+            const stopped = sessionService.get(session.id)!;
+            expect(ffmpegService.killActiveProcess).toHaveBeenCalled();
+            expect(stopped.status).toBe('failed');
+            expect(stopped.stopped).toBe(true);
+            expect(stopped.networkFailure).toBeUndefined();
+            expect(stopped.error).toBe(
+                'The encode was stopped. Open Luminary Media Convert to continue the encode or run it again.'
+            );
+            // What it made is settled as for any failure, for the continue.
+            expect(mockPipeline.settle).toHaveBeenCalled();
+        });
+
+        it('only stops an encode that is encoding', () => {
+            const session = encoding();
+            expect(service.stop(session.id)).toBe(false);
+            expect(service.stop('no-such-session')).toBe(false);
+            expect(ffmpegService.killActiveProcess).not.toHaveBeenCalled();
+        });
+
+        it('reports a later failure of the same session as a failure', async () => {
+            const session = encoding();
+            ffmpegService.encode.mockImplementationOnce(async () => {
+                service.stop(session.id);
+                throw new Error(
+                    'FFmpeg exited with code null (signal: SIGKILL)'
+                );
+            });
+            await service.processSession(session.id);
+
+            ffmpegService.encode.mockRejectedValueOnce(
+                new Error('FFmpeg exited with code 1')
+            );
+            await service.processSession(session.id);
+
+            const failed = sessionService.get(session.id)!;
+            expect(failed.stopped).toBeUndefined();
+            expect(failed.error).toMatch(/^The encoder could not encode/);
+        });
+    });
+
     it('does not wait on the uploads of a session deleted meanwhile', async () => {
         const session = sessionService.create(makeConfig());
         sessionService.setFilePath(session.id, '/tmp/input.mp4');

@@ -19,7 +19,11 @@ import {
 } from 'fs/promises';
 import { basename, join, posix } from 'path';
 import { estimateOutputBytes, formatBytes } from './output-estimate.js';
-import { failureMessage, isNetworkFailure } from './failure-message.js';
+import {
+    STOPPED_MESSAGE,
+    failureMessage,
+    isNetworkFailure,
+} from './failure-message.js';
 import { freeBytes } from './disk-space.js';
 import {
     SESSION_STATE_FILENAME,
@@ -176,6 +180,25 @@ export class EncodeService implements OnModuleInit {
             session.config.encryption != null &&
             session.config.encryption.enabled !== false
         );
+    }
+
+    /** Sessions someone asked to stop, so their failure is reported as a stop. */
+    private readonly stopRequested = new Set<string>();
+
+    /**
+     * Stop an encode to continue it later. FFmpeg is ended as a crash would end
+     * it, so what was encoded is kept the same way, and the session then offers
+     * to continue. Only an encode that is still encoding can be stopped; later
+     * steps are short and only write what is already made.
+     *
+     * @returns whether there was an encode to stop
+     */
+    stop(sessionId: string): boolean {
+        if (this.sessionService.get(sessionId)?.status !== 'encoding')
+            return false;
+        this.stopRequested.add(sessionId);
+        this.ffmpegService.killActiveProcess();
+        return true;
     }
 
     /**
@@ -893,8 +916,10 @@ export class EncodeService implements OnModuleInit {
             this.logger.log(`Session ${sessionId} completed successfully`);
         } catch (err) {
             const errorMsg = (err as Error).message || 'Unknown error';
+            const stopped = this.stopRequested.delete(sessionId);
             // The whole of it in the log; one sentence for whoever started the encode.
-            this.logger.error(`Session ${sessionId} failed: ${errorMsg}`);
+            if (stopped) this.logger.log(`Session ${sessionId} stopped`);
+            else this.logger.error(`Session ${sessionId} failed: ${errorMsg}`);
             // What a continue can reuse is settled before the session is marked
             // failed: a client looks at a failed session once, when it hears of
             // it, and an offer worked out after that is never seen.
@@ -923,12 +948,19 @@ export class EncodeService implements OnModuleInit {
                     );
                 }
             }
-            this.sessionService.setFailed(sessionId, failureMessage(errorMsg));
+            this.sessionService.setFailed(
+                sessionId,
+                stopped ? STOPPED_MESSAGE : failureMessage(errorMsg)
+            );
+            this.sessionService.setStopped(sessionId, stopped);
             this.sessionService.setNetworkFailure(
                 sessionId,
-                isNetworkFailure(errorMsg)
+                !stopped && isNetworkFailure(errorMsg)
             );
         } finally {
+            // A stop asked for after FFmpeg had already finished does not linger
+            // to turn a later failure of this session into a stop.
+            this.stopRequested.delete(sessionId);
             // A drain stops the poll timer on its way out; every other exit from
             // this method — an ffmpeg failure, a refused config, a throw from any
             // step between — leaves it running against a directory the session
