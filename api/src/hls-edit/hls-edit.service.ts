@@ -35,6 +35,12 @@ import {
     type AudioTrack,
     type AudioTrackEdit,
 } from './audio-tracks.js';
+import {
+    listVideoAngles,
+    rewriteVideoAngles,
+    type VideoAngle,
+    type VideoAngleEdit,
+} from './video-angles.js';
 
 export interface HlsReadResult {
     master: HlsParsedMaster;
@@ -60,6 +66,8 @@ export interface HlsDiscoverResult {
 /** What an existing video offers to edit, and the version of its master that was read. */
 export interface EncodedMedia {
     tracks: AudioTrack[];
+    /** The camera angles; one unnamed angle for a video with a single picture. */
+    angles: VideoAngle[];
     /** Languages with a chapters/<lang>.vtt beside the master. */
     chapterLanguages: string[];
     /** The master's ETag: a save is refused once the master has changed since. */
@@ -253,6 +261,7 @@ export class HlsEditService {
         );
         return {
             tracks: listAudioTracks(master),
+            angles: listVideoAngles(master),
             chapterLanguages: collectChaptersLanguages(keys, folderPrefix),
             etag,
             encrypted: isLmcencPayload(body),
@@ -297,6 +306,62 @@ export class HlsEditService {
             );
         }
         const rewritten = rewriteAudioTracks(
+            this.decode(body, keyHex),
+            edits,
+            removed
+        );
+
+        const contentType = encrypted ? OCTET_STREAM : M3U8_CONTENT_TYPE;
+        await this.s3EtagService.putObjectIfAbsent(
+            s3,
+            `${masterKey}.orig`,
+            body,
+            contentType
+        );
+        await this.s3EtagService.putObjectIfMatch(
+            s3,
+            masterKey,
+            this.encode(rewritten, encrypted ? keyHex : undefined),
+            ifMatch,
+            contentType,
+            { cacheControl: EDITED_CACHE_CONTROL }
+        );
+        return this.readEncodedMedia(s3, masterKey, keyHex);
+    }
+
+    /**
+     * Renames camera angles in an existing video's master and takes the
+     * `removed` ones out of it, as {@link saveAudioTracks} does for tracks: only
+     * over the version `ifMatch` names, encrypted when it was read encrypted,
+     * the first edit keeping the original at `master.m3u8.orig`. A removed
+     * angle's files stay in storage.
+     */
+    async saveVideoAngles(
+        s3: S3ConfigDto,
+        masterKey: string,
+        ifMatch: string,
+        edits: VideoAngleEdit[],
+        keyHex?: string,
+        removed: string[] = []
+    ): Promise<EncodedMedia> {
+        const { body, etag } = await this.s3EtagService.getObjectWithEtag(
+            s3,
+            masterKey
+        );
+        if (etag !== ifMatch) {
+            throw new ConflictException({
+                message: 'The video was changed since it was opened',
+                code: 'ETAG_MISMATCH',
+                currentEtag: etag,
+            });
+        }
+        const encrypted = isLmcencPayload(body);
+        if (encrypted && !keyHex) {
+            throw new BadRequestException(
+                'This video is encrypted: its key is needed to edit it'
+            );
+        }
+        const rewritten = rewriteVideoAngles(
             this.decode(body, keyHex),
             edits,
             removed

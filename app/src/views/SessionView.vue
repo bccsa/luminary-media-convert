@@ -11,10 +11,7 @@ import type {
     TrimSegment,
     TrimCopyMode,
 } from '@luminary-media-converter/encode-config';
-import {
-    SegmentEditor,
-    formatTime,
-} from '../components/segment-editor';
+import { SegmentEditor, formatTime } from '../components/segment-editor';
 import type { Segment } from '../components/segment-editor';
 import type { PlayerSource } from '@luminary-media-converter/player-core';
 import {
@@ -29,6 +26,7 @@ import DeleteSessionModal from '../components/DeleteSessionModal.vue';
 import SessionOutputPanel from '../components/session-view/SessionOutputPanel.vue';
 import SessionPlayerStrip from '../components/session-view/SessionPlayerStrip.vue';
 import AudioTracksPanel from '../components/session-view/AudioTracksPanel.vue';
+import VideoAnglesPanel from '../components/session-view/VideoAnglesPanel.vue';
 import SessionTopline from '../components/session-view/SessionTopline.vue';
 import SessionTrimWorkspace from '../components/session-view/SessionTrimWorkspace.vue';
 import SessionWorkflowPanel from '../components/session-view/SessionWorkflowPanel.vue';
@@ -111,9 +109,7 @@ const encodingType = ref<'video' | 'audio'>('video');
  * CMS fixes it at session creation and nothing here can change it. It used to
  * be pinned to the API default, which was a guess that happened to be right.
  */
-const byteRangeEnabled = computed(
-    () => session.value?.byteRange ?? true,
-);
+const byteRangeEnabled = computed(() => session.value?.byteRange ?? true);
 const submitting = ref(false);
 const waveformPeaks = ref<number[] | null>(null);
 const editorSegments = ref<Segment[]>([]);
@@ -294,7 +290,10 @@ const isTerminal = computed(() => {
 });
 
 const isCompleted = computed(() => {
-    return pollerStatus.value === 'completed' || sessionDocStatus.value === 'completed';
+    return (
+        pollerStatus.value === 'completed' ||
+        sessionDocStatus.value === 'completed'
+    );
 });
 
 const isEncrypted = computed(() => !!encryptionKeyHex.value);
@@ -402,7 +401,9 @@ const remoteIngestProgress = computed<number | undefined>(() => {
 
 const remoteIngestLabel = computed<string>(() => {
     const total = poller.ingestTotalBytes.value;
-    return total != null ? `Reading source (${formatBytes(total)})` : 'Reading source';
+    return total != null
+        ? `Reading source (${formatBytes(total)})`
+        : 'Reading source';
 });
 
 const canRetryEncode = computed(
@@ -943,24 +944,25 @@ const playbackUrl = computed(() => s3Url.value);
  * name where they are — which otherwise presents as a player that spins for no
  * stated reason.
  */
-const deliveryProblem = computed<
-    'blocked' | 'missing' | 'unreachable' | null
->(() => {
-    if (!isCompleted.value) return null;
-    const url = s3Url.value;
-    if (!url) return 'missing';
-    const pageIsSecure =
-        typeof window !== 'undefined' && window.location.protocol === 'https:';
-    if (pageIsSecure && url.startsWith('http://')) return 'blocked';
-    // Completed means the upload finished, so a player still waiting on the
-    // delivered master has an address problem (wrong public base URL, or a
-    // bucket that refuses anonymous reads) — not a timing one. Without this
-    // the page shows an indefinite "coming soon" for a finished encode.
-    if (playerRef.value?.lifecycle === 'waiting-for-master') {
-        return 'unreachable';
+const deliveryProblem = computed<'blocked' | 'missing' | 'unreachable' | null>(
+    () => {
+        if (!isCompleted.value) return null;
+        const url = s3Url.value;
+        if (!url) return 'missing';
+        const pageIsSecure =
+            typeof window !== 'undefined' &&
+            window.location.protocol === 'https:';
+        if (pageIsSecure && url.startsWith('http://')) return 'blocked';
+        // Completed means the upload finished, so a player still waiting on the
+        // delivered master has an address problem (wrong public base URL, or a
+        // bucket that refuses anonymous reads) — not a timing one. Without this
+        // the page shows an indefinite "coming soon" for a finished encode.
+        if (playerRef.value?.lifecycle === 'waiting-for-master') {
+            return 'unreachable';
+        }
+        return null;
     }
-    return null;
-});
+);
 
 const deliveryProblemText = computed(() => {
     switch (deliveryProblem.value) {
@@ -1212,7 +1214,9 @@ const playerChapterSidecars = computed(() => {
     // computed URLs above.
     const folder = masterFolderUrl.value;
     if (!folder) return undefined;
-    return [{ lang: 'en', label: 'Chapters', url: `${folder}/chapters/en.vtt` }];
+    return [
+        { lang: 'en', label: 'Chapters', url: `${folder}/chapters/en.vtt` },
+    ];
 });
 
 /**
@@ -1308,7 +1312,8 @@ async function onConfirmDelete() {
 async function resolveSessionToken(): Promise<string | null> {
     try {
         const rows = await listSessions();
-        for (const row of rows) setSessionToken(row.sessionId, row.sessionToken);
+        for (const row of rows)
+            setSessionToken(row.sessionId, row.sessionToken);
         summary.value =
             rows.find((row) => row.sessionId === sessionId.value) ?? null;
     } catch {
@@ -1546,7 +1551,7 @@ async function onEncodeSubmit(config: EncodeConfig) {
         if (submittedTrims.length > 0) {
             editorSegments.value = mapSegmentsToTimeline(
                 editorSegments.value,
-                submittedTrims,
+                submittedTrims
             );
             // Deletions are the one thing that genuinely does not survive: they
             // described material the encode has already removed, so there is
@@ -1848,7 +1853,19 @@ const encodingAsideTab = ref<'progress' | 'chapters'>('progress');
 const editsExistingVideo = computed(() => session.value?.mode === 'edit');
 
 /** Sub-tab within the aside panel of an edit session. */
-const editAsideTab = ref<'chapters' | 'tracks'>('chapters');
+const editAsideTab = ref<'chapters' | 'tracks' | 'angles'>('chapters');
+const audioTracksPanelRef = ref<InstanceType<typeof AudioTracksPanel> | null>(
+    null
+);
+const videoAnglesPanelRef = ref<InstanceType<typeof VideoAnglesPanel> | null>(
+    null
+);
+/** The master changed: the player and the other tab read it again. */
+function onMasterChanged(from: 'tracks' | 'angles'): void {
+    sessionPlayerStripRef.value?.reload?.();
+    if (from === 'tracks') void videoAnglesPanelRef.value?.load();
+    else void audioTracksPanelRef.value?.load();
+}
 
 const trimTimelineWorkspaceRef = ref<InstanceType<
     typeof SessionTrimWorkspace
@@ -1958,7 +1975,11 @@ onUnmounted(() => {
 <template>
     <div
         :data-retry-available="canRetryEncode || undefined"
-        :data-continue-from="canContinueEncode ? (poller.resumeFromPercent.value ?? 0) : undefined"
+        :data-continue-from="
+            canContinueEncode
+                ? (poller.resumeFromPercent.value ?? 0)
+                : undefined
+        "
         :class="
             headerLayout === 'session-trim'
                 ? 'flex h-full w-full flex-col'
@@ -2213,9 +2234,12 @@ onUnmounted(() => {
                                         type="button"
                                         data-testid="start-encoding"
                                         class="shrink-0 cursor-pointer rounded-lg bg-sky-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-700 dark:hover:bg-slate-600 sm:px-5 sm:py-2.5 sm:text-sm"
-                                        :disabled="!encodeConfigCanSubmit || submitting"
+                                        :disabled="
+                                            !encodeConfigCanSubmit || submitting
+                                        "
                                         :title="
-                                            !encodeConfigCanSubmit && !submitting
+                                            !encodeConfigCanSubmit &&
+                                            !submitting
                                                 ? 'Open Encode settings and complete the ladder (all required options) first.'
                                                 : undefined
                                         "
@@ -2355,7 +2379,7 @@ onUnmounted(() => {
                                     </button>
                                 </div>
 
-                                <!-- Tab switcher: an existing video (Chapters / Audio tracks) -->
+                                <!-- Tab switcher: an existing video (Chapters / Audio tracks / Angles) -->
                                 <div
                                     v-if="editsExistingVideo"
                                     class="shrink-0 flex gap-0.5 rounded-lg border border-slate-200/90 bg-slate-100/80 p-0.5 dark:border-slate-700 dark:bg-slate-800/50"
@@ -2385,6 +2409,19 @@ onUnmounted(() => {
                                     >
                                         Audio tracks
                                     </button>
+                                    <button
+                                        type="button"
+                                        class="flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
+                                        :class="
+                                            editAsideTab === 'angles'
+                                                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
+                                                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+                                        "
+                                        data-test="videoAnglesTab"
+                                        @click="editAsideTab = 'angles'"
+                                    >
+                                        Angles
+                                    </button>
                                 </div>
 
                                 <!--
@@ -2395,9 +2432,18 @@ onUnmounted(() => {
                                 <AudioTracksPanel
                                     v-if="editsExistingVideo"
                                     v-show="editAsideTab === 'tracks'"
+                                    ref="audioTracksPanelRef"
                                     :session-id="sessionId"
                                     :session-token="sessionToken"
-                                    @saved="sessionPlayerStripRef?.reload?.()"
+                                    @saved="onMasterChanged('tracks')"
+                                />
+                                <VideoAnglesPanel
+                                    v-if="editsExistingVideo"
+                                    v-show="editAsideTab === 'angles'"
+                                    ref="videoAnglesPanelRef"
+                                    :session-id="sessionId"
+                                    :session-token="sessionToken"
+                                    @saved="onMasterChanged('angles')"
                                 />
 
                                 <!-- Encoding progress panel -->
@@ -2624,7 +2670,9 @@ onUnmounted(() => {
                                         </div>
 
                                         <ul
-                                            v-if="removedTrimSegments.length > 0"
+                                            v-if="
+                                                removedTrimSegments.length > 0
+                                            "
                                             class="min-h-0 flex-1 space-y-1 overflow-y-auto"
                                         >
                                             <li
@@ -2670,7 +2718,11 @@ onUnmounted(() => {
                                                     stroke-linejoin="round"
                                                     aria-hidden="true"
                                                 >
-                                                    <circle cx="6" cy="6" r="3" />
+                                                    <circle
+                                                        cx="6"
+                                                        cy="6"
+                                                        r="3"
+                                                    />
                                                     <circle
                                                         cx="6"
                                                         cy="18"
@@ -2704,9 +2756,10 @@ onUnmounted(() => {
                                             <p
                                                 class="mt-1 text-xs text-slate-500 dark:text-slate-400"
                                             >
-                                                Mark in/out on the timeline below
-                                                and press Cut. The whole timeline
-                                                is encoded if you cut nothing.
+                                                Mark in/out on the timeline
+                                                below and press Cut. The whole
+                                                timeline is encoded if you cut
+                                                nothing.
                                             </p>
                                         </div>
                                     </div>
@@ -2766,23 +2819,34 @@ onUnmounted(() => {
                                                 words it differently.
                                             -->
                                             <button
-                                                v-if="asidePanelSegments.length > 0"
+                                                v-if="
+                                                    asidePanelSegments.length >
+                                                    0
+                                                "
                                                 type="button"
                                                 class="chapter-toolbar-muted"
                                                 title="Remove every chapter · undo with ⌘/Ctrl + Z"
-                                                @click="chapterSegmentEditorRef?.requestClearAll?.()"
+                                                @click="
+                                                    chapterSegmentEditorRef?.requestClearAll?.()
+                                                "
                                             >
                                                 Clear all
                                             </button>
                                             <span
-                                                v-if="canSaveChapters && chapters.isDirty.value"
+                                                v-if="
+                                                    canSaveChapters &&
+                                                    chapters.isDirty.value
+                                                "
                                                 class="chapter-unsaved-pill"
                                                 title="Unsaved changes are stored locally; click Save to commit to S3."
                                             >
                                                 Unsaved
                                             </span>
                                             <button
-                                                v-if="canSaveChapters && chapters.isDirty.value"
+                                                v-if="
+                                                    canSaveChapters &&
+                                                    chapters.isDirty.value
+                                                "
                                                 type="button"
                                                 class="chapter-toolbar-muted"
                                                 :disabled="
@@ -2817,10 +2881,8 @@ onUnmounted(() => {
                                         {{ chaptersSaveError }}
                                     </p>
                                 </div>
-
                             </template>
                         </SessionPlayerStrip>
-
                     </div>
 
                     <SessionTrimWorkspace
@@ -2834,7 +2896,9 @@ onUnmounted(() => {
                         :chapters-save-error="chaptersSaveError"
                         :show-trim-segment-editor="showTrimSegmentEditor"
                         :thumbnail-vtt-url="thumbnailVttUrl"
-                        :storyboard-pending="storyboardPending || regeneratingExistingThumbnails"
+                        :storyboard-pending="
+                            storyboardPending || regeneratingExistingThumbnails
+                        "
                         :can-regenerate-thumbnails="canRegenerateThumbnails"
                         :regenerate-thumbnails-error="regenerateThumbnailsError"
                         @regenerate-thumbnails="onRegenerateThumbnails"
@@ -3025,7 +3089,7 @@ onUnmounted(() => {
                             v-model:editor-segments="editorSegments"
                             :show-chapters-side-panel="showChaptersBesidePlayer"
                             :can-save-chapters="canSaveChapters"
-                                    :chapters-save-error="chaptersSaveError"
+                            :chapters-save-error="chaptersSaveError"
                             :show-trim-segment-editor="showTrimSegmentEditor"
                             :thumbnail-vtt-url="thumbnailVttUrl"
                             :waveform-peaks="timelineWaveformPeaks"
@@ -3044,7 +3108,7 @@ onUnmounted(() => {
                             :on-play-pause="() => playerRef?.togglePlay()"
                             :is-preview-playing="isPreviewPlaying"
                             :segment-editor-probe-fps="segmentEditorProbeFps"
-                                />
+                        />
                     </div>
                 </div>
             </template>

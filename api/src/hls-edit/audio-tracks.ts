@@ -255,18 +255,22 @@ export function rewriteAudioTracks(
     return out.join('');
 }
 
-const MEDIA_TAG = '#EXT-X-MEDIA:';
+export const MEDIA_TAG = '#EXT-X-MEDIA:';
 
-const attributePattern = (name: string): RegExp =>
+export const attributePattern = (name: string): RegExp =>
     new RegExp(`(^|,)${name}=(?:"([^"]*)"|([^,]*))`);
 
-function readAttribute(list: string, name: string): string | undefined {
+export function readAttribute(list: string, name: string): string | undefined {
     const match = attributePattern(name).exec(list);
     return match ? (match[2] ?? match[3]) : undefined;
 }
 
 /** Sets a quoted attribute in place, or adds it at the end when the line has none. */
-function writeAttribute(list: string, name: string, value: string): string {
+export function writeAttribute(
+    list: string,
+    name: string,
+    value: string
+): string {
     const pattern = attributePattern(name);
     return pattern.test(list)
         ? list.replace(
@@ -277,7 +281,11 @@ function writeAttribute(list: string, name: string, value: string): string {
 }
 
 /** Sets an enumerated attribute (`DEFAULT=YES`) in place, or adds it at the end. */
-function writeBareAttribute(list: string, name: string, value: string): string {
+export function writeBareAttribute(
+    list: string,
+    name: string,
+    value: string
+): string {
     const pattern = attributePattern(name);
     return pattern.test(list)
         ? list.replace(pattern, (_, lead: string) => `${lead}${name}=${value}`)

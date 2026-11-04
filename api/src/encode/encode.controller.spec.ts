@@ -118,6 +118,9 @@ const makeAddAudioTrackService = () => ({
     start: vi.fn(),
 });
 let addAudioTrackService: ReturnType<typeof makeAddAudioTrackService>;
+/** The add-angle job's stand-in, as the add-audio one. */
+const makeAddVideoAngleService = makeAddAudioTrackService;
+let addVideoAngleService: ReturnType<typeof makeAddVideoAngleService>;
 
 describe('EncodeController', () => {
     let controller: EncodeController;
@@ -200,7 +203,9 @@ describe('EncodeController', () => {
             hlsEditService,
             waveformService,
             thumbnailService,
-            (addAudioTrackService = makeAddAudioTrackService())
+            (addAudioTrackService = makeAddAudioTrackService()),
+            {} as any,
+            (addVideoAngleService = makeAddVideoAngleService())
         );
     });
 
@@ -381,6 +386,99 @@ describe('EncodeController', () => {
                 session.id,
                 expect.objectContaining({ offsetSec: 0, path: '/tmp/fr.wav' })
             );
+        });
+
+        it('reports the angle being added with the video', async () => {
+            const session = editSession(false);
+            hlsEditService.readEncodedMedia = vi
+                .fn()
+                .mockResolvedValue({ etag: 'v1' });
+            const addingAngle = {
+                state: 'running',
+                phase: 'encoding',
+                progress: 10,
+                name: 'Pulpit',
+            };
+            addVideoAngleService.job.mockReturnValue(addingAngle);
+            expect(await controller.getEncodedMedia(session.id)).toEqual({
+                etag: 'v1',
+                addingAngle,
+            });
+        });
+
+        it('renames and removes angles over the version read', async () => {
+            const session = editSession(true);
+            hlsEditService.saveVideoAngles = vi
+                .fn()
+                .mockResolvedValue({ etag: 'v2' });
+            const edits = [{ id: 'pulpit', name: 'Pulpit camera' }];
+            await controller.putVideoAngles(session.id, {
+                ifMatch: 'v1',
+                edits,
+                remove: ['side'],
+            });
+            expect(hlsEditService.saveVideoAngles).toHaveBeenCalledWith(
+                expect.anything(),
+                expect.any(String),
+                'v1',
+                edits,
+                KEY,
+                ['side']
+            );
+        });
+
+        it('starts adding an angle from the file, from 0:00 unless told otherwise', async () => {
+            const session = editSession(false);
+            addVideoAngleService.start.mockResolvedValue({
+                state: 'running',
+            } as never);
+            await controller.addVideoAngle(session.id, {
+                path: '/tmp/pulpit.mp4',
+                sourceTrackIndex: 0,
+                name: 'Pulpit',
+                ifMatch: 'v1',
+            });
+            expect(addVideoAngleService.start).toHaveBeenCalledWith(
+                session.id,
+                expect.objectContaining({
+                    offsetSec: 0,
+                    path: '/tmp/pulpit.mp4',
+                })
+            );
+        });
+
+        it('changes the master one thing at a time: a track and an angle wait for each other', async () => {
+            const session = editSession(false);
+            hlsEditService.saveVideoAngles = vi.fn();
+            addAudioTrackService.isBusy.mockReturnValue(true);
+            await expect(
+                controller.addVideoAngle(session.id, {
+                    path: '/tmp/pulpit.mp4',
+                    sourceTrackIndex: 0,
+                    name: 'Pulpit',
+                    ifMatch: 'v1',
+                })
+            ).rejects.toThrow(ConflictException);
+            await expect(
+                controller.putVideoAngles(session.id, {
+                    ifMatch: 'v1',
+                    edits: [],
+                })
+            ).rejects.toThrow(ConflictException);
+            addAudioTrackService.isBusy.mockReturnValue(false);
+            addVideoAngleService.isBusy.mockReturnValue(true);
+            await expect(
+                controller.addAudioTrack(session.id, {
+                    path: '/tmp/fr.wav',
+                    sourceTrackIndex: 0,
+                    language: 'fra',
+                    name: 'Français',
+                    ifMatch: 'v1',
+                })
+            ).rejects.toThrow(ConflictException);
+            expect(addVideoAngleService.start).not.toHaveBeenCalled();
+            expect(addAudioTrackService.start).not.toHaveBeenCalled();
+            expect(hlsEditService.saveVideoAngles).not.toHaveBeenCalled();
         });
 
         it('has no existing video to show or edit in an encode session', async () => {
@@ -2174,7 +2272,9 @@ describe('EncodeController — source storyboard', () => {
             {} as any,
             {} as any,
             thumbnailService,
-            (addAudioTrackService = makeAddAudioTrackService())
+            (addAudioTrackService = makeAddAudioTrackService()),
+            {} as any,
+            (addVideoAngleService = makeAddVideoAngleService())
         );
     });
 

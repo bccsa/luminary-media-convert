@@ -180,6 +180,9 @@ function discard(): void {
     error.value = null;
 }
 
+/** Read again when the other tab changed the master. */
+defineExpose({ load });
+
 watch(() => [props.sessionId, props.sessionToken] as const, load, {
     immediate: true,
 });
