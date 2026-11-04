@@ -19,6 +19,11 @@ import {
     createCredentialCipherProvider,
     type CredentialCipher,
 } from './encode/services/credential-cipher.js';
+import {
+    ENCODE_OUTCOME_HOOK,
+    createEncodeOutcomeHookProvider,
+    type EncodeOutcomeHook,
+} from './encode/encode-outcome-hook.js';
 
 /**
  * Everything the API cannot decide for itself.
@@ -38,12 +43,14 @@ export interface RuntimeOptions {
     credentialCipher?: CredentialCipher;
     /** Notified when a CMS opens a session, so the host can surface its window. */
     onCmsSessionCreated?: CmsSessionHook;
+    /** Notified when an encode finishes or fails for good, so the host can say so. */
+    onEncodeFinished?: EncodeOutcomeHook;
 }
 
 /**
  * The host's answers, bound to the tokens the feature modules inject.
  *
- * Global because the four consumers sit in three different modules and none of
+ * Global because the consumers sit in several modules and none of
  * them should have to be handed a dynamic module — importing this once at the
  * root is the whole of the wiring, and a module that only publishes
  * configuration is exactly the case `@Global` exists for.
@@ -62,12 +69,14 @@ export class RuntimeOptionsModule {
                 createOriginPolicyProvider(options.originPolicy),
                 createCredentialCipherProvider(options.credentialCipher),
                 createCmsSessionHookProvider(options.onCmsSessionCreated),
+                createEncodeOutcomeHookProvider(options.onEncodeFinished),
             ],
             exports: [
                 LOCAL_API_TOKEN,
                 ORIGIN_POLICY,
                 CREDENTIAL_CIPHER,
                 CMS_SESSION_HOOK,
+                ENCODE_OUTCOME_HOOK,
             ],
         };
     }
