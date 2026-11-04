@@ -1,7 +1,18 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import {
+    Inject,
+    Injectable,
+    Logger,
+    OnModuleDestroy,
+    Optional,
+} from '@nestjs/common';
+import { basename } from 'path';
 import { SessionService } from './session.service.js';
 import { EncodeService } from './encode.service.js';
 import { SessionEventsService } from './session-events.service.js';
+import {
+    ENCODE_OUTCOME_HOOK,
+    type EncodeOutcomeHook,
+} from '../encode-outcome-hook.js';
 
 /** How long to wait before each automatic try after a lost connection. */
 export const AUTOMATIC_TRY_DELAYS_MS = [30_000, 120_000, 300_000];
@@ -22,7 +33,10 @@ export class QueueService implements OnModuleDestroy {
     constructor(
         private readonly sessionService: SessionService,
         private readonly encodeService: EncodeService,
-        private readonly sessionEvents: SessionEventsService
+        private readonly sessionEvents: SessionEventsService,
+        @Optional()
+        @Inject(ENCODE_OUTCOME_HOOK)
+        private readonly onFinished?: EncodeOutcomeHook
     ) {}
 
     async onModuleDestroy(): Promise<void> {
@@ -110,6 +124,7 @@ export class QueueService implements OnModuleDestroy {
                 try {
                     await this.encodeService.processSession(sessionId);
                     this.tryAgainIfConnectionLost(sessionId);
+                    this.reportOutcome(sessionId);
                 } catch (err) {
                     // This should not happen since encodeService.processSession
                     // catches all errors internally, but guard against it anyway
@@ -120,6 +135,7 @@ export class QueueService implements OnModuleDestroy {
                         sessionId,
                         (err as Error).message || 'Unexpected queue error'
                     );
+                    this.reportOutcome(sessionId);
                 }
             }
         } finally {
@@ -160,6 +176,35 @@ export class QueueService implements OnModuleDestroy {
             if (this.sessionService.get(sessionId)?.status !== 'failed') return;
             this.enqueue(sessionId);
         }, delay).unref?.();
+    }
+
+    /**
+     * Tell the host how an encode ended, once that is final: done, or failed
+     * with no automatic try still to come. A session deleted meanwhile (a
+     * cancel) has nothing to report.
+     */
+    private reportOutcome(sessionId: string): void {
+        if (!this.onFinished || this.shuttingDown) return;
+        const session = this.sessionService.get(sessionId);
+        if (!session) return;
+        const failedForGood =
+            session.status === 'failed' && !this.automaticTries.has(sessionId);
+        if (session.status !== 'completed' && !failedForGood) return;
+        try {
+            this.onFinished({
+                sessionId,
+                outcome: session.status === 'completed' ? 'completed' : 'failed',
+                title: session.title,
+                fileName: session.filePath
+                    ? basename(session.filePath)
+                    : undefined,
+                message: failedForGood ? session.error : undefined,
+            });
+        } catch (err) {
+            this.logger.warn(
+                `Reporting how session ${sessionId} ended failed: ${(err as Error).message}`
+            );
+        }
     }
 
     /**

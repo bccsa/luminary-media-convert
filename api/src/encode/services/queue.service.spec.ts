@@ -24,8 +24,10 @@ const encoder = {
 } as unknown as EncodeService;
 const events = { emit } as unknown as SessionEventsService;
 
+const onFinished = vi.fn();
+
 function build(): QueueService {
-    return new QueueService(sessions, encoder, events);
+    return new QueueService(sessions, encoder, events, onFinished);
 }
 
 /** A job that only resolves when told to, so the queue can be observed mid-run. */
@@ -48,6 +50,7 @@ beforeEach(() => {
     processSession.mockReset().mockResolvedValue(undefined);
     get.mockReset().mockReturnValue({ status: 'completed' });
     appendToError.mockReset();
+    onFinished.mockReset();
 });
 
 describe('QueueService — enqueueing', () => {
@@ -366,5 +369,78 @@ describe('QueueService — trying again after a lost connection', () => {
         await vi.advanceTimersByTimeAsync(AUTOMATIC_TRY_DELAYS_MS[0]);
 
         expect(processSession).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('QueueService — telling the host how an encode ended', () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it('reports a finished encode with its post title', async () => {
+        get.mockReturnValue({
+            status: 'completed',
+            title: 'Sunday meeting',
+            filePath: '/media/sunday.mp4',
+        });
+        build().enqueue('a');
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(onFinished).toHaveBeenCalledExactlyOnceWith({
+            sessionId: 'a',
+            outcome: 'completed',
+            title: 'Sunday meeting',
+            fileName: 'sunday.mp4',
+            message: undefined,
+        });
+    });
+
+    it('reports a failure with the sentence the session shows', async () => {
+        get.mockReturnValue({
+            status: 'failed',
+            error: 'The encoder ran out of disk space.',
+        });
+        build().enqueue('a');
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(onFinished).toHaveBeenCalledExactlyOnceWith(
+            expect.objectContaining({
+                outcome: 'failed',
+                message: 'The encoder ran out of disk space.',
+            })
+        );
+    });
+
+    it('waits for the automatic tries before reporting a lost connection', async () => {
+        get.mockReturnValue({ status: 'failed', networkFailure: true });
+        build().enqueue('a');
+        await vi.advanceTimersByTimeAsync(0);
+        expect(onFinished).not.toHaveBeenCalled();
+
+        for (const delay of AUTOMATIC_TRY_DELAYS_MS) {
+            await vi.advanceTimersByTimeAsync(delay);
+        }
+        expect(onFinished).toHaveBeenCalledExactlyOnceWith(
+            expect.objectContaining({ outcome: 'failed' })
+        );
+    });
+
+    it('reports nothing for an encode cancelled meanwhile', async () => {
+        get.mockReturnValue(undefined);
+        build().enqueue('a');
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(onFinished).not.toHaveBeenCalled();
+    });
+
+    it('carries on when the host throws', async () => {
+        onFinished.mockImplementation(() => {
+            throw new Error('no notification centre');
+        });
+        const queue = build();
+        queue.enqueue('a');
+        queue.enqueue('b');
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(processSession).toHaveBeenCalledTimes(2);
     });
 });

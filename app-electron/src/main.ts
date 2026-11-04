@@ -5,6 +5,7 @@ import {
     ipcMain,
     Menu,
     net,
+    Notification,
     safeStorage,
     shell,
 } from 'electron';
@@ -19,6 +20,7 @@ import {
     DEFAULT_PORT,
     FFMPEG_DOWNLOAD_URL,
     MIN_FFMPEG_VERSION,
+    type EncodeOutcome,
     type RunningServer,
 } from '@luminary-media-converter/api';
 import { showLicences } from './licences';
@@ -27,6 +29,7 @@ import { resolveWindowTarget } from './window-target';
 import { type AvailableUpdate, checkForUpdate } from './update-check';
 import { teeConsoleToFile } from './log-file';
 import { menuTemplate } from './menu';
+import { encodeNotification } from './encode-notification';
 
 const PROTOCOL = 'luminary-convert';
 
@@ -337,6 +340,29 @@ function focusSession(sessionId: string): void {
     if (!contents || contents.isLoading()) return;
     contents.send('luminary:showSession', sessionId);
     pendingSessionId = null;
+}
+
+/**
+ * Shown notifications, held until they close: one that is garbage-collected
+ * loses its click handler, and the click then does nothing.
+ */
+const shownNotifications = new Set<Notification>();
+
+/**
+ * Say that an encode finished or failed. Skipped while the window has focus:
+ * the person is looking at the app already. Clicking it opens the session.
+ */
+function notifyEncodeEnded(outcome: EncodeOutcome): void {
+    if (!Notification.isSupported() || mainWindow?.isFocused()) return;
+    const notification = new Notification(encodeNotification(outcome));
+    const release = () => shownNotifications.delete(notification);
+    notification.on('click', () => {
+        release();
+        focusSession(outcome.sessionId);
+    });
+    notification.on('close', release);
+    shownNotifications.add(notification);
+    notification.show();
 }
 
 /**
@@ -791,6 +817,7 @@ async function start(): Promise<void> {
             },
             credentialCipher: buildCipher(),
             onCmsSessionCreated: (sessionId) => focusSession(sessionId),
+            onEncodeFinished: (outcome) => notifyEncodeEnded(outcome),
             ffmpegPath: resolveBinary('ffmpeg'),
             ffprobePath: resolveBinary('ffprobe'),
             staticAppDir: bundledWebClient(),

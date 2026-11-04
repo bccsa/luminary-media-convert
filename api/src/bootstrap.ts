@@ -7,6 +7,7 @@ import helmet from 'helmet';
 import { join } from 'path';
 import { AppModule } from './app.module.js';
 import type { CmsSessionHook } from './cms/cms-session-hook.js';
+import type { EncodeOutcomeHook } from './encode/encode-outcome-hook.js';
 import { OriginRegistry, type OriginDecisions } from './cms/origin-registry.js';
 import {
     createCorsOptions,
@@ -45,6 +46,8 @@ export {
     type FfmpegCheck,
 } from './encode/services/ffmpeg-availability.js';
 
+export type { EncodeOutcome } from './encode/encode-outcome-hook.js';
+
 /** Where the app listens when nobody says otherwise. */
 export const DEFAULT_PORT = 31711;
 
@@ -80,6 +83,8 @@ export interface CreateServerOptions {
     credentialCipher?: CredentialCipher;
     /** Notified when a CMS opens a session, so a host can surface its window. */
     onCmsSessionCreated?: CmsSessionHook;
+    /** Notified when an encode finishes or fails for good, so a host can say so. */
+    onEncodeFinished?: EncodeOutcomeHook;
     /** Absolute path to the ffmpeg executable. Default: found on PATH. */
     ffmpegPath?: string;
     /** Absolute path to the ffprobe executable. Default: found on PATH. */
@@ -218,6 +223,7 @@ export async function createServer(
             originPolicy,
             credentialCipher: options.credentialCipher,
             onCmsSessionCreated: options.onCmsSessionCreated,
+            onEncodeFinished: options.onEncodeFinished,
         })
     );
 
