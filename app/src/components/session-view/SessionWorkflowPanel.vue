@@ -68,7 +68,7 @@ const PHASE_LABELS: Record<PipelinePhase, string | null> = {
     waveform: 'Generating waveform…',
     'encrypting-playlists': 'Encrypting playlists…',
     'uploading-playlists': 'Uploading playlists & thumbnails…',
-    'uploading-kept': null,
+    'uploading-kept': 'Uploading the kept segments before continuing…',
 };
 
 const phaseLabel = computed(() =>
@@ -78,7 +78,7 @@ const phaseLabel = computed(() =>
 /** After a real encode job, keep pipeline steps visible at 100% (step encoding was here during the run). */
 const showCompletedPipelineSummary = computed(() => props.isCompleted);
 
-const emit = defineEmits<{ cancelEncode: [] }>();
+const emit = defineEmits<{ cancelEncode: []; stopEncode: [] }>();
 </script>
 
 <template>
@@ -227,7 +227,21 @@ const emit = defineEmits<{ cancelEncode: [] }>();
                     leaving the user believing they had cancelled something that
                     carried on encrypting and uploading.
                 -->
-                <div v-if="showEncoding && (pollerStatus === 'queued' || pollerStatus === 'encoding')">
+                <div
+                    v-if="showEncoding && (pollerStatus === 'queued' || pollerStatus === 'encoding')"
+                    class="flex flex-wrap gap-2"
+                >
+                    <!-- Stop keeps what is done, to continue later; only while FFmpeg runs. -->
+                    <button
+                        v-if="pollerStatus === 'encoding'"
+                        type="button"
+                        data-testid="stop-encoding"
+                        class="cursor-pointer rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-transparent dark:text-slate-300 dark:hover:bg-slate-800"
+                        title="Stop now and keep what is done, to continue later"
+                        @click="emit('stopEncode')"
+                    >
+                        Stop
+                    </button>
                     <button
                         type="button"
                         class="cursor-pointer rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 dark:border-red-900/50 dark:bg-transparent dark:text-red-400 dark:hover:bg-red-950/40"

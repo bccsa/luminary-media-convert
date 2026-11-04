@@ -79,6 +79,8 @@ export interface SessionSummary {
     error?: string;
     /** `edit` for a session on a video already encoded; absent for an encode. */
     mode?: 'edit';
+    /** A failed session that was stopped by hand, to continue later. */
+    stopped?: boolean;
 }
 
 /** An audio track of an existing video: one language and name, in however many groups. */
@@ -147,6 +149,8 @@ export interface SessionStatusResponse {
     resumeFromPercent?: number;
     /** With canRetry: the settings the failed encode was started with. */
     encodeConfig?: EncodeConfig;
+    /** With canRetry: it was stopped by hand, to continue later. */
+    stopped?: boolean;
     byteRange?: boolean;
     probeResult?: ProbeResult;
     files?: string[];

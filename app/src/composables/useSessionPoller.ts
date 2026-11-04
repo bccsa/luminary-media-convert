@@ -28,6 +28,7 @@ export function useSessionPoller() {
     const canResume = ref<boolean | undefined>();
     const resumeFromPercent = ref<number | undefined>();
     const retryConfig = ref<EncodeConfig | undefined>();
+    const stopped = ref<boolean | undefined>();
     const files = ref<string[] | undefined>();
     const masterPlaylist = ref<string | undefined>();
     const error = ref<string | undefined>();
@@ -68,6 +69,7 @@ export function useSessionPoller() {
         canResume.value = data.canResume;
         resumeFromPercent.value = data.resumeFromPercent;
         retryConfig.value = data.encodeConfig;
+        stopped.value = data.stopped;
         files.value = data.files;
         masterPlaylist.value = data.masterPlaylist;
         error.value = data.error;
@@ -123,6 +125,7 @@ export function useSessionPoller() {
         canResume.value = undefined;
         resumeFromPercent.value = undefined;
         retryConfig.value = undefined;
+        stopped.value = undefined;
         files.value = undefined;
         masterPlaylist.value = undefined;
         error.value = undefined;
@@ -198,6 +201,8 @@ export function useSessionPoller() {
         resumeFromPercent: readonly(resumeFromPercent),
         /** With canRetry: the settings the failed encode was started with. */
         retryConfig: computed(() => retryConfig.value),
+        /** With canRetry: it was stopped by hand, not failed. */
+        stopped: readonly(stopped),
         files: readonly(files),
         masterPlaylist: readonly(masterPlaylist),
         error: readonly(error),

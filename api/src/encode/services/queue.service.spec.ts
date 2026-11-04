@@ -424,6 +424,14 @@ describe('QueueService — telling the host how an encode ended', () => {
         );
     });
 
+    it('reports nothing for an encode stopped by hand', async () => {
+        get.mockReturnValue({ status: 'failed', stopped: true });
+        build().enqueue('a');
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(onFinished).not.toHaveBeenCalled();
+    });
+
     it('reports nothing for an encode cancelled meanwhile', async () => {
         get.mockReturnValue(undefined);
         build().enqueue('a');

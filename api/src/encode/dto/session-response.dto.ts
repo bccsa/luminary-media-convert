@@ -107,6 +107,14 @@ export class SessionSummaryDto {
     })
     @Expose()
     mode?: 'edit';
+
+    @ApiPropertyOptional({
+        description:
+            'A failed session that was stopped by hand, to continue later.',
+        example: true,
+    })
+    @Expose()
+    stopped?: boolean;
 }
 
 export class SessionStatusDto {
@@ -195,6 +203,14 @@ export class SessionStatusDto {
     })
     @Expose()
     canResume?: boolean;
+
+    @ApiPropertyOptional({
+        description:
+            'With canRetry: the encode was stopped by hand rather than failing.',
+        example: true,
+    })
+    @Expose()
+    stopped?: boolean;
 
     @ApiPropertyOptional({
         description:

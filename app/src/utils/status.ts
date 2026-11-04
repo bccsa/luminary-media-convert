@@ -9,6 +9,8 @@ export const STATUS_LABELS: Record<string, string> = {
     uploading_to_s3: 'Uploading to S3',
     completed: 'Completed',
     failed: 'Failed',
+    /** A failed session someone stopped by hand; see `displayStatus`. */
+    stopped: 'Stopped',
 };
 
 /** Label for a status, falling back to the raw status string. */

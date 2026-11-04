@@ -130,6 +130,11 @@ export interface Session {
     resumeFromSec?: number;
     /** It failed for want of a connection to storage, so trying again may be all it needs. */
     networkFailure?: boolean;
+    /**
+     * With `failed`: someone stopped it, to continue later. Kept as a failure so
+     * it continues, and survives a restart, exactly as one does.
+     */
+    stopped?: boolean;
     segmentFormat?: SegmentFormat;
     ingestTotalBytes?: number;
     /**
@@ -857,6 +862,14 @@ export class SessionService implements OnModuleInit {
         const session = this.sessions.get(id);
         if (session) {
             session.networkFailure = networkFailure || undefined;
+            this.persist(session);
+        }
+    }
+
+    setStopped(id: string, stopped: boolean): void {
+        const session = this.sessions.get(id);
+        if (session) {
+            session.stopped = stopped || undefined;
             this.persist(session);
         }
     }

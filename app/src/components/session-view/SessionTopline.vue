@@ -79,6 +79,10 @@ const statusColors: Record<string, { color: string; borderColor: string }> = {
         color: 'text-red-700 dark:text-red-400',
         borderColor: 'border-red-300 dark:border-red-800/60',
     },
+    stopped: {
+        color: 'text-amber-700 dark:text-amber-400',
+        borderColor: 'border-amber-300 dark:border-amber-800/60',
+    },
 };
 
 function createdLabel(createdAt: number | null | undefined): string {

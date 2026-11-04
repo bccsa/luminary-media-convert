@@ -593,6 +593,12 @@ describe('SessionView', () => {
             );
         });
 
+        it('says why a continue waits before encoding again', async () => {
+            expect(await captionFor('uploading-kept')).toContain(
+                'Uploading the kept segments before continuing'
+            );
+        });
+
         it('says nothing while the segment pipeline is still the whole story', async () => {
             // The bar already reads "Encoding"; a caption there would be noise.
             expect(await captionFor()).toBeNull();
