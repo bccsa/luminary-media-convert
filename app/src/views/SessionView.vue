@@ -1189,8 +1189,9 @@ const PIPELINE_PHASE_LABELS: Record<PipelinePhase, string | null> = {
     // bar restarts from 0 for the playlists and sprites, which are a different
     // set of files from the segments it was counting until then.
     'uploading-playlists': 'Uploading playlists & thumbnails…',
-    // Shown as the encode it is part of: the storage bar moving says enough.
-    'uploading-kept': null,
+    // A continue sends what the stopped run kept before FFmpeg restarts; on a
+    // slow connection that is minutes with only the storage bar moving.
+    'uploading-kept': 'Uploading the kept segments before continuing…',
 };
 
 const pipelinePhaseLabel = computed(() => {

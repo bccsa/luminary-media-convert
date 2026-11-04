@@ -68,7 +68,7 @@ const PHASE_LABELS: Record<PipelinePhase, string | null> = {
     waveform: 'Generating waveform…',
     'encrypting-playlists': 'Encrypting playlists…',
     'uploading-playlists': 'Uploading playlists & thumbnails…',
-    'uploading-kept': null,
+    'uploading-kept': 'Uploading the kept segments before continuing…',
 };
 
 const phaseLabel = computed(() =>
