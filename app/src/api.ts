@@ -7,6 +7,8 @@ import type {
     AudioTrackEdit,
     AddAudioTrackJob,
     AudioSource,
+    AddVideoAngleJob,
+    VideoSource,
     ThumbnailsRegenerateJob,
     EncodedMedia,
 } from './types';
@@ -426,6 +428,72 @@ export async function addAudioTrack(
             token: sessionToken,
             body: track,
             errorPrefix: 'Could not add the audio track',
+        }
+    );
+}
+
+/**
+ * Rename camera angles, or take some out. Refused (409) once the video has
+ * changed since `ifMatch` was read; the error says so.
+ */
+export async function putVideoAngles(
+    sessionId: string,
+    sessionToken: string,
+    ifMatch: string,
+    edits: { id: string; name: string }[],
+    remove: string[] = []
+): Promise<EncodedMedia> {
+    return requestJson(
+        `${API_BASE}/api/sessions/${sessionId}/media/video-angles`,
+        {
+            method: 'PUT',
+            token: sessionToken,
+            body: { ifMatch, edits, remove },
+            errorPrefix: 'Could not save the angles',
+        }
+    );
+}
+
+/** The video streams of a file on this machine or a link, to add an angle from. */
+export async function probeVideoSource(
+    sessionId: string,
+    sessionToken: string,
+    path: string
+): Promise<VideoSource> {
+    return requestJson(
+        `${API_BASE}/api/sessions/${sessionId}/media/video-sources`,
+        {
+            method: 'POST',
+            token: sessionToken,
+            body: { path },
+            errorPrefix: 'Could not read that file',
+        }
+    );
+}
+
+/**
+ * Starts adding a file's picture to the video as a new camera angle. It runs
+ * in the background: {@link getEncodedMedia} reports it as `addingAngle`.
+ */
+export async function addVideoAngle(
+    sessionId: string,
+    sessionToken: string,
+    angle: {
+        path: string;
+        sourceTrackIndex: number;
+        name: string;
+        mainName?: string;
+        offsetSec: number;
+        ifMatch: string;
+    }
+): Promise<AddVideoAngleJob> {
+    return requestJson(
+        `${API_BASE}/api/sessions/${sessionId}/media/video-angles`,
+        {
+            method: 'POST',
+            token: sessionToken,
+            body: angle,
+            errorPrefix: 'Could not add the angle',
         }
     );
 }

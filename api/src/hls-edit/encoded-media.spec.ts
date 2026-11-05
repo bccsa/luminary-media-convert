@@ -19,6 +19,17 @@ const RENAMED = MASTER.replace(
     'NAME="Francais",LANGUAGE="fr"',
     'NAME="Français",LANGUAGE="fra"'
 );
+const ANGLES_MASTER = [
+    '#EXTM3U',
+    '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="Francais",LANGUAGE="fr",DEFAULT=YES,URI="a/playlist.m3u8"',
+    '#EXT-X-MEDIA:TYPE=VIDEO,GROUP-ID="main",NAME="Main",DEFAULT=YES',
+    '#EXT-X-MEDIA:TYPE=VIDEO,GROUP-ID="side",NAME="Side",DEFAULT=NO',
+    '#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=1280x720,VIDEO="main",AUDIO="aud"',
+    'stream_main/playlist.m3u8',
+    '#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=1280x720,VIDEO="side",AUDIO="aud"',
+    'stream_side/playlist.m3u8',
+    '',
+].join('\n');
 const EDIT = {
     from: { language: 'fr', name: 'Francais' },
     to: { language: 'fra', name: 'Français' },
@@ -72,10 +83,21 @@ describe('HlsEditService — an existing video', () => {
                         default: true,
                     },
                 ],
+                angles: [],
                 chapterLanguages: ['en', 'fr'],
                 etag: 'v1',
                 encrypted: false,
             });
+        });
+
+        it('lists the camera angles', async () => {
+            etag = makeEtag(ANGLES_MASTER, [MASTER_KEY]);
+            service = new HlsEditService(etag as never);
+            const media = await service.readEncodedMedia(s3, MASTER_KEY);
+            expect(media.angles).toEqual([
+                { id: 'main', name: 'Main', default: true, renditions: 1 },
+                { id: 'side', name: 'Side', default: false, renditions: 1 },
+            ]);
         });
 
         it('names the scrub thumbnails beside the master', async () => {
@@ -175,4 +197,44 @@ describe('HlsEditService — an existing video', () => {
     });
 
     beforeEach(() => vi.clearAllMocks());
+
+    describe('saveVideoAngles', () => {
+        it('renames over the version read, keeps the original, and goes back encrypted', async () => {
+            const stored = encryptTextAsset(ANGLES_MASTER, keyFromHex(KEY));
+            etag = makeEtag(stored, [MASTER_KEY]);
+            service = new HlsEditService(etag as never);
+            await service.saveVideoAngles(
+                s3,
+                MASTER_KEY,
+                'v1',
+                [{ id: 'side', name: 'Pulpit' }],
+                KEY
+            );
+            expect(etag.putObjectIfAbsent).toHaveBeenCalledWith(
+                s3,
+                `${MASTER_KEY}.orig`,
+                Buffer.from(stored),
+                'application/octet-stream'
+            );
+            const [, key, written, ifMatch, , opts] =
+                etag.putObjectIfMatch.mock.calls[0];
+            expect(key).toBe(MASTER_KEY);
+            expect(ifMatch).toBe('v1');
+            expect(opts).toEqual({ cacheControl: EDITED_CACHE_CONTROL });
+            expect(decryptTextAsset(written, keyFromHex(KEY))).toBe(
+                ANGLES_MASTER.replace('NAME="Side"', 'NAME="Pulpit"')
+            );
+        });
+
+        it('refuses a master changed since it was read', async () => {
+            etag = makeEtag(ANGLES_MASTER, [MASTER_KEY]);
+            service = new HlsEditService(etag as never);
+            await expect(
+                service.saveVideoAngles(s3, MASTER_KEY, 'v0', [], undefined, [
+                    'side',
+                ])
+            ).rejects.toThrow(ConflictException);
+            expect(etag.putObjectIfMatch).not.toHaveBeenCalled();
+        });
+    });
 });

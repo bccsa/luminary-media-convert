@@ -113,14 +113,49 @@ export interface AddAudioTrackJob {
     error?: string;
 }
 
+/** A camera angle of an existing video; `id` is empty for a video with a single picture. */
+export interface VideoAngle {
+    id: string;
+    name: string;
+    default: boolean;
+    /** How many sizes it has. */
+    renditions: number;
+}
+
+/** A camera angle being added to the existing video, and how far it has got. */
+export interface AddVideoAngleJob {
+    state: 'running' | 'done' | 'failed';
+    phase: 'reading' | 'encoding' | 'uploading' | 'saving' | 'done';
+    /** 0–100 within the phase. */
+    progress: number;
+    name: string;
+    error?: string;
+}
+
+/** A file picked to take a new angle from: its video streams. */
+export interface VideoSource {
+    durationSec: number;
+    videoTracks: {
+        index: number;
+        codec?: string;
+        width?: number;
+        height?: number;
+        frameRate?: number;
+        name?: string;
+    }[];
+}
+
 /** What an edit session's video offers to edit, and the version read. */
 export interface EncodedMedia {
     tracks: AudioTrack[];
+    angles: VideoAngle[];
     chapterLanguages: string[];
     etag: string;
     encrypted: boolean;
     /** The audio track being added, or the last one. */
     adding?: AddAudioTrackJob;
+    /** The angle being added, or the last one. */
+    addingAngle?: AddVideoAngleJob;
 }
 
 /** A file picked to take a new audio track from: its audio streams. */

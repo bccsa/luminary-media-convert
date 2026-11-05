@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AUDIO_ONLY_ANGLE_ID } from '../types.js';
 import {
     DEFAULT_ANGLE_ID,
@@ -110,6 +110,19 @@ describe('describeMaster', () => {
         const info = describeMaster(MASTER_URL, PLAIN_MEDIA_PLAYLIST);
         expect(info.isMaster).toBe(false);
         expect(info.angles).toEqual([]);
+    });
+});
+
+describe('loadMaster', () => {
+    it('checks the master with the server rather than taking a cached copy', async () => {
+        const fetchImpl = vi.fn(
+            async () => new Response(SIMPLE_MASTER, { status: 200 }),
+        );
+        await loadMaster(MASTER_URL, context({}, { fetchImpl }));
+        expect(fetchImpl).toHaveBeenCalledWith(
+            MASTER_URL,
+            expect.objectContaining({ cache: 'no-cache' }),
+        );
     });
 });
 

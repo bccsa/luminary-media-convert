@@ -5,11 +5,9 @@ import {
     Logger,
     NotFoundException,
 } from '@nestjs/common';
-import { spawn } from 'child_process';
 import { randomBytes } from 'crypto';
-import { existsSync } from 'fs';
 import { mkdir, rm, writeFile } from 'fs/promises';
-import { isAbsolute, join, posix } from 'path';
+import { join, posix } from 'path';
 import {
     parseMasterPlaylist,
     parseMediaPlaylist,
@@ -31,7 +29,13 @@ import {
     keyFromHex,
     readMaybeEncrypted,
 } from './lmcenc.js';
-import { hasAllowedExtension } from './media-extensions.js';
+import {
+    assertReadableSource,
+    isHlsLink,
+    isLink,
+    runEncode,
+    runProcess as run,
+} from './edit-source.js';
 import { S3Service } from './s3.service.js';
 import { SegmentPipelineService } from './segment-pipeline.service.js';
 import { SessionService, type Session } from './session.service.js';
@@ -62,13 +66,6 @@ export interface AudioSource {
 interface ResolvedSource extends AudioSource {
     inputs: { input: string; audioIndex: number }[];
 }
-
-/** An http(s) link rather than a path on this machine. */
-const isLink = (source: string): boolean => /^https?:\/\//i.test(source);
-
-/** An HLS playlist link: its audio renditions are listed from the playlist itself. */
-const isHlsLink = (source: string): boolean =>
-    isLink(source) && /\.m3u8$/i.test(new URL(source).pathname);
 
 export interface AddAudioTrackRequest {
     path: string;
@@ -143,7 +140,7 @@ export class AddAudioTrackService {
     /** The audio tracks of a picked file or a pasted link, for the editor to choose one. */
     async probeSource(sessionId: string, path: string): Promise<AudioSource> {
         this.editSession(sessionId);
-        this.assertReadableSource(path);
+        assertReadableSource(path);
         const { durationSec, audioTracks } = await this.resolveSource(path);
         return { durationSec, audioTracks };
     }
@@ -159,7 +156,7 @@ export class AddAudioTrackService {
                 'An audio track is already being added to this video'
             );
         }
-        this.assertReadableSource(req.path);
+        assertReadableSource(req.path);
         const label = assertTrackLabel(req.language, req.name);
         if (
             !Number.isFinite(req.offsetSec) ||
@@ -527,45 +524,18 @@ export class AddAudioTrackService {
         }
     }
 
-    private async encode(
+    private encode(
         args: string[],
         durationSec: number,
         onProgress: (pct: number) => void
     ): Promise<void> {
-        await new Promise<void>((resolve, reject) => {
-            const child = spawn(ffmpegBin(), args, {
-                stdio: ['ignore', 'pipe', 'pipe'],
-            });
-            let stderr = '';
-            child.stdout.on('data', (chunk: Buffer) => {
-                const match = /out_time_us=(\d+)/.exec(chunk.toString());
-                if (match && durationSec > 0) {
-                    onProgress(
-                        Math.min(
-                            100,
-                            Math.round(
-                                (Number(match[1]) / 1e6 / durationSec) * 100
-                            )
-                        )
-                    );
-                }
-            });
-            child.stderr.on(
-                'data',
-                (chunk: Buffer) =>
-                    (stderr = (stderr + chunk.toString()).slice(-4000))
-            );
-            child.on('error', reject);
-            child.on('close', (code) =>
-                code === 0
-                    ? resolve()
-                    : reject(
-                          new Error(
-                              `The audio could not be encoded: ${stderr.trim().split('\n').pop()}`
-                          )
-                      )
-            );
-        });
+        return runEncode(
+            ffmpegBin(),
+            args,
+            durationSec,
+            onProgress,
+            'The audio could not be encoded'
+        );
     }
 
     private editSession(sessionId: string): Session {
@@ -745,40 +715,4 @@ export class AddAudioTrackService {
                 })),
         };
     }
-
-    /** A path on this machine, or an http(s) link. */
-    private assertReadableSource(path: string): void {
-        if (isLink(path)) {
-            try {
-                new URL(path);
-            } catch {
-                throw new BadRequestException('That is not a valid link');
-            }
-            return;
-        }
-        if (!isAbsolute(path) || !existsSync(path)) {
-            throw new BadRequestException('No file at that path');
-        }
-        if (!hasAllowedExtension(path)) {
-            throw new BadRequestException(
-                'That is not an audio or video file the encoder reads'
-            );
-        }
-    }
-}
-
-function run(bin: string, args: string[]): Promise<string> {
-    return new Promise((resolve, reject) => {
-        const child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-        let out = '';
-        let err = '';
-        child.stdout.on('data', (c: Buffer) => (out += c.toString()));
-        child.stderr.on('data', (c: Buffer) => (err += c.toString()));
-        child.on('error', reject);
-        child.on('close', (code) =>
-            code === 0
-                ? resolve(out)
-                : reject(new Error(err.trim() || `${bin} failed`))
-        );
-    });
 }

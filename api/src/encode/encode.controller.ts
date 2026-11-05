@@ -54,6 +54,9 @@ import { ChaptersWriteDto } from './dto/chapters.dto.js';
 import {
     AddAudioTrackDto,
     AddAudioTrackJobDto,
+    AddVideoAngleDto,
+    AddVideoAngleJobDto,
+    VideoAnglesWriteDto,
     AudioSourceRequestDto,
     AudioTracksWriteDto,
     EncodedMediaDto,
@@ -62,6 +65,10 @@ import {
     AddAudioTrackService,
     type AudioSource,
 } from './services/add-audio-track.service.js';
+import {
+    AddVideoAngleService,
+    type VideoSource,
+} from './services/add-video-angle.service.js';
 import {
     ExistingThumbnailsService,
     type ExistingThumbnailsJob,
@@ -135,7 +142,8 @@ export class EncodeController {
         private readonly waveformService: WaveformService,
         private readonly thumbnailService: ThumbnailService,
         private readonly addAudioTrackService: AddAudioTrackService,
-        private readonly existingThumbnailsService: ExistingThumbnailsService
+        private readonly existingThumbnailsService: ExistingThumbnailsService,
+        private readonly addVideoAngleService: AddVideoAngleService
     ) {}
 
     /**
@@ -723,7 +731,8 @@ export class EncodeController {
         ) {
             result.canRetry = true;
             if (session.stopped) result.stopped = true;
-            if (session.encodeConfig) result.encodeConfig = session.encodeConfig;
+            if (session.encodeConfig)
+                result.encodeConfig = session.encodeConfig;
             const duration = session.probeResult?.format?.duration ?? 0;
             if ((session.resumeFromSec ?? 0) > 0 && duration > 0) {
                 result.canResume = true;
@@ -1020,7 +1029,12 @@ export class EncodeController {
             keyHex
         );
         const adding = this.addAudioTrackService.job(sessionId);
-        return adding ? { ...media, adding } : media;
+        const addingAngle = this.addVideoAngleService.job(sessionId);
+        return {
+            ...media,
+            ...(adding ? { adding } : {}),
+            ...(addingAngle ? { addingAngle } : {}),
+        };
     }
 
     @Put(':sessionId/media/audio-tracks')
@@ -1049,11 +1063,7 @@ export class EncodeController {
         @Body() dto: AudioTracksWriteDto
     ): Promise<EncodedMediaDto> {
         const { s3, keyHex, masterKey } = this.editedVideo(sessionId);
-        if (this.addAudioTrackService.isBusy(sessionId)) {
-            throw new ConflictException(
-                'An audio track is being added to this video; save once it is done'
-            );
-        }
+        this.assertMasterIdle(sessionId);
         return this.hlsEditService.saveAudioTracks(
             s3,
             masterKey,
@@ -1115,10 +1125,124 @@ export class EncodeController {
         @Body() dto: AddAudioTrackDto
     ): Promise<AddAudioTrackJobDto> {
         this.assertEncoderAvailable();
+        this.assertMasterIdle(sessionId);
         return this.addAudioTrackService.start(sessionId, {
             ...dto,
             offsetSec: dto.offsetSec ?? 0,
         });
+    }
+
+    @Put(':sessionId/media/video-angles')
+    @UseGuards(AuthResolverGuard)
+    @AuthTypes('instance', 'session')
+    @ApiSecurity('apikey')
+    @ApiOperation({
+        summary: "Rename the existing video's camera angles, or remove some",
+        description:
+            'Only for an edit session. Rewrites NAME of the angles renamed and takes ' +
+            'the removed ones (group, variants, I-frame playlists) out of the master; ' +
+            'their files stay in storage. The first edit keeps the original at ' +
+            'master.m3u8.orig. Refused with 409 once the master has changed since ' +
+            '`ifMatch` was read.',
+    })
+    @ApiParam({ name: 'sessionId', description: 'Session ID' })
+    @ApiResponse({ status: 200, type: EncodedMediaDto })
+    @ApiResponse({ status: 400, description: 'An edit is invalid.' })
+    @ApiResponse({ status: 404, description: 'Session not found.' })
+    @ApiResponse({
+        status: 409,
+        description:
+            'Not an edit session, or the video changed since it was read.',
+    })
+    async putVideoAngles(
+        @Param('sessionId') sessionId: string,
+        @Body() dto: VideoAnglesWriteDto
+    ): Promise<EncodedMediaDto> {
+        const { s3, keyHex, masterKey } = this.editedVideo(sessionId);
+        this.assertMasterIdle(sessionId);
+        return this.hlsEditService.saveVideoAngles(
+            s3,
+            masterKey,
+            dto.ifMatch,
+            dto.edits,
+            keyHex,
+            dto.remove ?? []
+        );
+    }
+
+    @Post(':sessionId/media/video-sources')
+    @HttpCode(HttpStatus.OK)
+    @UseGuards(AuthResolverGuard)
+    @AuthTypes('instance', 'session')
+    @ApiSecurity('apikey')
+    @ApiOperation({
+        summary: 'List the video streams of a file to add an angle from',
+        description:
+            'Only for an edit session. The file is read where it is, never copied.',
+    })
+    @ApiParam({ name: 'sessionId', description: 'Session ID' })
+    @ApiResponse({
+        status: 400,
+        description: 'No such file, or no picture in it.',
+    })
+    @ApiResponse({ status: 409, description: 'Not an edit session.' })
+    async probeVideoSource(
+        @Param('sessionId') sessionId: string,
+        @Body() dto: AudioSourceRequestDto
+    ): Promise<VideoSource> {
+        return this.addVideoAngleService.probeSource(sessionId, dto.path);
+    }
+
+    @Post(':sessionId/media/video-angles')
+    @HttpCode(HttpStatus.ACCEPTED)
+    @UseGuards(AuthResolverGuard)
+    @AuthTypes('instance', 'session')
+    @ApiSecurity('apikey')
+    @ApiOperation({
+        summary: 'Add a camera angle to the existing video',
+        description:
+            "Only for an edit session. Encodes the file's picture to the sizes, bitrates, " +
+            "frame rate and segments of the video's main angle, uploads it beside the " +
+            'video in folders of its own, then adds it to the master over the version ' +
+            "`ifMatch` names, sharing the video's audio. A video with a single picture " +
+            'gains angles: its picture becomes the main one, named `mainName`. Runs in the ' +
+            'background: GET /api/sessions/:id/media reports it as `addingAngle`.',
+    })
+    @ApiParam({ name: 'sessionId', description: 'Session ID' })
+    @ApiResponse({ status: 202, type: AddVideoAngleJobDto })
+    @ApiResponse({
+        status: 400,
+        description: 'The file, stream, name or offset is invalid.',
+    })
+    @ApiResponse({
+        status: 409,
+        description:
+            'Not an edit session, or a track or an angle is already being added.',
+    })
+    async addVideoAngle(
+        @Param('sessionId') sessionId: string,
+        @Body() dto: AddVideoAngleDto
+    ): Promise<AddVideoAngleJobDto> {
+        this.assertEncoderAvailable();
+        this.assertMasterIdle(sessionId);
+        return this.addVideoAngleService.start(sessionId, {
+            ...dto,
+            offsetSec: dto.offsetSec ?? 0,
+        });
+    }
+
+    /** One change to the master at a time: a track or an angle being added holds it. */
+    private assertMasterIdle(sessionId: string): void {
+        if (this.addAudioTrackService.isBusy(sessionId)) {
+            throw new ConflictException(
+                'An audio track is being added to this video; try again once it is done'
+            );
+        }
+        if (this.addVideoAngleService.isBusy(sessionId)) {
+            throw new ConflictException(
+                'An angle is being added to this video; try again once it is done'
+            );
+        }
     }
 
     /** Where an edit session's video is, and its key; refused for an encode. */

@@ -20,6 +20,7 @@ import { SegmentPipelineService } from './services/segment-pipeline.service.js';
 import { PreviewService } from './services/preview.service.js';
 import { WaveformService } from './services/waveform.service.js';
 import { AddAudioTrackService } from './services/add-audio-track.service.js';
+import { AddVideoAngleService } from './services/add-video-angle.service.js';
 import { ExistingThumbnailsService } from './services/existing-thumbnails.service.js';
 
 @Module({
@@ -47,6 +48,7 @@ import { ExistingThumbnailsService } from './services/existing-thumbnails.servic
         PreviewService,
         WaveformService,
         AddAudioTrackService,
+        AddVideoAngleService,
         ExistingThumbnailsService,
     ],
     exports: [SessionService, SessionEventsService],
