@@ -106,3 +106,15 @@ export function findThumbnailCue(
     }
     return undefined;
 }
+
+/** How much of a video its thumbnails must span to be worth showing; the rest of the timeline would be blank. */
+export const THUMBNAIL_MIN_COVERAGE = 0.9;
+
+/**
+ * Whether `cues` span the video. A storyboard that stops early (an encode whose frame pass was cut
+ * short) leaves the roster blank for the rest of the video, which is worse than no roster.
+ */
+export function thumbnailsCoverDuration(cues: ThumbnailSpriteCue[], duration: number): boolean {
+    if (cues.length === 0 || !Number.isFinite(duration) || duration <= 0) return false;
+    return cues[cues.length - 1]!.endTime >= duration * THUMBNAIL_MIN_COVERAGE;
+}
