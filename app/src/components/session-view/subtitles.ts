@@ -138,3 +138,23 @@ export function languageName(code: string): string {
         return code;
     }
 }
+
+/**
+ * Every line moved by `by` seconds, later when positive. A line pushed before
+ * the start begins at 0:00; one that would end there is gone, since nothing
+ * of it would show.
+ */
+export function shiftLines(segments: Segment[], by: number): Segment[] {
+    return segments
+        .filter((cue) => cue.outSec + by > 0)
+        .map((cue) => ({ ...cue, inSec: Math.max(0, cue.inSec + by), outSec: cue.outSec + by }));
+}
+
+/** A time as a line's list shows it: `0:12.5`, `1:02:03.0`. */
+export function shortTime(sec: number): string {
+    const t = Math.max(0, Math.round(sec * 10) / 10);
+    const h = Math.floor(t / 3600);
+    const m = Math.floor((t % 3600) / 60);
+    const s = (t % 60).toFixed(1).padStart(4, '0');
+    return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
+}

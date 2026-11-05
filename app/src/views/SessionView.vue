@@ -2472,9 +2472,6 @@ onUnmounted(() => {
                                         () => playerRef?.getCurrentTime() ?? 0
                                     "
                                     :on-seek="(t: number) => playerRef?.seek(t)"
-                                    :on-play-pause="() => playerRef?.togglePlay()"
-                                    :is-playing="isPreviewPlaying"
-                                    :fps="segmentEditorProbeFps"
                                     @saved="onMasterChanged('subtitles')"
                                 />
 

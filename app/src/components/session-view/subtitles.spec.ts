@@ -4,6 +4,8 @@ import {
     copyTimings,
     languageName,
     readSubtitleFile,
+    shiftLines,
+    shortTime,
     subtitlesToSrt,
     subtitlesToVtt,
 } from './subtitles';
@@ -113,5 +115,29 @@ describe('languageName', () => {
         expect(languageName('fr')).toBe('Français');
         expect(languageName('en')).toBe('English');
         expect(languageName('not a code')).toBe('not a code');
+    });
+});
+
+describe('shiftLines', () => {
+    const cues = [
+        { id: 'a', inSec: 0.4, outSec: 1, label: 'gone' },
+        { id: 'b', inSec: 1, outSec: 3, label: 'clipped' },
+        { id: 'c', inSec: 5, outSec: 6, label: 'moved' },
+    ];
+
+    it('moves every line, later or earlier, keeping what still shows', () => {
+        expect(shiftLines(cues, 2).map((c) => [c.inSec, c.outSec])).toEqual([[2.4, 3], [3, 5], [7, 8]]);
+        expect(shiftLines(cues, -1.5).map((c) => [c.label, c.inSec, c.outSec])).toEqual([
+            ['clipped', 0, 1.5],
+            ['moved', 3.5, 4.5],
+        ]);
+    });
+});
+
+describe('shortTime', () => {
+    it('reads as a list shows it', () => {
+        expect(shortTime(12.46)).toBe('0:12.5');
+        expect(shortTime(62)).toBe('1:02.0');
+        expect(shortTime(3723)).toBe('1:02:03.0');
     });
 });

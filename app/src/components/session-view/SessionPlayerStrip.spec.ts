@@ -20,6 +20,7 @@ vi.mock('@luminary-media-converter/player-web', () => ({
 }));
 
 import SessionPlayerStrip from './SessionPlayerStrip.vue';
+import FormSelect from '../FormSelect.vue';
 
 const baseState = {
     lifecycle: 'ready',
@@ -53,7 +54,7 @@ async function mountStrip(state: Partial<typeof baseState>) {
 }
 
 const select = (wrapper: Awaited<ReturnType<typeof mountStrip>>) =>
-    wrapper.findComponent('[data-test="subtitleSelect"]');
+    wrapper.findAllComponents(FormSelect).find((c) => c.attributes('data-test') === 'subtitleSelect')!;
 
 describe('SessionPlayerStrip subtitles', () => {
     it('offers no subtitles selector for a video without any', async () => {

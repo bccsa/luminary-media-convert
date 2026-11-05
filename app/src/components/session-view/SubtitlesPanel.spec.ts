@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
-import { defineComponent, h } from 'vue';
 
 const api = vi.hoisted(() => ({
     getEncodedMedia: vi.fn(),
@@ -9,20 +8,6 @@ const api = vi.hoisted(() => ({
     deleteSubtitles: vi.fn(),
 }));
 vi.mock('../../api', () => api);
-
-// The timeline editor needs a browser's layout; its v-model is what the panel hands it.
-vi.mock('../segment-editor', async (importOriginal) => {
-    const actual = await importOriginal<typeof import('../segment-editor')>();
-    return {
-        ...actual,
-        SegmentEditor: defineComponent({
-            name: 'SegmentEditor',
-            props: { modelValue: { type: Array, required: true }, mode: String },
-            emits: ['update:modelValue'],
-            setup: (props) => () => h('div', { 'data-test': 'segmentEditorStub' }, `${props.modelValue.length} lines`),
-        }),
-    };
-});
 
 import SubtitlesPanel from './SubtitlesPanel.vue';
 
@@ -41,8 +26,11 @@ const mountPanel = () =>
         props: { sessionId: 'sess-1', sessionToken: 'tok', duration: 60, getCurrentTime: () => 0 },
         attachTo: document.body,
     });
+type Panel = ReturnType<typeof mountPanel>;
 
-const editor = (wrapper: ReturnType<typeof mountPanel>) => wrapper.findComponent({ name: 'SegmentEditor' });
+const words = (wrapper: Panel) =>
+    wrapper.findAll('[data-test="lineWords"]').map((t) => (t.element as HTMLTextAreaElement).value);
+const chips = (wrapper: Panel) => wrapper.findAll('[data-test="subtitleLanguage"]').map((b) => b.text());
 
 beforeEach(() => {
     vi.clearAllMocks();
@@ -51,23 +39,22 @@ beforeEach(() => {
 });
 
 describe('SubtitlesPanel', () => {
-    it("lists the video's languages and edits the first one's lines on the timeline", async () => {
+    it("opens the video's first language on its lines, nothing to save yet", async () => {
         const wrapper = mountPanel();
         await flushPromises();
-        expect(wrapper.findAll('[data-test="subtitleLanguage"]').map((b) => b.text())).toEqual(['English · en']);
+        expect(chips(wrapper)).toEqual(['English en']);
         expect(api.getSubtitles).toHaveBeenCalledWith('sess-1', 'tok', 'en');
-        expect(editor(wrapper).props('mode')).toBe('subtitles');
-        expect(editor(wrapper).props('modelValue')).toHaveLength(2);
-        expect(wrapper.find('[data-test="saveSubtitles"]').attributes('disabled')).toBeDefined();
+        expect(words(wrapper)).toEqual(['Hello', 'Goodbye']);
+        const save = wrapper.find('[data-test="saveSubtitles"]');
+        expect(save.text()).toBe('Save English');
+        expect(save.attributes('disabled')).toBeDefined();
     });
 
     it('saves a changed line as WebVTT, against the version it read', async () => {
         api.putSubtitles.mockResolvedValue(media([{ language: 'en', name: 'English' }], 'v2'));
         const wrapper = mountPanel();
         await flushPromises();
-        const lines = editor(wrapper).props('modelValue') as { label: string }[];
-        editor(wrapper).vm.$emit('update:modelValue', [{ ...lines[0], label: 'Hi there' }, lines[1]]);
-        await flushPromises();
+        await wrapper.findAll('[data-test="lineWords"]')[0]!.setValue('Hi there');
         expect(wrapper.text()).toContain('Unsaved');
 
         await wrapper.find('[data-test="saveSubtitles"]').trigger('click');
@@ -79,7 +66,22 @@ describe('SubtitlesPanel', () => {
         expect(wrapper.text()).not.toContain('Unsaved');
     });
 
-    it("adds a language on another's timings and opens it beside that one to translate", async () => {
+    it('switches between Lines and Translate on the same language', async () => {
+        const wrapper = mountPanel();
+        await flushPromises();
+        await wrapper.find('[data-test="subtitleViewTranslate"]').trigger('click');
+        // One language: nothing to translate from yet, and a way to start.
+        expect(wrapper.find('[data-test="translateNeedsTwo"]').text()).toContain('Add a second language to translate');
+        await wrapper.find('[data-test="translateNeedsTwo"] button').trigger('click');
+        expect(wrapper.find('[data-test="addSubtitlesForm"]').exists()).toBe(true);
+        expect((wrapper.find('[data-test="newSubtitleFromCopy"]').element as HTMLInputElement).checked).toBe(true);
+        expect(wrapper.find('[data-test="addSubtitles"]').text()).toBe('Start translating');
+
+        await wrapper.find('[data-test="subtitleViewLines"]').trigger('click');
+        expect(wrapper.find('[data-test="subtitleLines"]').exists()).toBe(true);
+    });
+
+    it("adds a language on another's timings and opens it in Translate beside that one", async () => {
         const wrapper = mountPanel();
         await flushPromises();
         await wrapper.find('[data-test="showAddSubtitles"]').trigger('click');
@@ -89,16 +91,11 @@ describe('SubtitlesPanel', () => {
         await wrapper.find('[data-test="addSubtitlesForm"]').trigger('submit');
         await flushPromises();
 
-        expect(wrapper.findAll('[data-test="subtitleLanguage"]').map((b) => b.text())).toEqual([
-            'English · en',
-            'Français · fr•',
-        ]);
-        const rows = wrapper.findAll('[data-test="subtitleCompareRow"]');
-        expect(rows.map((r) => r.text())).toEqual([
-            expect.stringContaining('Hello'),
-            expect.stringContaining('Goodbye'),
-        ]);
+        expect(chips(wrapper)).toEqual(['English en', 'Français fr']);
+        expect(wrapper.text()).toContain('Translating Français from');
+        expect(wrapper.find('[data-test="translatedCount"]').text()).toBe('0 of 2 translated');
         await wrapper.findAll('[data-test="subtitleCompareWords"]')[0]!.setValue('Bonjour');
+        expect(wrapper.find('[data-test="translatedCount"]').text()).toBe('1 of 2 translated');
 
         api.putSubtitles.mockResolvedValue(media([{ language: 'en', name: 'English' }, { language: 'fr', name: 'Français' }], 'v2'));
         await wrapper.find('[data-test="saveSubtitles"]').trigger('click');
@@ -120,49 +117,57 @@ describe('SubtitlesPanel', () => {
         expect(wrapper.find('[data-test="addSubtitles"]').attributes('disabled')).toBeDefined();
     });
 
-    it('replaces the lines with an imported .srt, unsaved until saved', async () => {
+    it('replaces the lines with a file imported from the Files menu, unsaved until saved', async () => {
         const wrapper = mountPanel();
         await flushPromises();
+        await wrapper.find('[data-test="subtitleFiles"]').trigger('click');
+        expect(wrapper.find('[data-test="subtitleFilesMenu"]').exists()).toBe(true);
         const input = wrapper.find('[data-test="importSubtitlesFile"]');
         const srt = '1\n00:00:02,000 --> 00:00:04,000\nFrom a file\n';
         // jsdom's File has no text(); the browser's has.
         const file = Object.assign(new File([srt], 'en.srt'), { text: async () => srt });
         Object.defineProperty(input.element, 'files', { value: [file] });
         await input.trigger('change');
-        // Reading a file finishes on a later turn than a promise.
         await vi.waitFor(() => expect(wrapper.text()).toContain('from en.srt'));
-        expect(editor(wrapper).props('modelValue')).toEqual([
-            expect.objectContaining({ inSec: 2, outSec: 4, label: 'From a file' }),
-        ]);
-        expect(wrapper.text()).toContain('1 lines from en.srt, not saved yet');
+        expect(words(wrapper)).toEqual(['From a file']);
         expect(wrapper.text()).toContain('Unsaved');
     });
 
-    it('takes a language out once it is confirmed', async () => {
+    it('renames a language in the Files menu', async () => {
+        const wrapper = mountPanel();
+        await flushPromises();
+        await wrapper.find('[data-test="subtitleFiles"]').trigger('click');
+        await wrapper.find('[data-test="subtitleName"]').setValue('English (UK)');
+        expect(chips(wrapper)).toEqual(['English (UK) en']);
+        expect(wrapper.find('[data-test="saveSubtitles"]').text()).toBe('Save English (UK)');
+        expect(wrapper.text()).toContain('Unsaved');
+    });
+
+    it('takes a language out once it is confirmed, and says the video has none', async () => {
         api.deleteSubtitles.mockResolvedValue(media([], 'v2'));
         const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
         const wrapper = mountPanel();
         await flushPromises();
+        await wrapper.find('[data-test="subtitleFiles"]').trigger('click');
         await wrapper.find('[data-test="removeSubtitles"]').trigger('click');
         await flushPromises();
         expect(confirm).toHaveBeenCalled();
         expect(api.deleteSubtitles).toHaveBeenCalledWith('sess-1', 'tok', 'en', 'v1');
-        expect(wrapper.text()).toContain('This video has no subtitles yet');
+        expect(wrapper.find('[data-test="subtitlesEmpty"]').text()).toContain('This video has no subtitles yet');
         expect(wrapper.emitted('saved')).toHaveLength(1);
     });
 
-    it('says when the video changed since it was read, and reads it again', async () => {
+    it('says when the video changed since it was read, and reads it again keeping the edit', async () => {
         api.putSubtitles.mockRejectedValue(new Error('Could not save the subtitles: The video was changed since it was opened'));
         const wrapper = mountPanel();
         await flushPromises();
-        await wrapper.find('[data-test="subtitleName"]').setValue('English (UK)');
+        await wrapper.findAll('[data-test="lineWords"]')[1]!.setValue('Bye');
         await wrapper.find('[data-test="saveSubtitles"]').trigger('click');
         await flushPromises();
         expect(wrapper.find('[data-test="subtitlesError"]').text()).toContain('changed since');
         await wrapper.find('[data-test="subtitlesError"] button').trigger('click');
         await flushPromises();
         expect(api.getEncodedMedia).toHaveBeenCalledTimes(2);
-        // The name typed survives the reread.
-        expect((wrapper.find('[data-test="subtitleName"]').element as HTMLInputElement).value).toBe('English (UK)');
+        expect(words(wrapper)).toEqual(['Hello', 'Bye']);
     });
 });
