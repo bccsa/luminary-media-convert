@@ -408,6 +408,31 @@ describe('SessionView', () => {
             expect(wrapper.findComponent({ name: 'AudioTracksPanel' }).vm).toBe(panel);
         });
 
+        it("offers the video's subtitles in a tab of their own, played against the player", async () => {
+            const editSession = {
+                status: 'completed',
+                mode: 'edit',
+                masterPlaylist: 'master.m3u8',
+                hlsUrl: HLS_URL,
+            };
+            detail.mockResolvedValue(uploadedSession(editSession));
+            status.mockResolvedValue(editSession);
+            const wrapper = await mountView();
+            await flushPromises();
+
+            await wrapper.find('[data-test="subtitlesTab"]').trigger('click');
+            const panel = wrapper.findComponent({ name: 'SubtitlesPanel' });
+            expect(panel.isVisible()).toBe(true);
+            expect(panel.props()).toMatchObject({ sessionId: 'sess-1', sessionToken: 'sess_token' });
+            expect(typeof panel.props('getCurrentTime')).toBe('function');
+            expect(typeof panel.props('onSeek')).toBe('function');
+        });
+
+        it('offers no subtitles tab for a finished encode', async () => {
+            const wrapper = await completedView();
+            expect(wrapper.find('[data-test="subtitlesTab"]').exists()).toBe(false);
+        });
+
         it('offers no audio tracks tab for a finished encode', async () => {
             const wrapper = await completedView();
             expect(wrapper.find('[data-test="audioTracksTab"]').exists()).toBe(false);

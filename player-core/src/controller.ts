@@ -386,6 +386,12 @@ export class PlayerController implements PlayerControllerApi {
         });
         if (generation !== this.generation) return;
 
+        // A subtitle chosen while this source was being prepared reached the
+        // engine before the source did, and an engine starts a source with
+        // subtitles off: it is told the choice again now that it has it.
+        const subtitle = this.state.activeSubtitleTrackId;
+        if (subtitle !== null) this.setSubtitleTrack(subtitle);
+
         // The adapter dropped the sidecar subtitles with the source it just
         // replaced. Empty on a first attach: they are loaded after it.
         if (this.sidecarTextTracks.length > 0) {

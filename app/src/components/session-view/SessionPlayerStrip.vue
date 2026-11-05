@@ -99,6 +99,22 @@ const showPlayerAudioSelect = computed(
     () => playerAudioOptions.value.length > 1
 );
 
+/** The video's subtitles, off by default as the master leaves them; `''` turns them off. */
+const subtitleOptions = computed(() => [
+    { value: '', label: 'Off' },
+    ...state.value.subtitleTracks.map((track) => ({
+        value: track.id,
+        label:
+            track.lang && track.lang !== track.label
+                ? `${track.label} (${track.lang})`
+                : track.label,
+    })),
+]);
+
+const showSubtitleSelect = computed(
+    () => state.value.subtitleTracks.length > 0
+);
+
 /** There is something playable to make full screen. */
 const canPlay = computed(() => state.value.lifecycle === 'ready');
 
@@ -107,6 +123,7 @@ const showPlaybackControlsRow = computed(
         showAngleRow.value ||
         props.showAudioSelect ||
         showPlayerAudioSelect.value ||
+        showSubtitleSelect.value ||
         showQualitySelect.value ||
         canPlay.value
 );
@@ -448,6 +465,27 @@ defineExpose({
                                 aria-label="Audio track"
                                 @update:model-value="
                                     controller?.setAudioTrack(String($event))
+                                "
+                            />
+                        </span>
+                        <span
+                            v-if="showSubtitleSelect"
+                            class="inline-flex shrink-0 items-center gap-1.5"
+                        >
+                            <label class="playback-slot-label shrink-0"
+                                >Subtitles:</label
+                            >
+                            <FormSelect
+                                variant="playback"
+                                presentation="custom"
+                                :model-value="state.activeSubtitleTrackId ?? ''"
+                                :options="subtitleOptions"
+                                aria-label="Subtitles"
+                                data-test="subtitleSelect"
+                                @update:model-value="
+                                    controller?.setSubtitleTrack(
+                                        $event ? String($event) : null
+                                    )
                                 "
                             />
                         </span>

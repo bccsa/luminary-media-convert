@@ -84,6 +84,7 @@ describe('HlsEditService — an existing video', () => {
                     },
                 ],
                 angles: [],
+                subtitles: [],
                 chapterLanguages: ['en', 'fr'],
                 etag: 'v1',
                 encrypted: false,

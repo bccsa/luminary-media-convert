@@ -454,6 +454,59 @@ export async function putVideoAngles(
     );
 }
 
+/** One language of the video's subtitles, as WebVTT. */
+export async function getSubtitles(
+    sessionId: string,
+    sessionToken: string,
+    language: string
+): Promise<{ language: string; name: string; vtt: string }> {
+    return requestJson(
+        `${API_BASE}/api/sessions/${sessionId}/media/subtitles/${encodeURIComponent(language)}`,
+        { token: sessionToken, errorPrefix: 'Could not read the subtitles' }
+    );
+}
+
+/**
+ * Write one language of the video's subtitles, adding the language when the
+ * video has none in it. Refused (409) once the video has changed since
+ * `ifMatch` was read.
+ */
+export async function putSubtitles(
+    sessionId: string,
+    sessionToken: string,
+    language: string,
+    ifMatch: string,
+    name: string,
+    vtt: string
+): Promise<EncodedMedia> {
+    return requestJson(
+        `${API_BASE}/api/sessions/${sessionId}/media/subtitles/${encodeURIComponent(language)}`,
+        {
+            method: 'PUT',
+            token: sessionToken,
+            body: { ifMatch, name, vtt },
+            errorPrefix: 'Could not save the subtitles',
+        }
+    );
+}
+
+/** Take one language of the video's subtitles out. */
+export async function deleteSubtitles(
+    sessionId: string,
+    sessionToken: string,
+    language: string,
+    ifMatch: string
+): Promise<EncodedMedia> {
+    return requestJson(
+        `${API_BASE}/api/sessions/${sessionId}/media/subtitles/${encodeURIComponent(language)}?ifMatch=${encodeURIComponent(ifMatch)}`,
+        {
+            method: 'DELETE',
+            token: sessionToken,
+            errorPrefix: 'Could not remove the subtitles',
+        }
+    );
+}
+
 /** The video streams of a file on this machine or a link, to add an angle from. */
 export async function probeVideoSource(
     sessionId: string,

@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import {
     BadRequestException,
     ConflictException,
@@ -36,6 +37,16 @@ import {
     type AudioTrackEdit,
 } from './audio-tracks.js';
 import {
+    MAX_SUBTITLE_VTT_BYTES,
+    listSubtitleTracks,
+    removeSubtitleLines,
+    segmentUriOf,
+    subtitleFileNames,
+    subtitlePlaylist,
+    upsertSubtitleLines,
+    type SubtitleTrack,
+} from './subtitle-tracks.js';
+import {
     listVideoAngles,
     rewriteVideoAngles,
     type VideoAngle,
@@ -68,6 +79,8 @@ export interface EncodedMedia {
     tracks: AudioTrack[];
     /** The camera angles; one unnamed angle for a video with a single picture. */
     angles: VideoAngle[];
+    /** The subtitles in the master, one language each. */
+    subtitles: SubtitleTrack[];
     /** Languages with a chapters/<lang>.vtt beside the master. */
     chapterLanguages: string[];
     /** The master's ETag: a save is refused once the master has changed since. */
@@ -262,6 +275,7 @@ export class HlsEditService {
         return {
             tracks: listAudioTracks(master),
             angles: listVideoAngles(master),
+            subtitles: listSubtitleTracks(master),
             chapterLanguages: collectChaptersLanguages(keys, folderPrefix),
             etag,
             encrypted: isLmcencPayload(body),
@@ -327,6 +341,204 @@ export class HlsEditService {
             { cacheControl: EDITED_CACHE_CONTROL }
         );
         return this.readEncodedMedia(s3, masterKey, keyHex);
+    }
+
+    /** A language's subtitles as WebVTT text, decrypted; a 404-worthy error when the video has none in it. */
+    async readSubtitles(
+        s3: S3ConfigDto,
+        masterKey: string,
+        language: string,
+        keyHex?: string
+    ): Promise<{ language: string; name: string; vtt: string }> {
+        const { body } = await this.s3EtagService.getObjectWithEtag(s3, masterKey);
+        const track = listSubtitleTracks(
+            parseMasterPlaylist(this.decode(body, keyHex))
+        ).find((t) => t.language === language);
+        if (!track) {
+            throw new BadRequestException(`This video has no "${language}" subtitles`);
+        }
+        const playlistKey = resolveKey(masterKey, track.uri);
+        const playlist = this.decode(
+            (await this.s3EtagService.getObjectWithEtag(s3, playlistKey)).body,
+            keyHex
+        );
+        const segment = segmentUriOf(playlist);
+        if (!segment) {
+            throw new BadRequestException(`The "${language}" subtitles list no file`);
+        }
+        const vtt = this.decode(
+            (await this.s3EtagService.getObjectWithEtag(s3, resolveKey(playlistKey, segment))).body,
+            keyHex
+        );
+        return { language: track.language, name: track.name, vtt };
+    }
+
+    /**
+     * Writes a language's subtitles and points the master at them, adding the
+     * language when the video has none in it yet.
+     *
+     * Every save writes new file names, so no cache hands out the words from
+     * before it, and the master moves to them only over the version `ifMatch`
+     * names, encrypted when it was read encrypted, the first edit keeping the
+     * original at `master.m3u8.orig`. The files a save replaces go once the
+     * master no longer names them.
+     */
+    async saveSubtitles(
+        s3: S3ConfigDto,
+        masterKey: string,
+        ifMatch: string,
+        subtitles: { language: string; name: string; vtt: string },
+        keyHex?: string
+    ): Promise<EncodedMedia> {
+        const { body, etag } = await this.s3EtagService.getObjectWithEtag(s3, masterKey);
+        this.assertSameVersion(etag, ifMatch);
+        const encrypted = isLmcencPayload(body);
+        if (encrypted && !keyHex) {
+            throw new BadRequestException(
+                'This video is encrypted: its key is needed to edit it'
+            );
+        }
+        const vtt = subtitles.vtt;
+        if (!/^\uFEFF?WEBVTT(\b|$)/.test(vtt.slice(0, 16).trimStart())) {
+            throw new BadRequestException('Subtitles must be a WebVTT document (start with WEBVTT)');
+        }
+        if (Buffer.byteLength(vtt, 'utf-8') > MAX_SUBTITLE_VTT_BYTES) {
+            throw new PayloadTooLargeException(
+                `Subtitles exceed ${MAX_SUBTITLE_VTT_BYTES} bytes`
+            );
+        }
+
+        const text = this.decode(body, keyHex);
+        const master = parseMasterPlaylist(text);
+        const before = listSubtitleTracks(master).find(
+            (t) => t.language === subtitles.language
+        );
+        const names = subtitleFileNames(subtitles.language, randomBytes(4).toString('hex'));
+        // Checked before anything is written: a bad language or name leaves storage as it was.
+        const rewritten = upsertSubtitleLines(text, {
+            language: subtitles.language,
+            name: subtitles.name,
+            uri: names.playlist,
+        });
+
+        const key = encrypted ? keyHex : undefined;
+        const playlistKey = resolveKey(masterKey, names.playlist);
+        const duration = await this.videoDuration(s3, masterKey, master, keyHex);
+        await this.s3EtagService.putObject(
+            s3,
+            resolveKey(playlistKey, names.vtt),
+            this.encode(vtt, key),
+            key ? OCTET_STREAM : VTT_CONTENT_TYPE
+        );
+        await this.s3EtagService.putObject(
+            s3,
+            playlistKey,
+            this.encode(subtitlePlaylist(names.vtt, duration), key),
+            key ? OCTET_STREAM : M3U8_CONTENT_TYPE
+        );
+        await this.writeEditedMaster(s3, masterKey, body, rewritten, ifMatch, key);
+        if (before) await this.dropSubtitleFiles(s3, masterKey, before.uri, keyHex);
+        return this.readEncodedMedia(s3, masterKey, keyHex);
+    }
+
+    /** Takes a language's subtitles out of the master, as {@link saveSubtitles} writes it; then their files. */
+    async removeSubtitles(
+        s3: S3ConfigDto,
+        masterKey: string,
+        ifMatch: string,
+        language: string,
+        keyHex?: string
+    ): Promise<EncodedMedia> {
+        const { body, etag } = await this.s3EtagService.getObjectWithEtag(s3, masterKey);
+        this.assertSameVersion(etag, ifMatch);
+        const encrypted = isLmcencPayload(body);
+        if (encrypted && !keyHex) {
+            throw new BadRequestException(
+                'This video is encrypted: its key is needed to edit it'
+            );
+        }
+        const { text, uri } = removeSubtitleLines(this.decode(body, keyHex), language);
+        await this.writeEditedMaster(s3, masterKey, body, text, ifMatch, encrypted ? keyHex : undefined);
+        await this.dropSubtitleFiles(s3, masterKey, uri, keyHex);
+        return this.readEncodedMedia(s3, masterKey, keyHex);
+    }
+
+    private assertSameVersion(etag: string, ifMatch: string): void {
+        if (etag !== ifMatch) {
+            throw new ConflictException({
+                message: 'The video was changed since it was opened',
+                code: 'ETAG_MISMATCH',
+                currentEtag: etag,
+            });
+        }
+    }
+
+    /** The master as edited, over the version read; the first edit keeps the original at `.orig`. */
+    private async writeEditedMaster(
+        s3: S3ConfigDto,
+        masterKey: string,
+        original: Buffer,
+        text: string,
+        ifMatch: string,
+        keyHex?: string
+    ): Promise<void> {
+        const contentType = keyHex ? OCTET_STREAM : M3U8_CONTENT_TYPE;
+        await this.s3EtagService.putObjectIfAbsent(s3, `${masterKey}.orig`, original, contentType);
+        await this.s3EtagService.putObjectIfMatch(
+            s3,
+            masterKey,
+            this.encode(text, keyHex),
+            ifMatch,
+            contentType,
+            { cacheControl: EDITED_CACHE_CONTROL }
+        );
+    }
+
+    /**
+     * A language's files the master no longer names. Only ones under
+     * `subtitles/` go: a rendition the encoder did not write is left where it
+     * is. Best effort: a file left behind is only space.
+     */
+    private async dropSubtitleFiles(
+        s3: S3ConfigDto,
+        masterKey: string,
+        playlistUri: string,
+        keyHex?: string
+    ): Promise<void> {
+        if (!playlistUri.startsWith('subtitles/')) return;
+        const playlistKey = resolveKey(masterKey, playlistUri);
+        try {
+            const playlist = this.decode(
+                (await this.s3EtagService.getObjectWithEtag(s3, playlistKey)).body,
+                keyHex
+            );
+            const segment = segmentUriOf(playlist);
+            await this.s3EtagService.deleteObjects(s3, [
+                playlistKey,
+                ...(segment ? [resolveKey(playlistKey, segment)] : []),
+            ]);
+        } catch (err) {
+            this.logger.warn(`Left ${playlistKey} behind: ${(err as Error).message}`);
+        }
+    }
+
+    /** The video's length: its first variant's segments added up. */
+    private async videoDuration(
+        s3: S3ConfigDto,
+        masterKey: string,
+        master: HlsParsedMaster,
+        keyHex?: string
+    ): Promise<number> {
+        const variant = master.variants[0];
+        if (!variant) throw new BadRequestException('The video lists no variants');
+        const playlist = this.decode(
+            (await this.s3EtagService.getObjectWithEtag(s3, resolveKey(masterKey, variant.uri))).body,
+            keyHex
+        );
+        let total = 0;
+        for (const match of playlist.matchAll(/^#EXTINF:([\d.]+)/gm)) total += Number(match[1]);
+        if (!(total > 0)) throw new BadRequestException("The video's length could not be read");
+        return total;
     }
 
     /**
@@ -537,6 +749,16 @@ export class HlsEditService {
         } while (continuationToken);
         return out;
     }
+}
+
+/** `uri` as a storage key, relative to the playlist at `fromKey`. */
+function resolveKey(fromKey: string, uri: string): string {
+    const parts = folderOf(fromKey).split('/').filter(Boolean);
+    for (const part of uri.split('/')) {
+        if (part === '..') parts.pop();
+        else if (part && part !== '.') parts.push(part);
+    }
+    return parts.join('/');
 }
 
 function folderOf(key: string): string {
