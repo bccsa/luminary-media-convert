@@ -104,30 +104,43 @@ const addingLabel = computed(() => {
         : `${phase}…`;
 });
 
-/** Read again every second while a track is being added, until it is done. */
-let poll: ReturnType<typeof setInterval> | undefined;
+/**
+ * Read again every second while a track is being added, until it is done. One
+ * read at a time: reading an encrypted master can take longer than the
+ * interval, and two reads that both found the add done would reload the player
+ * twice.
+ */
+let poll: ReturnType<typeof setTimeout> | undefined;
+let polling = false;
 function stopPolling(): void {
-    if (poll) clearInterval(poll);
+    polling = false;
+    if (poll) clearTimeout(poll);
     poll = undefined;
 }
 function startPolling(): void {
-    if (poll) return;
-    poll = setInterval(async () => {
-        const token = props.sessionToken;
-        if (!token) return;
+    if (polling) return;
+    polling = true;
+    poll = setTimeout(pollOnce, 1000);
+}
+async function pollOnce(): Promise<void> {
+    poll = undefined;
+    const token = props.sessionToken;
+    if (token) {
         try {
             const next = await getEncodedMedia(props.sessionId, token);
+            if (!polling) return;
             if (next.adding?.state !== 'running') {
                 stopPolling();
                 setRows(next);
                 if (next.adding?.state === 'done') emit('saved');
-            } else {
-                media.value = next;
+                return;
             }
+            media.value = next;
         } catch {
-            // The next tick asks again.
+            // The next read asks again.
         }
-    }, 1000);
+    }
+    if (polling) poll = setTimeout(pollOnce, 1000);
 }
 watch(adding, (running) => (running ? startPolling() : undefined));
 onBeforeUnmount(stopPolling);

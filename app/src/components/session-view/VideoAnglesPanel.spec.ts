@@ -151,6 +151,32 @@ describe('VideoAnglesPanel', () => {
         expect(wrapper.emitted('saved')).toHaveLength(1);
     });
 
+    it('reloads the player once when the add is done, however slow the reads are', async () => {
+        vi.useFakeTimers();
+        const running = {
+            ...ANGLES,
+            addingAngle: { state: 'running', phase: 'saving', progress: 99, name: 'Choir' },
+        };
+        const done = {
+            ...ANGLES,
+            etag: 'v3',
+            addingAngle: { state: 'done', phase: 'done', progress: 100, name: 'Choir' },
+        };
+        media.mockResolvedValueOnce(running);
+        const wrapper = mountPanel();
+        await flushPromises();
+
+        // Each read takes 2.5 s, longer than the interval between them.
+        media.mockImplementation(
+            () => new Promise((resolve) => setTimeout(() => resolve(done), 2500))
+        );
+        await vi.advanceTimersByTimeAsync(10_000);
+        await flushPromises();
+
+        expect(media).toHaveBeenCalledTimes(2);
+        expect(wrapper.emitted('saved')).toHaveLength(1);
+    });
+
     it('waits while an audio track is being added', async () => {
         media.mockResolvedValue({
             ...ANGLES,
