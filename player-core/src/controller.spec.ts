@@ -296,6 +296,31 @@ describe('PlayerController — coming-soon polling', () => {
         },
     );
 
+    it('unloads the previous source, so play cannot resume it under coming soon', async () => {
+        const NEXT_URL = `${BASE}/next/master.m3u8`;
+        const { adapter, controller } = setup({
+            ...simpleRoutes,
+            [NEXT_URL]: { status: 404 },
+        });
+        await controller.load({ masterUrl: MASTER_URL });
+        expect(adapter.unloadCount).toBe(0);
+
+        await controller.load({ masterUrl: NEXT_URL });
+
+        expect(controller.getState().lifecycle).toBe('waiting-for-master');
+        expect(adapter.unloadCount).toBe(1);
+    });
+
+    it('still pauses an adapter that cannot unload', async () => {
+        const { adapter, controller } = setup({ [MASTER_URL]: { status: 404 } });
+        adapter.unload = undefined;
+
+        await controller.load({ masterUrl: MASTER_URL });
+
+        expect(controller.getState().lifecycle).toBe('waiting-for-master');
+        expect(adapter.pauseCount).toBe(1);
+    });
+
     it('keeps re-checking on the fixed cadence', async () => {
         const { controller, calls } = setup({ [MASTER_URL]: { status: 404 } });
         await controller.load({ masterUrl: MASTER_URL });
@@ -1049,6 +1074,22 @@ describe('PlayerController — an adapter that has exhausted its recovery', () =
 
         adapter.emit('error', { category: 'network', fatal: true });
         expect(controller.getState().error?.code).toBe('network');
+    });
+});
+
+describe('PlayerController — a source that fails to load', () => {
+    it('unloads the previous source, so play cannot resume it under the error', async () => {
+        const NEXT_URL = `${BASE}/next/master.m3u8`;
+        const { adapter, controller } = setup({
+            ...simpleRoutes,
+            [NEXT_URL]: { status: 500 },
+        });
+        await controller.load({ masterUrl: MASTER_URL });
+
+        await controller.load({ masterUrl: NEXT_URL });
+
+        expect(controller.getState().lifecycle).toBe('error');
+        expect(adapter.unloadCount).toBe(1);
     });
 });
 

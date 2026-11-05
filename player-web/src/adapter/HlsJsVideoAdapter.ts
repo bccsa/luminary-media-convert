@@ -241,6 +241,18 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         if (wasPlaying) await this.el.play().catch(() => undefined);
     }
 
+    /**
+     * Clearing the element's source destroys its hls.js engine, which empties the `<video>`; the next
+     * `loadSource` builds a new one.
+     */
+    unload(): void {
+        if (this.destroyed) return;
+        this.teardownSource();
+        this.bindEngine(null);
+        this.engineKeyHex = undefined;
+        this.el.source = null;
+    }
+
     // -- playback -----------------------------------------------------------
 
     async play(): Promise<void> {

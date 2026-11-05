@@ -249,7 +249,7 @@ export class PlayerController implements PlayerControllerApi {
                 // The engine may still hold the PREVIOUS source (teardown
                 // stops our plumbing, not the adapter). "Coming soon" over
                 // silently continuing stale playback is a lie — stop it.
-                this.adapter.pause();
+                this.releaseEngineSource();
                 this.store.setState({
                     lifecycle: 'waiting-for-master',
                     playing: false,
@@ -973,9 +973,15 @@ export class PlayerController implements PlayerControllerApi {
         // Same reasoning as the waiting-for-master path: the adapter may
         // still be playing a previous source; an error surface over live
         // playback misstates both.
-        this.adapter.pause();
+        this.releaseEngineSource();
         this.store.setState({ lifecycle: 'error', error, playing: false });
         this.emitter.emit('error', error);
+    }
+
+    /** Pausing alone leaves the previous source one press of play away. */
+    private releaseEngineSource(): void {
+        this.adapter.pause();
+        this.adapter.unload?.();
     }
 
     private emitNonFatal(error: PlayerError): void {
