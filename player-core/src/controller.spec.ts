@@ -92,6 +92,59 @@ describe('PlayerController — a subtitle pick', () => {
     });
 });
 
+describe('PlayerController — a subtitle picked as a source loads', () => {
+    /** The adapter's source loads and subtitle choices, in the order they reached it. */
+    function recordOrder(adapter: FakeAdapter): string[] {
+        const order: string[] = [];
+        const load = adapter.loadSource.bind(adapter);
+        const choose = adapter.setActiveTextTrack.bind(adapter);
+        adapter.loadSource = async (src) => {
+            order.push('load');
+            return load(src);
+        };
+        adapter.setActiveTextTrack = (id, track) => {
+            order.push(`subtitle:${id}`);
+            choose(id, track);
+        };
+        return order;
+    }
+
+    it('tells the engine again once it has the source, so a pick made while it was prepared is not lost', async () => {
+        const { adapter, controller } = setup(multiAngleRoutes);
+        const order = recordOrder(adapter);
+        // The host picks as soon as the tracks are listed, before the engine has the source.
+        let picked = false;
+        controller.subscribe((state) => {
+            if (!picked && state.subtitleTracks.length > 0) {
+                picked = true;
+                controller.setSubtitleTrack(state.subtitleTracks[0]!.id);
+            }
+        });
+        await controller.load({ masterUrl: MASTER_URL });
+        const id = controller.getState().subtitleTracks[0]!.id;
+        expect(order).toEqual([`subtitle:${id}`, 'load', `subtitle:${id}`]);
+        expect(controller.getState().activeSubtitleTrackId).toBe(id);
+    });
+
+    it('keeps the subtitles on across an angle switch', async () => {
+        const { adapter, controller } = setup(multiAngleRoutes);
+        await controller.load({ masterUrl: MASTER_URL });
+        const id = controller.getState().subtitleTracks[0]!.id;
+        controller.setSubtitleTrack(id);
+        const order = recordOrder(adapter);
+
+        await controller.setAngle('angle_1');
+        expect(order.slice(-2)).toEqual(['load', `subtitle:${id}`]);
+    });
+
+    it('tells the engine nothing after the source when no subtitle is chosen', async () => {
+        const { adapter, controller } = setup(multiAngleRoutes);
+        const order = recordOrder(adapter);
+        await controller.load({ masterUrl: MASTER_URL });
+        expect(order).toEqual(['load']);
+    });
+});
+
 describe('PlayerController — a subtitle track read for its words', () => {
     it('reads the lines once per track, and nothing before a source is loaded', async () => {
         const { controller, calls } = setup(multiAngleRoutes);
