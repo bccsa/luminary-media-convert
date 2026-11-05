@@ -982,6 +982,8 @@ export class PlayerController implements PlayerControllerApi {
     private releaseEngineSource(): void {
         this.adapter.pause();
         this.adapter.unload?.();
+        // The old source played on while the new one was fetched, and its position reached the state after the reset.
+        this.store.setState({ currentTime: 0, duration: 0, bufferedEnd: 0 });
     }
 
     private emitNonFatal(error: PlayerError): void {

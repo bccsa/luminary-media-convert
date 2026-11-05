@@ -311,6 +311,22 @@ describe('PlayerController — coming-soon polling', () => {
         expect(adapter.unloadCount).toBe(1);
     });
 
+    it('shows no time from the previous source under coming soon', async () => {
+        const NEXT_URL = `${BASE}/next/master.m3u8`;
+        const { adapter, controller } = setup({ ...simpleRoutes, [NEXT_URL]: { status: 404 } });
+        await controller.load({ masterUrl: MASTER_URL });
+
+        const next = controller.load({ masterUrl: NEXT_URL });
+        // The old source plays on while the next master is fetched.
+        adapter.advanceTo(49);
+        adapter.emit('progress', { bufferedEnd: 60 });
+        await next;
+
+        expect(controller.getState().lifecycle).toBe('waiting-for-master');
+        expect(controller.getState().currentTime).toBe(0);
+        expect(controller.getState().bufferedEnd).toBe(0);
+    });
+
     it('still pauses an adapter that cannot unload', async () => {
         const { adapter, controller } = setup({ [MASTER_URL]: { status: 404 } });
         adapter.unload = undefined;
