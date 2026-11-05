@@ -92,6 +92,8 @@ export interface FetchOptions {
     /** Content check applied after decoding. Default `'any'`. */
     expect?: ExpectedAsset;
     signal?: AbortSignal;
+    /** The request's HTTP cache mode; the browser's default when unset. */
+    httpCache?: RequestCache;
     /** Injectable for tests; defaults to `globalThis.crypto.subtle`. */
     subtle?: SubtleLike;
 }
@@ -108,11 +110,14 @@ export interface DecodedAsset {
 /** Raw bytes of a URL, with 404/403 surfaced as `missing`. */
 export async function fetchBytes(
     url: string,
-    options: Pick<FetchOptions, 'fetchImpl' | 'signal'>,
+    options: Pick<FetchOptions, 'fetchImpl' | 'signal' | 'httpCache'>,
 ): Promise<Uint8Array> {
     let response: Response;
     try {
-        response = await options.fetchImpl(url, { signal: options.signal });
+        response = await options.fetchImpl(url, {
+            signal: options.signal,
+            ...(options.httpCache ? { cache: options.httpCache } : {}),
+        });
     } catch (cause) {
         throw new PipelineError('fetch-failed', `Could not fetch ${url}`, {
             cause,

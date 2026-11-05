@@ -195,6 +195,12 @@ export async function loadMaster(
         keyHex: ctx.keyHex,
         expect: 'playlist',
         signal: ctx.signal,
+        // Checked with the server on every load: a master is rewritten in
+        // place when angles or tracks change, and one stored without a
+        // Cache-Control header would otherwise be served stale from the HTTP
+        // cache for as long as the browser guesses it fresh. It is small, and
+        // an unchanged one costs a 304.
+        httpCache: 'no-cache',
         subtle: ctx.subtle,
     });
     ctx.cache.set(absolute, asset.text);
