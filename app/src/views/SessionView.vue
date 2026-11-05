@@ -27,6 +27,7 @@ import SessionOutputPanel from '../components/session-view/SessionOutputPanel.vu
 import SessionPlayerStrip from '../components/session-view/SessionPlayerStrip.vue';
 import AudioTracksPanel from '../components/session-view/AudioTracksPanel.vue';
 import VideoAnglesPanel from '../components/session-view/VideoAnglesPanel.vue';
+import SubtitlesPanel from '../components/session-view/SubtitlesPanel.vue';
 import SessionTopline from '../components/session-view/SessionTopline.vue';
 import SessionTrimWorkspace from '../components/session-view/SessionTrimWorkspace.vue';
 import SessionWorkflowPanel from '../components/session-view/SessionWorkflowPanel.vue';
@@ -1853,18 +1854,20 @@ const encodingAsideTab = ref<'progress' | 'chapters'>('progress');
 const editsExistingVideo = computed(() => session.value?.mode === 'edit');
 
 /** Sub-tab within the aside panel of an edit session. */
-const editAsideTab = ref<'chapters' | 'tracks' | 'angles'>('chapters');
+const editAsideTab = ref<'chapters' | 'tracks' | 'angles' | 'subtitles'>('chapters');
 const audioTracksPanelRef = ref<InstanceType<typeof AudioTracksPanel> | null>(
     null
 );
 const videoAnglesPanelRef = ref<InstanceType<typeof VideoAnglesPanel> | null>(
     null
 );
-/** The master changed: the player and the other tab read it again. */
-function onMasterChanged(from: 'tracks' | 'angles'): void {
+const subtitlesPanelRef = ref<InstanceType<typeof SubtitlesPanel> | null>(null);
+/** The master changed: the player and the other tabs read it again. */
+function onMasterChanged(from: 'tracks' | 'angles' | 'subtitles'): void {
     sessionPlayerStripRef.value?.reload?.();
-    if (from === 'tracks') void videoAnglesPanelRef.value?.load();
-    else void audioTracksPanelRef.value?.load();
+    if (from !== 'angles') void videoAnglesPanelRef.value?.load();
+    if (from !== 'tracks') void audioTracksPanelRef.value?.load();
+    if (from !== 'subtitles') void subtitlesPanelRef.value?.load();
 }
 
 const trimTimelineWorkspaceRef = ref<InstanceType<
@@ -2422,6 +2425,19 @@ onUnmounted(() => {
                                     >
                                         Angles
                                     </button>
+                                    <button
+                                        type="button"
+                                        class="flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
+                                        :class="
+                                            editAsideTab === 'subtitles'
+                                                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
+                                                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+                                        "
+                                        data-test="subtitlesTab"
+                                        @click="editAsideTab = 'subtitles'"
+                                    >
+                                        Subtitles
+                                    </button>
                                 </div>
 
                                 <!--
@@ -2444,6 +2460,22 @@ onUnmounted(() => {
                                     :session-id="sessionId"
                                     :session-token="sessionToken"
                                     @saved="onMasterChanged('angles')"
+                                />
+                                <SubtitlesPanel
+                                    v-if="editsExistingVideo"
+                                    v-show="editAsideTab === 'subtitles'"
+                                    ref="subtitlesPanelRef"
+                                    :session-id="sessionId"
+                                    :session-token="sessionToken"
+                                    :duration="chaptersSidePanelDuration"
+                                    :get-current-time="
+                                        () => playerRef?.getCurrentTime() ?? 0
+                                    "
+                                    :on-seek="(t: number) => playerRef?.seek(t)"
+                                    :on-play-pause="() => playerRef?.togglePlay()"
+                                    :is-playing="isPreviewPlaying"
+                                    :fps="segmentEditorProbeFps"
+                                    @saved="onMasterChanged('subtitles')"
                                 />
 
                                 <!-- Encoding progress panel -->

@@ -146,9 +146,19 @@ export interface VideoSource {
 }
 
 /** What an edit session's video offers to edit, and the version read. */
+/** One language's subtitles in the video's master. */
+export interface SubtitleTrack {
+    language: string;
+    name: string;
+    /** Its media playlist, relative to the master. */
+    uri: string;
+    default: boolean;
+}
+
 export interface EncodedMedia {
     tracks: AudioTrack[];
     angles: VideoAngle[];
+    subtitles: SubtitleTrack[];
     chapterLanguages: string[];
     etag: string;
     encrypted: boolean;
