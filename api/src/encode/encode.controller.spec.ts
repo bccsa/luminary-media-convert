@@ -338,6 +338,39 @@ describe('EncodeController', () => {
             );
         });
 
+        it("reads, writes and removes a language's subtitles of the video it opened, with its key", async () => {
+            const session = editSession(true);
+            hlsEditService.readSubtitles = vi.fn().mockResolvedValue({ language: 'fr', name: 'Français', vtt: 'WEBVTT\n' });
+            hlsEditService.saveSubtitles = vi.fn().mockResolvedValue({ etag: 'v2' });
+            hlsEditService.removeSubtitles = vi.fn().mockResolvedValue({ etag: 'v3' });
+
+            await controller.getSubtitles(session.id, 'fr');
+            expect(hlsEditService.readSubtitles).toHaveBeenCalledWith(expect.anything(), MASTER_KEY, 'fr', KEY);
+
+            await controller.putSubtitles(session.id, 'fr', { ifMatch: 'v1', name: 'Français', vtt: 'WEBVTT\n' });
+            expect(hlsEditService.saveSubtitles).toHaveBeenCalledWith(
+                expect.anything(),
+                MASTER_KEY,
+                'v1',
+                { language: 'fr', name: 'Français', vtt: 'WEBVTT\n' },
+                KEY
+            );
+
+            await controller.deleteSubtitles(session.id, 'fr', 'v2');
+            expect(hlsEditService.removeSubtitles).toHaveBeenCalledWith(expect.anything(), MASTER_KEY, 'v2', 'fr', KEY);
+            await expect(controller.deleteSubtitles(session.id, 'fr', '')).rejects.toThrow(BadRequestException);
+        });
+
+        it('waits to write subtitles while an angle is being added', async () => {
+            const session = editSession(false);
+            hlsEditService.saveSubtitles = vi.fn();
+            addVideoAngleService.isBusy.mockReturnValue(true);
+            await expect(
+                controller.putSubtitles(session.id, 'fr', { ifMatch: 'v1', name: 'Français', vtt: 'WEBVTT\n' })
+            ).rejects.toThrow(ConflictException);
+            expect(hlsEditService.saveSubtitles).not.toHaveBeenCalled();
+        });
+
         it('reports the audio track being added with the video', async () => {
             const session = editSession(false);
             hlsEditService.readEncodedMedia = vi

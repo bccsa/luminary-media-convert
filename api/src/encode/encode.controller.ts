@@ -60,6 +60,8 @@ import {
     AudioSourceRequestDto,
     AudioTracksWriteDto,
     EncodedMediaDto,
+    SubtitlesDto,
+    SubtitlesWriteDto,
 } from './dto/encoded-media.dto.js';
 import {
     AddAudioTrackService,
@@ -1130,6 +1132,85 @@ export class EncodeController {
             ...dto,
             offsetSec: dto.offsetSec ?? 0,
         });
+    }
+
+    @Get(':sessionId/media/subtitles/:language')
+    @UseGuards(AuthResolverGuard)
+    @AuthTypes('instance', 'session')
+    @ApiSecurity('apikey')
+    @ApiOperation({
+        summary: "One language of the existing video's subtitles, as WebVTT",
+        description: 'Only for an edit session. Decrypted when the video is encrypted.',
+    })
+    @ApiParam({ name: 'sessionId', description: 'Session ID' })
+    @ApiParam({ name: 'language', description: 'LANGUAGE of the subtitles, e.g. fr' })
+    @ApiResponse({ status: 200, type: SubtitlesDto })
+    @ApiResponse({ status: 400, description: 'The video has no subtitles in that language.' })
+    @ApiResponse({ status: 409, description: 'Not an edit session.' })
+    async getSubtitles(
+        @Param('sessionId') sessionId: string,
+        @Param('language') language: string
+    ): Promise<SubtitlesDto> {
+        const { s3, keyHex, masterKey } = this.editedVideo(sessionId);
+        return this.hlsEditService.readSubtitles(s3, masterKey, language, keyHex);
+    }
+
+    @Put(':sessionId/media/subtitles/:language')
+    @UseGuards(AuthResolverGuard)
+    @AuthTypes('instance', 'session')
+    @ApiSecurity('apikey')
+    @ApiOperation({
+        summary: "Write one language of the existing video's subtitles",
+        description:
+            'Only for an edit session. Writes the WebVTT under a new name with its media ' +
+            'playlist, then points the master at it, adding the language when it is new. ' +
+            'The first edit keeps the original master at master.m3u8.orig. Refused with 409 ' +
+            'once the master has changed since `ifMatch` was read.',
+    })
+    @ApiParam({ name: 'sessionId', description: 'Session ID' })
+    @ApiParam({ name: 'language', description: 'LANGUAGE of the subtitles, e.g. fr' })
+    @ApiResponse({ status: 200, type: EncodedMediaDto })
+    @ApiResponse({ status: 400, description: 'The language, name or WebVTT is invalid.' })
+    @ApiResponse({ status: 409, description: 'Not an edit session, the video changed, or it is busy.' })
+    async putSubtitles(
+        @Param('sessionId') sessionId: string,
+        @Param('language') language: string,
+        @Body() dto: SubtitlesWriteDto
+    ): Promise<EncodedMediaDto> {
+        const { s3, keyHex, masterKey } = this.editedVideo(sessionId);
+        this.assertMasterIdle(sessionId);
+        return this.hlsEditService.saveSubtitles(
+            s3,
+            masterKey,
+            dto.ifMatch,
+            { language, name: dto.name, vtt: dto.vtt },
+            keyHex
+        );
+    }
+
+    @Delete(':sessionId/media/subtitles/:language')
+    @UseGuards(AuthResolverGuard)
+    @AuthTypes('instance', 'session')
+    @ApiSecurity('apikey')
+    @ApiOperation({
+        summary: "Take one language of the existing video's subtitles out",
+        description:
+            'Only for an edit session. Removes the rendition from the master, over the ' +
+            'version `ifMatch` names, then its files.',
+    })
+    @ApiParam({ name: 'sessionId', description: 'Session ID' })
+    @ApiParam({ name: 'language', description: 'LANGUAGE of the subtitles, e.g. fr' })
+    @ApiResponse({ status: 200, type: EncodedMediaDto })
+    @ApiResponse({ status: 409, description: 'Not an edit session, the video changed, or it is busy.' })
+    async deleteSubtitles(
+        @Param('sessionId') sessionId: string,
+        @Param('language') language: string,
+        @Query('ifMatch') ifMatch: string
+    ): Promise<EncodedMediaDto> {
+        if (!ifMatch) throw new BadRequestException('ifMatch is required');
+        const { s3, keyHex, masterKey } = this.editedVideo(sessionId);
+        this.assertMasterIdle(sessionId);
+        return this.hlsEditService.removeSubtitles(s3, masterKey, ifMatch, language, keyHex);
     }
 
     @Put(':sessionId/media/video-angles')

@@ -330,6 +330,67 @@ export class AddVideoAngleJobDto {
     error?: string;
 }
 
+/** One language's subtitles in the master. */
+export class SubtitleTrackDto {
+    @ApiProperty({ example: 'fr', description: 'LANGUAGE (ISO 639).' })
+    @Expose()
+    language: string;
+
+    @ApiProperty({ example: 'Français', description: 'NAME, as the players list it.' })
+    @Expose()
+    name: string;
+
+    @ApiProperty({
+        example: 'subtitles/fr_1a2b3c4d.m3u8',
+        description: 'Its media playlist, relative to the master.',
+    })
+    @Expose()
+    uri: string;
+
+    @ApiProperty({ description: 'A player turns these subtitles on by itself.' })
+    @Expose()
+    default: boolean;
+}
+
+/** One language's subtitles, as WebVTT. */
+export class SubtitlesDto {
+    @ApiProperty({ example: 'fr' })
+    @Expose()
+    language: string;
+
+    @ApiProperty({ example: 'Français' })
+    @Expose()
+    name: string;
+
+    @ApiProperty({ description: 'The subtitles, as a WebVTT document.' })
+    @Expose()
+    vtt: string;
+}
+
+export class SubtitlesWriteDto {
+    @ApiProperty({
+        description:
+            'The etag GET /api/sessions/:id/media returned: the save is refused (409) once the video has changed since.',
+    })
+    @IsString()
+    @IsNotEmpty()
+    @Expose()
+    ifMatch: string;
+
+    @ApiProperty({ example: 'Français', description: 'The name players list them under.' })
+    @IsString()
+    @IsNotEmpty()
+    @MaxLength(100)
+    @Expose()
+    name: string;
+
+    @ApiProperty({ description: 'The subtitles, as a WebVTT document.' })
+    @IsString()
+    @IsNotEmpty()
+    @Expose()
+    vtt: string;
+}
+
 export class EncodedMediaDto {
     @ApiProperty({ type: AudioTrackDto, isArray: true })
     @Expose()
@@ -338,6 +399,10 @@ export class EncodedMediaDto {
     @ApiProperty({ type: VideoAngleDto, isArray: true })
     @Expose()
     angles: VideoAngleDto[];
+
+    @ApiProperty({ type: SubtitleTrackDto, isArray: true })
+    @Expose()
+    subtitles: SubtitleTrackDto[];
 
     @ApiProperty({
         example: ['en'],
