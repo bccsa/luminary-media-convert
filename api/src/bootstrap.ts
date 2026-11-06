@@ -47,6 +47,10 @@ export {
 } from './encode/services/ffmpeg-availability.js';
 
 export type { EncodeOutcome } from './encode/encode-outcome-hook.js';
+export {
+    allowStorageOutageSwitch,
+    setStorageOffline,
+} from './encode/services/storage-outage.js';
 
 /** Where the app listens when nobody says otherwise. */
 export const DEFAULT_PORT = 31711;
