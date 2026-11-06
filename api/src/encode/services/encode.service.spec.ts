@@ -1805,6 +1805,23 @@ describe('EncodeService — naming the finalize phases', () => {
             expect(uploadPhase[0].uploading).toBe(95);
         });
     });
+
+    describe('the encrypting bar', () => {
+        it('reads 100 once the segments are through, whatever the estimate said', async () => {
+            await run(makeFullConfig());
+
+            const uploadPhase = emissions.filter(
+                (p) => p.phase === 'uploading-playlists'
+            );
+            expect(uploadPhase[0].encrypting).toBe(100);
+        });
+
+        it('stays off an unencrypted session', async () => {
+            await run(makeConfig());
+
+            expect(emissions.every((p) => p.encrypting === undefined)).toBe(true);
+        });
+    });
 });
 
 /*
