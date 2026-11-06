@@ -1865,8 +1865,29 @@ const videoAnglesPanelRef = ref<InstanceType<typeof VideoAnglesPanel> | null>(
 const subtitlesPanelRef = ref<InstanceType<typeof SubtitlesPanel> | null>(null);
 const subtitleTrackRef = ref<InstanceType<typeof SubtitleTrack> | null>(null);
 
-/** The subtitle track is edited on the Subtitles tab, and only looked at elsewhere. */
+/** The subtitle track takes the keys on the Subtitles tab; elsewhere a mouse edit brings that tab up. */
 const subtitleTrackEditable = computed(() => editAsideTab.value === 'subtitles');
+
+/**
+ * The timeline's chapters changed. Dragged, retimed or drawn from another tab, the
+ * Chapters tab comes up, where the change can be seen and saved. The timeline
+ * also hands back chapters read from storage once it has given them ids, which
+ * is not an edit.
+ */
+function onTimelineChaptersEdited(next: Segment[]): void {
+    const before = timelineSegments.value;
+    timelineSegments.value = next;
+    if (!editsExistingVideo.value || editAsideTab.value === 'chapters') return;
+    const same =
+        next.length === before.length &&
+        next.every(
+            (s, i) =>
+                s.inSec === before[i]!.inSec &&
+                s.outSec === before[i]!.outSec &&
+                (s.label ?? '') === (before[i]!.label ?? '')
+        );
+    if (!same) editAsideTab.value = 'chapters';
+}
 
 /**
  * Like the chapters, the open language's lines stay above the timeline on every
@@ -2954,7 +2975,8 @@ onUnmounted(() => {
                         v-if="activeTab === 'trim' && showTrimSegmentEditor"
                         class="order-3 shrink-0"
                         section="timeline"
-                        v-model:editor-segments="timelineSegments"
+                        :editor-segments="timelineSegments"
+                        @update:editor-segments="onTimelineChaptersEdited"
                         :show-chapters-side-panel="showChaptersBesidePlayer"
                         :can-save-chapters="canSaveChapters"
                         :chapters-save-error="chaptersSaveError"
@@ -2999,7 +3021,8 @@ onUnmounted(() => {
                                 :playhead-sec="playheadSec"
                                 :get-current-time="timelineCurrentTime"
                                 :name="subtitlesPanelRef?.timelineName ?? ''"
-                                :readonly="!subtitleTrackEditable"
+                                :away="!subtitleTrackEditable"
+                                @edit="editAsideTab = 'subtitles'"
                                 :on-seek="timelineSeek"
                             />
                         </template>

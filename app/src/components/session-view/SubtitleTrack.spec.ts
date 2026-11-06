@@ -73,18 +73,40 @@ describe('SubtitleTrack', () => {
         expect(wrapper.text()).toContain('Français');
     });
 
-    it('away from the Subtitles tab, only plays from a line: no picking, moving, retiming or drawing', async () => {
-        const { wrapper, onSeek, lines, blocks } = mountTrack();
-        await wrapper.setProps({ readonly: true });
-        expect(wrapper.find('[data-test="subtitleTrackIn"]').exists()).toBe(false);
-        await drag(wrapper, blocks()[1]!.element, 120, 25);
-        expect(onSeek).toHaveBeenCalledWith(10);
-        expect(wrapper.props('selected')).toBeNull();
-        expect(lines()).toEqual(LINES);
-        const lane = wrapper.find('[data-test="subtitleTrack"]').element;
-        await drag(wrapper, lane, 300, 0);
-        await drag(wrapper, lane, 300, 45);
-        expect(lines()).toEqual(LINES);
+    describe('away from the Subtitles tab', () => {
+        it('only plays from a line on a click, without picking it or asking for the tab', async () => {
+            const { wrapper, onSeek, lines, blocks } = mountTrack();
+            await wrapper.setProps({ away: true });
+            await drag(wrapper, blocks()[1]!.element, 120, 0);
+            expect(onSeek).toHaveBeenCalledWith(10);
+            expect(wrapper.props('selected')).toBeNull();
+            expect(lines()).toEqual(LINES);
+            expect(wrapper.emitted('edit')).toBeUndefined();
+        });
+
+        it('asks for the tab as a drag begins, and the drag carries on', async () => {
+            const { wrapper, line, blocks } = mountTrack();
+            await wrapper.setProps({ away: true });
+            await drag(wrapper, blocks()[1]!.element, 120, 25);
+            expect(wrapper.emitted('edit')).toHaveLength(1);
+            expect(wrapper.props('selected')).toBe('a');
+            expect(line('a')).toMatchObject({ inSec: 12.5, outSec: 16.5 });
+        });
+
+        it('asks for the tab on taking an edge, and on a double-press to draw', async () => {
+            const { wrapper } = mountTrack();
+            await wrapper.setProps({ away: true });
+            wrapper
+                .findAll('[data-test="subtitleTrackOut"]')[1]!
+                .element.dispatchEvent(new MouseEvent('pointerdown', { clientX: 140, button: 0, bubbles: true }));
+            window.dispatchEvent(new MouseEvent('pointerup', { clientX: 140 }));
+            expect(wrapper.emitted('edit')).toHaveLength(1);
+            const lane = wrapper.find('[data-test="subtitleTrack"]').element;
+            await drag(wrapper, lane, 300, 0);
+            expect(wrapper.emitted('edit')).toHaveLength(1);
+            await drag(wrapper, lane, 300, 45);
+            expect(wrapper.emitted('edit')).toHaveLength(2);
+        });
     });
 
     it('picks a line with a click and plays from it', async () => {

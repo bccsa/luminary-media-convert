@@ -3,7 +3,8 @@
  * One language's subtitle lines as a track above the timeline strip, sharing its
  * zoom and pan, edited the way chapters are: `[` and `]` at the playhead, a
  * double-press and drag to draw a line, drags to move and retime, Delete, and
- * undo. A click on a line picks it and plays from it. Read-only, a click only plays.
+ * undo. A click on a line picks it and plays from it. Away from its tab a click
+ * only plays, and an edit asks for the Subtitles tab first, where its Save is.
  */
 import { computed, onBeforeUnmount, ref } from 'vue';
 import { createSegmentId, type Segment, type SegmentKeyTarget } from '../segment-editor';
@@ -17,9 +18,14 @@ const props = defineProps<{
     getCurrentTime: () => number;
     /** The language's name, shown at the track's end. */
     name: string;
-    /** Shown for reference only: away from the Subtitles tab, where their Save is not in sight. */
-    readonly?: boolean;
+    /** Away from the Subtitles tab: an edit emits `edit` so the host can bring that tab up. */
+    away?: boolean;
     onSeek?: (seconds: number) => void;
+}>();
+
+const emit = defineEmits<{
+    /** A mouse edit began while away from the Subtitles tab. */
+    edit: [];
 }>();
 
 const lines = defineModel<Segment[]>({ required: true });
@@ -180,6 +186,10 @@ function onMove(e: PointerEvent): void {
         return;
     }
     if (!d.moved && Math.abs(e.clientX - d.startX) < 3) return;
+    if (!d.moved && props.away) {
+        selected.value = d.line.id;
+        emit('edit');
+    }
     d.moved = true;
     const shift = ((e.clientX - d.startX) / lane.value!.getBoundingClientRect().width) * props.visibleSpan;
     const { inSec, outSec, id } = d.line;
@@ -217,11 +227,9 @@ function startDrag(e: PointerEvent, line: Segment, kind: 'move' | 'inSec' | 'out
     if (e.button !== 0 || !lane.value) return;
     e.preventDefault();
     e.stopPropagation();
-    if (props.readonly) {
-        props.onSeek?.(line.inSec);
-        return;
-    }
-    selected.value = line.id;
+    if (props.away && kind !== 'move') emit('edit');
+    // Away, a line is picked only once it is edited: a click there just plays from it.
+    if (!props.away || kind !== 'move') selected.value = line.id;
     drag = { kind, line: { ...line }, startX: e.clientX, moved: false };
     listen();
 }
@@ -237,9 +245,9 @@ function onLaneDown(e: PointerEvent): void {
     e.preventDefault();
     const t = timeAt(e.clientX);
     const second =
-        !props.readonly &&
         lastPress && performance.now() - lastPress.at <= DOUBLE_PRESS_MS && Math.abs(e.clientX - lastPress.x) <= DOUBLE_PRESS_SLOP_PX;
     if (second) {
+        if (props.away) emit('edit');
         lastPress = null;
         drag = { kind: 'draw', anchor: t };
         drawing.value = { inSec: t, outSec: t };
@@ -273,8 +281,8 @@ onBeforeUnmount(onUp);
             :key="line.id"
             class="group absolute top-0.5 bottom-0.5 flex items-center overflow-hidden rounded border px-1.5"
             :class="[
-                readonly ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing',
-                line.id === selected && !readonly
+                'cursor-grab active:cursor-grabbing',
+                line.id === selected && !away
                     ? 'z-[2] border-amber-700 bg-amber-400 text-amber-950 dark:border-amber-300 dark:bg-amber-400/80'
                     : 'z-[1] border-amber-500/70 bg-amber-200/90 text-amber-950 hover:bg-amber-300 dark:border-amber-400/50 dark:bg-amber-400/25 dark:text-amber-100',
             ]"
@@ -286,14 +294,12 @@ onBeforeUnmount(onUp);
         >
             <span class="pointer-events-none truncate text-[10px] leading-none font-medium">{{ line.label }}</span>
             <span
-                v-if="!readonly"
                 class="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize hover:bg-amber-700/40"
                 aria-hidden="true"
                 data-test="subtitleTrackIn"
                 @pointerdown="startDrag($event, line, 'inSec')"
             ></span>
             <span
-                v-if="!readonly"
                 class="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize hover:bg-amber-700/40"
                 aria-hidden="true"
                 data-test="subtitleTrackOut"
