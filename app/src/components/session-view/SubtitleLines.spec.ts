@@ -37,9 +37,9 @@ describe('SubtitleLines', () => {
         ]);
     });
 
-    it('opens a line chosen on the strip, seeks to it, and times it from the playhead', async () => {
+    it('opens a line chosen in the list, seeks to it, and times it from the playhead', async () => {
         const { wrapper, onSeek, lines } = mountLines(7);
-        await wrapper.findAll('[data-test="subtitleStrip"] button')[1]!.trigger('click');
+        await wrapper.findAll('[data-test="subtitleLine"]')[1]!.trigger('click');
         expect(onSeek).toHaveBeenCalledWith(6);
 
         await wrapper.find('[data-test="startHere"]').trigger('click');
@@ -51,6 +51,19 @@ describe('SubtitleLines', () => {
         await wrapper.find('[data-test="lineEnd"]').setValue('0:12.5');
         await wrapper.find('[data-test="lineEnd"]').trigger('change');
         expect(lines().find((l) => l.id === 'a')).toMatchObject({ inSec: 7, outSec: 12.5 });
+    });
+
+    it('opens a line picked on the timeline without taking the keyboard', async () => {
+        const { wrapper } = mountLines();
+        await wrapper.setProps({ selected: 'a' });
+        expect(wrapper.find('[data-test="lineStart"]').element).toMatchObject({ value: '0:06.0' });
+        expect(wrapper.element.contains(document.activeElement)).toBe(false);
+    });
+
+    it('shares the line opened in the list', async () => {
+        const { wrapper } = mountLines();
+        await wrapper.findAll('[data-test="subtitleLine"]')[0]!.trigger('click');
+        expect(wrapper.emitted('update:selected')).toEqual([['b']]);
     });
 
     it('adds a line at the playhead, up to the next one, ready for its words', async () => {

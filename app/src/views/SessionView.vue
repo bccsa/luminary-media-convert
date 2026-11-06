@@ -28,6 +28,7 @@ import SessionPlayerStrip from '../components/session-view/SessionPlayerStrip.vu
 import AudioTracksPanel from '../components/session-view/AudioTracksPanel.vue';
 import VideoAnglesPanel from '../components/session-view/VideoAnglesPanel.vue';
 import SubtitlesPanel from '../components/session-view/SubtitlesPanel.vue';
+import SubtitleTrack from '../components/session-view/SubtitleTrack.vue';
 import SessionTopline from '../components/session-view/SessionTopline.vue';
 import SessionTrimWorkspace from '../components/session-view/SessionTrimWorkspace.vue';
 import SessionWorkflowPanel from '../components/session-view/SessionWorkflowPanel.vue';
@@ -1862,6 +1863,61 @@ const videoAnglesPanelRef = ref<InstanceType<typeof VideoAnglesPanel> | null>(
     null
 );
 const subtitlesPanelRef = ref<InstanceType<typeof SubtitlesPanel> | null>(null);
+const subtitleTrackRef = ref<InstanceType<typeof SubtitleTrack> | null>(null);
+
+/** The subtitle track takes the keys on the Subtitles tab; elsewhere a mouse edit brings that tab up. */
+const subtitleTrackEditable = computed(() => editAsideTab.value === 'subtitles');
+
+/**
+ * The timeline's chapters changed. Dragged, retimed or drawn from another tab, the
+ * Chapters tab comes up, where the change can be seen and saved. The timeline
+ * also hands back chapters read from storage once it has given them ids, which
+ * is not an edit.
+ */
+function onTimelineChaptersEdited(next: Segment[]): void {
+    const before = timelineSegments.value;
+    timelineSegments.value = next;
+    if (!editsExistingVideo.value || editAsideTab.value === 'chapters') return;
+    const same =
+        next.length === before.length &&
+        next.every(
+            (s, i) =>
+                s.inSec === before[i]!.inSec &&
+                s.outSec === before[i]!.outSec &&
+                (s.label ?? '') === (before[i]!.label ?? '')
+        );
+    if (!same) editAsideTab.value = 'chapters';
+}
+
+/**
+ * Like the chapters, the open language's lines stay above the timeline on every
+ * tab; a video with none has no track, except on the Subtitles tab with a
+ * language open, where the first line is made.
+ */
+const subtitleTrackShown = computed(() => {
+    const lines = subtitlesPanelRef.value?.timelineLines;
+    if (!editsExistingVideo.value || lines == null) return false;
+    return lines.length > 0 || subtitleTrackEditable.value;
+});
+const subtitleTrackLines = computed<Segment[]>({
+    get: () => subtitlesPanelRef.value?.timelineLines ?? [],
+    set: (next) => {
+        if (subtitlesPanelRef.value) subtitlesPanelRef.value.timelineLines = next;
+    },
+});
+/** While the track shows, the timeline's marks, delete and undo act on it, not on the chapters. */
+const timelineKeyTarget = computed(() =>
+    subtitleTrackShown.value && subtitleTrackEditable.value
+        ? subtitleTrackRef.value
+        : null
+);
+const subtitleTrackSelected = computed<string | null>({
+    get: () => subtitlesPanelRef.value?.selectedLine ?? null,
+    set: (id) => {
+        if (subtitlesPanelRef.value) subtitlesPanelRef.value.selectedLine = id;
+    },
+});
+
 /** The master changed: the player and the other tabs read it again. */
 function onMasterChanged(from: 'tracks' | 'angles' | 'subtitles'): void {
     sessionPlayerStripRef.value?.reload?.();
@@ -2919,7 +2975,8 @@ onUnmounted(() => {
                         v-if="activeTab === 'trim' && showTrimSegmentEditor"
                         class="order-3 shrink-0"
                         section="timeline"
-                        v-model:editor-segments="timelineSegments"
+                        :editor-segments="timelineSegments"
+                        @update:editor-segments="onTimelineChaptersEdited"
                         :show-chapters-side-panel="showChaptersBesidePlayer"
                         :can-save-chapters="canSaveChapters"
                         :chapters-save-error="chaptersSaveError"
@@ -2935,6 +2992,7 @@ onUnmounted(() => {
                         @segment-removed="onTimelineSegmentRemoved"
                         @segment-restored="trimDeletions.restore($event.id)"
                         :edits-chapters="timelineEditsChapters"
+                        :key-target="timelineKeyTarget"
                         :probe-duration="trimEditorProbeDuration"
                         :add-gap-above-timeline="false"
                         :get-current-time="timelineCurrentTime"
@@ -2946,6 +3004,27 @@ onUnmounted(() => {
                         <template #timeline-end>
                             <!-- Opens upward: the controls bar is at the floor of the window. -->
                             <AccountMenu drop="up" variant="editor" />
+                        </template>
+                        <template
+                            v-if="subtitleTrackShown"
+                            #above-timeline="{ viewStart, visibleSpan, playheadSec }"
+                        >
+                            <!-- One per language, so undo never reaches another language. -->
+                            <SubtitleTrack
+                                ref="subtitleTrackRef"
+                                :key="subtitlesPanelRef?.timelineName"
+                                v-model="subtitleTrackLines"
+                                v-model:selected="subtitleTrackSelected"
+                                :duration="trimEditorProbeDuration"
+                                :view-start="viewStart"
+                                :visible-span="visibleSpan"
+                                :playhead-sec="playheadSec"
+                                :get-current-time="timelineCurrentTime"
+                                :name="subtitlesPanelRef?.timelineName ?? ''"
+                                :away="!subtitleTrackEditable"
+                                @edit="editAsideTab = 'subtitles'"
+                                :on-seek="timelineSeek"
+                            />
                         </template>
                     </SessionTrimWorkspace>
 

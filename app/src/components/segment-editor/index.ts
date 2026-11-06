@@ -1,5 +1,5 @@
 export { default as SegmentEditor } from './SegmentEditor.vue';
-export type { Segment, SegmentEditorMode } from './types';
+export type { Segment, SegmentEditorMode, SegmentKeyTarget } from './types';
 export { createSegmentId } from './types';
 export {
     exportChaptersVtt,
