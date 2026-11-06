@@ -91,6 +91,18 @@ describe('the application menu', () => {
         ).toBe(true);
     });
 
+    it('has a Developer menu only when given one, as a development build is', () => {
+        expect(menuTemplate(options()).some((m) => m.label === 'Developer')).toBe(false);
+        const toggleStorageOffline = vi.fn();
+        const template = menuTemplate(
+            options({ developer: { storageOffline: true, toggleStorageOffline } })
+        );
+        const item = find(template, 'Storage Offline')!;
+        expect(item).toMatchObject({ type: 'checkbox', checked: true });
+        (item.click as () => void)();
+        expect(toggleStorageOffline).toHaveBeenCalled();
+    });
+
     it('wires each item to its action', () => {
         const opts = options();
         const template = menuTemplate(opts);
