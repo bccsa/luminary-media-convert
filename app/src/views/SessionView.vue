@@ -28,6 +28,7 @@ import SessionPlayerStrip from '../components/session-view/SessionPlayerStrip.vu
 import AudioTracksPanel from '../components/session-view/AudioTracksPanel.vue';
 import VideoAnglesPanel from '../components/session-view/VideoAnglesPanel.vue';
 import SubtitlesPanel from '../components/session-view/SubtitlesPanel.vue';
+import SubtitleTrack from '../components/session-view/SubtitleTrack.vue';
 import SessionTopline from '../components/session-view/SessionTopline.vue';
 import SessionTrimWorkspace from '../components/session-view/SessionTrimWorkspace.vue';
 import SessionWorkflowPanel from '../components/session-view/SessionWorkflowPanel.vue';
@@ -1862,6 +1863,40 @@ const videoAnglesPanelRef = ref<InstanceType<typeof VideoAnglesPanel> | null>(
     null
 );
 const subtitlesPanelRef = ref<InstanceType<typeof SubtitlesPanel> | null>(null);
+const subtitleTrackRef = ref<InstanceType<typeof SubtitleTrack> | null>(null);
+
+/** The subtitle track is edited on the Subtitles tab, and only looked at elsewhere. */
+const subtitleTrackEditable = computed(() => editAsideTab.value === 'subtitles');
+
+/**
+ * Like the chapters, the open language's lines stay above the timeline on every
+ * tab; a video with none has no track, except on the Subtitles tab with a
+ * language open, where the first line is made.
+ */
+const subtitleTrackShown = computed(() => {
+    const lines = subtitlesPanelRef.value?.timelineLines;
+    if (!editsExistingVideo.value || lines == null) return false;
+    return lines.length > 0 || subtitleTrackEditable.value;
+});
+const subtitleTrackLines = computed<Segment[]>({
+    get: () => subtitlesPanelRef.value?.timelineLines ?? [],
+    set: (next) => {
+        if (subtitlesPanelRef.value) subtitlesPanelRef.value.timelineLines = next;
+    },
+});
+/** While the track shows, the timeline's marks, delete and undo act on it, not on the chapters. */
+const timelineKeyTarget = computed(() =>
+    subtitleTrackShown.value && subtitleTrackEditable.value
+        ? subtitleTrackRef.value
+        : null
+);
+const subtitleTrackSelected = computed<string | null>({
+    get: () => subtitlesPanelRef.value?.selectedLine ?? null,
+    set: (id) => {
+        if (subtitlesPanelRef.value) subtitlesPanelRef.value.selectedLine = id;
+    },
+});
+
 /** The master changed: the player and the other tabs read it again. */
 function onMasterChanged(from: 'tracks' | 'angles' | 'subtitles'): void {
     sessionPlayerStripRef.value?.reload?.();
@@ -2935,6 +2970,7 @@ onUnmounted(() => {
                         @segment-removed="onTimelineSegmentRemoved"
                         @segment-restored="trimDeletions.restore($event.id)"
                         :edits-chapters="timelineEditsChapters"
+                        :key-target="timelineKeyTarget"
                         :probe-duration="trimEditorProbeDuration"
                         :add-gap-above-timeline="false"
                         :get-current-time="timelineCurrentTime"
@@ -2946,6 +2982,26 @@ onUnmounted(() => {
                         <template #timeline-end>
                             <!-- Opens upward: the controls bar is at the floor of the window. -->
                             <AccountMenu drop="up" variant="editor" />
+                        </template>
+                        <template
+                            v-if="subtitleTrackShown"
+                            #above-timeline="{ viewStart, visibleSpan, playheadSec }"
+                        >
+                            <!-- One per language, so undo never reaches another language. -->
+                            <SubtitleTrack
+                                ref="subtitleTrackRef"
+                                :key="subtitlesPanelRef?.timelineName"
+                                v-model="subtitleTrackLines"
+                                v-model:selected="subtitleTrackSelected"
+                                :duration="trimEditorProbeDuration"
+                                :view-start="viewStart"
+                                :visible-span="visibleSpan"
+                                :playhead-sec="playheadSec"
+                                :get-current-time="timelineCurrentTime"
+                                :name="subtitlesPanelRef?.timelineName ?? ''"
+                                :readonly="!subtitleTrackEditable"
+                                :on-seek="timelineSeek"
+                            />
                         </template>
                     </SessionTrimWorkspace>
 

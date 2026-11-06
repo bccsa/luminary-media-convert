@@ -1,17 +1,16 @@
 <script setup lang="ts">
 /**
  * One language's lines, in time order: what each says and when it shows. The
- * line chosen opens for its times, typed or taken from the playhead; a strip
- * above shows where every line falls, the one playing marked, and a click on
- * any seeks to it. All lines move together with Shift all.
+ * line chosen opens for its times, typed or taken from the playhead, and the one
+ * playing is marked. All lines move together with Shift all.
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { createSegmentId, parseTime, type Segment } from '../segment-editor';
 import { shiftLines, shortTime } from './subtitles';
 import { stepBetweenFields } from '../../utils/fieldWalk';
 
 const props = defineProps<{
-    /** The video's length; the strip spans it. */
+    /** The video's length; a line added at the playhead ends within it. */
     duration: number;
     getCurrentTime: () => number;
     onSeek?: (seconds: number) => void;
@@ -21,9 +20,10 @@ const lines = defineModel<Segment[]>({ required: true });
 
 const sorted = computed(() => [...lines.value].sort((a, b) => a.inSec - b.inSec));
 const span = computed(() => Math.max(props.duration, ...lines.value.map((l) => l.outSec), 1));
-const selectedId = ref<string | null>(null);
+/** The line open for editing, shared with the timeline so a block picked there opens here. */
+const selectedId = defineModel<string | null>('selected', { default: null });
 
-/** The playhead, read a few times a second: the line under it is marked in the list and on the strip. */
+/** The playhead, read a few times a second: the line under it is marked in the list. */
 const now = ref(0);
 let timer: ReturnType<typeof setInterval> | undefined;
 onMounted(() => {
@@ -45,6 +45,14 @@ const root = ref<HTMLElement | null>(null);
 function onWordsKeydown(e: KeyboardEvent): void {
     stepBetweenFields(e, Array.from(root.value?.querySelectorAll<HTMLTextAreaElement>('.subtitle-words') ?? []));
 }
+
+const rows = ref<Record<string, HTMLElement | null>>({});
+
+// A line picked on the timeline comes into view without taking the keyboard from it.
+watch(selectedId, async (id) => {
+    await nextTick();
+    if (id) rows.value[id]?.scrollIntoView?.({ block: 'nearest' });
+});
 
 async function select(line: Segment, seek = true): Promise<void> {
     selectedId.value = line.id;
@@ -91,7 +99,6 @@ function shift(direction: 1 | -1): void {
     if (by) lines.value = shiftLines(lines.value, by);
 }
 
-const pct = (sec: number) => `${(sec / span.value) * 100}%`;
 </script>
 
 <template>
@@ -150,37 +157,6 @@ const pct = (sec: number) => `${(sec / span.value) * 100}%`;
             </button>
         </div>
 
-        <div v-if="lines.length" class="shrink-0 pb-3">
-            <div
-                class="relative h-5.5 rounded-md bg-slate-100 dark:bg-slate-800"
-                aria-label="Where the lines fall: click one to play it"
-                data-test="subtitleStrip"
-            >
-                <button
-                    v-for="(line, i) in sorted"
-                    :key="line.id"
-                    type="button"
-                    class="absolute top-1 bottom-1 min-w-0.5 rounded-sm"
-                    :class="
-                        line.id === playingId || line.id === selectedId
-                            ? 'bg-sky-700 dark:bg-sky-400'
-                            : 'bg-sky-200 hover:bg-sky-300 dark:bg-sky-400/30'
-                    "
-                    :style="{ left: pct(line.inSec), width: pct(line.outSec - line.inSec) }"
-                    :aria-label="`Line ${i + 1}, ${shortTime(line.inSec)}`"
-                    @click="select(line)"
-                ></button>
-                <span
-                    aria-hidden="true"
-                    class="absolute -top-0.5 -bottom-0.5 w-0.5 rounded bg-red-600"
-                    :style="{ left: pct(now) }"
-                ></span>
-            </div>
-            <div aria-hidden="true" class="mt-1 flex justify-between font-mono text-[11px] text-slate-500">
-                <span>0:00</span><span>{{ shortTime(span / 2) }}</span><span>{{ shortTime(span) }}</span>
-            </div>
-        </div>
-
         <div
             v-if="lines.length"
             class="grid shrink-0 grid-cols-[1.75rem_10rem_minmax(0,1fr)_2rem] gap-3 px-2 pb-2 text-xs font-semibold text-slate-500 dark:text-slate-400"
@@ -191,6 +167,7 @@ const pct = (sec: number) => `${(sec / span.value) * 100}%`;
             <li
                 v-for="(line, i) in sorted"
                 :key="line.id"
+                :ref="(el) => (rows[line.id] = el as HTMLElement | null)"
                 class="grid grid-cols-[1.75rem_10rem_minmax(0,1fr)_2rem] items-start gap-3 rounded-lg px-2 py-2"
                 :class="
                     line.id === selectedId || line.id === playingId
@@ -199,7 +176,7 @@ const pct = (sec: number) => `${(sec / span.value) * 100}%`;
                 "
                 :aria-current="line.id === playingId ? 'true' : undefined"
                 data-test="subtitleLine"
-                @click="selectedId !== line.id && select(line, false)"
+                @click="selectedId !== line.id && select(line)"
             >
                 <span
                     class="pt-1.5 text-[13px]"

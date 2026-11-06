@@ -7,7 +7,7 @@ import {
     toRaw,
     watch,
 } from 'vue';
-import type { Segment, SegmentEditorMode } from './types';
+import type { Segment, SegmentEditorMode, SegmentKeyTarget } from './types';
 import { createSegmentId } from './types';
 import { formatDuration, formatTime, parseTime } from './time';
 import { exportChaptersVtt, exportSubtitlesVtt, parseVtt } from './vtt';
@@ -52,6 +52,8 @@ interface Props {
     snapSec?: number;
     /** Where keyboard shortcuts are active. */
     keyboardScope?: KeyboardScope;
+    /** When set, marks, delete and undo act on this track instead of the segments. */
+    keyTarget?: SegmentKeyTarget | null;
     /** Maximum seek emissions per second while dragging/scrubbing. */
     throttleSeekMs?: number;
     /** Optional frame rate; enables `,` / `.` frame stepping. */
@@ -942,6 +944,7 @@ function inGapBetweenSegments(t: number): boolean {
 }
 
 function markIn() {
+    if (props.keyTarget) return props.keyTarget.markIn();
     const t = clampTime(props.getCurrentTime());
     const atPH = segmentAt(t);
     if (atPH) {
@@ -963,6 +966,7 @@ function markIn() {
 }
 
 function markOut() {
+    if (props.keyTarget) return props.keyTarget.markOut();
     const t = clampTime(props.getCurrentTime());
     const atPH = segmentAt(t);
     if (atPH) {
@@ -1164,6 +1168,7 @@ function handleEscape(e: KeyboardEvent) {
     }
     clearSelection();
     pendingInSec.value = null;
+    props.keyTarget?.escape();
     helpOpen.value = false;
     confirmClearOpen.value = false;
 }
@@ -1262,7 +1267,8 @@ function onKeyDown(e: KeyboardEvent) {
             target.isContentEditable);
     if (isTyping) {
         // Allow Cmd+Z / Esc even when typing; otherwise let the input handle it.
-        if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z')) {
+        // A track with its own keys leaves Cmd+Z in a field to the field's text.
+        if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z') && !props.keyTarget) {
             /* fall through */
         } else if (e.key === 'Escape') {
             handleEscape(e);
@@ -1389,13 +1395,18 @@ function onKeyDown(e: KeyboardEvent) {
         case 'Z': {
             if (e.metaKey || e.ctrlKey) {
                 e.preventDefault();
-                if (e.shiftKey) redo();
-                else undo();
+                const target = props.keyTarget ?? { undo, redo };
+                if (e.shiftKey) target.redo();
+                else target.undo();
             }
             return;
         }
         case 'Delete':
         case 'Backspace': {
+            if (props.keyTarget) {
+                if (props.keyTarget.removeSelected()) e.preventDefault();
+                return;
+            }
             if (selectedIds.value.size > 0) {
                 e.preventDefault();
                 deleteSelected();
@@ -1412,6 +1423,10 @@ function onKeyDown(e: KeyboardEvent) {
         case 'x':
         case 'X': {
             if (!(e.metaKey || e.ctrlKey)) return;
+            if (props.keyTarget) {
+                if (props.keyTarget.removeSelected()) e.preventDefault();
+                return;
+            }
             if (selectedIds.value.size > 0) {
                 e.preventDefault();
                 deleteSelected();
@@ -2467,6 +2482,16 @@ const splitRowFrame = computed(() =>
                 >
                     {{ formatTime(hoverTimecode.sec) }}
                 </div>
+                <!--
+                    A track above the strip, such as subtitles: it gets the strip's
+                    window on the video so it zooms and pans with it.
+                -->
+                <slot
+                    name="above-timeline"
+                    :view-start="viewStart"
+                    :visible-span="visibleSpan"
+                    :playhead-sec="playheadSec"
+                />
                 <div
                     ref="timelineTrackRef"
                     class="se-timeline relative cursor-crosshair overflow-hidden bg-slate-100 dark:bg-blue-950 select-none touch-pan-x"
