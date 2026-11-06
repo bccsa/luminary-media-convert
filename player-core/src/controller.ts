@@ -257,6 +257,8 @@ export class PlayerController implements PlayerControllerApi {
                 this.startPolling(generation, source);
                 return;
             }
+            // A new source that never loaded: the engine still holds the previous one.
+            this.releaseEngineSource();
             this.fail(toPlayerError(error));
         }
     }
@@ -972,8 +974,9 @@ export class PlayerController implements PlayerControllerApi {
     private fail(error: PlayerError): void {
         // Same reasoning as the waiting-for-master path: the adapter may
         // still be playing a previous source; an error surface over live
-        // playback misstates both.
-        this.releaseEngineSource();
+        // playback misstates both. Paused, not unloaded: mid-playback the
+        // source and position are what a retry or the engine's own recovery resumes.
+        this.adapter.pause();
         this.store.setState({ lifecycle: 'error', error, playing: false });
         this.emitter.emit('error', error);
     }

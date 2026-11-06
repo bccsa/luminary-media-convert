@@ -1109,6 +1109,36 @@ describe('PlayerController — a source that fails to load', () => {
     });
 });
 
+describe('PlayerController — a fatal error during playback', () => {
+    it('only pauses: the source and the position stay for a retry or a recovery', async () => {
+        const { adapter, controller } = setup(simpleRoutes, { recoverResult: false });
+        await controller.load({ masterUrl: MASTER_URL, recovery: { maxReloadAttempts: 0 } });
+        adapter.advanceTo(30);
+
+        adapter.emit('error', { category: 'network', fatal: true });
+
+        expect(controller.getState().lifecycle).toBe('error');
+        expect(adapter.pauseCount).toBe(1);
+        expect(adapter.unloadCount).toBe(0);
+        expect(controller.getState().currentTime).toBe(30);
+    });
+
+    it('only pauses when an angle switch fails', async () => {
+        const { adapter, controller } = setup(multiAngleRoutes);
+        await controller.load({ masterUrl: MASTER_URL });
+        adapter.advanceTo(42);
+        adapter.loadSource = async () => {
+            throw new Error('engine refused the angle');
+        };
+
+        await controller.setAngle('angle_1');
+
+        expect(controller.getState().lifecycle).toBe('error');
+        expect(adapter.unloadCount).toBe(0);
+        expect(controller.getState().currentTime).toBe(42);
+    });
+});
+
 describe('PlayerController — an error the engine recovers from', () => {
     it('clears the error panel when playback starts again by itself', async () => {
         const { adapter, controller } = setup(simpleRoutes, { recoverResult: false });
@@ -1122,6 +1152,7 @@ describe('PlayerController — an error the engine recovers from', () => {
         expect(state.lifecycle).toBe('ready');
         expect(state.error).toBeNull();
         expect(state.playing).toBe(true);
+        expect(adapter.unloadCount).toBe(0);
     });
 
     it('leaves a destroyed player destroyed when a late playing event arrives', async () => {
