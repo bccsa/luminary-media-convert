@@ -490,6 +490,13 @@ export class FakeAdapter implements PlayerAdapter {
         this.emit('audiotracks-updated', undefined);
     }
 
+    unloadCount = 0;
+
+    /** A property so a spec can set it to `undefined`: an adapter that cannot unload. */
+    unload: PlayerAdapter['unload'] = () => {
+        this.unloadCount += 1;
+    };
+
     /**
      * A property rather than a method so a spec can set it to `undefined` and
      * stand in for an adapter that implements no warming at all — the

@@ -605,6 +605,14 @@ export interface PlayerAdapter {
      */
     reattach(): Promise<void>;
 
+    /**
+     * Let go of the source the engine holds; the adapter stays usable for the next `loadSource`.
+     * Called when a new source turns out to be unplayable (coming soon, or a fatal error): the
+     * previous one must not stay playable under that surface, whoever's controls press play.
+     * Optional; an adapter without it is only paused.
+     */
+    unload?(): void;
+
     play(): Promise<void>;
     pause(): void;
     seek(seconds: number): void;
