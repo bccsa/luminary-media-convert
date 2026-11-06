@@ -18,6 +18,7 @@ import {
     writeFile,
 } from 'fs/promises';
 import { basename, join, posix } from 'path';
+import { estimateSegments } from './segment-estimate.js';
 import { estimateOutputBytes, formatBytes } from './output-estimate.js';
 import {
     STOPPED_MESSAGE,
@@ -440,20 +441,6 @@ export class EncodeService implements OnModuleInit {
                     },
                 });
 
-            /**
-             * Segments a full re-encode of this config is expected to produce:
-             * numStreams * ceil(duration / segmentDuration).
-             */
-            const estimateSegments = (
-                config: EncodeConfigDto
-            ): number | undefined => {
-                const numStreams =
-                    (config.videoRenditions?.length ?? 0) +
-                    (config.audioGroups?.length ?? 0);
-                return numStreams > 0 && duration > 0
-                    ? numStreams * Math.ceil(duration / segDur)
-                    : undefined;
-            };
 
             /**
              * Name the post-drain step the session is on.
@@ -608,7 +595,7 @@ export class EncodeService implements OnModuleInit {
                 encodeConfig,
                 encodeResult && plan
                     ? plan.plannedTotalSegments
-                    : estimateSegments(encodeConfig)
+                    : estimateSegments(encodeConfig, duration, segDur)
             );
 
             pipeline.start();
@@ -853,6 +840,9 @@ export class EncodeService implements OnModuleInit {
             finishPhase();
             currentProgress.phase = 'uploading-playlists';
             currentProgress.uploading = SEGMENT_UPLOAD_SHARE;
+            // Every segment is encrypted by now, whatever the count measured
+            // against an estimate came to; the bar should not end short of it.
+            if (encryptionEnabled) currentProgress.encrypting = 100;
             this.sessionService.updatePipelineProgress(sessionId, {
                 ...currentProgress,
             });
