@@ -114,6 +114,35 @@ describe('SubtitlesPanel', () => {
         expect(vtt).toBe('WEBVTT\n\n1\n00:00:01.000 --> 00:00:03.000\nBonjour\n');
     });
 
+    it('starts a language from a file chosen with a clear button, or dropped on the form', async () => {
+        const wrapper = mountPanel();
+        await flushPromises();
+        await wrapper.find('[data-test="showAddSubtitles"]').trigger('click');
+        await wrapper.find('[data-test="newSubtitleCode"]').setValue('fr');
+
+        const input = wrapper.find('[data-test="newSubtitleFile"]');
+        const opened = vi.spyOn(input.element as HTMLInputElement, 'click').mockImplementation(() => {});
+        const button = wrapper.find('[data-test="chooseNewSubtitleFile"]');
+        expect(button.text()).toBe('Choose a file…');
+        await button.trigger('click');
+        expect(opened).toHaveBeenCalled();
+        expect((wrapper.find('[data-test="newSubtitleFromFile"]').element as HTMLInputElement).checked).toBe(true);
+
+        const srt = '1\n00:00:02,000 --> 00:00:04,000\nBonjour\n';
+        // jsdom's File has no text(); the browser's has.
+        const file = Object.assign(new File([srt], 'fr.srt'), { text: async () => srt });
+        Object.defineProperty(input.element, 'files', { value: [file], configurable: true });
+        await input.trigger('change');
+        await vi.waitFor(() => expect(wrapper.text()).toContain('1 line in fr.srt'));
+        expect(button.text()).toBe('Choose another file');
+
+        // A drop on the open form takes the file and keeps the code typed there.
+        const dropped = Object.assign(new File([srt], 'de.srt'), { text: async () => srt });
+        await wrapper.find('[data-test="subtitlesPanel"]').trigger('drop', { dataTransfer: { files: [dropped] } });
+        await vi.waitFor(() => expect(wrapper.text()).toContain('1 line in de.srt'));
+        expect((wrapper.find('[data-test="newSubtitleCode"]').element as HTMLInputElement).value).toBe('fr');
+    });
+
     it('refuses a language the video already has, or a code that is not one', async () => {
         const wrapper = mountPanel();
         await flushPromises();
