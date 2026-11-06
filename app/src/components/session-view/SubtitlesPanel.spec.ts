@@ -97,6 +97,14 @@ describe('SubtitlesPanel', () => {
         await wrapper.findAll('[data-test="subtitleCompareWords"]')[0]!.setValue('Bonjour');
         expect(wrapper.find('[data-test="translatedCount"]').text()).toBe('1 of 2 translated');
 
+        // Up and Down walk the translations, as on the chapters.
+        const words = wrapper.findAll('[data-test="subtitleCompareWords"]');
+        (words[0]!.element as HTMLTextAreaElement).focus();
+        await words[0]!.trigger('keydown', { key: 'ArrowDown' });
+        expect(document.activeElement).toBe(words[1]!.element);
+        await words[1]!.trigger('keydown', { key: 'ArrowUp' });
+        expect(document.activeElement).toBe(words[0]!.element);
+
         api.putSubtitles.mockResolvedValue(media([{ language: 'en', name: 'English' }, { language: 'fr', name: 'Français' }], 'v2'));
         await wrapper.find('[data-test="saveSubtitles"]').trigger('click');
         await flushPromises();
@@ -117,11 +125,11 @@ describe('SubtitlesPanel', () => {
         expect(wrapper.find('[data-test="addSubtitles"]').attributes('disabled')).toBeDefined();
     });
 
-    it('replaces the lines with a file imported from the Files menu, unsaved until saved', async () => {
+    it('replaces the lines with a file imported from the options menu, unsaved until saved', async () => {
         const wrapper = mountPanel();
         await flushPromises();
-        await wrapper.find('[data-test="subtitleFiles"]').trigger('click');
-        expect(wrapper.find('[data-test="subtitleFilesMenu"]').exists()).toBe(true);
+        await wrapper.find('[data-test="subtitleOptions"]').trigger('click');
+        expect(wrapper.find('[data-test="subtitleOptionsMenu"]').exists()).toBe(true);
         const input = wrapper.find('[data-test="importSubtitlesFile"]');
         const srt = '1\n00:00:02,000 --> 00:00:04,000\nFrom a file\n';
         // jsdom's File has no text(); the browser's has.
@@ -133,10 +141,29 @@ describe('SubtitlesPanel', () => {
         expect(wrapper.text()).toContain('Unsaved');
     });
 
-    it('renames a language in the Files menu', async () => {
+    it('names the options menu after the language, and closes it on a click outside or Escape', async () => {
         const wrapper = mountPanel();
         await flushPromises();
-        await wrapper.find('[data-test="subtitleFiles"]').trigger('click');
+        const trigger = wrapper.find('[data-test="subtitleOptions"]');
+        const menu = () => wrapper.find('[data-test="subtitleOptionsMenu"]').exists();
+        expect(trigger.text()).toBe('English options');
+
+        await trigger.trigger('click');
+        await wrapper.find('[data-test="subtitleName"]').trigger('mousedown');
+        expect(menu()).toBe(true);
+        document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+        await flushPromises();
+        expect(menu()).toBe(false);
+
+        await trigger.trigger('click');
+        await wrapper.find('[data-test="subtitleName"]').trigger('keydown', { key: 'Escape' });
+        expect(menu()).toBe(false);
+    });
+
+    it('renames a language in the options menu', async () => {
+        const wrapper = mountPanel();
+        await flushPromises();
+        await wrapper.find('[data-test="subtitleOptions"]').trigger('click');
         await wrapper.find('[data-test="subtitleName"]').setValue('English (UK)');
         expect(chips(wrapper)).toEqual(['English (UK) en']);
         expect(wrapper.find('[data-test="saveSubtitles"]').text()).toBe('Save English (UK)');
@@ -148,7 +175,7 @@ describe('SubtitlesPanel', () => {
         const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
         const wrapper = mountPanel();
         await flushPromises();
-        await wrapper.find('[data-test="subtitleFiles"]').trigger('click');
+        await wrapper.find('[data-test="subtitleOptions"]').trigger('click');
         await wrapper.find('[data-test="removeSubtitles"]').trigger('click');
         await flushPromises();
         expect(confirm).toHaveBeenCalled();

@@ -73,6 +73,18 @@ describe('SubtitleLines', () => {
         expect(lines().map((l) => [l.inSec, l.outSec])).toEqual([[6, 10], [0, 4]]);
     });
 
+    it('walks the lines with Up and Down, in time order', async () => {
+        const { wrapper } = mountLines();
+        const words = () => wrapper.findAll('[data-test="lineWords"]');
+        const [first, second] = words().map((w) => w.element as HTMLTextAreaElement);
+        expect([first!.value, second!.value]).toEqual(['First', 'Second']);
+        first!.focus();
+        await words()[0]!.trigger('keydown', { key: 'ArrowDown' });
+        expect(document.activeElement).toBe(second);
+        await words()[1]!.trigger('keydown', { key: 'ArrowUp' });
+        expect(document.activeElement).toBe(first);
+    });
+
     it('removes a line', async () => {
         const { wrapper, lines } = mountLines();
         await wrapper.findAll('[data-test="removeLine"]')[0]!.trigger('click');

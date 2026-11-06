@@ -8,7 +8,7 @@
  * video's master, so every player shows it. Edits not yet saved stay when the
  * language, the view or the tab changes.
  */
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { deleteSubtitles, getEncodedMedia, getSubtitles, putSubtitles } from '../../api';
 import type { EncodedMedia } from '../../types';
 import type { Segment } from '../segment-editor';
@@ -122,7 +122,7 @@ async function select(language: string): Promise<void> {
     selected.value = language;
     error.value = null;
     notice.value = null;
-    filesOpen.value = false;
+    optionsOpen.value = false;
     try {
         await ensureLoaded(language);
     } catch (err) {
@@ -194,7 +194,7 @@ function openAdd(preset: { copyFrom?: string; file?: { fileName: string; segment
     newFile.value = preset.file ?? null;
     newCopyFrom.value = preset.copyFrom ?? selected.value;
     newStart.value = preset.file ? 'file' : preset.copyFrom ? 'copy' : 'empty';
-    filesOpen.value = false;
+    optionsOpen.value = false;
     adding.value = true;
 }
 
@@ -230,16 +230,27 @@ async function addLanguage(): Promise<void> {
     if (from) original.value = from;
 }
 
-// ---- Files ----------------------------------------------------------------
+// ---- Options menu ---------------------------------------------------------
 
-const filesOpen = ref(false);
+const optionsOpen = ref(false);
+const optionsRef = ref<HTMLElement | null>(null);
 const importInput = ref<HTMLInputElement | null>(null);
+
+function onDocumentMouseDown(event: MouseEvent): void {
+    if (!optionsRef.value?.contains(event.target as Node)) optionsOpen.value = false;
+}
+
+watch(optionsOpen, (open) => {
+    if (open) document.addEventListener('mousedown', onDocumentMouseDown, true);
+    else document.removeEventListener('mousedown', onDocumentMouseDown, true);
+});
+onBeforeUnmount(() => document.removeEventListener('mousedown', onDocumentMouseDown, true));
 
 async function importInto(event: Event): Promise<void> {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
     input.value = '';
-    filesOpen.value = false;
+    optionsOpen.value = false;
     const d = draft.value;
     if (!file || !d) return;
     const { segments } = await readFile(file);
@@ -252,7 +263,7 @@ async function importInto(event: Event): Promise<void> {
 }
 
 function download(kind: 'srt' | 'vtt'): void {
-    filesOpen.value = false;
+    optionsOpen.value = false;
     const d = draft.value;
     if (!d || !selected.value) return;
     const text = kind === 'srt' ? subtitlesToSrt(d.segments) : subtitlesToVtt(d.segments);
@@ -318,7 +329,7 @@ function discard(): void {
 }
 
 async function remove(): Promise<void> {
-    filesOpen.value = false;
+    optionsOpen.value = false;
     const token = props.sessionToken;
     const language = selected.value;
     const d = draft.value;
@@ -464,25 +475,34 @@ const offTab = 'font-medium text-slate-600 hover:text-zinc-900 dark:text-slate-4
                         + Add language
                     </button>
                 </div>
-                <div class="ml-auto">
+                <div ref="optionsRef" class="ml-auto" @keydown.escape="optionsOpen = false">
                     <button
                         type="button"
                         class="chapter-toolbar-muted flex items-center gap-1.5"
-                        :aria-expanded="filesOpen"
+                        :aria-expanded="optionsOpen"
                         aria-haspopup="menu"
-                        data-test="subtitleFiles"
-                        @click="filesOpen = !filesOpen"
+                        data-test="subtitleOptions"
+                        @click="optionsOpen = !optionsOpen"
                     >
-                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
-                            <path d="M12 3v12M7 10l5 5 5-5M5 21h14" />
+                        {{ labelOf(selected!) }} options
+                        <svg
+                            class="h-4 w-4 transition-transform"
+                            :class="{ 'rotate-180': optionsOpen }"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            aria-hidden="true"
+                        >
+                            <path d="M6 9l6 6 6-6" />
                         </svg>
-                        Files
                     </button>
                     <div
-                        v-if="filesOpen"
+                        v-if="optionsOpen"
                         role="menu"
                         class="absolute top-full right-5 z-20 mt-1 flex w-64 flex-col gap-1 rounded-xl border border-slate-200 bg-white p-2 shadow-lg dark:border-slate-700 dark:bg-slate-800"
-                        data-test="subtitleFilesMenu"
+                        data-test="subtitleOptionsMenu"
                     >
                         <label class="flex flex-col gap-1 px-2 pt-1 pb-2 text-xs font-medium text-slate-500 dark:text-slate-400">
                             Name players show
