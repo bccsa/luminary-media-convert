@@ -6,6 +6,7 @@ import type { NextFunction, Request, Response } from 'express';
 import helmet from 'helmet';
 import { join } from 'path';
 import { AppModule } from './app.module.js';
+import { SERVER_OPTIONS } from './server-options.js';
 import type { CmsSessionHook } from './cms/cms-session-hook.js';
 import type { EncodeOutcomeHook } from './encode/encode-outcome-hook.js';
 import { OriginRegistry, type OriginDecisions } from './cms/origin-registry.js';
@@ -224,7 +225,8 @@ export async function createServer(
             credentialCipher: options.credentialCipher,
             onCmsSessionCreated: options.onCmsSessionCreated,
             onEncodeFinished: options.onEncodeFinished,
-        })
+        }),
+        SERVER_OPTIONS
     );
 
     app.use(buildHelmet(!!options.staticAppDir));
