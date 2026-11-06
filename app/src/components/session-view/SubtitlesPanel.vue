@@ -8,7 +8,7 @@
  * video's master, so every player shows it. Edits not yet saved stay when the
  * language, the view or the tab changes.
  */
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { deleteSubtitles, getEncodedMedia, getSubtitles, putSubtitles } from '../../api';
 import type { EncodedMedia } from '../../types';
 import type { Segment } from '../segment-editor';
@@ -122,7 +122,7 @@ async function select(language: string): Promise<void> {
     selected.value = language;
     error.value = null;
     notice.value = null;
-    filesOpen.value = false;
+    optionsOpen.value = false;
     try {
         await ensureLoaded(language);
     } catch (err) {
@@ -194,7 +194,7 @@ function openAdd(preset: { copyFrom?: string; file?: { fileName: string; segment
     newFile.value = preset.file ?? null;
     newCopyFrom.value = preset.copyFrom ?? selected.value;
     newStart.value = preset.file ? 'file' : preset.copyFrom ? 'copy' : 'empty';
-    filesOpen.value = false;
+    optionsOpen.value = false;
     adding.value = true;
 }
 
@@ -202,8 +202,18 @@ async function readFile(file: File): Promise<{ fileName: string; segments: Segme
     return { fileName: file.name, segments: readSubtitleFile(await file.text()) };
 }
 
+const newFileInput = ref<HTMLInputElement | null>(null);
+
+/** The file button chooses this way of starting, then opens the picker. */
+function chooseNewFile(): void {
+    newStart.value = 'file';
+    newFileInput.value?.click();
+}
+
 async function pickNewFile(event: Event): Promise<void> {
-    const file = (event.target as HTMLInputElement).files?.[0];
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
     if (file) newFile.value = await readFile(file);
 }
 
@@ -230,16 +240,27 @@ async function addLanguage(): Promise<void> {
     if (from) original.value = from;
 }
 
-// ---- Files ----------------------------------------------------------------
+// ---- Options menu ---------------------------------------------------------
 
-const filesOpen = ref(false);
+const optionsOpen = ref(false);
+const optionsRef = ref<HTMLElement | null>(null);
 const importInput = ref<HTMLInputElement | null>(null);
+
+function onDocumentMouseDown(event: MouseEvent): void {
+    if (!optionsRef.value?.contains(event.target as Node)) optionsOpen.value = false;
+}
+
+watch(optionsOpen, (open) => {
+    if (open) document.addEventListener('mousedown', onDocumentMouseDown, true);
+    else document.removeEventListener('mousedown', onDocumentMouseDown, true);
+});
+onBeforeUnmount(() => document.removeEventListener('mousedown', onDocumentMouseDown, true));
 
 async function importInto(event: Event): Promise<void> {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
     input.value = '';
-    filesOpen.value = false;
+    optionsOpen.value = false;
     const d = draft.value;
     if (!file || !d) return;
     const { segments } = await readFile(file);
@@ -252,7 +273,7 @@ async function importInto(event: Event): Promise<void> {
 }
 
 function download(kind: 'srt' | 'vtt'): void {
-    filesOpen.value = false;
+    optionsOpen.value = false;
     const d = draft.value;
     if (!d || !selected.value) return;
     const text = kind === 'srt' ? subtitlesToSrt(d.segments) : subtitlesToVtt(d.segments);
@@ -271,6 +292,16 @@ async function onDrop(event: DragEvent): Promise<void> {
     const file = [...(event.dataTransfer?.files ?? [])].find((f) => /\.(srt|vtt)$/i.test(f.name));
     if (!file) return;
     const read = await readFile(file);
+    // Into the open add form, keeping what was typed there.
+    if (adding.value) {
+        newFile.value = read;
+        newStart.value = 'file';
+        if (!newCode.value) {
+            newCode.value = codeFromFileName(read.fileName);
+            newName.value = newCode.value ? languageName(newCode.value) : newName.value;
+        }
+        return;
+    }
     if (draft.value && draft.value.segments.length === 0) {
         draft.value.segments = read.segments;
         notice.value = `${read.segments.length} lines from ${file.name}, not saved yet`;
@@ -318,7 +349,7 @@ function discard(): void {
 }
 
 async function remove(): Promise<void> {
-    filesOpen.value = false;
+    optionsOpen.value = false;
     const token = props.sessionToken;
     const language = selected.value;
     const d = draft.value;
@@ -464,25 +495,34 @@ const offTab = 'font-medium text-slate-600 hover:text-zinc-900 dark:text-slate-4
                         + Add language
                     </button>
                 </div>
-                <div class="ml-auto">
+                <div ref="optionsRef" class="ml-auto" @keydown.escape="optionsOpen = false">
                     <button
                         type="button"
                         class="chapter-toolbar-muted flex items-center gap-1.5"
-                        :aria-expanded="filesOpen"
+                        :aria-expanded="optionsOpen"
                         aria-haspopup="menu"
-                        data-test="subtitleFiles"
-                        @click="filesOpen = !filesOpen"
+                        data-test="subtitleOptions"
+                        @click="optionsOpen = !optionsOpen"
                     >
-                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
-                            <path d="M12 3v12M7 10l5 5 5-5M5 21h14" />
+                        {{ labelOf(selected!) }} options
+                        <svg
+                            class="h-4 w-4 transition-transform"
+                            :class="{ 'rotate-180': optionsOpen }"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            aria-hidden="true"
+                        >
+                            <path d="M6 9l6 6 6-6" />
                         </svg>
-                        Files
                     </button>
                     <div
-                        v-if="filesOpen"
+                        v-if="optionsOpen"
                         role="menu"
                         class="absolute top-full right-5 z-20 mt-1 flex w-64 flex-col gap-1 rounded-xl border border-slate-200 bg-white p-2 shadow-lg dark:border-slate-700 dark:bg-slate-800"
-                        data-test="subtitleFilesMenu"
+                        data-test="subtitleOptionsMenu"
                     >
                         <label class="flex flex-col gap-1 px-2 pt-1 pb-2 text-xs font-medium text-slate-500 dark:text-slate-400">
                             Name players show
@@ -633,15 +673,29 @@ const offTab = 'font-medium text-slate-600 hover:text-zinc-900 dark:text-slate-4
                             <span class="flex flex-col gap-0.5">
                                 <span class="text-sm font-semibold">An .srt or .vtt file</span>
                                 <span class="text-[13px] text-slate-500 dark:text-slate-400">
-                                    <template v-if="newFile">{{ newFile.segments.length }} lines in {{ newFile.fileName }}</template>
+                                    <template v-if="newFile">{{ newFile.segments.length }} line{{ newFile.segments.length === 1 ? '' : 's' }} in {{ newFile.fileName }}</template>
                                     <template v-else>Its lines and timings, ready to check</template>
                                 </span>
                             </span>
+                            <span class="flex flex-wrap items-center gap-2">
+                                <button
+                                    type="button"
+                                    class="flex h-8 items-center gap-1.5 rounded-lg border border-sky-600 bg-white px-3 text-[13px] font-semibold text-sky-700 hover:bg-sky-50 dark:border-sky-400 dark:bg-transparent dark:text-sky-300"
+                                    data-test="chooseNewSubtitleFile"
+                                    @click.prevent="chooseNewFile"
+                                >
+                                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                                        <path d="M12 15V3M7 8l5-5 5 5M5 21h14" />
+                                    </svg>
+                                    {{ newFile ? 'Choose another file' : 'Choose a file…' }}
+                                </button>
+                                <span v-if="!newFile" class="text-xs text-slate-500 dark:text-slate-400">or drop one here</span>
+                            </span>
                             <input
-                                v-if="newStart === 'file'"
+                                ref="newFileInput"
                                 type="file"
                                 accept=".srt,.vtt,text/vtt,application/x-subrip"
-                                class="text-xs"
+                                class="hidden"
                                 data-test="newSubtitleFile"
                                 @change="pickNewFile"
                             />

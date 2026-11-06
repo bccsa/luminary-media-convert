@@ -9,6 +9,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import { createSegmentId, type Segment } from '../segment-editor';
 import { compareRows, shortTime, type CompareRow } from './subtitles';
+import { stepBetweenFields } from '../../utils/fieldWalk';
 
 const props = defineProps<{
     original: Segment[];
@@ -31,6 +32,12 @@ onBeforeUnmount(() => clearInterval(timer));
 const playing = (row: CompareRow) => row.inSec <= now.value && now.value < row.outSec;
 
 const fields = ref<HTMLTextAreaElement[]>([]);
+const root = ref<HTMLElement | null>(null);
+
+/** Up and Down walk the translations, as they walk the chapter titles. */
+function onWordsKeydown(e: KeyboardEvent): void {
+    stepBetweenFields(e, Array.from(root.value?.querySelectorAll<HTMLTextAreaElement>('.subtitle-words') ?? []));
+}
 
 function write(row: CompareRow, words: string): void {
     if (row.cue) {
@@ -57,7 +64,7 @@ async function nextToTranslate(): Promise<void> {
 </script>
 
 <template>
-    <div class="flex min-h-0 flex-1 flex-col" data-test="subtitleCompare">
+    <div ref="root" class="flex min-h-0 flex-1 flex-col" data-test="subtitleCompare">
         <div class="flex shrink-0 items-center gap-3 border-b border-sky-100 pb-3 dark:border-sky-400/10">
             <div
                 role="progressbar"
@@ -114,7 +121,7 @@ async function nextToTranslate(): Promise<void> {
                     :value="row.cue?.label ?? ''"
                     rows="2"
                     placeholder="Translate this line"
-                    class="w-full resize-y rounded-md px-2.5 py-1.5 text-sm leading-snug text-zinc-900 outline-none focus:border-solid focus:border-sky-600 dark:text-slate-200 dark:focus:border-sky-400"
+                    class="subtitle-words w-full resize-y rounded-md px-2.5 py-1.5 text-sm leading-snug text-zinc-900 outline-none focus:border-solid focus:border-sky-600 dark:text-slate-200 dark:focus:border-sky-400"
                     :class="
                         row.cue?.label?.trim()
                             ? 'border border-slate-200 bg-white dark:border-slate-700 dark:bg-[#0c1222]'
@@ -122,6 +129,7 @@ async function nextToTranslate(): Promise<void> {
                     "
                     :aria-label="`${translationName} at ${shortTime(row.inSec)}`"
                     data-test="subtitleCompareWords"
+                    @keydown="onWordsKeydown"
                     @input="write(row, ($event.target as HTMLTextAreaElement).value)"
                 ></textarea>
             </li>

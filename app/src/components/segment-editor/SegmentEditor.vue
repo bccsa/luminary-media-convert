@@ -11,6 +11,7 @@ import type { Segment, SegmentEditorMode } from './types';
 import { createSegmentId } from './types';
 import { formatDuration, formatTime, parseTime } from './time';
 import { exportChaptersVtt, exportSubtitlesVtt, parseVtt } from './vtt';
+import { stepBetweenFields } from '../../utils/fieldWalk';
 import {
     findThumbnailCue,
     parseThumbnailVtt,
@@ -1122,40 +1123,13 @@ function onLabelInput(e: Event, id: string) {
     syncLabelFieldHeight(el);
 }
 
-/** Whether a label's text runs over more than one line, wrapped or not. */
-function labelIsMultiline(el: HTMLTextAreaElement): boolean {
-    const styles = getComputedStyle(el);
-    const lineHeight = parseFloat(styles.lineHeight);
-    if (!(lineHeight > 0)) return false;
-    const padding =
-        (parseFloat(styles.paddingTop) || 0) +
-        (parseFloat(styles.paddingBottom) || 0);
-    return el.scrollHeight - padding >= lineHeight * 1.5;
-}
-
-/**
- * Up and Down walk the labels. In a multi-line label they first move the caret as
- * usual, and leave only once it has reached that end of the text.
- */
+/** Up and Down walk the labels. */
 function onLabelKeyDown(e: KeyboardEvent) {
-    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
-    if (e.shiftKey || e.altKey || e.metaKey || e.ctrlKey) return;
-    const el = e.target as HTMLTextAreaElement;
-    if (el.selectionStart !== el.selectionEnd) return;
-    const up = e.key === 'ArrowUp';
-    const edge = up ? 0 : el.value.length;
-    if (labelIsMultiline(el) && el.selectionStart !== edge) return;
-
-    const fields = Array.from(
-        el
-            .closest('.se-root')
-            ?.querySelectorAll<HTMLTextAreaElement>('.se-label-field') ?? []
+    const el = e.target as HTMLElement;
+    stepBetweenFields(
+        e,
+        Array.from(el.closest('.se-root')?.querySelectorAll<HTMLTextAreaElement>('.se-label-field') ?? [])
     );
-    const next = fields[fields.indexOf(el) + (up ? -1 : 1)];
-    if (!next) return;
-    e.preventDefault();
-    next.focus();
-    next.setSelectionRange(next.value.length, next.value.length);
 }
 
 /** Fire the user-intentioned commit signal once when a label edit ends. */

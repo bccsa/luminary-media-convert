@@ -8,6 +8,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import { createSegmentId, parseTime, type Segment } from '../segment-editor';
 import { shiftLines, shortTime } from './subtitles';
+import { stepBetweenFields } from '../../utils/fieldWalk';
 
 const props = defineProps<{
     /** The video's length; the strip spans it. */
@@ -38,6 +39,12 @@ function update(id: string, change: Partial<Segment>): void {
 }
 
 const fields = ref<Record<string, HTMLTextAreaElement | null>>({});
+const root = ref<HTMLElement | null>(null);
+
+/** Up and Down walk the lines' words, as they walk the chapter titles. */
+function onWordsKeydown(e: KeyboardEvent): void {
+    stepBetweenFields(e, Array.from(root.value?.querySelectorAll<HTMLTextAreaElement>('.subtitle-words') ?? []));
+}
 
 async function select(line: Segment, seek = true): Promise<void> {
     selectedId.value = line.id;
@@ -88,7 +95,7 @@ const pct = (sec: number) => `${(sec / span.value) * 100}%`;
 </script>
 
 <template>
-    <div class="flex min-h-0 flex-1 flex-col" data-test="subtitleLines">
+    <div ref="root" class="flex min-h-0 flex-1 flex-col" data-test="subtitleLines">
         <div class="flex shrink-0 flex-wrap items-center gap-2.5 pb-2">
             <span class="text-[13px] text-slate-500 dark:text-slate-400">
                 {{ lines.length }} line{{ lines.length === 1 ? '' : 's' }}
@@ -243,7 +250,7 @@ const pct = (sec: number) => `${(sec / span.value) * 100}%`;
                     :ref="(el) => (fields[line.id] = el as HTMLTextAreaElement | null)"
                     :value="line.label ?? ''"
                     :rows="line.id === selectedId ? 2 : 1"
-                    class="w-full resize-none rounded-md border bg-white px-2.5 py-1.5 text-sm leading-snug text-zinc-900 outline-none dark:bg-[#0c1222] dark:text-slate-200"
+                    class="subtitle-words w-full resize-none rounded-md border bg-white px-2.5 py-1.5 text-sm leading-snug text-zinc-900 outline-none dark:bg-[#0c1222] dark:text-slate-200"
                     :class="
                         line.id === selectedId
                             ? 'border-sky-600 dark:border-sky-400'
@@ -253,6 +260,7 @@ const pct = (sec: number) => `${(sec / span.value) * 100}%`;
                     placeholder="What is said"
                     data-test="lineWords"
                     @focus="selectedId = line.id"
+                    @keydown="onWordsKeydown"
                     @input="update(line.id, { label: ($event.target as HTMLTextAreaElement).value })"
                 ></textarea>
                 <button
@@ -269,7 +277,7 @@ const pct = (sec: number) => `${(sec / span.value) * 100}%`;
             </li>
         </ol>
         <p v-if="!lines.length" class="m-0 py-8 text-center text-sm text-slate-500 dark:text-slate-400">
-            No lines yet. Play to where something is said, then press + Line, or import a file from Files.
+            No lines yet. Play to where something is said, then press + Line, or import a file from the options menu.
         </p>
     </div>
 </template>
