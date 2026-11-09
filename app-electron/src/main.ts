@@ -947,6 +947,6 @@ app.on('before-quit', (event) => {
         .catch((err: Error) => console.error('Shutdown failed:', err))
         .finally(() => {
             server = undefined;
-            app.quit();
+            app.exit(0);
         });
 });
