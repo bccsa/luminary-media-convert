@@ -947,9 +947,6 @@ app.on('before-quit', (event) => {
         .catch((err: Error) => console.error('Shutdown failed:', err))
         .finally(() => {
             server = undefined;
-            // On macOS a second app.quit() after a cancelled Cmd+Q closes the
-            // window but leaves the process running. Nothing is left to wait
-            // for once the server has closed.
             app.exit(0);
         });
 });
