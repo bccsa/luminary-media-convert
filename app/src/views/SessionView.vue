@@ -1768,8 +1768,18 @@ watch(
                 fetchWaveform();
             }
         }
+        // A finished encode opens as an edit of its own video: read the session
+        // again so its audio tracks, angles and subtitles show without leaving.
+        if (status === 'completed' && prev && prev !== 'completed') {
+            void refreshFinishedSession();
+        }
     }
 );
+
+async function refreshFinishedSession(): Promise<void> {
+    const detail = await getSession(sessionId.value).catch(() => null);
+    if (detail && session.value) session.value = { ...session.value, ...detail };
+}
 
 // ---------------------------------------------------------------------------
 // Chapter editor — load / save / discard
