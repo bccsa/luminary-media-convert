@@ -854,6 +854,29 @@ describe('SessionView', () => {
         });
     });
 
+    it('turns a finished encode into an edit of its video in place, with its audio tracks, angles and subtitles', async () => {
+        detail.mockResolvedValue(uploadedSession({ status: 'encoding' }));
+        status.mockResolvedValue({ status: 'encoding' });
+        const wrapper = await mountView();
+        await flushPromises();
+        expect(wrapper.find('[data-test="audioTracksTab"]').exists()).toBe(false);
+
+        // The encoder marks a finished encode editable; the page has to read it.
+        const finished = {
+            status: 'completed',
+            mode: 'edit',
+            masterPlaylist: 'master.m3u8',
+            hlsUrl: 'http://127.0.0.1:9000/media/sess-1/master.m3u8',
+        };
+        detail.mockResolvedValue(uploadedSession(finished));
+        status.mockResolvedValue(finished);
+        subscribe.mock.calls[0][2]({ status: 'completed' });
+        await flushPromises();
+
+        expect(wrapper.find('[data-test="audioTracksTab"]').exists()).toBe(true);
+        expect(wrapper.find('[data-test="subtitlesTab"]').exists()).toBe(true);
+    });
+
     /**
      * The filmstrip refetches when the encoder says it has sampled more frames.
      * That signal folds the completion flag into the count, because the final

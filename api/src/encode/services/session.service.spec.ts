@@ -608,6 +608,47 @@ describe('SessionService — restoring after a restart', () => {
     });
 });
 
+describe('SessionService — a finished encode is editable in place', () => {
+    const encrypted = (encryptPlaylists?: boolean) =>
+        makeConfig({
+            s3: { ...makeConfig().s3, pathPrefix: '/videos/post-1/' },
+            encryption: {
+                enabled: true,
+                ...(encryptPlaylists === undefined ? {} : { encryptPlaylists }),
+            },
+        } as Partial<CreateSessionDto>);
+
+    it('opens as an edit of its own video once it completes', () => {
+        const service = build();
+        const session = service.create(encrypted(), {
+            origin: 'cms',
+            documentId: 'doc-1',
+            createdByOrigin: 'https://cms.example',
+        });
+        expect(session.edit).toBeUndefined();
+
+        service.setCompleted(session.id, [], 'master.m3u8', undefined, undefined, 'ab'.repeat(16));
+
+        expect(service.get(session.id)!.edit).toEqual({
+            masterKey: 'videos/post-1/master.m3u8',
+            encrypted: true,
+        });
+        // So Edit from the CMS opens this session rather than another one.
+        expect(
+            service.findActiveByDocumentId('doc-1', 'https://cms.example', true)?.id
+        ).toBe(session.id);
+    });
+
+    it('reads its master as plain when the encode left its playlists plain', () => {
+        const service = build();
+        const session = service.create(encrypted(false));
+
+        service.setCompleted(session.id, [], 'master.m3u8', undefined, undefined, 'ab'.repeat(16));
+
+        expect(service.get(session.id)!.edit?.encrypted).toBe(false);
+    });
+});
+
 describe('SessionService — removing', () => {
     it('drops the record, its tokens and its directory', () => {
         const service = build();
