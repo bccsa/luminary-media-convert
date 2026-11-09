@@ -50,6 +50,7 @@ import {
     runQuickTrim,
     type QuickTrimStreamTarget,
 } from './quick-trim-runner.js';
+import { FfmpegOutput } from './ffmpeg-output';
 
 const execFileAsync = promisify(execFile);
 
@@ -475,13 +476,31 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     }
 
     private detectNvidiaGpu(): boolean {
+        // A machine with an NVIDIA card that does not encode on it can only be
+        // diagnosed from its log, so the reason is said there. A Mac never has
+        // NVENC, and saying so on every launch would only be noise.
+        const notUsed = (reason: string) => {
+            if (process.platform !== 'darwin')
+                this.logger.log(`NVENC not used: ${reason}`);
+            return false;
+        };
         try {
             execSync('nvidia-smi', { stdio: 'ignore', timeout: 5000 });
-        } catch {
-            return false;
+        } catch (err) {
+            return notUsed(
+                `nvidia-smi did not run (${(err as Error).message})`
+            );
         }
 
-        return this.ffmpegCapabilityList('-hwaccels').includes('cuda');
+        const hwaccels = this.ffmpegCapabilityList('-hwaccels');
+        if (hwaccels.includes('cuda')) return true;
+        const listed = hwaccels
+            .split('\n')
+            .map((line) => line.trim())
+            .filter((line) => line && !line.endsWith(':'));
+        return notUsed(
+            `this ffmpeg has no CUDA hwaccel (it lists: ${listed.join(', ') || 'none'})`
+        );
     }
 
     private detectAppleGpu(): boolean {
@@ -1737,17 +1756,13 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             });
             this.activeProcess = proc;
 
-            let stderrBuffer = '';
+            const output = new FfmpegOutput();
             let lastProgress = 0;
 
             proc.stderr?.on('data', (chunk: Buffer) => {
                 try {
                     const text = chunk.toString();
-                    stderrBuffer += text;
-
-                    if (stderrBuffer.length > 8192) {
-                        stderrBuffer = stderrBuffer.slice(-8192);
-                    }
+                    output.push(text);
 
                     if (totalDuration > 0) {
                         const currentTime = this.parseProgressTime(text);
@@ -1813,10 +1828,9 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                     onProgress(100);
                     settle();
                 } else {
-                    const tail = stderrBuffer.slice(-2000);
                     settle(
                         new Error(
-                            `FFmpeg exited with code ${code}${signal ? ` (signal: ${signal})` : ''}. stderr tail:\n${tail}`
+                            `FFmpeg exited with code ${code}${signal ? ` (signal: ${signal})` : ''}. stderr:\n${output.report()}`
                         )
                     );
                 }
@@ -1938,14 +1952,11 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             });
             this.quickTrimProcesses.add(proc);
 
-            let stderrBuffer = '';
+            const output = new FfmpegOutput();
             proc.stderr?.on('data', (chunk: Buffer) => {
                 try {
                     const text = chunk.toString();
-                    stderrBuffer += text;
-                    if (stderrBuffer.length > 8192) {
-                        stderrBuffer = stderrBuffer.slice(-8192);
-                    }
+                    output.push(text);
                     const currentTime = this.parseProgressTime(text);
                     if (currentTime !== null) onTime(currentTime);
                 } catch {
@@ -1979,7 +1990,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                     new Error(
                         `FFmpeg (${label}) exited with code ${code}` +
                             `${signal ? ` (signal: ${signal})` : ''}. ` +
-                            `stderr tail:\n${stderrBuffer.slice(-2000)}`
+                            `stderr:\n${output.report()}`
                     )
                 );
             });

@@ -2,7 +2,7 @@
  * What a failed encode tells the person who started it.
  *
  * The errors an encode fails with are written for whoever reads the log: an
- * ffmpeg failure carries the last two thousand characters of its output, an
+ * ffmpeg failure carries the start and end of its output, an
  * upload failure the object key and the storage client's reply. Shown as they
  * are, a CMS put a wall of file paths and progress lines where an editor
  * needed one sentence. This turns them into that sentence; the original stays
