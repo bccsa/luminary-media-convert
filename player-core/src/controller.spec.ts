@@ -471,6 +471,74 @@ describe('PlayerController — setAngle', () => {
     });
 });
 
+describe('PlayerController — audio and back on an engine that drops the picture in place', () => {
+    it('turns the picture off without a reload, and on again for the angle it left', async () => {
+        const { adapter, controller, calls } = setup(multiAngleRoutes, { videoToggling: true });
+        await controller.load({ masterUrl: MASTER_URL });
+        adapter.emit('playing', undefined);
+        adapter.advanceTo(42);
+        const before = calls.length;
+        const changed = vi.fn();
+        controller.on('angle-changed', changed);
+
+        await controller.setAngle(AUDIO_ONLY_ANGLE_ID);
+
+        expect(adapter.loads).toHaveLength(1);
+        expect(adapter.videoEnabledCalls).toEqual([false]);
+        expect(controller.getState()).toMatchObject({
+            activeAngleId: AUDIO_ONLY_ANGLE_ID,
+            isAudioOnly: true,
+        });
+        expect(changed).toHaveBeenCalledWith({ angleId: AUDIO_ONLY_ANGLE_ID });
+
+        await controller.setAngle('angle_0');
+
+        expect(adapter.loads).toHaveLength(1);
+        expect(adapter.videoEnabledCalls).toEqual([false, true]);
+        expect(controller.getState()).toMatchObject({ activeAngleId: 'angle_0', isAudioOnly: false });
+        expect(changed).toHaveBeenLastCalledWith({ angleId: 'angle_0' });
+        expect(calls.slice(before)).toEqual([]);
+        expect(adapter.seeks).toEqual([]);
+    });
+
+    it('reloads for another angle than the one under the sound', async () => {
+        const { adapter, controller } = setup(multiAngleRoutes, { videoToggling: true });
+        await controller.load({ masterUrl: MASTER_URL });
+        await controller.setAngle(AUDIO_ONLY_ANGLE_ID);
+
+        await controller.setAngle('angle_1');
+
+        expect(adapter.loads).toHaveLength(2);
+        expect(adapter.videoEnabledCalls).toEqual([false]);
+        expect(controller.getState()).toMatchObject({ activeAngleId: 'angle_1', isAudioOnly: false });
+    });
+
+    it('reloads for video once a re-munge has replaced the source with the audio-only one', async () => {
+        const { adapter, controller } = setup(multiAngleRoutes, { videoToggling: true });
+        await controller.load({ masterUrl: MASTER_URL });
+        await controller.setAngle(AUDIO_ONLY_ANGLE_ID);
+        adapter.emit('reload-requested', { reason: 'wedged', attempt: 1 });
+        await flush();
+        expect(adapter.loads).toHaveLength(2);
+
+        await controller.setAngle('angle_0');
+
+        expect(adapter.loads).toHaveLength(3);
+        expect(adapter.videoEnabledCalls).toEqual([false]);
+    });
+
+    it('starts a source in audio-only with the audio-only master, never a hidden picture', async () => {
+        const { adapter, controller } = setup(multiAngleRoutes, { videoToggling: true });
+        await controller.load({ masterUrl: MASTER_URL, startAngleId: AUDIO_ONLY_ANGLE_ID });
+
+        expect(adapter.videoEnabledCalls).toEqual([]);
+        expect(controller.getState().isAudioOnly).toBe(true);
+
+        await controller.setAngle('angle_0');
+        expect(adapter.loads).toHaveLength(2);
+    });
+});
+
 /**
  * A source's media playlists are served once for its whole life. An angle
  * switch, the audio toggle and a recovery re-munge serve a new master and

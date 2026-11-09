@@ -348,6 +348,8 @@ export interface FakeAdapterOptions {
     variants?: AdapterVariant[];
     audioTracks?: AdapterAudioTrack[];
     recoverResult?: boolean;
+    /** Implements `setVideoEnabled`, as an engine that can drop the picture in place does. */
+    videoToggling?: boolean;
 }
 
 /** Scriptable {@link PlayerAdapter} for controller specs. */
@@ -359,6 +361,8 @@ export class FakeAdapter implements PlayerAdapter {
     readonly variantCalls: string[] = [];
     readonly audioTrackCalls: string[] = [];
     readonly recoverCalls: string[] = [];
+    readonly videoEnabledCalls: boolean[] = [];
+    setVideoEnabled?: (enabled: boolean) => void;
     reattachCount = 0;
     readonly warmCalls: Array<{
         schedules: ChunkBoundary[][];
@@ -392,6 +396,9 @@ export class FakeAdapter implements PlayerAdapter {
         this.variants = options.variants ?? [];
         this.audioTracks = options.audioTracks ?? [];
         this.recoverResult = options.recoverResult ?? true;
+        if (options.videoToggling) {
+            this.setVideoEnabled = (enabled) => this.videoEnabledCalls.push(enabled);
+        }
     }
 
     async loadSource(src: AdapterSource): Promise<void> {

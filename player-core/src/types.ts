@@ -641,6 +641,13 @@ export interface PlayerAdapter {
     getAudioTracks(): AdapterAudioTrack[];
     setAudioTrack(id: string): void;
 
+    /**
+     * Stops (false) or resumes (true) fetching and decoding the picture of the source already loaded, keeping
+     * the sound playing without a reload: the audio-only switch, where the engine can do it in place. Every
+     * `loadSource` starts with the picture on. Optional; without it the wrapper reloads with the audio-only master.
+     */
+    setVideoEnabled?(enabled: boolean): void;
+
     setTextTracks(tracks: AdapterTextTrack[]): void;
     /**
      * `track` is what the controller knows of the one chosen: its name and language, so an engine that names its

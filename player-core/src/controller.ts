@@ -169,6 +169,8 @@ export class PlayerController implements PlayerControllerApi {
     private qualityChoice: { id: string; height: number } | null = null;
     private startPosition = 0;
     private resumePlaying = false;
+    /** The video angle loaded under audio-only while the engine has its picture switched off; null otherwise. */
+    private pictureOffAngleId: string | null = null;
     private chapterTrackPinned = false;
 
     constructor(
@@ -380,6 +382,7 @@ export class PlayerController implements PlayerControllerApi {
         // A data saver starts low whatever the host measured: the estimate is the one input both
         // engines already start from, so clamping it here needs no engine to know about data savers.
         const bandwidth = dataSaver ? Math.min(usable ?? Infinity, DATA_SAVER_START_BPS) : usable;
+        this.pictureOffAngleId = null;
         await this.adapter.loadSource({
             ...(source ?? munged!.source),
             ...(bandwidth !== undefined ? { bandwidthEstimate: bandwidth } : {}),
@@ -552,6 +555,10 @@ export class PlayerController implements PlayerControllerApi {
         if (!this.master || this.state.lifecycle === 'destroyed') return;
         if (id === this.state.activeAngleId) return;
         if (!this.state.angles.some((angle) => angle.id === id)) return;
+        if (this.switchPictureInPlace(id)) {
+            this.emitter.emit('angle-changed', { angleId: id });
+            return;
+        }
 
         const generation = this.generation;
         const seekTo = this.adapter.getCurrentTime();
@@ -566,6 +573,28 @@ export class PlayerController implements PlayerControllerApi {
         }
         if (generation !== this.generation) return;
         this.emitter.emit('angle-changed', { angleId: id });
+    }
+
+    /**
+     * Audio and back on the source already loaded, where the engine can drop the picture in place: the sound plays
+     * on without the gap of a reload, and the picture returns from the next segment. False when it takes a reload.
+     */
+    private switchPictureInPlace(id: string): boolean {
+        const setVideoEnabled = this.adapter.setVideoEnabled?.bind(this.adapter);
+        if (!setVideoEnabled || this.state.lifecycle !== 'ready') return false;
+        if (id === AUDIO_ONLY_ANGLE_ID) {
+            const loaded = this.state.activeAngleId;
+            if (this.pictureOffAngleId !== null || !loaded || loaded === AUDIO_ONLY_ANGLE_ID) return false;
+            setVideoEnabled(false);
+            this.pictureOffAngleId = loaded;
+            this.store.setState({ activeAngleId: AUDIO_ONLY_ANGLE_ID, isAudioOnly: true });
+            return true;
+        }
+        if (id !== this.pictureOffAngleId) return false;
+        setVideoEnabled(true);
+        this.pictureOffAngleId = null;
+        this.store.setState({ activeAngleId: id, isAudioOnly: false });
+        return true;
     }
 
     setQuality(id: string | 'auto'): void {
@@ -751,6 +780,7 @@ export class PlayerController implements PlayerControllerApi {
         this.updateChunkWarming(null);
         this.serveStrategy.release();
         this.master = null;
+        this.pictureOffAngleId = null;
         this.subtitleCues.clear();
     }
 
