@@ -420,7 +420,9 @@ export class PlayerController implements PlayerControllerApi {
         this.refreshQualities();
         this.refreshAudioTracks();
 
-        if (options.seekTo > 0) this.adapter.seek(options.seekTo);
+        // Each load of a live source starts a new timeline, so a carried-over position lands at or past
+        // the new live edge and playback waits for segments not yet published; the engine's own live start is right.
+        if (options.seekTo > 0 && !munged?.isLive) this.adapter.seek(options.seekTo);
         if (options.resume) {
             await this.adapter.play().catch(() => undefined);
         }

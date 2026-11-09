@@ -194,6 +194,21 @@ describe('PlayerController — a live source', () => {
         await recorded.controller.load({ masterUrl: MASTER_URL });
         expect(recorded.controller.getState().live).toBe(false);
     });
+
+    it('switches to audio and back without carrying the old position into the reload', async () => {
+        const { adapter, controller } = setup(liveRoutes, {}, { serveStrategy: new FakeLiveServeStrategy() });
+        await controller.load({ masterUrl: MASTER_URL });
+        adapter.emit('playing', undefined);
+        adapter.advanceTo(35.9);
+
+        await controller.setAngle(AUDIO_ONLY_ANGLE_ID);
+        adapter.advanceTo(41.2);
+        await controller.setAngle(controller.getState().angles[0]!.id);
+
+        expect(adapter.loads).toHaveLength(3);
+        expect(adapter.seeks).toEqual([]);
+        expect(adapter.playCount).toBe(2);
+    });
 });
 
 describe('PlayerController — load', () => {
