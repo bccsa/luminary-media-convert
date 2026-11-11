@@ -21,7 +21,12 @@ import { ChunkPrefetcher } from './chunkWarming';
 import { initialBandwidth, persistBandwidth } from './hlsBandwidth';
 import { createLuminaryLoader, loadPolicyConfig } from './hlsLoaders';
 import { HlsStallSignals } from './hlsStallSignals';
-import type { HlsEngine, HlsErrorData, HlsJsConfig, HlsJsVideoElement } from './hlsTypes';
+import type {
+    HlsEngine,
+    HlsErrorData,
+    HlsJsConfig,
+    HlsJsVideoElement,
+} from './hlsTypes';
 
 /** The MIME type that routes a source to hls.js; a blob master has no `.m3u8` to infer it from. */
 const HLS_MIME_TYPE = 'application/vnd.apple.mpegurl';
@@ -50,7 +55,9 @@ export function isHlsEngineSupported(): boolean {
     } catch {
         /* engine unavailable in this environment */
     }
-    return typeof globalThis !== 'undefined' && 'ManagedMediaSource' in globalThis;
+    return (
+        typeof globalThis !== 'undefined' && 'ManagedMediaSource' in globalThis
+    );
 }
 
 function errorCategory(type: string): AdapterErrorCategory {
@@ -59,8 +66,13 @@ function errorCategory(type: string): AdapterErrorCategory {
     return 'other';
 }
 
-function variantId(rendition: { height?: number | undefined; bitrate?: number | undefined }): string {
-    return rendition.height ? String(rendition.height) : `b${rendition.bitrate ?? 0}`;
+function variantId(rendition: {
+    height?: number | undefined;
+    bitrate?: number | undefined;
+}): string {
+    return rendition.height
+        ? String(rendition.height)
+        : `b${rendition.bitrate ?? 0}`;
 }
 
 export interface HlsJsVideoAdapterOptions {
@@ -86,7 +98,10 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         keyDelivery: 'memory',
         variantSwitching: true,
         renderText: true,
+        liveMaxHeight: true,
     };
+    /** The cap on the picture's height ({@link setMaxHeight}), applied to every hls.js instance as its levels arrive. */
+    private maxHeight: number | null = null;
 
     private readonly el: HlsJsVideoElement;
     private readonly options: HlsJsVideoAdapterOptions;
@@ -120,7 +135,10 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
      * refused until the element has rebuilt it.
      */
     private audioTracksOutgoing = false;
-    private listeners = new Map<AdapterEventName, Set<(payload: never) => void>>();
+    private listeners = new Map<
+        AdapterEventName,
+        Set<(payload: never) => void>
+    >();
     private destroyed = false;
     private baseConfig: HlsJsConfig | null = null;
     private configKey = '';
@@ -135,7 +153,8 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         this.ladder = new RecoveryLadder(DEFAULT_RECOVERY_POLICY, {
             recoverInPlace: (category) => this.recover(category),
             reattach: () => this.reattach(),
-            requestReload: (reason, attempt) => this.emit('reload-requested', { reason, attempt }),
+            requestReload: (reason, attempt) =>
+                this.emit('reload-requested', { reason, attempt }),
             onExhausted: (payload) => this.emit('error', payload),
         });
         this.attachElementListeners();
@@ -157,7 +176,11 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         const key = `${this.lastSource?.bandwidthEstimate ?? ''}|${dataSaver}`;
         if (this.baseConfig && key === this.configKey) return this.baseConfig;
         this.configKey = key;
-        const start = initialBandwidth(this.lastSource?.bandwidthEstimate, undefined, dataSaver);
+        const start = initialBandwidth(
+            this.lastSource?.bandwidthEstimate,
+            undefined,
+            dataSaver
+        );
         this.baseConfig = {
             ...loadPolicyConfig(),
             loader: createLuminaryLoader({
@@ -191,7 +214,11 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         if (!isHlsEngineSupported()) {
             if (src.isBlob) {
                 const error = new UnsupportedBrowserError();
-                this.emit('error', { category: 'other', fatal: true, detail: error });
+                this.emit('error', {
+                    category: 'other',
+                    fatal: true,
+                    detail: error,
+                });
                 throw error;
             }
             // Best effort: hand the untouched URL to the platform player.
@@ -200,7 +227,8 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         }
 
         if (src.keyHex) {
-            if (this.engineKeyHex && this.engineKeyHex !== src.keyHex) this.engineGeneration++;
+            if (this.engineKeyHex && this.engineKeyHex !== src.keyHex)
+                this.engineGeneration++;
             this.engineKeyHex = src.keyHex;
         }
         this.retireAudioTracks();
@@ -211,7 +239,14 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         this.el.source = {
             src: url,
             type: HLS_MIME_TYPE,
-            engine: { hlsJs: { ...this.config(), ...(this.engineGeneration ? { engineGeneration: this.engineGeneration } : {}) } },
+            engine: {
+                hlsJs: {
+                    ...this.config(),
+                    ...(this.engineGeneration
+                        ? { engineGeneration: this.engineGeneration }
+                        : {}),
+                },
+            },
         };
     }
 
@@ -298,12 +333,16 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
 
     getCurrentTime(): number {
         const currentTime = this.el.currentTime;
-        return typeof currentTime === 'number' && Number.isFinite(currentTime) ? currentTime : 0;
+        return typeof currentTime === 'number' && Number.isFinite(currentTime)
+            ? currentTime
+            : 0;
     }
 
     getDuration(): number {
         const duration = this.el.duration;
-        return typeof duration === 'number' && Number.isFinite(duration) ? duration : 0;
+        return typeof duration === 'number' && Number.isFinite(duration)
+            ? duration
+            : 0;
     }
 
     setPlaybackRate(rate: number): void {
@@ -324,6 +363,51 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
             });
         }
         return variants;
+    }
+
+    /**
+     * Caps ABR in place: hls.js's `autoLevelCapping` at the tallest level within `height`, or lifted with null. A
+     * level playing above a new cap gives way at the next fragment; lifted, ABR is free to climb at once.
+     */
+    setMaxHeight(height: number | null): void {
+        this.maxHeight = height && height > 0 ? height : null;
+        this.applyMaxHeight();
+    }
+
+    private applyMaxHeight(): void {
+        const engine = this.engine ?? this.el.engine;
+        if (!engine || !engine.levels?.length) return;
+        const cap = this.maxHeight;
+        let index = -1;
+        if (cap !== null) {
+            engine.levels.forEach((level, i) => {
+                if (
+                    (level.height || 0) <= cap &&
+                    (index < 0 || level.height > engine.levels[index]!.height)
+                )
+                    index = i;
+            });
+            // No level fits: the smallest is the least that can be shown.
+            if (index < 0)
+                index = engine.levels.reduce(
+                    (low, level, i, all) =>
+                        level.height < all[low]!.height ? i : low,
+                    0
+                );
+        }
+        const before = engine.autoLevelCapping;
+        engine.autoLevelCapping = index;
+        if (engine.currentLevel < 0) return;
+        const overCap =
+            cap !== null &&
+            (engine.levels[engine.currentLevel]?.height ?? 0) > cap;
+        // The change shows at once, as on the native players: hls.js sizes its forward buffer by bitrate (minutes at
+        // 360p), so a climb would wait for it to play out, and a fragment in flight above a new cap would still land.
+        // Setting `currentLevel` to Auto aborts that fragment and drops the buffer for a short refill. A hand pick
+        // within the cap is left alone.
+        const raised =
+            before !== -1 && (index === -1 || index > before) && engine.autoLevelEnabled;
+        if (overCap || raised) engine.currentLevel = -1;
     }
 
     setVariant(id: string | 'auto'): void {
@@ -372,7 +456,11 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         let i = 0;
         for (const track of tracks) {
             const id = track.id || `a${i}`;
-            result.push({ id, lang: track.language || undefined, label: track.label || track.language || id });
+            result.push({
+                id,
+                lang: track.language || undefined,
+                label: track.label || track.language || id,
+            });
             i++;
         }
         return result;
@@ -401,7 +489,10 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
      * parses the WebVTT itself, which is what v8's remote text tracks amounted to.
      */
     private mediaTarget(): HTMLVideoElement | null {
-        const el = this.el as unknown as { target?: HTMLVideoElement | null; shadowRoot?: ShadowRoot | null };
+        const el = this.el as unknown as {
+            target?: HTMLVideoElement | null;
+            shadowRoot?: ShadowRoot | null;
+        };
         return el.target ?? el.shadowRoot?.querySelector('video') ?? null;
     }
 
@@ -430,7 +521,9 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
     private applyActiveTextTrack(): void {
         for (const [id, trackEl] of this.textTracks) {
             // `track` is absent in non-browser environments (jsdom).
-            if (trackEl.track) trackEl.track.mode = id === this.activeTextTrackId ? 'showing' : 'disabled';
+            if (trackEl.track)
+                trackEl.track.mode =
+                    id === this.activeTextTrackId ? 'showing' : 'disabled';
         }
         this.applyMasterSubtitle();
     }
@@ -444,8 +537,11 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         if (id !== null && !id.startsWith('m:')) return;
         const label = id === null ? null : id.split(':').slice(2).join(':');
         for (const track of Array.from(this.mediaTarget()?.textTracks ?? [])) {
-            if (track.kind !== 'subtitles' || this.textTracks.has(track.id)) continue;
-            const wanted = label !== null && (track.label === label || track.language === label);
+            if (track.kind !== 'subtitles' || this.textTracks.has(track.id))
+                continue;
+            const wanted =
+                label !== null &&
+                (track.label === label || track.language === label);
             const mode = wanted ? 'showing' : 'disabled';
             if (track.mode !== mode) track.mode = mode;
         }
@@ -456,10 +552,12 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         const id = this.activeTextTrackId;
         if (id === null || !id.startsWith('m:')) return -1;
         const label = id.split(':').slice(2).join(':');
-        return (engine.subtitleTracks ?? []).findIndex((track) => track.name === label || track.lang === label);
+        return (engine.subtitleTracks ?? []).findIndex(
+            (track) => track.name === label || track.lang === label
+        );
     }
 
-        private removeTextTracks(): void {
+    private removeTextTracks(): void {
         for (const trackEl of this.textTracks.values()) {
             if (trackEl.track) trackEl.track.mode = 'disabled';
             trackEl.remove();
@@ -506,7 +604,9 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
                 // floor, so a video with nothing buffered yet still warms from where it is playing.
                 getWatermark: () => {
                     const buffered = this.el.buffered;
-                    const front = buffered?.length ? Number(buffered.end(buffered.length - 1)) : 0;
+                    const front = buffered?.length
+                        ? Number(buffered.end(buffered.length - 1))
+                        : 0;
                     return Math.max(front, this.getCurrentTime());
                 },
             },
@@ -517,7 +617,10 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
 
     // -- events -------------------------------------------------------------
 
-    on<E extends AdapterEventName>(event: E, listener: (payload: AdapterEventMap[E]) => void): Unsubscribe {
+    on<E extends AdapterEventName>(
+        event: E,
+        listener: (payload: AdapterEventMap[E]) => void
+    ): Unsubscribe {
         let set = this.listeners.get(event);
         if (!set) {
             set = new Set();
@@ -529,7 +632,10 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         };
     }
 
-    private emit<E extends AdapterEventName>(event: E, payload: AdapterEventMap[E]): void {
+    private emit<E extends AdapterEventName>(
+        event: E,
+        payload: AdapterEventMap[E]
+    ): void {
         const set = this.listeners.get(event);
         if (!set) return;
         for (const listener of [...set]) {
@@ -559,7 +665,9 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         // The engine is built when the source loads and replaced when its options change, so
         // everything that hangs off it is re-subscribed per load.
         add('loadstart', () => this.bindEngine(this.el.engine));
-        add('durationchange', () => this.emit('durationchange', { duration: this.getDuration() }));
+        add('durationchange', () =>
+            this.emit('durationchange', { duration: this.getDuration() })
+        );
         add('progress', () => this.emitProgress());
         add('playing', () => this.emit('playing', undefined));
         // `play` fires before buffering completes; emitting on both keeps the UI responsive.
@@ -590,7 +698,11 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
     private bindEngine(engine: HlsEngine | null): void {
         if (engine === this.engine) return;
         this.engine?.off(Hls.Events.ERROR, this.onEngineError);
-        this.engine?.off(Hls.Events.SUBTITLE_TRACKS_UPDATED, this.onSubtitleTracks);
+        this.engine?.off(
+            Hls.Events.SUBTITLE_TRACKS_UPDATED,
+            this.onSubtitleTracks
+        );
+        this.engine?.off(Hls.Events.MANIFEST_PARSED, this.onLevels);
         this.stopPersistingBandwidth?.();
         this.stopPersistingBandwidth = null;
         this.engine = engine;
@@ -599,7 +711,9 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         if (!engine) return;
         engine.on(Hls.Events.ERROR, this.onEngineError);
         engine.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, this.onSubtitleTracks);
+        engine.on(Hls.Events.MANIFEST_PARSED, this.onLevels);
         this.stopPersistingBandwidth = persistBandwidth(engine);
+        this.applyMaxHeight();
     }
 
     /**
@@ -607,6 +721,8 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
      * players. hls.js selects the default track when the list arrives, so it is put aside once per source, and
      * again after the tracks have settled; a pick the viewer makes later is left alone.
      */
+    private readonly onLevels = (): void => this.applyMaxHeight();
+
     private readonly onSubtitleTracks = (): void => {
         if (this.subtitlesSettled || !this.engine) return;
         this.subtitlesSettled = true;
@@ -624,9 +740,16 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         setTimeout(settle, 400);
     };
 
-    private readonly onEngineError = (_event: string, data: HlsErrorData): void => {
+    private readonly onEngineError = (
+        _event: string,
+        data: HlsErrorData
+    ): void => {
         if (!data.fatal) return;
-        this.ladder.note({ category: errorCategory(data.type), fatal: true, detail: data.error ?? data });
+        this.ladder.note({
+            category: errorCategory(data.type),
+            fatal: true,
+            detail: data.error ?? data,
+        });
     };
 
     /**
@@ -676,10 +799,17 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         this.detachListListeners();
         const renditions = this.el.videoRenditions;
         if (renditions) {
-            const onVariants = (): void => this.emit('variants-updated', undefined);
-            for (const type of ['addrendition', 'removerendition', 'change'] as const) {
+            const onVariants = (): void =>
+                this.emit('variants-updated', undefined);
+            for (const type of [
+                'addrendition',
+                'removerendition',
+                'change',
+            ] as const) {
                 renditions.addEventListener(type, onVariants);
-                this.listListeners.push(() => renditions.removeEventListener(type, onVariants));
+                this.listListeners.push(() =>
+                    renditions.removeEventListener(type, onVariants)
+                );
             }
         }
         const tracks = this.el.audioTracks;
@@ -691,7 +821,9 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
             };
             for (const type of ['addtrack', 'removetrack', 'change'] as const) {
                 tracks.addEventListener(type, onAudioTracks);
-                this.listListeners.push(() => tracks.removeEventListener(type, onAudioTracks));
+                this.listListeners.push(() =>
+                    tracks.removeEventListener(type, onAudioTracks)
+                );
             }
         }
     }
@@ -742,10 +874,14 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         this.ladder.destroy();
         this.bindEngine(null);
         if (this.onVisibilityChange && typeof document !== 'undefined') {
-            document.removeEventListener('visibilitychange', this.onVisibilityChange);
+            document.removeEventListener(
+                'visibilitychange',
+                this.onVisibilityChange
+            );
         }
         this.onVisibilityChange = null;
-        for (const [type, handler] of this.elementListeners) this.el.removeEventListener(type, handler);
+        for (const [type, handler] of this.elementListeners)
+            this.el.removeEventListener(type, handler);
         this.elementListeners = [];
         this.detachListListeners();
         this.activeTextTrackId = null;

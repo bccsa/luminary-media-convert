@@ -268,6 +268,45 @@ describe('variants', () => {
     });
 });
 
+describe('Data Saver cap', () => {
+    type Capped = FakeEngine & { levels: { height: number }[]; autoLevelCapping: number; autoLevelEnabled: boolean };
+    let engine: Capped;
+    beforeEach(() => {
+        engine = Object.assign(el.engine!, {
+            levels: [{ height: 144 }, { height: 360 }, { height: 720 }],
+            autoLevelCapping: -1,
+            autoLevelEnabled: true,
+        });
+    });
+
+    it('caps Auto at the tallest level within the height', () => {
+        adapter.setMaxHeight(360);
+        expect(engine.autoLevelCapping).toBe(1);
+    });
+
+    it('drops what was buffered under the cap when it lifts, so Auto climbs now rather than after minutes of 360p', () => {
+        adapter.setMaxHeight(360);
+        engine.currentLevel = 1;
+        adapter.setMaxHeight(null);
+        expect(engine.autoLevelCapping).toBe(-1);
+        expect(engine.currentLevel).toBe(-1);
+    });
+
+    it('leaves a hand pick and its buffer alone when the cap lifts', () => {
+        adapter.setMaxHeight(360);
+        engine.currentLevel = 0;
+        engine.autoLevelEnabled = false;
+        adapter.setMaxHeight(null);
+        expect(engine.currentLevel).toBe(0);
+    });
+
+    it('switches down at once when the playing level is above a new cap', () => {
+        engine.currentLevel = 2;
+        adapter.setMaxHeight(360);
+        expect(engine.currentLevel).toBe(-1);
+    });
+});
+
 describe('audio tracks', () => {
     const tracks = () => [
         { id: '0', label: 'English', language: 'en', enabled: true },
