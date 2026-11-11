@@ -31,6 +31,41 @@ function escapeVttText(text: string): string {
     return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+const CLASSES = String.raw`(?:\.[^\s.&<>]+)*`;
+
+/**
+ * The tags WebVTT cue text may carry: class, italic, bold, underline and ruby
+ * spans with optional classes; voice and language spans, which need an
+ * annotation (`<v Name>`, `<lang en>`); their end tags; and timestamps.
+ */
+export const VTT_CUE_TAG = new RegExp(
+    '<(?:' +
+        [
+            `(?:c|i|b|u|ruby|rt)${CLASSES}`,
+            String.raw`(?:v|lang)${CLASSES}[ \t][^<>&\n]*[^\s<>&]`,
+            '/(?:c|i|b|u|ruby|rt|v|lang)',
+            String.raw`(?:\d{2,}:)?[0-5]\d:[0-5]\d\.\d{3}`,
+        ].join('|') +
+        ')>',
+    'g'
+);
+
+/**
+ * A subtitle cue's text for WebVTT: its tags kept, so players show the voices,
+ * classes and styling, and every other `&`, `<` and `>` escaped, so they show
+ * as typed.
+ */
+export function escapeCueText(text: string): string {
+    const parts: string[] = [];
+    let last = 0;
+    for (const tag of text.matchAll(VTT_CUE_TAG)) {
+        parts.push(escapeVttText(text.slice(last, tag.index)), tag[0]);
+        last = tag.index! + tag[0].length;
+    }
+    parts.push(escapeVttText(text.slice(last)));
+    return parts.join('');
+}
+
 /**
  * Export segments as a WebVTT subtitle file.
  * The segment `label` is used as the cue text; newlines are preserved.
@@ -41,7 +76,7 @@ export function exportSubtitlesVtt(segments: Segment[]): string {
     sorted.forEach((seg, i) => {
         lines.push(String(i + 1));
         lines.push(`${formatVttTimestamp(seg.inSec)} --> ${formatVttTimestamp(seg.outSec)}`);
-        lines.push(escapeVttText(seg.label ?? ''));
+        lines.push(escapeCueText(seg.label ?? ''));
         lines.push('');
     });
     return lines.join('\n');
