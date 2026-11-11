@@ -305,6 +305,37 @@ describe('Data Saver cap', () => {
         adapter.setMaxHeight(360);
         expect(engine.currentLevel).toBe(-1);
     });
+
+    describe('sound alone, whose levels have no height', () => {
+        beforeEach(() => {
+            engine.levels = [{ height: 0 }, { height: 0 }, { height: 0 }];
+        });
+
+        it('caps Auto at the lowest bitrate', () => {
+            adapter.setMaxHeight(360);
+            expect(engine.autoLevelCapping).toBe(0);
+        });
+
+        it('switches down at once from a higher bitrate, as a picture does from a taller level', () => {
+            engine.currentLevel = 2;
+            adapter.setMaxHeight(360);
+            expect(engine.currentLevel).toBe(-1);
+        });
+
+        it('leaves a bitrate the viewer picked by hand', () => {
+            engine.currentLevel = 2;
+            engine.autoLevelEnabled = false;
+            adapter.setMaxHeight(360);
+            expect(engine.currentLevel).toBe(2);
+        });
+
+        it('climbs at once when the cap lifts', () => {
+            adapter.setMaxHeight(360);
+            engine.currentLevel = 0;
+            adapter.setMaxHeight(null);
+            expect(engine.currentLevel).toBe(-1);
+        });
+    });
 });
 
 describe('audio tracks', () => {

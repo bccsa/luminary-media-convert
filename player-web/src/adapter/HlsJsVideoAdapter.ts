@@ -398,9 +398,13 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         const before = engine.autoLevelCapping;
         engine.autoLevelCapping = index;
         if (engine.currentLevel < 0) return;
+        // Over the cap by its height, or, for levels with none (sound alone, capped to its lowest bitrate), by being
+        // a level Auto may no longer use.
+        const playingHeight = engine.levels[engine.currentLevel]?.height ?? 0;
         const overCap =
             cap !== null &&
-            (engine.levels[engine.currentLevel]?.height ?? 0) > cap;
+            (playingHeight > cap ||
+                (!playingHeight && engine.autoLevelEnabled && engine.currentLevel > index));
         // The change shows at once, as on the native players: hls.js sizes its forward buffer by bitrate (minutes at
         // 360p), so a climb would wait for it to play out, and a fragment in flight above a new cap would still land.
         // Setting `currentLevel` to Auto aborts that fragment and drops the buffer for a short refill. A hand pick
