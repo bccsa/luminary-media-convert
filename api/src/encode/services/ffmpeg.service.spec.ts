@@ -283,6 +283,52 @@ describe('FfmpegService', () => {
             );
             expect((service as any).detectAcceleration()).toBe('nvidia');
         });
+
+        const nvencLines = (spy: ReturnType<typeof vi.spyOn>) =>
+            spy.mock.calls
+                .map((c) => String(c[0]))
+                .filter((m) => m.includes('NVENC not used'));
+
+        it('says in the log why NVENC is not used when nvidia-smi cannot run', () => {
+            setPlatform('win32');
+            capabilities({});
+            mockExecSync.mockImplementation(() => {
+                throw new Error('spawn nvidia-smi ENOENT');
+            });
+            const log = vi.spyOn((service as any).logger, 'log');
+            expect((service as any).detectNvidiaGpu()).toBe(false);
+            expect(nvencLines(log)).toEqual([
+                expect.stringContaining(
+                    'nvidia-smi did not run (spawn nvidia-smi ENOENT)'
+                ),
+            ]);
+        });
+
+        it('says in the log why NVENC is not used when this ffmpeg has no CUDA', () => {
+            setPlatform('win32');
+            capabilities({
+                hwaccels: 'Hardware acceleration methods:\nqsv\ndxva2\n',
+            });
+            mockExecSync.mockImplementation(() => '');
+            const log = vi.spyOn((service as any).logger, 'log');
+            expect((service as any).detectNvidiaGpu()).toBe(false);
+            expect(nvencLines(log)).toEqual([
+                expect.stringContaining(
+                    'this ffmpeg has no CUDA hwaccel (it lists: qsv, dxva2)'
+                ),
+            ]);
+        });
+
+        it('says nothing about NVENC on a Mac, which never has it', () => {
+            setPlatform('darwin');
+            capabilities({});
+            mockExecSync.mockImplementation(() => {
+                throw new Error('spawn nvidia-smi ENOENT');
+            });
+            const log = vi.spyOn((service as any).logger, 'log');
+            expect((service as any).detectNvidiaGpu()).toBe(false);
+            expect(nvencLines(log)).toEqual([]);
+        });
     });
 
     describe('parseProgressTime (private, tested via reflection)', () => {
@@ -439,7 +485,11 @@ describe('FfmpegService', () => {
                                 { inSec: 70, outSec: 100 },
                             ],
                         } as any),
-                        resume: { fromSec: 48, startNumber: 8, timescale: 90000 },
+                        resume: {
+                            fromSec: 48,
+                            startNumber: 8,
+                            timescale: 90000,
+                        },
                     });
 
                     const inputs = args.flatMap((a, i) =>
