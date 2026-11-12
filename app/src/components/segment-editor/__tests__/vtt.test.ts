@@ -65,9 +65,9 @@ describe('exportSubtitlesVtt', () => {
         expect(out.indexOf('earlier')).toBeLessThan(out.indexOf('later'));
     });
 
-    it('escapes special VTT characters', () => {
-        const out = exportSubtitlesVtt([mkSeg(0, 1, '<b>A & B</b>')]);
-        expect(out).toContain('&lt;b&gt;A &amp; B&lt;/b&gt;');
+    it('keeps WebVTT tags and escapes the rest of the text', () => {
+        const out = exportSubtitlesVtt([mkSeg(0, 1, '<v Ann><b>A & B</b> <br></v>')]);
+        expect(out).toContain('<v Ann><b>A &amp; B</b> &lt;br&gt;</v>');
     });
 
     it('handles segments without a label', () => {
@@ -77,6 +77,11 @@ describe('exportSubtitlesVtt', () => {
 });
 
 describe('exportChaptersVtt', () => {
+    it('escapes everything in a chapter title, tags included', () => {
+        const out = exportChaptersVtt([mkSeg(0, 1, '<b>A & B</b>')]);
+        expect(out).toContain('&lt;b&gt;A &amp; B&lt;/b&gt;');
+    });
+
     it('numbers chapters and falls back to a default title', () => {
         const out = exportChaptersVtt([mkSeg(0, 30), mkSeg(30, 60, 'Intro')]);
         expect(out).toContain('Chapter 1\n00:00:00.000 --> 00:00:30.000\nChapter 1');
