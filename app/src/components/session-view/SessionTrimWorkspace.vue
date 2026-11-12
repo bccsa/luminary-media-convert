@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { SegmentEditor } from '../segment-editor';
-import type { Segment } from '../segment-editor';
+import type { Segment, SegmentKeyTarget } from '../segment-editor';
 import { EDITOR_ICON_BUTTON } from '../segment-editor/buttonStyles';
 
 const props = withDefaults(
@@ -44,6 +44,8 @@ const props = withDefaults(
         regenerateThumbnailsError?: string | null;
         /** The timeline edits chapters, from the moment the encode is submitted, rather than trim ranges. */
         editsChapters?: boolean;
+        /** Marks, delete and undo go to this track, such as subtitles above the timeline. */
+        keyTarget?: SegmentKeyTarget | null;
         /**
          * When the session shell uses zero flex gap (collapsed detail card), add space
          * between the player row and this timeline so it matches the spaced stack after encode.
@@ -153,6 +155,7 @@ const trimToolbarHasVisibleContent = computed(() => {
             :show-list="false"
             :show-clear-all="false"
             keyboard-scope="global"
+            :key-target="keyTarget"
             :fps="segmentEditorProbeFps"
             :thumbnail-vtt-url="thumbnailVttUrl"
             :waveform-peaks="waveformPeaks"
@@ -160,6 +163,9 @@ const trimToolbarHasVisibleContent = computed(() => {
             @segment-removed="emit('segmentRemoved', $event)"
             @segment-restored="emit('segmentRestored', $event)"
         >
+            <template v-if="$slots['above-timeline']" #above-timeline="track">
+                <slot name="above-timeline" v-bind="track" />
+            </template>
             <!--
                 `controls-end` is the controls bar's end cluster — the same
                 grid cell as the keyboard-shortcuts button, so the appearance

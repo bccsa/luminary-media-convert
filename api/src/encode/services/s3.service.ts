@@ -8,6 +8,7 @@ import {
     isEncryptedPayload,
 } from '@luminary-media-converter/hls-core';
 import type { S3ConfigDto } from '../dto/s3-config.dto.js';
+import { storageTransportAgent } from './storage-outage.js';
 
 @Injectable()
 export class S3Service {
@@ -29,6 +30,7 @@ export class S3Service {
             accessKey: config.accessKey,
             secretKey: config.secretKey,
             region: config.region,
+            transportAgent: storageTransportAgent(config.useSSL ?? true),
         });
     }
 

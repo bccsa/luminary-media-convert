@@ -7,10 +7,11 @@ import {
     toRaw,
     watch,
 } from 'vue';
-import type { Segment, SegmentEditorMode } from './types';
+import type { Segment, SegmentEditorMode, SegmentKeyTarget } from './types';
 import { createSegmentId } from './types';
 import { formatDuration, formatTime, parseTime } from './time';
 import { exportChaptersVtt, exportSubtitlesVtt, parseVtt } from './vtt';
+import { stepBetweenFields } from '../../utils/fieldWalk';
 import {
     findThumbnailCue,
     parseThumbnailVtt,
@@ -51,6 +52,8 @@ interface Props {
     snapSec?: number;
     /** Where keyboard shortcuts are active. */
     keyboardScope?: KeyboardScope;
+    /** When set, marks, delete and undo act on this track instead of the segments. */
+    keyTarget?: SegmentKeyTarget | null;
     /** Maximum seek emissions per second while dragging/scrubbing. */
     throttleSeekMs?: number;
     /** Optional frame rate; enables `,` / `.` frame stepping. */
@@ -941,6 +944,7 @@ function inGapBetweenSegments(t: number): boolean {
 }
 
 function markIn() {
+    if (props.keyTarget) return props.keyTarget.markIn();
     const t = clampTime(props.getCurrentTime());
     const atPH = segmentAt(t);
     if (atPH) {
@@ -962,6 +966,7 @@ function markIn() {
 }
 
 function markOut() {
+    if (props.keyTarget) return props.keyTarget.markOut();
     const t = clampTime(props.getCurrentTime());
     const atPH = segmentAt(t);
     if (atPH) {
@@ -1122,40 +1127,13 @@ function onLabelInput(e: Event, id: string) {
     syncLabelFieldHeight(el);
 }
 
-/** Whether a label's text runs over more than one line, wrapped or not. */
-function labelIsMultiline(el: HTMLTextAreaElement): boolean {
-    const styles = getComputedStyle(el);
-    const lineHeight = parseFloat(styles.lineHeight);
-    if (!(lineHeight > 0)) return false;
-    const padding =
-        (parseFloat(styles.paddingTop) || 0) +
-        (parseFloat(styles.paddingBottom) || 0);
-    return el.scrollHeight - padding >= lineHeight * 1.5;
-}
-
-/**
- * Up and Down walk the labels. In a multi-line label they first move the caret as
- * usual, and leave only once it has reached that end of the text.
- */
+/** Up and Down walk the labels. */
 function onLabelKeyDown(e: KeyboardEvent) {
-    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
-    if (e.shiftKey || e.altKey || e.metaKey || e.ctrlKey) return;
-    const el = e.target as HTMLTextAreaElement;
-    if (el.selectionStart !== el.selectionEnd) return;
-    const up = e.key === 'ArrowUp';
-    const edge = up ? 0 : el.value.length;
-    if (labelIsMultiline(el) && el.selectionStart !== edge) return;
-
-    const fields = Array.from(
-        el
-            .closest('.se-root')
-            ?.querySelectorAll<HTMLTextAreaElement>('.se-label-field') ?? []
+    const el = e.target as HTMLElement;
+    stepBetweenFields(
+        e,
+        Array.from(el.closest('.se-root')?.querySelectorAll<HTMLTextAreaElement>('.se-label-field') ?? [])
     );
-    const next = fields[fields.indexOf(el) + (up ? -1 : 1)];
-    if (!next) return;
-    e.preventDefault();
-    next.focus();
-    next.setSelectionRange(next.value.length, next.value.length);
 }
 
 /** Fire the user-intentioned commit signal once when a label edit ends. */
@@ -1190,6 +1168,7 @@ function handleEscape(e: KeyboardEvent) {
     }
     clearSelection();
     pendingInSec.value = null;
+    props.keyTarget?.escape();
     helpOpen.value = false;
     confirmClearOpen.value = false;
 }
@@ -1288,7 +1267,8 @@ function onKeyDown(e: KeyboardEvent) {
             target.isContentEditable);
     if (isTyping) {
         // Allow Cmd+Z / Esc even when typing; otherwise let the input handle it.
-        if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z')) {
+        // A track with its own keys leaves Cmd+Z in a field to the field's text.
+        if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z') && !props.keyTarget) {
             /* fall through */
         } else if (e.key === 'Escape') {
             handleEscape(e);
@@ -1415,13 +1395,18 @@ function onKeyDown(e: KeyboardEvent) {
         case 'Z': {
             if (e.metaKey || e.ctrlKey) {
                 e.preventDefault();
-                if (e.shiftKey) redo();
-                else undo();
+                const target = props.keyTarget ?? { undo, redo };
+                if (e.shiftKey) target.redo();
+                else target.undo();
             }
             return;
         }
         case 'Delete':
         case 'Backspace': {
+            if (props.keyTarget) {
+                if (props.keyTarget.removeSelected()) e.preventDefault();
+                return;
+            }
             if (selectedIds.value.size > 0) {
                 e.preventDefault();
                 deleteSelected();
@@ -1438,6 +1423,10 @@ function onKeyDown(e: KeyboardEvent) {
         case 'x':
         case 'X': {
             if (!(e.metaKey || e.ctrlKey)) return;
+            if (props.keyTarget) {
+                if (props.keyTarget.removeSelected()) e.preventDefault();
+                return;
+            }
             if (selectedIds.value.size > 0) {
                 e.preventDefault();
                 deleteSelected();
@@ -2493,6 +2482,16 @@ const splitRowFrame = computed(() =>
                 >
                     {{ formatTime(hoverTimecode.sec) }}
                 </div>
+                <!--
+                    A track above the strip, such as subtitles: it gets the strip's
+                    window on the video so it zooms and pans with it.
+                -->
+                <slot
+                    name="above-timeline"
+                    :view-start="viewStart"
+                    :visible-span="visibleSpan"
+                    :playhead-sec="playheadSec"
+                />
                 <div
                     ref="timelineTrackRef"
                     class="se-timeline relative cursor-crosshair overflow-hidden bg-slate-100 dark:bg-blue-950 select-none touch-pan-x"

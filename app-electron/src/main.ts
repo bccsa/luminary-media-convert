@@ -16,10 +16,12 @@ import { join, resolve } from 'node:path';
 import {
     ALLOWED_EXTENSIONS,
     checkFfmpeg,
+    allowStorageOutageSwitch,
     createServer,
     DEFAULT_PORT,
     FFMPEG_DOWNLOAD_URL,
     MIN_FFMPEG_VERSION,
+    setStorageOffline,
     type EncodeOutcome,
     type RunningServer,
 } from '@luminary-media-converter/api';
@@ -626,6 +628,9 @@ async function clearWorkingFiles(): Promise<void> {
     });
 }
 
+/** The Developer menu's simulated storage outage; development builds only. */
+let storageOffline = false;
+
 function buildMenu(): void {
     Menu.setApplicationMenu(
         Menu.buildFromTemplate(
@@ -642,6 +647,17 @@ function buildMenu(): void {
                     clearWorkingFiles: () => void clearWorkingFiles(),
                     showLog: () => logPath && shell.showItemInFolder(logPath),
                 },
+                developer: app.isPackaged
+                    ? undefined
+                    : {
+                          storageOffline,
+                          toggleStorageOffline: () => {
+                              storageOffline = !storageOffline;
+                              setStorageOffline(storageOffline);
+                              console.log(`Developer: storage ${storageOffline ? 'offline' : 'online'}`);
+                              buildMenu();
+                          },
+                      },
             })
         )
     );
@@ -800,6 +816,9 @@ async function start(): Promise<void> {
     await loadSettings();
     registerIpc();
 
+    // Before the server, so every storage client it makes can be switched off.
+    if (!app.isPackaged) allowStorageOutageSwitch();
+
     try {
         server = await createServer({
             port: Number(process.env.LUMINARY_PORT ?? DEFAULT_PORT),
@@ -928,6 +947,6 @@ app.on('before-quit', (event) => {
         .catch((err: Error) => console.error('Shutdown failed:', err))
         .finally(() => {
             server = undefined;
-            app.quit();
+            app.exit(0);
         });
 });

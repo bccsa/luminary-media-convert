@@ -20,6 +20,14 @@ export interface MenuOptions {
         clearWorkingFiles: () => void;
         showLog: () => void;
     };
+    /**
+     * Tools for testing, in a Developer menu: given only to a development build,
+     * never to the app people install.
+     */
+    developer?: {
+        storageOffline: boolean;
+        toggleStorageOffline: () => void;
+    };
 }
 
 export function menuTemplate(opts: MenuOptions): MenuItemConstructorOptions[] {
@@ -78,6 +86,22 @@ export function menuTemplate(opts: MenuOptions): MenuItemConstructorOptions[] {
         { role: 'editMenu' },
         { role: 'viewMenu' },
         { role: 'windowMenu' },
+        ...(opts.developer
+            ? ([
+                  {
+                      label: 'Developer',
+                      submenu: [
+                          {
+                              // Cuts storage only, so the rest of the machine stays online.
+                              label: 'Storage Offline',
+                              type: 'checkbox',
+                              checked: opts.developer.storageOffline,
+                              click: opts.developer.toggleStorageOffline,
+                          },
+                      ],
+                  },
+              ] as MenuItemConstructorOptions[])
+            : []),
         {
             role: 'help',
             submenu: opts.isMac

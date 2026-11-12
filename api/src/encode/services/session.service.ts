@@ -16,7 +16,8 @@ import {
     statSync,
     writeFileSync,
 } from 'fs';
-import { join } from 'path';
+import { join, posix } from 'path';
+import { S3Service } from './s3.service.js';
 import { CreateSessionDto } from '../dto/create-session.dto.js';
 import type { SessionStatus } from '../session-status.js';
 import type { ProbeResult } from './probe.service.js';
@@ -936,6 +937,7 @@ export class SessionService implements OnModuleInit {
             session.thumbnailsVtt = thumbnailsVtt;
             session.segmentFormat = segmentFormat;
             session.encryptionKeyHex = encryptionKeyHex;
+            session.edit ??= editOfFinishedEncode(session);
             this.persist(session);
             this.emitEvent(session);
         }
@@ -1117,4 +1119,28 @@ export class SessionService implements OnModuleInit {
 
         return removed;
     }
+}
+
+/**
+ * A finished encode opened for editing, as an edit session from the CMS opens
+ * it: its master is in its own folder, and its key is the one it encrypted
+ * with. Lets the encoded video take audio tracks, angles and subtitles at once,
+ * without going back to the CMS to open it again.
+ */
+function editOfFinishedEncode(session: Session): Session['edit'] {
+    if (!session.masterPlaylist || !session.config?.s3) return undefined;
+    const encryption = session.config.encryption;
+    return {
+        masterKey: posix.join(
+            S3Service.canonicalPrefix(session.config.s3.pathPrefix),
+            posix.basename(session.masterPlaylist)
+        ),
+        // Whether the master was written encrypted, as an edit session reads
+        // it: an encode can encrypt its segments and leave its playlists plain.
+        encrypted:
+            !!session.encryptionKeyHex &&
+            encryption != null &&
+            encryption.enabled !== false &&
+            encryption.encryptPlaylists !== false,
+    };
 }

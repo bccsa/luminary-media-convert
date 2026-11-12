@@ -20,3 +20,18 @@ export function createSegmentId(): string {
     }
     return `seg_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}`;
 }
+
+/**
+ * Takes over the editing keys (marks, delete, undo) for another track, such as
+ * subtitles above the strip, while transport keys stay with the editor.
+ */
+export interface SegmentKeyTarget {
+    markIn(): void;
+    markOut(): void;
+    /** Removes the track's selection; false when nothing was selected. */
+    removeSelected(): boolean;
+    undo(): void;
+    redo(): void;
+    /** Drops a pending mark. */
+    escape(): void;
+}
