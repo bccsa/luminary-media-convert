@@ -113,6 +113,12 @@ export interface PlayerSource {
      */
     maxHeight?: number;
     /**
+     * Holds {@link maxHeight} in place where the engine can (`canCapInPlace`): the whole ladder is loaded and ABR is
+     * capped instead, so the controller's `setMaxHeight` can move or lift it mid-play with no reload. Where the engine
+     * cannot, `maxHeight` stays the load-time cap above.
+     */
+    maxHeightInPlace?: boolean;
+    /**
      * The host's own measure of the connection, in bits per second, for the
      * engine's adaptive logic to START from rather than guess: the host holds a
      * measurement the engine has not made yet (the first segment is the one
@@ -243,7 +249,9 @@ export interface Chapter {
 }
 
 /** What a viewer can ask of the sleep timer: playback stops after some minutes, or at the end of the chapter playing. */
-export type SleepTimerOption = { kind: 'minutes'; minutes: number } | { kind: 'chapter' };
+export type SleepTimerOption =
+    | { kind: 'minutes'; minutes: number }
+    | { kind: 'chapter' };
 
 /** A running sleep timer. */
 export type SleepTimerState =
@@ -255,7 +263,7 @@ export type SleepTimerState =
 /** Typed, user-presentable failure. */
 export interface PlayerError {
     code: /** AES-128/LMCENC content encountered and no keyHex was supplied. */
-        | 'key-required'
+    | 'key-required'
         /** LMCENC payload failed to decrypt (wrong key / corrupt file). */
         | 'decrypt-failed'
         /** Response was neither LMCENC nor a recognizable playlist/VTT. */
@@ -406,6 +414,11 @@ export interface AdapterCapabilities {
      * the wrapper neither fetches side-loaded subtitles nor offers them.
      */
     renderText: boolean;
+    /**
+     * Caps the picture's height in place through setMaxHeight(), with no reload: ABR stays beneath the cap, a variant
+     * pinned by hand stands. Without it a cap is the source's `maxHeight`, applied on the next load.
+     */
+    liveMaxHeight?: boolean;
 }
 
 /** What a data saver starts the adaptive logic from, in bits per second: the lowest rungs. */
@@ -623,6 +636,8 @@ export interface PlayerAdapter {
     getVariants(): AdapterVariant[];
     /** `'auto'` re-enables ABR. */
     setVariant(id: string | 'auto'): void;
+    /** With `liveMaxHeight`: ABR never goes above `height` px (null lifts it); holds across loads. */
+    setMaxHeight?(height: number | null): void;
 
     /**
      * The audio tracks of the source the engine was last handed; empty until
@@ -646,7 +661,10 @@ export interface PlayerAdapter {
      * `track` is what the controller knows of the one chosen: its name and language, so an engine that names its
      * tracks its own way can still find it.
      */
-    setActiveTextTrack(id: string | null, track?: { label: string; lang?: string }): void;
+    setActiveTextTrack(
+        id: string | null,
+        track?: { label: string; lang?: string },
+    ): void;
 
     /**
      * Attempt an in-place recovery for the given error category
@@ -806,6 +824,14 @@ export interface PlayerControllerApi {
      * the next `load()`.
      */
     setQuality(id: string | 'auto'): void;
+    /** The engine caps the picture's height in place: {@link setMaxHeight} applies at once. */
+    readonly canCapInPlace: boolean;
+    /**
+     * Caps the picture's height in place (null lifts it), held across loads: the qualities above it leave
+     * `state.qualities` at once and ABR stays beneath it; lifting it hands the choice back to Auto. False, and
+     * nothing done, where the engine cannot (`canCapInPlace` false): the host caps the source on its next load.
+     */
+    setMaxHeight(height: number | null): boolean;
     /**
      * Selects an audio track and keeps it selected until the next `load()`.
      * An angle switch, the audio toggle and a recovery re-attach each rebuild

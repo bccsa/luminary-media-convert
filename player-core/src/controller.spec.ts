@@ -84,7 +84,10 @@ describe('PlayerController — a subtitle pick', () => {
 
         controller.setSubtitleTrack(track.id);
         expect(adapter.activeTextTrackId).toBe(track.id);
-        expect(adapter.activeTextTrackHint).toEqual({ label: track.label, lang: track.lang });
+        expect(adapter.activeTextTrackHint).toEqual({
+            label: track.label,
+            lang: track.lang,
+        });
 
         controller.setSubtitleTrack(null);
         expect(adapter.activeTextTrackId).toBeNull();
@@ -153,15 +156,23 @@ describe('PlayerController — a subtitle track read for its words', () => {
         await controller.load({ masterUrl: MASTER_URL });
         const track = controller.getState().subtitleTracks[0]!;
         const lines = await controller.readSubtitleCues(track.id);
-        expect(lines.map((line) => line.text)).toEqual(['Opening', 'The interview']);
+        expect(lines.map((line) => line.text)).toEqual([
+            'Opening',
+            'The interview',
+        ]);
 
         const reads = calls.filter((url) => url.endsWith('en_0.vtt')).length;
         expect(await controller.readSubtitleCues(track.id)).toEqual(lines);
-        expect(calls.filter((url) => url.endsWith('en_0.vtt'))).toHaveLength(reads);
+        expect(calls.filter((url) => url.endsWith('en_0.vtt'))).toHaveLength(
+            reads,
+        );
     });
 
     it('is empty when the track cannot be read, and tries again when asked again', async () => {
-        const { controller, routes } = setup({ ...multiAngleRoutes, [`${BASE}/subs_en/en_0.vtt`]: { status: 500 } });
+        const { controller, routes } = setup({
+            ...multiAngleRoutes,
+            [`${BASE}/subs_en/en_0.vtt`]: { status: 500 },
+        });
         await controller.load({ masterUrl: MASTER_URL });
         const track = controller.getState().subtitleTracks[0]!;
         expect(await controller.readSubtitleCues(track.id)).toEqual([]);
@@ -185,7 +196,11 @@ describe('PlayerController — a live source', () => {
     };
 
     it('says so in its state, while a recorded one does not', async () => {
-        const live = setup(liveRoutes, {}, { serveStrategy: new FakeLiveServeStrategy() });
+        const live = setup(
+            liveRoutes,
+            {},
+            { serveStrategy: new FakeLiveServeStrategy() },
+        );
         expect(live.controller.getState().live).toBe(false);
         await live.controller.load({ masterUrl: MASTER_URL });
         expect(live.controller.getState().live).toBe(true);
@@ -193,6 +208,21 @@ describe('PlayerController — a live source', () => {
         const recorded = setup(simpleRoutes);
         await recorded.controller.load({ masterUrl: MASTER_URL });
         expect(recorded.controller.getState().live).toBe(false);
+    });
+
+    it('switches to audio and back without carrying the old position into the reload', async () => {
+        const { adapter, controller } = setup(liveRoutes, {}, { serveStrategy: new FakeLiveServeStrategy() });
+        await controller.load({ masterUrl: MASTER_URL });
+        adapter.emit('playing', undefined);
+        adapter.advanceTo(35.9);
+
+        await controller.setAngle(AUDIO_ONLY_ANGLE_ID);
+        adapter.advanceTo(41.2);
+        await controller.setAngle(controller.getState().angles[0]!.id);
+
+        expect(adapter.loads).toHaveLength(3);
+        expect(adapter.seeks).toEqual([]);
+        expect(adapter.playCount).toBe(2);
     });
 });
 
@@ -237,16 +267,30 @@ describe('PlayerController — load', () => {
         expect(state.qualities.map((q) => q.id)).toEqual(['720', '480']);
     });
 
-    it('hands the host\'s bandwidth estimate to the engine as a hint, only when usable', async () => {
+    it("hands the host's bandwidth estimate to the engine as a hint, only when usable", async () => {
         const { adapter, controller } = setup(simpleRoutes);
         const spy = vi.spyOn(adapter, 'loadSource');
 
-        await controller.load({ masterUrl: MASTER_URL, bandwidthEstimate: 2_500_000 });
+        await controller.load({
+            masterUrl: MASTER_URL,
+            bandwidthEstimate: 2_500_000,
+        });
         expect(spy.mock.calls.at(-1)![0].bandwidthEstimate).toBe(2_500_000);
 
-        for (const unusable of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, undefined]) {
-            await controller.load({ masterUrl: MASTER_URL, bandwidthEstimate: unusable });
-            expect(spy.mock.calls.at(-1)![0]).not.toHaveProperty('bandwidthEstimate');
+        for (const unusable of [
+            0,
+            -1,
+            Number.NaN,
+            Number.POSITIVE_INFINITY,
+            undefined,
+        ]) {
+            await controller.load({
+                masterUrl: MASTER_URL,
+                bandwidthEstimate: unusable,
+            });
+            expect(spy.mock.calls.at(-1)![0]).not.toHaveProperty(
+                'bandwidthEstimate',
+            );
         }
     });
 
@@ -254,16 +298,30 @@ describe('PlayerController — load', () => {
         const { adapter, controller } = setup(simpleRoutes);
         const spy = vi.spyOn(adapter, 'loadSource');
 
-        await controller.load({ masterUrl: MASTER_URL, bandwidthEstimate: 20_000_000, dataSaver: true });
-        expect(spy.mock.calls.at(-1)![0]).toMatchObject({ bandwidthEstimate: 1_000_000, dataSaver: true });
+        await controller.load({
+            masterUrl: MASTER_URL,
+            bandwidthEstimate: 20_000_000,
+            dataSaver: true,
+        });
+        expect(spy.mock.calls.at(-1)![0]).toMatchObject({
+            bandwidthEstimate: 1_000_000,
+            dataSaver: true,
+        });
 
-        await controller.load({ masterUrl: MASTER_URL, bandwidthEstimate: 400_000, dataSaver: true });
+        await controller.load({
+            masterUrl: MASTER_URL,
+            bandwidthEstimate: 400_000,
+            dataSaver: true,
+        });
         expect(spy.mock.calls.at(-1)![0].bandwidthEstimate).toBe(400_000);
 
         await controller.load({ masterUrl: MASTER_URL, dataSaver: true });
         expect(spy.mock.calls.at(-1)![0].bandwidthEstimate).toBe(1_000_000);
 
-        await controller.load({ masterUrl: MASTER_URL, bandwidthEstimate: 20_000_000 });
+        await controller.load({
+            masterUrl: MASTER_URL,
+            bandwidthEstimate: 20_000_000,
+        });
         expect(spy.mock.calls.at(-1)![0]).not.toHaveProperty('dataSaver');
     });
 
@@ -366,7 +424,10 @@ describe('PlayerController — coming-soon polling', () => {
 
     it('shows no time from the previous source under coming soon', async () => {
         const NEXT_URL = `${BASE}/next/master.m3u8`;
-        const { adapter, controller } = setup({ ...simpleRoutes, [NEXT_URL]: { status: 404 } });
+        const { adapter, controller } = setup({
+            ...simpleRoutes,
+            [NEXT_URL]: { status: 404 },
+        });
         await controller.load({ masterUrl: MASTER_URL });
 
         const next = controller.load({ masterUrl: NEXT_URL });
@@ -381,7 +442,9 @@ describe('PlayerController — coming-soon polling', () => {
     });
 
     it('still pauses an adapter that cannot unload', async () => {
-        const { adapter, controller } = setup({ [MASTER_URL]: { status: 404 } });
+        const { adapter, controller } = setup({
+            [MASTER_URL]: { status: 404 },
+        });
         adapter.unload = undefined;
 
         await controller.load({ masterUrl: MASTER_URL });
@@ -733,6 +796,124 @@ describe('PlayerController — the chosen audio track across attaches', () => {
     });
 });
 
+describe('PlayerController — a height cap held in place', () => {
+    const variants = [
+        { id: 'level-0', height: 480, bandwidth: 1_000_000 },
+        { id: 'level-1', height: 720, bandwidth: 2_500_000 },
+        { id: 'level-2', height: 1080, bandwidth: 5_000_000 },
+    ];
+
+    it('loads the whole ladder, caps the engine and lists only what fits', async () => {
+        const { adapter, controller } = setup(simpleRoutes, {
+            liveMaxHeight: true,
+            variants,
+        });
+        await controller.load({
+            masterUrl: MASTER_URL,
+            maxHeight: 720,
+            maxHeightInPlace: true,
+        });
+
+        expect(adapter.maxHeightCalls).toEqual([720]);
+        expect(adapter.loads[0]!.url).toBeDefined();
+        expect(controller.getState().qualities.map((q) => q.id)).toEqual([
+            '720',
+            '480',
+        ]);
+    });
+
+    it('moves at once: capped, the list shrinks and a held quality above it goes to Auto; lifted, all of it', async () => {
+        const { adapter, controller } = setup(simpleRoutes, {
+            liveMaxHeight: true,
+            variants,
+        });
+        await controller.load({
+            masterUrl: MASTER_URL,
+            maxHeightInPlace: true,
+        });
+        controller.setQuality('1080');
+
+        expect(controller.setMaxHeight(480)).toBe(true);
+        expect(controller.getState().qualities.map((q) => q.id)).toEqual([
+            '480',
+        ]);
+        expect(controller.getState().activeQualityId).toBe('auto');
+
+        controller.setMaxHeight(null);
+        expect(adapter.maxHeightCalls.at(-1)).toBeNull();
+        expect(controller.getState().qualities.map((q) => q.id)).toEqual([
+            '1080',
+            '720',
+            '480',
+        ]);
+        expect(controller.getState().activeQualityId).toBe('auto');
+    });
+
+    it('keeps a hand pick across both flips of the cap', async () => {
+        const { adapter, controller } = setup(simpleRoutes, {
+            liveMaxHeight: true,
+            variants,
+        });
+        await controller.load({
+            masterUrl: MASTER_URL,
+            maxHeightInPlace: true,
+        });
+        controller.setQuality('480');
+        const picks = adapter.variantCalls.length;
+        controller.setMaxHeight(720);
+        controller.setMaxHeight(null);
+        expect(controller.getState().activeQualityId).toBe('480');
+        expect(adapter.variantCalls).toHaveLength(picks);
+    });
+
+    it('keeps a hand pick within the cap', async () => {
+        const { controller } = setup(simpleRoutes, {
+            liveMaxHeight: true,
+            variants,
+        });
+        await controller.load({
+            masterUrl: MASTER_URL,
+            maxHeightInPlace: true,
+        });
+        controller.setQuality('480');
+        controller.setMaxHeight(720);
+        expect(controller.getState().activeQualityId).toBe('480');
+    });
+
+    it('keeps a moved cap when the same video loads again', async () => {
+        const { adapter, controller } = setup(simpleRoutes, {
+            liveMaxHeight: true,
+            variants,
+        });
+        await controller.load({
+            masterUrl: MASTER_URL,
+            maxHeightInPlace: true,
+        });
+        controller.setMaxHeight(480);
+        await controller.load({
+            masterUrl: MASTER_URL,
+            maxHeightInPlace: true,
+            preservePosition: true,
+        });
+        expect(adapter.maxHeightCalls.at(-1)).toBe(480);
+        expect(controller.getState().qualities.map((q) => q.id)).toEqual([
+            '480',
+        ]);
+    });
+
+    it('does nothing in place where the engine cannot, and the source cap applies at load', async () => {
+        const { adapter, controller } = setup(simpleRoutes, { variants });
+        await controller.load({
+            masterUrl: MASTER_URL,
+            maxHeight: 720,
+            maxHeightInPlace: true,
+        });
+        expect(controller.canCapInPlace).toBe(false);
+        expect(controller.setMaxHeight(480)).toBe(false);
+        expect(adapter.maxHeightCalls).toEqual([]);
+    });
+});
+
 describe('PlayerController — quality and tracks', () => {
     it('maps contract quality ids onto adapter variant ids', async () => {
         const { adapter, controller } = setup(simpleRoutes, {
@@ -926,9 +1107,7 @@ describe('PlayerController — an engine that cannot pin a rendition', () => {
 
         await controller.load({ masterUrl: MASTER_URL });
 
-        expect(servedHeights(adapter, serveStrategy)).toEqual([
-            1080, 720, 480,
-        ]);
+        expect(servedHeights(adapter, serveStrategy)).toEqual([1080, 720, 480]);
         expect(controller.getState().activeQualityId).toBe('auto');
     });
 });
@@ -1164,8 +1343,13 @@ describe('PlayerController — a source that fails to load', () => {
 
 describe('PlayerController — a fatal error during playback', () => {
     it('only pauses: the source and the position stay for a retry or a recovery', async () => {
-        const { adapter, controller } = setup(simpleRoutes, { recoverResult: false });
-        await controller.load({ masterUrl: MASTER_URL, recovery: { maxReloadAttempts: 0 } });
+        const { adapter, controller } = setup(simpleRoutes, {
+            recoverResult: false,
+        });
+        await controller.load({
+            masterUrl: MASTER_URL,
+            recovery: { maxReloadAttempts: 0 },
+        });
         adapter.advanceTo(30);
 
         adapter.emit('error', { category: 'network', fatal: true });
@@ -1194,8 +1378,13 @@ describe('PlayerController — a fatal error during playback', () => {
 
 describe('PlayerController — an error the engine recovers from', () => {
     it('clears the error panel when playback starts again by itself', async () => {
-        const { adapter, controller } = setup(simpleRoutes, { recoverResult: false });
-        await controller.load({ masterUrl: MASTER_URL, recovery: { maxReloadAttempts: 0 } });
+        const { adapter, controller } = setup(simpleRoutes, {
+            recoverResult: false,
+        });
+        await controller.load({
+            masterUrl: MASTER_URL,
+            recovery: { maxReloadAttempts: 0 },
+        });
         adapter.emit('error', { category: 'network', fatal: true });
         expect(controller.getState().lifecycle).toBe('error');
 
@@ -1426,7 +1615,10 @@ describe('PlayerController — default angle', () => {
 
     it('starts on the angle a source asks for: audio only, fetching no video', async () => {
         const { controller, calls } = setup(multiAngleRoutes);
-        await controller.load({ masterUrl: MASTER_URL, startAngleId: AUDIO_ONLY_ANGLE_ID });
+        await controller.load({
+            masterUrl: MASTER_URL,
+            startAngleId: AUDIO_ONLY_ANGLE_ID,
+        });
 
         expect(controller.getState().activeAngleId).toBe(AUDIO_ONLY_ANGLE_ID);
         expect(controller.getState().isAudioOnly).toBe(true);
@@ -1435,13 +1627,19 @@ describe('PlayerController — default angle', () => {
 
     it('starts on another camera a source asks for', async () => {
         const { controller } = setup(multiAngleRoutes);
-        await controller.load({ masterUrl: MASTER_URL, startAngleId: 'angle_1' });
+        await controller.load({
+            masterUrl: MASTER_URL,
+            startAngleId: 'angle_1',
+        });
         expect(controller.getState().activeAngleId).toBe('angle_1');
     });
 
     it('falls back to the default for an angle the master does not have', async () => {
         const { controller } = setup(multiAngleRoutes);
-        await controller.load({ masterUrl: MASTER_URL, startAngleId: 'angle_9' });
+        await controller.load({
+            masterUrl: MASTER_URL,
+            startAngleId: 'angle_9',
+        });
         expect(controller.getState().activeAngleId).toBe('angle_0');
     });
 });
@@ -1541,7 +1739,10 @@ describe('PlayerController — scrub thumbnails', () => {
 
 describe('PlayerController — sleep timer', () => {
     const chaptered = { ...simpleRoutes, [EN_CHAPTERS]: CHAPTERS_VTT };
-    const withChapters = { masterUrl: MASTER_URL, sidecars: { chapters: [{ lang: 'en', url: EN_CHAPTERS }] } };
+    const withChapters = {
+        masterUrl: MASTER_URL,
+        sidecars: { chapters: [{ lang: 'en', url: EN_CHAPTERS }] },
+    };
 
     afterEach(() => vi.useRealTimers());
 
@@ -1577,7 +1778,10 @@ describe('PlayerController — sleep timer', () => {
 
         adapter.advanceTo(30);
         controller.setSleepTimer({ kind: 'chapter' });
-        expect(controller.state.sleepTimer).toEqual({ kind: 'chapter', endTime: 90.5 });
+        expect(controller.state.sleepTimer).toEqual({
+            kind: 'chapter',
+            endTime: 90.5,
+        });
 
         adapter.advanceTo(90);
         expect(adapter.pauseCount).toBe(0);

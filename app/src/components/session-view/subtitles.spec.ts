@@ -78,6 +78,43 @@ describe('writing subtitles', () => {
             '1\n00:00:02,000 --> 00:00:03,000\nfirst\n\n2\n00:00:05,000 --> 00:00:06,000\nlater\n'
         );
     });
+
+    describe('WebVTT tags', () => {
+        const vttText = (label: string) => subtitlesToVtt([cue(1, 2, label)]).split('\n')[4];
+
+        it.each([
+            ['voice', '<v Roger Bingham>We are in New York City</v>'],
+            ['voice with a class', '<v.loud Esme>Hello</v>'],
+            ['class', 'The <c.yellow.bg_blue>sky</c> is blue'],
+            ['bold, italic and underline with classes', '<b.loud>Go</b> <i.sung>now</i> <u.x>here</u>'],
+            ['ruby', '<ruby>漢<rt>kan</rt>字<rt>ji</rt></ruby>'],
+            ['language', '<lang en-GB>colour</lang>'],
+            ['timestamp', 'Never <00:00:01.500>drink <01:00:02.000>liquid'],
+        ])('keeps %s', (_kind, text) => {
+            expect(vttText(text)).toBe(text);
+        });
+
+        it('escapes text that only looks like a tag', () => {
+            expect(vttText('<script>x</script> <v> <lang> a<b <c.> <00:01.5> <br/>')).toBe(
+                '&lt;script&gt;x&lt;/script&gt; &lt;v&gt; &lt;lang&gt; a&lt;b &lt;c.&gt; &lt;00:01.5&gt; &lt;br/&gt;'
+            );
+        });
+
+        it('escapes & and > in the text around the tags', () => {
+            expect(vttText('<v Tom>Tom & Jerry -> home</v>')).toBe('<v Tom>Tom &amp; Jerry -&gt; home</v>');
+        });
+
+        it('read back, the cue is as it was typed', () => {
+            const text = '<v Tom>Tom & <c.red>Jerry</c> <3</v>';
+            expect(readSubtitleFile(subtitlesToVtt([cue(1, 2, text)]))[0]!.label).toBe(text);
+        });
+
+        it('.srt keeps only the tags it shares with WebVTT', () => {
+            expect(subtitlesToSrt([cue(1, 2, '<v Tom>Hi <i>you</i> <c.red>there</c></v> <3')])).toBe(
+                '1\n00:00:01,000 --> 00:00:02,000\nHi <i>you</i> there <3\n'
+            );
+        });
+    });
 });
 
 describe('translating', () => {

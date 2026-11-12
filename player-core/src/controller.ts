@@ -122,7 +122,7 @@ export class PlayerController implements PlayerControllerApi {
     /** The sleep timer; a minutes timer outlives a source, so it is not torn down with one. */
     private readonly sleep = new SleepTimer(
         () => this.adapter.pause(),
-        (sleepTimer) => this.store.setState({ sleepTimer })
+        (sleepTimer) => this.store.setState({ sleepTimer }),
     );
 
     /** Bumped by every load(); stale async work checks it and bails. */
@@ -170,6 +170,8 @@ export class PlayerController implements PlayerControllerApi {
     private startPosition = 0;
     private resumePlaying = false;
     private chapterTrackPinned = false;
+    /** The in-place cap on the picture's height ({@link setMaxHeight}); null while there is none. */
+    private liveCap: number | null = null;
 
     constructor(
         private readonly adapter: PlayerAdapter,
@@ -195,12 +197,16 @@ export class PlayerController implements PlayerControllerApi {
         const generation = ++this.generation;
         const preserved = source.preservePosition
             ? this.adapter.getCurrentTime()
-            : (source.startPosition ?? 0);
+            : source.startPosition ?? 0;
         const resume = source.preservePosition ? this.state.playing : false;
 
         this.teardownSource();
         this.sleep.onNewSource();
+        // A new video starts under the cap its source asks for; the same one loaded again keeps the cap moved since.
+        const sameVideo = this.source?.masterUrl === source.masterUrl;
         this.source = source;
+        if (source.maxHeightInPlace && this.canCapInPlace && !sameVideo)
+            this.liveCap = source.maxHeight ?? null;
         this.policy = resolveRecoveryPolicy(source.recovery);
         this.startPosition = preserved;
         this.resumePlaying = resume;
@@ -364,7 +370,11 @@ export class PlayerController implements PlayerControllerApi {
                   info,
                   {
                       angleId,
-                      maxHeight: this.source?.maxHeight,
+                      // Held in place, the cap is the engine's: the ladder goes whole.
+                      maxHeight:
+                          this.source?.maxHeightInPlace && this.canCapInPlace
+                              ? undefined
+                              : this.source?.maxHeight,
                       selectHeight: this.qualityChoice?.height,
                   },
                   this.context(),
@@ -376,13 +386,22 @@ export class PlayerController implements PlayerControllerApi {
         // runs the ladder on the result.
         const dataSaver = this.source?.dataSaver === true;
         const measured = this.source?.bandwidthEstimate;
-        const usable = measured && measured > 0 && Number.isFinite(measured) ? measured : undefined;
+        const usable =
+            measured && measured > 0 && Number.isFinite(measured)
+                ? measured
+                : undefined;
         // A data saver starts low whatever the host measured: the estimate is the one input both
         // engines already start from, so clamping it here needs no engine to know about data savers.
-        const bandwidth = dataSaver ? Math.min(usable ?? Infinity, DATA_SAVER_START_BPS) : usable;
+        const bandwidth = dataSaver
+            ? Math.min(usable ?? Infinity, DATA_SAVER_START_BPS)
+            : usable;
+        // An in-place cap outlives the load; the engine is told it again for what it now holds.
+        if (this.liveCap !== null) this.adapter.setMaxHeight?.(this.liveCap);
         await this.adapter.loadSource({
             ...(source ?? munged!.source),
-            ...(bandwidth !== undefined ? { bandwidthEstimate: bandwidth } : {}),
+            ...(bandwidth !== undefined
+                ? { bandwidthEstimate: bandwidth }
+                : {}),
             ...(dataSaver ? { dataSaver } : {}),
             recovery: this.policy,
         });
@@ -410,7 +429,11 @@ export class PlayerController implements PlayerControllerApi {
             lifecycle: 'ready',
             activeAngleId: angleId,
             activeQualityId: this.qualityChoice?.id ?? 'auto',
-            qualities: munged?.qualities ?? [],
+            qualities: (munged?.qualities ?? []).filter(
+                (quality) =>
+                    this.liveCap === null ||
+                    (quality.height ?? 0) <= this.liveCap,
+            ),
             isAudioOnly:
                 munged?.isAudioOnly ??
                 (info.nativelyAudioOnly || angleId === AUDIO_ONLY_ANGLE_ID),
@@ -420,7 +443,9 @@ export class PlayerController implements PlayerControllerApi {
         this.refreshQualities();
         this.refreshAudioTracks();
 
-        if (options.seekTo > 0) this.adapter.seek(options.seekTo);
+        // Each load of a live source starts a new timeline, so a carried-over position lands at or past
+        // the new live edge and playback waits for segments not yet published; the engine's own live start is right.
+        if (options.seekTo > 0 && !munged?.isLive) this.adapter.seek(options.seekTo);
         if (options.resume) {
             await this.adapter.play().catch(() => undefined);
         }
@@ -486,7 +511,10 @@ export class PlayerController implements PlayerControllerApi {
     /** Ready once there are cues that span the video; re-asked when the duration becomes known. */
     private updateThumbnailsReady(): void {
         this.store.setState({
-            thumbnailsReady: thumbnailsCoverDuration(this.thumbnailCues, this.state.duration),
+            thumbnailsReady: thumbnailsCoverDuration(
+                this.thumbnailCues,
+                this.state.duration,
+            ),
         });
     }
 
@@ -503,7 +531,10 @@ export class PlayerController implements PlayerControllerApi {
         if (!cue) return null;
         // A frame is sampled at its cue's start, so the second half of a cue is nearer the next frame than its own.
         const span = cue.endTime - cue.startTime;
-        const next = span > 0 ? findThumbnailCue(this.thumbnailCues, cue.endTime) : undefined;
+        const next =
+            span > 0
+                ? findThumbnailCue(this.thumbnailCues, cue.endTime)
+                : undefined;
         return next && timeSec - cue.startTime > span / 2 ? next : cue;
     }
 
@@ -536,11 +567,19 @@ export class PlayerController implements PlayerControllerApi {
             const { chapters, currentTime, duration } = this.state;
             const index = chapterIndexAt(chapters, currentTime);
             if (index < 0) return;
-            chapterEnd = chapters[index + 1]?.startTime ?? (Number.isFinite(duration) && duration > 0 ? duration : undefined);
+            chapterEnd =
+                chapters[index + 1]?.startTime ??
+                (Number.isFinite(duration) && duration > 0
+                    ? duration
+                    : undefined);
         }
         this.sleep.set(option, chapterEnd);
         // A shell may keep the minutes timer beside the engine, where a suspended web view cannot stop it.
-        this.adapter.setSleepTimer?.(this.sleep.state?.kind === 'minutes' ? this.sleep.state.endsAt : null);
+        this.adapter.setSleepTimer?.(
+            this.sleep.state?.kind === 'minutes'
+                ? this.sleep.state.endsAt
+                : null,
+        );
     }
 
     setPlaybackRate(rate: number): void {
@@ -568,13 +607,44 @@ export class PlayerController implements PlayerControllerApi {
         this.emitter.emit('angle-changed', { angleId: id });
     }
 
+    get canCapInPlace(): boolean {
+        return (
+            this.adapter.capabilities.liveMaxHeight === true &&
+            !!this.adapter.setMaxHeight
+        );
+    }
+
+    setMaxHeight(height: number | null): boolean {
+        if (!this.canCapInPlace || this.state.lifecycle === 'destroyed')
+            return false;
+        const cap = height && height > 0 ? height : null;
+        this.liveCap = cap;
+        this.adapter.setMaxHeight!(cap);
+        this.store.setState({
+            maxHeight:
+                cap ??
+                (this.source?.maxHeightInPlace
+                    ? undefined
+                    : this.source?.maxHeight),
+        });
+        this.refreshQualities(true);
+        const held = this.state.qualities.find(
+            (q) => q.id === this.state.activeQualityId,
+        );
+        // A hand pick stands across the cap's changes; only one the cap has put out of reach goes back to Auto. Lifted,
+        // Auto is free to climb on its own.
+        if (this.state.activeQualityId !== 'auto' && !held)
+            this.setQuality('auto');
+        return true;
+    }
+
     setQuality(id: string | 'auto'): void {
         if (!this.adapter.capabilities.variantSwitching) {
             void this.capQuality(id);
             return;
         }
         const variantId =
-            id === 'auto' ? 'auto' : (this.qualityToVariant.get(id) ?? id);
+            id === 'auto' ? 'auto' : this.qualityToVariant.get(id) ?? id;
         this.adapter.setVariant(variantId);
         this.store.setState({ activeQualityId: id });
     }
@@ -592,7 +662,9 @@ export class PlayerController implements PlayerControllerApi {
         if (!this.master || this.state.lifecycle === 'destroyed') return;
         let choice: { id: string; height: number } | null = null;
         if (id !== 'auto') {
-            const height = this.state.qualities.find((q) => q.id === id)?.height;
+            const height = this.state.qualities.find(
+                (q) => q.id === id,
+            )?.height;
             if (height === undefined) return;
             choice = { id, height };
         }
@@ -630,8 +702,19 @@ export class PlayerController implements PlayerControllerApi {
     }
 
     setSubtitleTrack(id: string | null): void {
-        const track = id === null ? undefined : this.state.subtitleTracks.find((t) => t.id === id);
-        this.adapter.setActiveTextTrack(id, track ? { label: track.label, ...(track.lang ? { lang: track.lang } : {}) } : undefined);
+        const track =
+            id === null
+                ? undefined
+                : this.state.subtitleTracks.find((t) => t.id === id);
+        this.adapter.setActiveTextTrack(
+            id,
+            track
+                ? {
+                      label: track.label,
+                      ...(track.lang ? { lang: track.lang } : {}),
+                  }
+                : undefined,
+        );
         this.store.setState({ activeSubtitleTrackId: id });
     }
 
@@ -646,7 +729,8 @@ export class PlayerController implements PlayerControllerApi {
             subtle: this.subtle,
         }).catch(() => {
             // A failed read is tried again the next time it is asked for.
-            if (this.subtitleCues.get(id) === read) this.subtitleCues.delete(id);
+            if (this.subtitleCues.get(id) === read)
+                this.subtitleCues.delete(id);
             return [];
         });
         this.subtitleCues.set(id, read);
@@ -807,23 +891,32 @@ export class PlayerController implements PlayerControllerApi {
      * same id scheme either way, so `setQuality()` keeps working while the
      * variant ids stay adapter-private.
      */
-    private refreshQualities(): void {
+    private refreshQualities(force = false): void {
         const variants = this.adapter.getVariants();
         if (variants.length === 0) return;
 
         const map = new Map<string, string>();
         const qualities: Quality[] = [];
+        const cap = this.liveCap;
         for (const variant of variants) {
+            // Above an in-place cap a rendition is not offered: ABR cannot reach it either.
+            if (cap !== null && (variant.height ?? 0) > cap) continue;
             // The engine reports no width, so the playlist's own is kept.
-            const known = this.state.qualities.find((q) => q.height === variant.height);
-            const quality = toQuality(variant.height, variant.bandwidth, known?.width);
+            const known = this.state.qualities.find(
+                (q) => q.height === variant.height,
+            );
+            const quality = toQuality(
+                variant.height,
+                variant.bandwidth,
+                known?.width,
+            );
             if (!map.has(quality.id)) qualities.push(quality);
             map.set(quality.id, variant.id);
         }
         this.qualityToVariant = map;
 
         const sorted = sortQualities(qualities);
-        if (sameIds(sorted, this.state.qualities)) return;
+        if (!force && sameIds(sorted, this.state.qualities)) return;
         this.store.setState({ qualities: sorted });
     }
 
@@ -832,7 +925,8 @@ export class PlayerController implements PlayerControllerApi {
         if (tracks.length === 0) {
             // The engine tore its list down, and the one it builds next has
             // its own default selected. See `PlayerAdapter.getAudioTracks`.
-            if (this.chosenAudioTrackId !== null) this.audioChoicePending = true;
+            if (this.chosenAudioTrackId !== null)
+                this.audioChoicePending = true;
             return;
         }
 
@@ -855,8 +949,8 @@ export class PlayerController implements PlayerControllerApi {
         const active = chosenListed
             ? chosen
             : mapped.some((track) => track.id === this.state.activeAudioTrackId)
-              ? this.state.activeAudioTrackId
-              : (mapped[0]?.id ?? null);
+            ? this.state.activeAudioTrackId
+            : mapped[0]?.id ?? null;
         this.store.setState({
             audioTracks: mapped,
             activeAudioTrackId: active,
@@ -880,7 +974,9 @@ export class PlayerController implements PlayerControllerApi {
             // A newer choice selected itself. A list torn down again in the
             // meantime is pending again, and its rebuild hands this back.
             if (this.chosenAudioTrackId !== id) return;
-            if (!this.adapter.getAudioTracks().some((track) => track.id === id)) {
+            if (
+                !this.adapter.getAudioTracks().some((track) => track.id === id)
+            ) {
                 return;
             }
             this.adapter.setAudioTrack(id);
@@ -908,7 +1004,9 @@ export class PlayerController implements PlayerControllerApi {
                     playing: true,
                     ended: false,
                     stalled: false,
-                    ...(recovered ? { lifecycle: 'ready' as const, error: null } : {}),
+                    ...(recovered
+                        ? { lifecycle: 'ready' as const, error: null }
+                        : {}),
                 });
             }),
             this.adapter.on('pause', () => {
@@ -1010,8 +1108,8 @@ function adapterErrorToPlayerError(payload: AdapterErrorPayload): PlayerError {
         payload.category === 'network'
             ? 'network'
             : payload.category === 'media'
-              ? 'media'
-              : 'unknown';
+            ? 'media'
+            : 'unknown';
     return {
         code,
         fatal: true,

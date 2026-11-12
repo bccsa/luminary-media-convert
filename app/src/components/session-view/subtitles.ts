@@ -5,13 +5,12 @@
  */
 import {
     createSegmentId,
+    escapeCueText,
     formatVttTimestamp,
     parseVtt,
+    VTT_CUE_TAG,
     type Segment,
 } from '../segment-editor';
-
-/** The formatting a cue may carry that SRT and WebVTT share; everything else is text. */
-const KEPT_TAGS = /<\/?(?:i|b|u)>/g;
 
 const ENTITIES: Record<string, string> = {
     '&amp;': '&',
@@ -38,20 +37,12 @@ export function readSubtitleFile(text: string): Segment[] {
         .sort((a, b) => a.inSec - b.inSec);
 }
 
-/** A cue's text for WebVTT: `&` and `<` escaped except in the tags both formats share. */
-function escapeKeepingTags(text: string): string {
-    const parts: string[] = [];
-    let last = 0;
-    for (const tag of text.matchAll(KEPT_TAGS)) {
-        parts.push(escape(text.slice(last, tag.index)), tag[0]);
-        last = tag.index! + tag[0].length;
-    }
-    parts.push(escape(text.slice(last)));
-    return parts.join('');
-}
-
-const escape = (text: string) =>
-    text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+/** A cue's text for SRT, which knows only italic, bold and underline: other WebVTT tags go, their words stay. */
+const srtText = (text: string) =>
+    text.replace(VTT_CUE_TAG, (tag) => {
+        const shared = /^<(\/?)([ibu])(?:\.[^>]*)?>$/.exec(tag);
+        return shared ? `<${shared[1]}${shared[2]}>` : '';
+    });
 
 /** No cue without words: an empty one shows nothing and only takes room. */
 const spoken = (segments: Segment[]) =>
@@ -66,7 +57,7 @@ export function subtitlesToVtt(segments: Segment[]): string {
         lines.push(
             String(i + 1),
             `${formatVttTimestamp(cue.inSec)} --> ${formatVttTimestamp(cue.outSec)}`,
-            escapeKeepingTags(cue.label!.trim()),
+            escapeCueText(cue.label!.trim()),
             ''
         );
     });
@@ -77,7 +68,7 @@ export function subtitlesToVtt(segments: Segment[]): string {
 export function subtitlesToSrt(segments: Segment[]): string {
     const time = (sec: number) => formatVttTimestamp(sec).replace('.', ',');
     return spoken(segments)
-        .map((cue, i) => `${i + 1}\n${time(cue.inSec)} --> ${time(cue.outSec)}\n${cue.label!.trim()}\n`)
+        .map((cue, i) => `${i + 1}\n${time(cue.inSec)} --> ${time(cue.outSec)}\n${srtText(cue.label!.trim())}\n`)
         .join('\n');
 }
 
