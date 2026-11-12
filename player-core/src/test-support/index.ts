@@ -325,8 +325,8 @@ function makeResponse(status: number, body?: string | Uint8Array): Response {
         body === undefined
             ? new Uint8Array(0)
             : typeof body === 'string'
-              ? new TextEncoder().encode(body)
-              : body;
+            ? new TextEncoder().encode(body)
+            : body;
     return {
         ok: status >= 200 && status < 300,
         status,
@@ -348,6 +348,8 @@ export interface FakeAdapterOptions {
     variants?: AdapterVariant[];
     audioTracks?: AdapterAudioTrack[];
     recoverResult?: boolean;
+    /** Caps the height in place (`setMaxHeight`). Default false. */
+    liveMaxHeight?: boolean;
 }
 
 /** Scriptable {@link PlayerAdapter} for controller specs. */
@@ -357,6 +359,7 @@ export class FakeAdapter implements PlayerAdapter {
     readonly loads: AdapterSource[] = [];
     readonly seeks: number[] = [];
     readonly variantCalls: string[] = [];
+    readonly maxHeightCalls: Array<number | null> = [];
     readonly audioTrackCalls: string[] = [];
     readonly recoverCalls: string[] = [];
     reattachCount = 0;
@@ -388,6 +391,7 @@ export class FakeAdapter implements PlayerAdapter {
             keyDelivery: options.keyDelivery ?? 'memory',
             variantSwitching: options.variantSwitching ?? true,
             renderText: options.renderText ?? true,
+            liveMaxHeight: options.liveMaxHeight ?? false,
         };
         this.variants = options.variants ?? [];
         this.audioTracks = options.audioTracks ?? [];
@@ -448,6 +452,10 @@ export class FakeAdapter implements PlayerAdapter {
         this.variantCalls.push(id);
     }
 
+    setMaxHeight(height: number | null): void {
+        this.maxHeightCalls.push(height);
+    }
+
     getAudioTracks(): AdapterAudioTrack[] {
         return this.audioTracks;
     }
@@ -465,7 +473,10 @@ export class FakeAdapter implements PlayerAdapter {
         this.textTracks = tracks;
     }
 
-    setActiveTextTrack(id: string | null, track?: { label: string; lang?: string }): void {
+    setActiveTextTrack(
+        id: string | null,
+        track?: { label: string; lang?: string },
+    ): void {
         this.activeTextTrackId = id;
         this.activeTextTrackHint = track;
     }
