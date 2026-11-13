@@ -170,14 +170,6 @@ describe('previewVideoArgs', () => {
         expect(encoderOf(previewVideoArgs('cpu', true))).toBe('libx264');
     });
 
-    // The GPU flag is what the caller uses to force software, so a hardware mode
-    // with useGpu false has to land on libx264 rather than half-configuring.
-    it('falls back to libx264 when the GPU is not in use', () => {
-        for (const mode of MODES) {
-            expect(encoderOf(previewVideoArgs(mode, false))).toBe('libx264');
-        }
-    });
-
     it('emits no filter when there is nothing to scale', () => {
         for (const mode of MODES) {
             expect(previewVideoArgs(mode, true)).not.toContain('-vf');

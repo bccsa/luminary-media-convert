@@ -53,6 +53,27 @@ export async function acquireEncoderSession(): Promise<() => void> {
 }
 
 /**
+ * A session if one is free right now, or null — never a wait.
+ *
+ * For a caller with somewhere else to go: a preview segment that finds every
+ * session taken by the ladder is better made on the CPU at once than made on
+ * the GPU after the ladder's wave finishes. Release as for
+ * {@link acquireEncoderSession}.
+ */
+export function tryAcquireEncoderSession(): (() => void) | null {
+    if (held >= MAX_HARDWARE_SESSIONS) return null;
+    held++;
+
+    let released = false;
+    return () => {
+        if (released) return;
+        released = true;
+        held--;
+        waiting.shift()?.();
+    };
+}
+
+/**
  * Hold `count` sessions at once, for a caller that opens several in one ffmpeg
  * invocation — the ladder encodes a wave of renditions from a single process.
  *
