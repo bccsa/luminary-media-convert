@@ -692,6 +692,11 @@ function createWindow(): void {
             contextIsolation: true,
             nodeIntegration: false,
             sandbox: true,
+            // `audioTracks` / `videoTracks` on media elements, which Chromium
+            // ships behind a flag. The preview plays a browser-playable source
+            // file directly, and a file's second audio track or camera angle
+            // can only be switched to through these lists.
+            enableBlinkFeatures: 'AudioVideoTracks',
         },
     });
 
