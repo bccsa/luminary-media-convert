@@ -30,3 +30,23 @@ export interface HlsErrorData {
     details: string;
     error?: unknown;
 }
+
+/**
+ * A media element's own `audioTracks` / `videoTracks` entry — what Chromium exposes for a file played
+ * natively when its `AudioVideoTracks` feature is on, and Safari always. Not in TypeScript's DOM lib.
+ */
+export interface NativeMediaTrack {
+    readonly id: string;
+    readonly label: string;
+    readonly language: string;
+    /** Audio tracks: any number may be enabled at once. */
+    enabled?: boolean;
+    /** Video tracks: exactly one is selected; selecting one deselects the rest. */
+    selected?: boolean;
+}
+
+/** `AudioTrackList` / `VideoTrackList`: indexable, with `addtrack`, `removetrack` and `change` events. */
+export interface NativeMediaTrackList extends EventTarget {
+    readonly length: number;
+    readonly [index: number]: NativeMediaTrack;
+}

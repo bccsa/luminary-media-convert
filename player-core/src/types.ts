@@ -95,9 +95,34 @@ export interface ThumbnailSidecar {
     url: string;
 }
 
+/**
+ * What {@link PlayerSource.masterUrl} points at.
+ *
+ * - `'hls'` (the default): a master playlist, munged before the engine sees it.
+ * - `'file'`: a progressive media file the engine plays as it is — an MP4, a
+ *   WebM, an MP3 straight off a disk. There is no master to read, so nothing is
+ *   munged: no quality ladder, no key, no polling. Its audio tracks are the
+ *   engine's, and its video tracks are offered as {@link PlayerState.angles}
+ *   when the engine can switch them ({@link PlayerAdapter.getVideoTracks}).
+ */
+export type PlayerSourceKind = 'hls' | 'file';
+
 export interface PlayerSource {
-    /** URL of the (possibly multi-angle, possibly LMCENC-encrypted) master playlist. */
+    /**
+     * URL of the (possibly multi-angle, possibly LMCENC-encrypted) master
+     * playlist — or, with `kind: 'file'`, of the media file itself.
+     */
     masterUrl: string;
+    /** See {@link PlayerSourceKind}. Absent means `'hls'`. */
+    kind?: PlayerSourceKind;
+    /**
+     * `kind: 'file'` only: the file has a picture. An engine that finds none
+     * once it has read the file's metadata — its video stream was dropped as
+     * undecodable, which a browser does silently while playing the sound — raises
+     * a fatal `media` error rather than play the sound over a black frame.
+     * Absent: no expectation either way, and the file is not checked.
+     */
+    expectVideo?: boolean;
     /**
      * AES-128 session key as 32 hex chars. When set, it is used to decrypt
      * LMCENC playlists/VTTs and is supplied to the engine for segment
@@ -429,6 +454,15 @@ export interface AdapterSource {
     /** Munged master (blob URL) — or the original URL when munging was skipped. */
     url: string;
     isBlob: boolean;
+    /**
+     * {@link PlayerSource.kind}. With `'file'`, `url` is a media file to play
+     * natively, never a playlist; the adapter reports the file's audio tracks
+     * and, if it can, its video tracks ({@link PlayerAdapter.getVideoTracks}).
+     * Absent means `'hls'`.
+     */
+    kind?: PlayerSourceKind;
+    /** {@link PlayerSource.expectVideo}, for `kind: 'file'`. */
+    expectVideo?: boolean;
     /** Raw session key for 'memory' key delivery. */
     keyHex?: string;
     /** {@link PlayerSource.bandwidthEstimate}, passed on only when it is a usable number. */
@@ -454,6 +488,14 @@ export interface AdapterAudioTrack {
     id: string;
     lang?: string;
     label: string;
+}
+
+/** A video track of a `kind: 'file'` source: a second camera muxed into the same file. */
+export interface AdapterVideoTrack {
+    id: string;
+    lang?: string;
+    label: string;
+    selected: boolean;
 }
 
 export interface AdapterTextTrack {
@@ -519,6 +561,8 @@ export interface AdapterEventMap {
     'reload-requested': { reason: 'wedged' | 'fatal'; attempt: number };
     'variants-updated': void;
     'audiotracks-updated': void;
+    /** The list {@link PlayerAdapter.getVideoTracks} reports, or its selection, changed. */
+    'videotracks-updated': void;
 }
 
 export type AdapterEventName = keyof AdapterEventMap;
@@ -655,6 +699,19 @@ export interface PlayerAdapter {
      */
     getAudioTracks(): AdapterAudioTrack[];
     setAudioTrack(id: string): void;
+
+    /**
+     * The video tracks of a `kind: 'file'` source, in the file's order; empty
+     * for an HLS source, whose angles the wrapper reads from the master, and
+     * until the file's metadata has been read. Announce changes with
+     * `videotracks-updated`.
+     *
+     * Optional: an engine that cannot switch a file's video tracks omits both
+     * methods, and the file plays its default track with no angles offered.
+     */
+    getVideoTracks?(): AdapterVideoTrack[];
+    /** Selects one of {@link getVideoTracks}, replacing the one showing. */
+    setVideoTrack?(id: string): void;
 
     setTextTracks(tracks: AdapterTextTrack[]): void;
     /**
@@ -812,7 +869,11 @@ export interface PlayerControllerApi {
      */
     setSleepTimer(option: SleepTimerOption | null): void;
 
-    /** Re-munges and reloads, preserving position and play state. */
+    /**
+     * Re-munges and reloads, preserving position and play state. A
+     * `kind: 'file'` source's angles are its video tracks, which the engine
+     * switches in place instead.
+     */
     setAngle(id: string): Promise<void>;
     /**
      * Chooses a rendition within the capped set; `'auto'` re-enables ABR.

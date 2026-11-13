@@ -56,6 +56,7 @@ import {
     type PlayerState,
     type Quality,
     type RecoveryPolicy,
+    type SubtitleTrack,
     resolveRecoveryPolicy,
     type SleepTimerOption,
     type ServeStrategy,
@@ -246,6 +247,11 @@ export class PlayerController implements PlayerControllerApi {
                 subtle: this.subtle,
             });
 
+            if (source.kind === 'file') {
+                await this.applyFile(generation);
+                return;
+            }
+
             const info = await loadMaster(source.masterUrl, this.context());
             if (generation !== this.generation) return;
             await this.applyMaster(generation, info);
@@ -342,7 +348,72 @@ export class PlayerController implements PlayerControllerApi {
         });
         if (generation !== this.generation) return;
 
-        await this.attachSidecars(generation, info);
+        await this.attachSidecars(generation, info.subtitleTracks);
+    }
+
+    /**
+     * A `kind: 'file'` source: there is no master to read and nothing to munge,
+     * so the engine is handed the URL as it is. The file's audio and video
+     * tracks arrive from the engine once it has read the file, through the
+     * same events an HLS source's audio tracks do.
+     */
+    private async applyFile(generation: number): Promise<void> {
+        this.store.setState({
+            lifecycle: 'loading',
+            isAudioOnly: this.source?.expectVideo === false,
+            chapterTracks: this.prepareChapterTracks(),
+        });
+
+        await this.attachFile(generation, {
+            seekTo: this.startPosition,
+            resume: this.resumePlaying,
+        });
+        if (generation !== this.generation) return;
+
+        await this.attachSidecars(generation, []);
+    }
+
+    /** {@link attachAngle} for a file: engine attach, then position and play state. Used by load and reload. */
+    private async attachFile(
+        generation: number,
+        options: { seekTo: number; resume: boolean },
+    ): Promise<void> {
+        const source = this.source;
+        if (!source) return;
+
+        await this.adapter.loadSource({
+            url: source.masterUrl,
+            isBlob: false,
+            kind: 'file',
+            ...(source.expectVideo !== undefined
+                ? { expectVideo: source.expectVideo }
+                : {}),
+            recovery: this.policy,
+        });
+        if (generation !== this.generation) return;
+
+        // As in `attachAngle`: the engine starts a source with subtitles off
+        // and without the sidecar tracks the last one had.
+        const subtitle = this.state.activeSubtitleTrackId;
+        if (subtitle !== null) this.setSubtitleTrack(subtitle);
+        if (this.sidecarTextTracks.length > 0) {
+            this.adapter.setTextTracks(this.sidecarTextTracks);
+        }
+
+        this.store.setState({
+            lifecycle: 'ready',
+            activeQualityId: 'auto',
+            qualities: [],
+            live: false,
+            error: null,
+        });
+        this.refreshAudioTracks();
+        this.refreshVideoTracks();
+
+        if (options.seekTo > 0) this.adapter.seek(options.seekTo);
+        if (options.resume) {
+            await this.adapter.play().catch(() => undefined);
+        }
     }
 
     /** Steps 3–6 of the pipeline, plus engine attach. Used by load/setAngle/reload. */
@@ -451,9 +522,10 @@ export class PlayerController implements PlayerControllerApi {
         }
     }
 
+    /** `masterSubtitles`: the tracks the source itself carries, which side-loaded ones join. */
     private async attachSidecars(
         generation: number,
-        info: MasterInfo,
+        masterSubtitles: SubtitleTrack[],
     ): Promise<void> {
         const loader = this.sidecarLoader;
         if (!loader) return;
@@ -472,7 +544,7 @@ export class PlayerController implements PlayerControllerApi {
                     this.sidecarTextTracks = adapterTracks;
                     this.adapter.setTextTracks(adapterTracks);
                     this.store.setState({
-                        subtitleTracks: [...info.subtitleTracks, ...tracks],
+                        subtitleTracks: [...masterSubtitles, ...tracks],
                     });
                 }
             } catch (error) {
@@ -588,6 +660,10 @@ export class PlayerController implements PlayerControllerApi {
     }
 
     async setAngle(id: string): Promise<void> {
+        if (this.source?.kind === 'file') {
+            this.setFileAngle(id);
+            return;
+        }
         if (!this.master || this.state.lifecycle === 'destroyed') return;
         if (id === this.state.activeAngleId) return;
         if (!this.state.angles.some((angle) => angle.id === id)) return;
@@ -636,6 +712,20 @@ export class PlayerController implements PlayerControllerApi {
         if (this.state.activeQualityId !== 'auto' && !held)
             this.setQuality('auto');
         return true;
+    }
+
+    /**
+     * A file's angles are its video tracks, and the engine switches between
+     * them in place: no re-munge, no reload, the position carries on by itself.
+     */
+    private setFileAngle(id: string): void {
+        if (this.state.lifecycle === 'destroyed') return;
+        if (id === this.state.activeAngleId) return;
+        if (!this.state.angles.some((angle) => angle.id === id)) return;
+        if (!this.adapter.setVideoTrack) return;
+        this.adapter.setVideoTrack(id);
+        this.store.setState({ activeAngleId: id });
+        this.emitter.emit('angle-changed', { angleId: id });
     }
 
     setQuality(id: string | 'auto'): void {
@@ -958,6 +1048,29 @@ export class PlayerController implements PlayerControllerApi {
     }
 
     /**
+     * A file's video tracks, offered as its angles. An HLS source's angles come
+     * from its master instead, and are left alone.
+     */
+    private refreshVideoTracks(): void {
+        if (this.source?.kind !== 'file') return;
+        const tracks = this.adapter.getVideoTracks?.() ?? [];
+        const angles: Angle[] = tracks.map((track, index) => ({
+            id: track.id,
+            name: track.label,
+            isDefault: index === 0,
+        }));
+        const activeAngleId =
+            tracks.find((track) => track.selected)?.id ?? angles[0]?.id ?? null;
+        if (
+            sameIds(angles, this.state.angles) &&
+            activeAngleId === this.state.activeAngleId
+        ) {
+            return;
+        }
+        this.store.setState({ angles, activeAngleId });
+    }
+
+    /**
      * Selects the chosen track again in a list the engine has just rebuilt.
      *
      * A microtask late rather than now, because this runs while the engine is
@@ -1046,6 +1159,9 @@ export class PlayerController implements PlayerControllerApi {
             this.adapter.on('audiotracks-updated', () =>
                 this.refreshAudioTracks(),
             ),
+            this.adapter.on('videotracks-updated', () =>
+                this.refreshVideoTracks(),
+            ),
         );
     }
 
@@ -1062,10 +1178,15 @@ export class PlayerController implements PlayerControllerApi {
         const seekTo = this.adapter.getCurrentTime();
         const resume = this.state.playing;
         try {
-            await this.attachAngle(generation, this.state.activeAngleId, {
-                seekTo,
-                resume,
-            });
+            if (this.source?.kind === 'file') {
+                // Nothing was munged; a reload is the same file handed over again.
+                await this.attachFile(generation, { seekTo, resume });
+            } else {
+                await this.attachAngle(generation, this.state.activeAngleId, {
+                    seekTo,
+                    resume,
+                });
+            }
         } catch (error) {
             if (generation !== this.generation) return;
             this.fail(toPlayerError(error));
