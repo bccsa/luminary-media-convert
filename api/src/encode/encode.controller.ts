@@ -521,10 +521,6 @@ export class EncodeController {
 
         this.sessionService.setEncodeConfig(sessionId, dto);
 
-        if (dto.trimSegments?.length) {
-            this.previewService.setTrimSegments(sessionId, dto.trimSegments);
-        }
-
         const position = this.queueService.enqueue(sessionId);
 
         this.logger.log(
@@ -1545,19 +1541,6 @@ export class EncodeController {
     // -----------------------------------------------------------------------
     // Preview HLS endpoints
     // -----------------------------------------------------------------------
-
-    @Get(':sessionId/preview/audio-tracks')
-    @ApiOperation({ summary: 'Get available preview audio tracks' })
-    async getPreviewAudioTracks(
-        @Param('sessionId') sessionId: string,
-        @Query('token') token: string
-    ): Promise<any> {
-        this.validatePreviewToken(sessionId, token);
-        await this.previewService.ensureReady(sessionId);
-        const tracks = this.previewService.getAudioTracks(sessionId);
-        if (!tracks) throw new NotFoundException('Preview not ready');
-        return tracks;
-    }
 
     @Get(':sessionId/preview/playlist.m3u8')
     @ApiOperation({ summary: 'Get preview HLS master playlist' })

@@ -6,20 +6,19 @@ import {
     USE_YOUR_OWN_FFMPEG,
     type AccelMode,
 } from './encoder-selection';
-import { acquireEncoderSession } from './encoder-sessions';
+import { tryAcquireEncoderSession } from './encoder-sessions';
+import { GpuLoadMonitor, gpuLoadSampler } from './gpu-load';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { join } from 'path';
 import { createReadStream, existsSync } from 'fs';
-import { mkdir, rm, writeFile, stat } from 'fs/promises';
+import { mkdir, rename, rm, stat } from 'fs/promises';
 import type { ReadStream } from 'fs';
 import { SessionService } from './session.service.js';
-import type { ProbeResult, AudioTrackInfo } from './probe.service.js';
+import type { ProbeResult, VideoTrackInfo } from './probe.service.js';
 import { FfmpegService } from './ffmpeg.service.js';
 import { ffmpegBin, ffprobeBin } from './ffbin.js';
 import { displayDimensionsOf, isAnamorphic } from './aspect.js';
-
-const MAX_AUDIO_BITRATE_KBPS = 150;
 
 export interface PreviewAudioTrack {
     index: number;
@@ -62,11 +61,42 @@ function lateAudioFilter(
     return `[${audioInput}:a:${track.streamIndex}]aresample=async=1:first_pts=${firstPts}[a]`;
 }
 
-// Codecs that can be remuxed to MPEG-TS for browser MSE playback
-const TS_COPY_CODECS = new Set(['h264', 'vp8', 'vp9']);
+/**
+ * Whether a video stream can be remuxed into the preview's MPEG-TS as it is.
+ *
+ * H.264 only: hls.js demuxes nothing else out of MPEG-TS. And only 8-bit 4:2:0,
+ * the one H.264 a browser decodes — High 10 and 4:2:2 are H.264 too. A probe
+ * from before the pixel format was reported is taken to be the common case.
+ *
+ * Never an anamorphic stream, however cheap it would be. A copied preview
+ * carries the source's own sample aspect ratio, leaving the picture correct
+ * only if the browser honours SAR in MPEG-TS; transcoding it costs a preview
+ * and settles the question.
+ */
+function canCopyToTs(track: VideoTrackInfo): boolean {
+    if (track.codec.toLowerCase() !== 'h264') return false;
+    if (track.pixFmt && !['yuv420p', 'yuvj420p'].includes(track.pixFmt)) {
+        return false;
+    }
+    return !isAnamorphic(track);
+}
 
 const SEGMENT_DURATION = 4;
-const MAX_PREVIEW_HEIGHT = 480;
+/**
+ * The tallest a converted preview is made. Copied streams keep their own size:
+ * remuxing costs the same whatever the size, and the browser scales.
+ */
+const MAX_PREVIEW_HEIGHT = 720;
+
+/**
+ * How long a session's converted preview stays on the CPU after a GPU segment
+ * came back slower than real time, ms. The GPU was busy enough to stall the
+ * player; asking it again on the very next segment would stall it again.
+ */
+const SLOW_GPU_COOLDOWN_MS = 30_000;
+
+/** GPU-capable modes: the ones whose preview segments compete with the ladder for the device. */
+const GPU_MODES = new Set<AccelMode>(['nvidia', 'apple', 'intel', 'amd']);
 
 interface SegmentBoundary {
     start: number;
@@ -95,8 +125,11 @@ interface PreviewState {
     previewDir: string;
     masterPlaylist: string;
     mediaPlaylists: string[];
-    /** When set, media playlists are filtered to only include overlapping segments */
-    trimSegments?: { inSec: number; outSec: number }[];
+    /**
+     * Until when (a `Date.now()` time) this preview's transcoded segments are
+     * made on the CPU, because a GPU segment came back slower than real time.
+     */
+    cpuUntil: number;
     /** Median keyframe spacing of the scanned stream's grid, seconds. */
     keyframeStep?: number;
     /**
@@ -144,6 +177,8 @@ export class PreviewService {
     // Concurrency limiter for FFmpeg processes
     private activeCount = 0;
     private readonly waitQueue: Array<() => void> = [];
+    /** Made on the first transcoded segment, once the encoder is known. */
+    private gpuLoad: GpuLoadMonitor | null = null;
 
     constructor(
         private readonly sessionService: SessionService,
@@ -202,15 +237,6 @@ export class PreviewService {
               )
             : { boundaries: [], keyframeStep: undefined };
         const boundaries = scan.boundaries;
-        if (copyRendition && boundaries.length > 0) {
-            renditions = await this.alignRenditions(
-                sessionId,
-                filePath,
-                renditions,
-                copyRendition,
-                boundaries
-            );
-        }
 
         // Generate playlists
         const mediaPlaylists = renditions.map((_, i) =>
@@ -227,6 +253,7 @@ export class PreviewService {
             previewDir,
             masterPlaylist,
             mediaPlaylists,
+            cpuUntil: 0,
             keyframeStep: scan.keyframeStep,
             seekHops: new Map(),
             seekHopLearners: new Map(),
@@ -256,11 +283,15 @@ export class PreviewService {
     /**
      * Whether the session has a preview, building it first when it can.
      *
-     * The state lives in memory and is built when a file is attached, so a
-     * session restored after a restart has its file, its probe and its cached
-     * segments, but no preview until something builds it again — the player
-     * waited on "Coming soon" for good. Cuts the encode was started with are
-     * applied again, as they were before the restart.
+     * Built on the first request rather than when the file arrives: most
+     * sources play directly in the browser and never ask for one, and the
+     * keyframe scan a copied preview needs reads the whole file. The state
+     * lives in memory, so a session restored after a restart builds it again
+     * the same way, and finds its cached segments where it left them.
+     *
+     * The preview is always the whole source. Cuts are skipped by the player as
+     * it plays, before the encode and during it alike, so nothing here knows of
+     * them.
      */
     async ensureReady(sessionId: string): Promise<boolean> {
         if (this.states.has(sessionId)) return true;
@@ -283,37 +314,7 @@ export class PreviewService {
             return false;
         }
 
-        const trims = session.encodeConfig?.trimSegments;
-        if (trims?.length && !this.states.get(sessionId)?.trimSegments) {
-            this.setTrimSegments(sessionId, trims);
-        }
         return this.states.has(sessionId);
-    }
-
-    /** Get available audio tracks for client-side track selector */
-    getAudioTracks(sessionId: string): PreviewAudioTrack[] | null {
-        const state = this.states.get(sessionId);
-        return state ? state.audioTracks : null;
-    }
-
-    /** Store trim segments and regenerate filtered media playlists */
-    setTrimSegments(
-        sessionId: string,
-        segments: { inSec: number; outSec: number }[]
-    ): void {
-        const state = this.states.get(sessionId);
-        if (!state) return;
-
-        state.trimSegments = segments;
-
-        // Regenerate media playlists filtered to trim ranges
-        state.mediaPlaylists = state.renditions.map((_, i) =>
-            this.generateFilteredMediaPlaylist(state, i)
-        );
-
-        this.logger.log(
-            `Preview playlists filtered to ${segments.length} trim segment(s) for session ${sessionId}`
-        );
     }
 
     /** Get master or media playlist */
@@ -514,79 +515,41 @@ export class PreviewService {
     // Private: rendition building
     // -----------------------------------------------------------------------
 
-    /** Build ABR renditions from available video tracks, capped at MAX_PREVIEW_HEIGHT */
+    /**
+     * One rendition of the first video stream: copied when the browser can
+     * decode it as it is, transcoded to at most {@link MAX_PREVIEW_HEIGHT}
+     * otherwise.
+     *
+     * One, not a ladder. The preview is played on the machine that makes it, so
+     * there is no connection to adapt to — and every extra rung was another
+     * segment encoded on the same GPU the encode itself needs. A file's other
+     * video streams are not offered: the sources that need this preview at all
+     * are ones the browser cannot play, and its first camera is enough to cut by.
+     */
     private buildRenditions(probe: ProbeResult): Rendition[] {
-        const videos = probe.videoTracks;
-        if (videos.length === 0) return [];
+        const v = probe.videoTracks[0];
+        if (!v) return [];
 
-        const codec = videos[0].codec.toLowerCase();
-        // An anamorphic track is never copied here, however cheap it would be.
-        // The trim player is where the user first sees the shape of their
-        // source, and a copied preview carries the source's own sample aspect
-        // ratio — leaving the picture correct only if the browser honours SAR
-        // in MPEG-TS. Transcoding it costs a preview and settles the question.
-        const canCopyCodec =
-            TS_COPY_CODECS.has(codec) && !videos.some((v) => isAnamorphic(v));
-
-        if (canCopyCodec && videos.length > 1) {
-            // Multi-stream file with copy-compatible codec — use existing streams as renditions
-            const eligible = videos
-                .filter((v) => v.height <= MAX_PREVIEW_HEIGHT)
-                .sort((a, b) => b.height - a.height); // highest first
-
-            if (eligible.length > 0) {
-                return eligible.map((v) => ({
+        if (canCopyToTs(v)) {
+            return [
+                {
                     videoIndex: v.index,
                     width: v.width,
                     height: v.height,
                     bitrateKbps: v.bitrateKbps,
                     canCopy: true,
-                }));
-            }
-
-            // All streams > 480p — use the smallest one
-            const smallest = [...videos].sort((a, b) => a.height - b.height)[0];
-            return [
-                {
-                    videoIndex: smallest.index,
-                    width: smallest.width,
-                    height: smallest.height,
-                    bitrateKbps: smallest.bitrateKbps,
-                    canCopy: true,
                 },
             ];
         }
 
-        if (canCopyCodec) {
-            const v = videos[0];
-            if (v.height <= MAX_PREVIEW_HEIGHT) {
-                // Source fits within preview height — single copy rendition
-                return [
-                    {
-                        videoIndex: v.index,
-                        width: v.width,
-                        height: v.height,
-                        bitrateKbps: v.bitrateKbps,
-                        canCopy: true,
-                    },
-                ];
-            }
-            // Source > 480p — fall through to generate multiple transcode renditions
-        }
-
-        // Transcode mode (HEVC, ProRes, >480p H.264, anamorphic, …) — 2-3 renditions
-        const renditions: Rendition[] = [];
-        const v = videos[0];
         // Display dimensions: the preview has to show the picture's real shape,
         // and for an anamorphic source its coded size is not it.
         const display = displayDimensionsOf(v);
-        const heights = [480, 360, 240].filter(
-            (h) => h <= Math.max(display.height, 240)
-        );
-
-        for (const h of heights) {
-            const w = Math.round((display.width * h) / display.height / 2) * 2;
-            renditions.push({
+        const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
+        const h = even(Math.min(MAX_PREVIEW_HEIGHT, display.height));
+        const w = even((display.width * h) / display.height);
+        return [
+            {
                 videoIndex: v.index,
                 width: w,
                 height: h,
@@ -594,13 +557,10 @@ export class PreviewService {
                 canCopy: false,
                 // Both dimensions stated, never `-2`: that derives the height
                 // from the *input's storage* ratio, so `scale=854:-2` on a
-                // 720x576 input gives 683, not 480. It only ever worked because
-                // `w` came from that same storage ratio.
+                // 720x576 input gives 683, not 480.
                 scaleFilter: `${w}:${h}`,
-            });
-        }
-
-        return renditions;
+            },
+        ];
     }
 
     // -----------------------------------------------------------------------
@@ -650,61 +610,6 @@ export class PreviewService {
             this.logger.warn(`Keyframe scan failed: ${e}`);
             return { boundaries: [] };
         }
-    }
-
-    /**
-     * The renditions, with every one that cannot be copied on the reference's
-     * segment boundaries switched to transcoding.
-     *
-     * Every rendition is cut on those boundaries, and a copied segment can only
-     * start on its own stream's keyframe. A stream whose keyframes fall
-     * elsewhere would start each segment early, by a different amount each
-     * time, so a switch to it jumps the picture back and leaves the audio out
-     * of step. Transcoded, it is cut exactly on the boundaries instead.
-     */
-    private async alignRenditions(
-        sessionId: string,
-        filePath: string,
-        renditions: Rendition[],
-        reference: Rendition,
-        boundaries: SegmentBoundary[]
-    ): Promise<Rendition[]> {
-        const kept: Rendition[] = [];
-        for (const rendition of renditions) {
-            if (rendition === reference || !rendition.canCopy) {
-                kept.push(rendition);
-                continue;
-            }
-            let keyframes: number[];
-            try {
-                keyframes = await this.ffmpegService.scanKeyframeGrid(
-                    filePath,
-                    rendition.videoIndex,
-                    join(this.workDir, sessionId, 'kfscan')
-                );
-            } catch (e) {
-                this.logger.warn(
-                    `Re-encoding stream ${rendition.videoIndex} for the preview of ${sessionId}: keyframe scan failed (${e})`
-                );
-                kept.push({ ...rendition, canCopy: false });
-                continue;
-            }
-            const aligned = boundaries.every((b) =>
-                keyframes.some(
-                    (k) => Math.abs(k - b.start) <= LANDING_TOLERANCE_SECONDS
-                )
-            );
-            if (aligned) {
-                kept.push(rendition);
-            } else {
-                this.logger.warn(
-                    `Re-encoding stream ${rendition.videoIndex} (${rendition.width}x${rendition.height}) for the preview ` +
-                        `of ${sessionId}: its keyframes are not on the segment boundaries`
-                );
-                kept.push({ ...rendition, canCopy: false });
-            }
-        }
-        return kept;
     }
 
     /**
@@ -798,100 +703,6 @@ export class PreviewService {
         return lines.join('\n');
     }
 
-    private generateFilteredMediaPlaylist(
-        state: PreviewState,
-        renditionIndex: number
-    ): string {
-        const trims = state.trimSegments;
-        if (!trims?.length) {
-            return this.generateMediaPlaylist(
-                state.segmentBoundaries,
-                state.duration,
-                renditionIndex
-            );
-        }
-
-        const boundaries = state.segmentBoundaries;
-        const segCount =
-            boundaries.length > 0
-                ? boundaries.length
-                : Math.ceil(state.duration / SEGMENT_DURATION);
-
-        // Find segments that overlap any trim range
-        const included: number[] = [];
-        for (let i = 0; i < segCount; i++) {
-            const segStart =
-                boundaries.length > 0
-                    ? boundaries[i].start
-                    : i * SEGMENT_DURATION;
-            const segDur =
-                boundaries.length > 0
-                    ? boundaries[i].duration
-                    : Math.min(
-                          SEGMENT_DURATION,
-                          state.duration - i * SEGMENT_DURATION
-                      );
-            const segEnd = segStart + segDur;
-
-            for (const trim of trims) {
-                if (segStart < trim.outSec && segEnd > trim.inSec) {
-                    included.push(i);
-                    break;
-                }
-            }
-        }
-
-        if (included.length === 0) {
-            return this.generateMediaPlaylist(
-                boundaries,
-                state.duration,
-                renditionIndex
-            );
-        }
-
-        // Compute max duration for #EXT-X-TARGETDURATION
-        let maxDuration = SEGMENT_DURATION;
-        for (const idx of included) {
-            const dur =
-                boundaries.length > 0
-                    ? boundaries[idx].duration
-                    : Math.min(
-                          SEGMENT_DURATION,
-                          state.duration - idx * SEGMENT_DURATION
-                      );
-            if (dur > maxDuration) maxDuration = dur;
-        }
-
-        const lines = [
-            '#EXTM3U',
-            '#EXT-X-VERSION:3',
-            `#EXT-X-TARGETDURATION:${Math.ceil(maxDuration)}`,
-            '#EXT-X-MEDIA-SEQUENCE:0',
-            '#EXT-X-PLAYLIST-TYPE:VOD',
-        ];
-
-        for (let j = 0; j < included.length; j++) {
-            const idx = included[j];
-            // Segments carry source timestamps (-copyts): adjacent segments are
-            // continuous, so a discontinuity is only real where the trim filter
-            // skipped segments and the timeline actually jumps.
-            if (j > 0 && idx !== included[j - 1] + 1)
-                lines.push('#EXT-X-DISCONTINUITY');
-            const segDur =
-                boundaries.length > 0
-                    ? boundaries[idx].duration
-                    : Math.min(
-                          SEGMENT_DURATION,
-                          state.duration - idx * SEGMENT_DURATION
-                      );
-            lines.push(`#EXTINF:${segDur.toFixed(3)},`);
-            lines.push(`segment${idx}.ts`);
-        }
-
-        lines.push('#EXT-X-ENDLIST', '');
-        return lines.join('\n');
-    }
-
     private buildSegmentArgs(
         filePath: string,
         start: number,
@@ -908,7 +719,9 @@ export class PreviewService {
          * whose accurate seek has no hop.
          */
         copySeekStart = start,
-        audioTrack?: PreviewAudioTrack
+        audioTrack?: PreviewAudioTrack,
+        /** Where the segment goes: a file, or `pipe:1`. */
+        output = 'pipe:1'
     ): string[] {
         const args: string[] = [];
 
@@ -926,7 +739,8 @@ export class PreviewService {
             '0',
             '-f',
             'mpegts',
-            'pipe:1',
+            ...(output === 'pipe:1' ? [] : ['-y']),
+            output,
         ];
 
         if (rendition.audioOnly) {
@@ -1035,15 +849,11 @@ export class PreviewService {
         const audioMap = audioTrack ? `0:a:${audioTrack.streamIndex}` : null;
 
         const accelMode = this.ffmpegService.getAccelMode();
-        const useGpu =
-            !rendition.canCopy &&
-            !rendition.audioOnly &&
-            accelMode !== 'cpu' &&
-            accelMode !== 'none';
-
-        this.logger.debug(
-            `Segment r${renditionIndex}/s${segmentIndex} (${useGpu ? accelMode : rendition.canCopy ? 'copy' : 'cpu'})`
-        );
+        const transcodes = !rendition.canCopy && !rendition.audioOnly;
+        // Decided below, once a process slot is held: the GPU's state is read
+        // as close to the encode as it can be.
+        let useGpu = false;
+        const partPath = `${outputPath}.part`;
 
         const runOnce = async (copySeekStart: number): Promise<void> => {
             const args = this.buildSegmentArgs(
@@ -1056,25 +866,24 @@ export class PreviewService {
                 accelMode,
                 useGpu,
                 copySeekStart,
-                audioTrack ?? undefined
+                audioTrack ?? undefined,
+                partPath
             );
             const timeout = rendition.canCopy ? 30_000 : 120_000;
-            const opts = {
-                timeout,
-                maxBuffer: 50 * 1024 * 1024,
-                encoding: 'buffer' as BufferEncoding,
-            };
 
-            // No CPU retry: this FFmpeg has no software H.264 encoder to retry
-            // with, so one would fail on a missing encoder and report that
-            // instead of the hardware error that actually stopped the preview.
-            // The session limit that motivated the retry is now kept away by the
-            // shared session budget above.
-            const result: { stdout: any } = await execFileAsync(
-                ffmpegBin(),
-                args,
-                opts
-            ).catch((err: any) => {
+            // Straight to a file, not through a buffer: a copied segment is the
+            // source's own bitrate, and a 4K one outgrows any buffer worth
+            // holding. Written aside and renamed into place, so a process killed
+            // half-way leaves nothing a later request would serve as a segment.
+            //
+            // No retry on the CPU after a GPU failure: the GPU's own error is
+            // the one worth reporting, and a starved GPU is steered around
+            // before the segment starts rather than after it fails.
+            await execFileAsync(ffmpegBin(), args, {
+                timeout,
+                maxBuffer: 4 * 1024 * 1024,
+            }).catch(async (err: any) => {
+                await rm(partPath, { force: true }).catch(() => {});
                 const via = useGpu
                     ? accelMode
                     : rendition.canCopy
@@ -1092,30 +901,28 @@ export class PreviewService {
                 );
             });
 
-            // Write segment data ourselves — guaranteed flushed via writeFile
-            await writeFile(outputPath, result.stdout);
+            await rename(partPath, outputPath);
         };
 
         // Wait for a concurrency slot
         await this.acquireSlot();
 
-        // Two separate limits. The slot above bounds ffmpeg *processes*, which
-        // is about this service's own load. This one bounds hardware encode
-        // *sessions*, whose cap belongs to the graphics driver and is shared
-        // with the ladder — previews staying under three on their own is no
-        // help while a six-rung ladder is running beside them.
-        //
-        // Only a transcoding segment opens an encoder. Copy mode hands bytes
-        // to the muxer and takes no session.
         let releaseEncoderSession: () => void = () => {};
 
         try {
-            if (!rendition.canCopy) {
-                releaseEncoderSession = await acquireEncoderSession();
+            if (transcodes) {
+                const gpu = this.claimGpu(state, accelMode);
+                useGpu = gpu.useGpu;
+                releaseEncoderSession = gpu.release;
+                this.logger.debug(
+                    `Segment r${renditionIndex}/s${segmentIndex} (${useGpu ? accelMode : `cpu: ${gpu.why}`})`
+                );
             }
 
             if (!rendition.canCopy || !state.keyframeStep) {
+                const startedAt = Date.now();
                 await runOnce(start);
+                if (useGpu) this.noteGpuSegmentTime(state, startedAt);
                 return outputPath;
             }
 
@@ -1216,6 +1023,53 @@ export class PreviewService {
         }
 
         return outputPath;
+    }
+
+    /**
+     * Whether a transcoded segment is made on the GPU or the CPU, and the
+     * encoder session it holds if the GPU.
+     *
+     * The GPU when it can take the segment now; the operating system's software
+     * encoder when it cannot. "Cannot" is any of three things, each cheap to
+     * know: every encoder session is held (the ladder's waves take them all),
+     * the GPU reads as saturated, or its last segment for this preview came back
+     * slower than real time. Waiting for the GPU instead is what made the
+     * preview stall the moment an encode started.
+     *
+     * Two separate limits meet here. The process slot already held bounds this
+     * service's own ffmpeg processes; the encoder session bounds hardware
+     * encode sessions, whose cap belongs to the graphics driver and is shared
+     * with the ladder. Only a GPU segment takes a session — a CPU one, a copy
+     * and an audio-only segment open no hardware encoder.
+     */
+    private claimGpu(
+        state: PreviewState,
+        accelMode: AccelMode
+    ): { useGpu: boolean; release: () => void; why?: string } {
+        const cpu = (why: string) => ({ useGpu: false, release: () => {}, why });
+        if (!GPU_MODES.has(accelMode)) return cpu('no GPU encoder');
+
+        this.gpuLoad ??= new GpuLoadMonitor(gpuLoadSampler(accelMode));
+        this.gpuLoad.noteDemand();
+
+        if (Date.now() < state.cpuUntil) return cpu('the GPU was slow');
+        if (this.gpuLoad.isStarved()) {
+            return cpu(`the GPU is at ${this.gpuLoad.utilisation}%`);
+        }
+        const release = tryAcquireEncoderSession();
+        if (!release) return cpu('every encoder session is in use');
+        return { useGpu: true, release };
+    }
+
+    /** A GPU segment slower than real time puts the preview on the CPU for a while. */
+    private noteGpuSegmentTime(state: PreviewState, startedAt: number): void {
+        const took = Date.now() - startedAt;
+        if (took <= SEGMENT_DURATION * 1000) return;
+        state.cpuUntil = Date.now() + SLOW_GPU_COOLDOWN_MS;
+        this.logger.log(
+            `Preview segment took ${(took / 1000).toFixed(1)}s on the GPU; ` +
+                `making this preview on the CPU for ${SLOW_GPU_COOLDOWN_MS / 1000}s`
+        );
     }
 
     /** First video packet presentation time of a segment, or null. */

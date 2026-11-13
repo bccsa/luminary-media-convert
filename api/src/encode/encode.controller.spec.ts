@@ -159,14 +159,11 @@ describe('EncodeController', () => {
         } as any;
 
         previewService = {
-            init: vi.fn(),
             isReady: vi.fn().mockReturnValue(false),
             ensureReady: vi.fn().mockResolvedValue(true),
             getPlaylist: vi.fn().mockReturnValue(null),
-            getAudioTracks: vi.fn().mockReturnValue(null),
             getSegmentStream: vi.fn().mockResolvedValue(null),
             destroy: vi.fn().mockResolvedValue(undefined),
-            setTrimSegments: vi.fn(),
         } as any;
 
         // Ingest, chapter and sidecar collaborators. The controller only
@@ -1051,40 +1048,6 @@ describe('EncodeController', () => {
             });
         });
 
-        it('should call setTrimSegments when trimSegments are present', async () => {
-            const session = sessionService.create(makeConfig());
-            sessionService.updateStatus(session.id, 'uploaded');
-
-            const config = makeEncodeConfig();
-            config.trimSegments = [
-                { inSec: 5, outSec: 30 },
-                { inSec: 60, outSec: 90 },
-            ];
-
-            await controller.startEncode(session.id, config, makeRequest());
-
-            expect(previewService.setTrimSegments).toHaveBeenCalledWith(
-                session.id,
-                [
-                    { inSec: 5, outSec: 30 },
-                    { inSec: 60, outSec: 90 },
-                ]
-            );
-        });
-
-        it('should not call setTrimSegments when no trimSegments', async () => {
-            const session = sessionService.create(makeConfig());
-            sessionService.updateStatus(session.id, 'uploaded');
-
-            await controller.startEncode(
-                session.id,
-                makeEncodeConfig(),
-                makeRequest()
-            );
-
-            expect(previewService.setTrimSegments).not.toHaveBeenCalled();
-        });
-
         it('should reject video config without videoRenditions', async () => {
             const session = sessionService.create(makeConfig());
             sessionService.updateStatus(session.id, 'uploaded');
@@ -1935,43 +1898,6 @@ describe('EncodeController', () => {
                         session.sessionToken,
                         undefined,
                         res
-                    )
-                ).rejects.toThrow(NotFoundException);
-            });
-        });
-
-        describe('getPreviewAudioTracks', () => {
-            it('should return audio tracks', async () => {
-                const session = sessionService.create(makeConfig());
-                const tracks = [
-                    {
-                        index: 0,
-                        streamIndex: 0,
-                        name: 'English',
-                        isDefault: true,
-                    },
-                ];
-                previewService.getAudioTracks.mockReturnValue(tracks);
-
-                const result = await controller.getPreviewAudioTracks(
-                    session.id,
-                    session.sessionToken
-                );
-
-                expect(previewService.getAudioTracks).toHaveBeenCalledWith(
-                    session.id
-                );
-                expect(result).toEqual(tracks);
-            });
-
-            it('should throw NotFoundException when preview not ready', async () => {
-                const session = sessionService.create(makeConfig());
-                previewService.getAudioTracks.mockReturnValue(null);
-
-                await expect(
-                    controller.getPreviewAudioTracks(
-                        session.id,
-                        session.sessionToken
                     )
                 ).rejects.toThrow(NotFoundException);
             });

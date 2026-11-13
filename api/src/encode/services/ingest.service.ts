@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { SessionService } from './session.service.js';
 import { ProbeService } from './probe.service.js';
-import { PreviewService } from './preview.service.js';
 import { WaveformService } from './waveform.service.js';
 import {
     selectStoryboardTrack,
@@ -22,14 +21,13 @@ export class IngestService {
     constructor(
         private readonly sessionService: SessionService,
         private readonly probeService: ProbeService,
-        private readonly previewService: PreviewService,
         private readonly waveformService: WaveformService,
         private readonly thumbnailService: ThumbnailService
     ) {}
 
     /**
      * Run the post-ingest pipeline once a source file is in place at destPath:
-     * record file path, probe metadata, init preview, and transition the
+     * record file path, probe metadata, and transition the
      * session to 'uploaded'. Clients learn of the transition over SSE or by
      * polling.
      */
@@ -38,17 +36,9 @@ export class IngestService {
 
         const probeResult = await this.probeService.probe(destPath);
 
-        // Initialize preview before exposing probe result —
-        // clients poll for probeResult and immediately use preview
-        // endpoints, so the preview must be ready first.
+        // The converted preview is built on its first request, if one comes:
+        // most sources play directly in the browser and never ask for it.
         this.sessionService.setProbeResult(sessionId, probeResult);
-        try {
-            await this.previewService.init(sessionId);
-        } catch (err) {
-            this.logger.warn(
-                `Preview init failed for ${sessionId}: ${(err as Error).message}`
-            );
-        }
 
         this.sessionService.updateStatus(sessionId, 'uploaded');
 
