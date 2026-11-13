@@ -100,7 +100,7 @@ S3 credentials arrive per session and must survive a restart without ever sittin
 
 1. `POST /api/cms/sessions` (the CMS) or `POST /api/sessions` (a direct integration) creates the session.
 2. `POST /api/sessions/:id/local-file` attaches an absolute path. **The source is used where it is** — never copied, never moved, never written to or deleted, including on failure. Validated as absolute, a regular file, and in the `ALLOWED_EXTENSIONS` allow-list (which `bootstrap.ts` re-exports so the host's file picker offers exactly the extensions the API will accept).
-3. `IngestService.finalizeUpload` runs the shared post-ingest pipeline: record the path → ffprobe → initialise the preview → status `uploaded` → prime the waveform cache and the source storyboard in the background.
+3. `IngestService.finalizeUpload` runs the shared post-ingest pipeline: record the path → ffprobe → status `uploaded` → prime the waveform cache and the source storyboard in the background.
 4. The client computes a suggested encode config from the probe results (`EncodeConfigForm`); the user adjusts renditions / audio groups / copy / VBR and optionally marks trim segments.
 5. `POST /api/sessions/:id/encode` validates the config (video needs ≥ 1 rendition and ≥ 1 audio group; every rendition's `audioGroupId` must exist; `copyStream` needs a `sourceTrackIndex`), refuses sessions without usable credentials, and enqueues. A `failed` session whose source file is still on disk may be retried (`canRetry` on the status response).
 6. FIFO queue, one encode at a time.
@@ -114,7 +114,7 @@ Disk is guarded on both ends: `disk-space.ts` refuses an ingest or an encode tha
 ### Encoding features
 
 - **Video + audio-only modes**: `EncodeConfigDto.type` is `'video'` or `'audio'`
-- **Trim segments**: optional `trimSegments` restricts the encode to one or more `[in, out]` ranges, concatenated in order. The preview reflects the trimmed timeline so cut points can be checked before queueing
+- **Trim segments**: optional `trimSegments` restricts the encode to one or more `[in, out]` ranges, concatenated in order. The preview stays the whole source; the player skips the cuts as it plays, before the encode and during it, so cut points can be checked before queueing
 - **Byte-range HLS**: on by default; segments packed into **shared chunk chains** under `media/` at the prefix root — one chain per video angle carrying every rendition of that angle (interleaved by arrival; byte order inside a chunk is irrelevant to a whole-object backhaul, so no cross-stream barrier exists), one audio chain carrying every audio group. Media playlists stay per-stream and reference chunks as `../media/<chain>_<n>.m4s` with `#EXT-X-BYTERANGE` (ciphertext offsets). The first chunk of a chain closes at ~20 s of content so a byte-range-forwarding edge warms almost immediately at play-start; later chunks are cap-sized (`byteRangeMaxFileSizeMB` default 500 for video chains, `audioByteRangeMaxFileSizeMB` default 50 for the audio chain — it aggregates every language, wide ladders should raise it). Chain identity comes from `FfmpegService.buildStreamChainMap`, never from parsing directory names. Packing happens in `SegmentPipelineService` as segments arrive; the fMP4 init is deliberately **not** uploaded mid-encode (FFmpeg creates it empty and fills it later — an early upload raced that write and shipped zero-byte inits), it travels with the remaining files at the end
 - **Copy mode** (`-c:v copy` / `-c:a copy`) and **VBR** (CRF/CQ) per rendition and per audio group
 - **Audio groups** mapped to renditions via HLS `#EXT-X-MEDIA` `GROUP-ID`; multi-track audio with language/name attributes; mono/stereo/5.1/7.1 via `-ac`
@@ -123,15 +123,18 @@ Disk is guarded on both ends: `disk-space.ts` refuses an ingest or an encode tha
 - **Thumbnails**: sprite sheets + WebVTT for the encoded output, plus a separate pre-encode _source storyboard_ served from `/api/sessions/:id/thumbnails/*` so the trim timeline can show frames before anything is encoded (`X-Storyboard-Complete` tells the client when sampling has finished)
 - **Waveform**: peaks computed once per source, cached on disk, served over HTTP for the trim UI and written to S3 as `waveform.json`
 
-### Server-side on-demand HLS preview
+### Preview: the source file, or a conversion of it
 
-`PreviewService` generates preview HLS on demand once the source is probed:
+The pre-encode preview plays the **source file itself** whenever the browser can decode it, and a converted HLS stream only when it cannot.
 
-- 2–3 ABR renditions (480p/360p/240p), copy-mode for H.264/VP8/VP9 where possible
-- Segments extracted on demand, cached under `<workDir>/<sessionId>/preview/`, with prefetch and a cap of 3 concurrent FFmpeg processes
-- GPU-accelerated (NVENC / VideoToolbox) with CPU fallback, sharing `FfmpegService`'s detection
-- Multi-audio: one track per language (or all when unlabelled), each `(rendition, audioTrack)` pair cached separately
-- Trim-aware; MPEG-TS segments of 4 s
+- **Direct play**: `GET /api/sessions/:id/source?token=` serves the file as it is on disk (`res.sendFile`, which answers `Range`/`If-Range`/`HEAD` with 206 and 416; `dotfiles: 'allow'`, since the source lives wherever the user keeps it; `Cross-Origin-Resource-Policy: cross-origin`, since a `<video src>` request is no-cors). No FFmpeg is involved: seeks land at once whatever the encoder is doing to the GPU. **The renderer decides** which sources play directly (`app/src/utils/previewPlayback.ts`, from the probe plus `canPlayType` checks) — the API never does. The player reports a file it could not play (a `MediaError`, or a video source whose picture the browser dropped) and the renderer falls back to the converted preview for the session
+- **Converted preview** (`PreviewService`), for everything else: a single rendition, built lazily on the first playlist request — never at ingest, since most sources never ask for it
+  - H.264 8-bit 4:2:0, not anamorphic: **copied** at native size, the keyframe scan and seek-hop learning keeping segments on their boundaries; audio to AAC
+  - anything else: **transcoded** to at most 720p
+  - audio-only: AAC, on the CPU
+  - segments of ~4 s in MPEG-TS, written to `<segment>.part` and renamed into place, cached under `<workDir>/<sessionId>/preview/`, prefetched, at most 3 concurrent FFmpeg processes. Multi-audio: one track chosen by `?audio=`, each `(rendition, audioTrack)` pair cached separately
+- **A starved GPU sends the conversion to the CPU** (`claimGpu`): a transcoded segment uses the GPU only if an encoder session is free right now (`tryAcquireEncoderSession`, never a wait), the GPU reads below 95% (`gpu-load.ts`: `nvidia-smi` encoder/decoder utilisation, or the IOAccelerator's `Device Utilization %` on macOS; sampled every 2 s only while segments are asked for), and this preview's last GPU segment was not slower than real time (otherwise 30 s on the CPU). The CPU path is the OS's own software encoder — `h264_videotoolbox -require_sw 1` on macOS, `h264_mf` on Windows — because the shipped FFmpeg has no libx264. Every path names High profile so GPU and CPU segments play as one rendition
+- No trims on the server: the preview is always the whole source
 - Removed when the session is deleted
 
 ### Session persistence and sweeping

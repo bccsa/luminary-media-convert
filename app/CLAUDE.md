@@ -11,7 +11,7 @@
 - **Routing**: Vue Router 4 (history mode) — `/` → `/sessions`, `/sessions`, `/sessions/:id`
 - **Auth**: no sign-in. The UI's credential is the instance API token, taken from the preload bridge in the desktop app and from `VITE_API_TOKEN` in browser development (`src/auth-token.ts`)
 - **API base**: same-origin by default (the packaged app is served by the API); `VITE_API_URL` for browser development
-- **Media playback**: `LuminaryPlayer` from `@luminary-media-converter/player-web` (Video.js 10 / hls.js, driven by the `player-core` controller) with a bare windowed frame (`controls.windowedControls: false`): the trim timeline and its shortcuts are the whole transport, and fullscreen — the app's button beside the selectors, or a double-click on the picture — shows the player's own controls. Angle switching, quality selection, audio tracks and encrypted playback all go through the controller; the AES key is fetched masked from `GET /api/sessions/:id/key`, unmasked in memory (`utils/keyMask.ts`) and handed to the player, which serves it to hls.js from memory through its loader — no key blob URLs
+- **Media playback**: `LuminaryPlayer` from `@luminary-media-converter/player-web` (Video.js 10 / hls.js, driven by the `player-core` controller) with a bare windowed frame (`controls.windowedControls: false`): the trim timeline and its shortcuts are the whole transport, and fullscreen — the app's button beside the selectors, or a double-click on the picture — shows the player's own controls. Before the encode is done the preview is the source file itself (`kind: 'file'`, from `GET /api/sessions/:id/source`) whenever `utils/previewPlayback.ts` finds every stream browser-playable, and the API's converted HLS preview otherwise — or after the file failed to play — with a quiet "Converted preview · <reason>" note beside the selectors. Either way the player stays on source time and the cuts are skipped as it plays (`previewKeepRanges` in `SessionView`). Angle switching, quality selection, audio tracks and encrypted playback all go through the controller; the AES key is fetched masked from `GET /api/sessions/:id/key`, unmasked in memory (`utils/keyMask.ts`) and handed to the player, which serves it to hls.js from memory through its loader — no key blob URLs
 - **Shared packages**: `@luminary-media-converter/encode-config`, `@luminary-media-converter/hls-core`, `@luminary-media-converter/player-core`, `@luminary-media-converter/player-web`
 - **Real-time updates**: SSE via `GET /api/sessions/:id/events`, with a polling fallback in `useSessionPoller`
 - **Testing**: Vitest + `@vue/test-utils` + jsdom
@@ -62,7 +62,7 @@ app/
 │   │   ├── useChapters.ts               # Chapter load/save (localStorage draft + debounced write to the API)
 │   │   ├── useChapterTrimSync.ts, useTrimDeletions.ts, useTrimPlayback.ts, useTrimmedStoryboard.ts
 │   │   └── useStoryboard.ts, useEncodeEta.ts, useAppLayout.ts, useTheme.ts
-│   ├── utils/                           # errors, format, status, storyboardVtt, trimPlayback, trimTimeline, keyMask
+│   ├── utils/                           # errors, format, status, storyboardVtt, trimPlayback, trimTimeline, keyMask, previewPlayback
 │   └── views/
 │       ├── ActiveSessionsView.vue       # Session list (polls GET /api/sessions)
 │       └── SessionView.vue              # Full session lifecycle

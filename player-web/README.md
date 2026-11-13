@@ -5,7 +5,8 @@ The simple web player for this repo's playback stack, on **Video.js 10** (`@vide
 and recovery policy; this package is the web engine binding (`HlsJsVideoAdapter`, the hls.js loaders,
 `BlobServeStrategy`, `RecoveryLadder`) and a `LuminaryPlayer` Vue component on Video.js's **stock** video skin.
 
-It serves the encoder's preview and the Luminary CMS's video preview. The Luminary app's full player (chapters,
+It serves the encoder's preview — the source file itself (`PlayerSource.kind: 'file'`) when the browser can play it,
+the encoder's converted HLS when it cannot — and the Luminary CMS's video preview. The Luminary app's full player (chapters,
 up next, scrub roster, audio fullscreen, its own skin) lives in the Luminary repo and runs on this package's
 engine.
 

@@ -18,6 +18,6 @@ At startup `FfmpegService.onModuleInit()` detects the acceleration mode (`AccelM
 2. **Apple Silicon**: `darwin` + `arm64` + `videotoolbox` in `-hwaccels` + `h264_videotoolbox` in `-encoders` + `scale_vt` in `-filters` → `h264_videotoolbox`, `scale_vt`, `-hwaccel videotoolbox -hwaccel_output_format videotoolbox_vld`
 3. **CPU fallback**: `libx264` with resolution-based presets. Audio always encodes on CPU
 
-`PreviewService` shares the same detection. The active mode is reported as `encoder` on status responses and SSE events.
+`PreviewService` shares the same detection for the converted preview (sources the browser cannot play directly). A transcoded preview segment the GPU cannot take right now — every encoder session held, the GPU at 95% or more, or its last segment slower than real time — goes to the OS's own software encoder instead: `h264_videotoolbox -require_sw 1` on macOS, `h264_mf` (software by default) on Windows, libx264 only in `'cpu'` mode. The active mode is reported as `encoder` on status responses and SSE events.
 
 This is exactly why the packaged app ships its own ffmpeg: hardware encoding is a compile-time decision, and a user's own build may have none of it.
