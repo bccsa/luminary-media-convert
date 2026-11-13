@@ -20,13 +20,21 @@ const props = defineProps<{
     /** When true, hide the below-player angle row (e.g. on tabs other than the player view). */
     hideAngleSwitcher?: boolean;
     /**
-     * Server-side preview audio tracks. The preview stream carries one audio
-     * rendition chosen by URL, so switching it is a source swap rather than a
-     * track change — which is why it is separate from the player's own
-     * `audioTracks` below.
+     * The source's audio tracks, labelled by the view from the probe and the
+     * encode form, which the player knows nothing of — which is why they are
+     * separate from the player's own `audioTracks` below.
      */
     showAudioSelect: boolean;
     previewAudioSelectOptions: { value: number; label: string }[];
+    /**
+     * The player holds the source file itself, whose own audio tracks are the
+     * ones on offer: the choice selects the file's track at that position. When
+     * false the preview is a conversion carrying one track chosen by URL, and
+     * the view swaps the source instead.
+     */
+    nativePreviewAudio?: boolean;
+    /** Said quietly beside the selectors: why the preview is a conversion. */
+    previewNote?: string | null;
 }>();
 
 const selectedAudioTrack = defineModel<number>('selectedAudioTrack', {
@@ -82,8 +90,8 @@ const showQualitySelect = computed(
 );
 
 /**
- * Audio tracks the stream itself offers. The preview stream never has more than
- * one (its track is picked by URL), so this only lights up post-encode.
+ * Audio tracks the stream itself offers. During the preview the view's own
+ * selector stands in for this one, so it only lights up post-encode.
  */
 const playerAudioOptions = computed(() =>
     state.value.audioTracks.map((track) => ({
@@ -118,8 +126,29 @@ const showSubtitleSelect = computed(
 /** There is something playable to make full screen. */
 const canPlay = computed(() => state.value.lifecycle === 'ready');
 
+/**
+ * The source file's own track at the chosen position, selected in the player:
+ * when the choice changes, and again when the file's tracks arrive, since a
+ * new load starts on the file's default.
+ */
+watch(
+    () =>
+        [
+            props.nativePreviewAudio,
+            selectedAudioTrack.value,
+            state.value.audioTracks,
+        ] as const,
+    ([native, index, tracks]) => {
+        if (!native) return;
+        const track = tracks[index];
+        if (!track || track.id === state.value.activeAudioTrackId) return;
+        controller.value?.setAudioTrack(track.id);
+    }
+);
+
 const showPlaybackControlsRow = computed(
     () =>
+        !!props.previewNote ||
         showAngleRow.value ||
         props.showAudioSelect ||
         showPlayerAudioSelect.value ||
@@ -200,7 +229,7 @@ function isPlaying(): boolean {
 /**
  * Re-run the load for the current source. The player reloads by itself whenever
  * the `source` object changes, so this is for the case where the URL is stable
- * but what it serves is not — the preview playlist after trims are submitted.
+ * but what it serves is not — a master edited in place.
  */
 function reload(): void {
     if (props.source) void controller.value?.load(props.source);
@@ -531,6 +560,12 @@ defineExpose({
                                 />
                             </svg>
                         </button>
+                        <span
+                            v-if="previewNote"
+                            class="text-xs text-slate-500 dark:text-slate-400"
+                            data-test="previewNote"
+                            >{{ previewNote }}</span
+                        >
                     </div>
                 </div>
             </div>
