@@ -5,7 +5,7 @@ import {
     checkPlayback,
     playback,
     selectAngle,
-    stream,
+    storedMedia,
 } from '../store';
 
 /** The 16 raw key bytes the player hands to the decryptor, as a data URI. */
@@ -16,7 +16,7 @@ function keyDataUri(hex: string): string {
 }
 
 const swappedKeyLine = computed(() => {
-    const hlsKey = stream.media?.hlsKey;
+    const hlsKey = storedMedia.value?.hlsKey;
     if (!playback.keyLine || !playback.hasPlaceholder || !hlsKey) return '';
     return playback.keyLine.replace(LUMINARY_KEY_PLACEHOLDER_URI, keyDataUri(hlsKey));
 });
@@ -26,14 +26,14 @@ const swappedKeyLine = computed(() => {
     <section class="panel">
         <h2>4 &middot; Playback check</h2>
 
-        <p v-if="!stream.media" class="note">
-            No <code>hlsUrl</code> reported yet — it arrives with the first
-            <code>encoding</code> event.
+        <p v-if="!storedMedia" class="note">
+            No <code>hlsUrl</code> stored yet — it arrives with the first event that
+            carries one, once the encode is queued.
         </p>
 
         <template v-else>
             <p class="note" style="margin-top: 0">
-                <code>{{ stream.media.hlsUrl }}</code>
+                <code>{{ storedMedia.hlsUrl }}</code>
             </p>
 
             <div class="row">
