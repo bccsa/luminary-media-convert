@@ -15,6 +15,7 @@ import type { Segment } from '../segment-editor';
 import SubtitleCompare from './SubtitleCompare.vue';
 import SubtitleLines from './SubtitleLines.vue';
 import { copyTimings, languageName, readSubtitleFile, subtitlesToSrt, subtitlesToVtt } from './subtitles';
+import { isChangedElsewhere, saveErrorMessage } from '../../utils/errors';
 
 const props = defineProps<{
     sessionId: string;
@@ -26,8 +27,12 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-    /** The master changed: whatever holds the old one should load it again. */
-    saved: [];
+    /**
+     * The master changed — saved here, or moved on to a version another
+     * machine wrote: whatever holds the old one should load it again. A save
+     * passes on its `published`, whether Luminary CMS has stored it yet.
+     */
+    saved: [published?: boolean];
 }>();
 
 /** One language as edited here, against what was last read or saved. */
@@ -334,15 +339,29 @@ async function save(): Promise<void> {
     notice.value = null;
     try {
         const vtt = subtitlesToVtt(d.segments);
-        media.value = await putSubtitles(props.sessionId, token, language, media.value.etag, d.name.trim(), vtt);
+        const next = await putSubtitles(props.sessionId, token, language, media.value.etag, d.name.trim(), vtt);
+        media.value = next;
         Object.assign(d, { savedVtt: vtt, savedName: d.name.trim(), isNew: false });
         notice.value = `Saved: every player offers ${labelOf(language)} now`;
-        emit('saved');
+        emit('saved', next.published);
     } catch (err) {
-        error.value = (err as Error).message;
+        error.value = saveErrorMessage(err);
+        if (isChangedElsewhere(err)) void followNewerVersion(error.value);
     } finally {
         saving.value = false;
     }
+}
+
+/**
+ * Another machine saved the video first, and the session has moved on to its
+ * version. Reading it again keeps every unsaved language as it is here, so the
+ * edit can be saved again over the newer version, and the page follows the new
+ * master. The read clears the error, so the conflict is put back after it.
+ */
+async function followNewerVersion(message: string): Promise<void> {
+    emit('saved');
+    await load();
+    error.value ??= message;
 }
 
 function discard(): void {
@@ -371,13 +390,15 @@ async function remove(): Promise<void> {
     saving.value = true;
     error.value = null;
     try {
-        media.value = await deleteSubtitles(props.sessionId, token, language, media.value.etag);
+        const next = await deleteSubtitles(props.sessionId, token, language, media.value.etag);
+        media.value = next;
         delete drafts[language];
         selected.value = languages.value[0] ?? null;
         if (selected.value) await ensureLoaded(selected.value);
-        emit('saved');
+        emit('saved', next.published);
     } catch (err) {
-        error.value = (err as Error).message;
+        error.value = saveErrorMessage(err);
+        if (isChangedElsewhere(err)) void followNewerVersion(error.value);
     } finally {
         saving.value = false;
     }

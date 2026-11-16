@@ -97,8 +97,9 @@ export function useSessionPoller() {
         if (data.trimSegments?.length) {
             trimSegments.value = data.trimSegments;
         }
-        // The playback URL is settled once encoding starts and never changes
-        // after; progress events that omit it are not saying it went away.
+        // The playback URL is known once encoding starts. It moves only when a
+        // save to the finished video writes a new master revision; progress
+        // events that omit it are not saying it went away.
         if (data.hlsUrl) {
             hlsUrl.value = data.hlsUrl;
         }
@@ -189,6 +190,17 @@ export function useSessionPoller() {
         );
     }
 
+    /**
+     * Take in a status read elsewhere. The stream ends at `completed`, but a
+     * finished video's master still moves on with every save to it, and the
+     * view reads the session again to follow it. Fed through here, the new
+     * `hlsUrl`, `masterPlaylist` and `thumbnailsVtt` replace the ones the
+     * stream last delivered rather than sitting behind them.
+     */
+    function apply(data: SessionStatusResponse) {
+        applyUpdate(data);
+    }
+
     onUnmounted(stop);
 
     return {
@@ -218,5 +230,6 @@ export function useSessionPoller() {
         polling: readonly(polling),
         start,
         stop,
+        apply,
     };
 }

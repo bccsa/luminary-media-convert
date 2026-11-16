@@ -11,7 +11,9 @@ import type {
     VideoSource,
     ThumbnailsRegenerateJob,
     EncodedMedia,
+    ChaptersSaveResult,
 } from './types';
+import { ApiError } from './utils/errors';
 
 /**
  * Where the local Encoding API is.
@@ -41,8 +43,9 @@ export const API_BASE = import.meta.env.DEV
 // Fetch helpers
 //
 // Every endpoint shares the same shape: a credential, an optional JSON body,
-// and an error path that reads `{ message }` off the response (falling back to
-// a "<prefix> (<status>)" string). These helpers collapse that boilerplate.
+// and an error path that reads `{ message, code }` off the response (falling
+// back to a "<prefix> (<status>)" string). These helpers collapse that
+// boilerplate.
 // ---------------------------------------------------------------------------
 
 interface RequestSpec {
@@ -74,9 +77,21 @@ async function buildInit(spec: RequestSpec): Promise<RequestInit> {
     return init;
 }
 
+/**
+ * Throws an {@link ApiError}. The `code` rides along because a 409 has more
+ * than one meaning — a stale panel, a version the CMS has not stored, a
+ * version another machine wrote — and each asks something different of the
+ * person looking at it.
+ */
 async function fail(res: Response, errorPrefix: string): Promise<never> {
-    const body = await res.json().catch(() => ({}) as { message?: string });
-    throw new Error(body.message || `${errorPrefix} (${res.status})`);
+    const body = await res
+        .json()
+        .catch(() => ({}) as { message?: string; code?: string });
+    throw new ApiError(
+        body.message || `${errorPrefix} (${res.status})`,
+        res.status,
+        typeof body.code === 'string' ? body.code : undefined
+    );
 }
 
 /** Fetch + parse JSON, throwing a normalized Error on a non-ok response. */
@@ -333,14 +348,18 @@ export async function getChapters(
 /**
  * Persist the chapter VTT to the session's own bucket and prefix. The server
  * validates the BCP-47 language and the WEBVTT body.
+ *
+ * Once the video's master is published, a save writes a new master revision
+ * naming the new chapter file, and the answer says where it is. Before that —
+ * chapters saved during the encode — the answer is empty.
  */
 export async function putChapters(
     sessionId: string,
     lang: string,
     vtt: string,
     sessionToken: string
-): Promise<void> {
-    return requestVoid(
+): Promise<ChaptersSaveResult> {
+    return requestJson(
         `${API_BASE}/api/sessions/${sessionId}/chapters?lang=${encodeURIComponent(lang)}`,
         {
             method: 'PUT',
