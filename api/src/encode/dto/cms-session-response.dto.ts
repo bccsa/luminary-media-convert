@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Expose } from 'class-transformer';
 
 export class CmsHealthResponseDto {
@@ -64,4 +64,14 @@ export class CmsSessionResponseDto {
     })
     @Expose()
     reused: boolean;
+
+    @ApiPropertyOptional({
+        description:
+            "For a session on an existing video: the master revision it opened, which may be newer " +
+            'than existingMedia.hlsUrl when an edit was saved that the CMS never stored. Store it, ' +
+            'then acknowledge it. Absent while an encode has no published video.',
+        example: 'https://cdn.example.com/media/a1b2c3d4/master_r3.m3u8',
+    })
+    @Expose()
+    hlsUrl?: string;
 }

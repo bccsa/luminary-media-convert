@@ -406,10 +406,33 @@ export class EncodedMediaDto {
 
     @ApiProperty({
         example: ['en'],
-        description: 'Languages with a chapters/<lang>.vtt.',
+        description:
+            'Languages with chapters: named in the master, or at the legacy chapters/<lang>.vtt.',
     })
     @Expose()
     chapterLanguages: string[];
+
+    @ApiProperty({
+        description:
+            'Public URL of the master revision read — after a save, the one the save wrote. ' +
+            'Every save writes a new revision, so this changes with each.',
+        example: 'https://cdn.example.com/media/a1b2c3d4/master_r2.m3u8',
+    })
+    @Expose()
+    hlsUrl: string;
+
+    @ApiProperty({ description: "That revision's object key." })
+    @Expose()
+    masterPlaylist: string;
+
+    @ApiPropertyOptional({
+        description:
+            'On a save: the CMS confirmed it stored the new version within the wait. False when ' +
+            'the save landed but the CMS has not confirmed it yet. Absent on reads, and for a ' +
+            'session with no CMS behind it.',
+    })
+    @Expose()
+    published?: boolean;
 
     @ApiProperty({
         description:
