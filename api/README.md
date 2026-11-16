@@ -123,22 +123,24 @@ const server = await createServer({
 
 Interactive OpenAPI docs at `/api/docs` when Swagger is enabled.
 
-| Method    | Path                                                                         | Auth                        | Description                                                         |
-| --------- | ---------------------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------- |
-| POST      | `/api/sessions`                                                              | token                       | Create a session                                                    |
-| GET       | `/api/sessions`                                                              | token                       | List every session, newest first (includes session tokens)          |
-| POST      | `/api/sessions/:id/local-file`                                               | token, session              | Attach a file already on this machine                               |
-| POST      | `/api/sessions/:id/encode`                                                   | token, session              | Submit the encode config and enqueue                                |
-| GET       | `/api/sessions/:id`                                                          | token, session, read        | Poll status                                                         |
-| GET       | `/api/sessions/:id/events`                                                   | `?token=` (session or read) | SSE event stream                                                    |
-| DELETE    | `/api/sessions/:id`                                                          | token, session              | Cancel and delete (not while `encrypting` / `uploading_to_s3`)      |
-| GET / PUT | `/api/sessions/:id/chapters`                                                 | token, session              | Read / write `chapters/<lang>.vtt` in the session's own prefix      |
-| GET       | `/api/sessions/:id/waveform`                                                 | `?token=`                   | Waveform peaks for the source                                       |
-| GET       | `/api/sessions/:id/preview/**`                                               | `?token=`                   | On-demand preview master / rendition playlists and MPEG-TS segments |
-| GET       | `/api/sessions/:id/thumbnails/**`                                            | `?token=`                   | Pre-encode source storyboard VTT and sprite sheets                  |
-| GET       | `/api/cms/health`                                                            | none                        | Liveness probe for the CMS                                          |
-| POST      | `/api/cms/sessions`                                                          | Origin                      | Open (or reuse) a session for a CMS document                        |
-| POST      | `/api/hls/{read,mutate,discover,chapters/read,chapters/write,waveform/read}` | token                       | Stateless HLS-edit operations against inline S3 credentials         |
+| Method    | Path                                                   | Auth                        | Description                                                               |
+| --------- | ------------------------------------------------------ | --------------------------- | ------------------------------------------------------------------------- |
+| POST      | `/api/sessions`                                        | token                       | Create a session                                                          |
+| GET       | `/api/sessions`                                        | token                       | List every session, newest first (includes session tokens)                |
+| POST      | `/api/sessions/:id/local-file`                         | token, session              | Attach a file already on this machine                                     |
+| POST      | `/api/sessions/:id/encode`                             | token, session              | Submit the encode config and enqueue                                      |
+| GET       | `/api/sessions/:id`                                    | token, session, read        | Poll status                                                               |
+| GET       | `/api/sessions/:id/events`                             | `?token=` (session or read) | SSE event stream                                                          |
+| DELETE    | `/api/sessions/:id`                                    | token, session              | Cancel and delete (not while `encrypting` / `uploading_to_s3`)            |
+| GET / PUT | `/api/sessions/:id/chapters`                           | token, session              | Read / write a language's chapters (a new master revision once published) |
+| POST      | `/api/sessions/:id/ack`                                | read                        | The CMS confirms it has stored `hlsUrl`                                   |
+| several   | `/api/sessions/:id/media/**`                           | token, session              | Edit session: the existing video's tracks, subtitles and angles           |
+| GET       | `/api/sessions/:id/waveform`                           | `?token=`                   | Waveform peaks for the source                                             |
+| GET       | `/api/sessions/:id/preview/**`                         | `?token=`                   | On-demand preview master / rendition playlists and MPEG-TS segments       |
+| GET       | `/api/sessions/:id/thumbnails/**`                      | `?token=`                   | Pre-encode source storyboard VTT and sprite sheets                        |
+| GET       | `/api/cms/health`                                      | none                        | Liveness probe for the CMS                                                |
+| POST      | `/api/cms/sessions`                                    | Origin                      | Open (or reuse) a session for a CMS document                              |
+| POST      | `/api/hls/{read,discover,chapters/read,waveform/read}` | token                       | Stateless, read-only HLS operations against inline S3 credentials         |
 
 ### 1. Create a session
 
@@ -323,9 +325,12 @@ DELETE /api/sessions/:sessionId
     "s3": { "…": "…" },
     "publicBaseUrl": "https://cdn.example.com/media",
     "encryption": { "required": true },
+    "mode": "edit",
     "existingMedia": { "hlsUrl": "…", "hlsKey": "…" }
 }
 ```
+
+(`mode` and `existingMedia` only for an edit session; an encode sends neither.)
 
 →
 
@@ -342,25 +347,23 @@ DELETE /api/sessions/:sessionId
 - The response carries identifiers and a read token, **never** the storage credentials it was sent.
 - `documentId` is an idempotency key: a repeat click returns the session already in flight (`reused: true`) instead of starting a second encode against the same post. Finished sessions do not match — that click means "replace what is there".
 - Every session writes to its own subfolder, `<pathPrefix>/<sessionId>`, so a replacement cannot be half-live while the second encode runs.
-- `existingMedia` is validated and stored for a future edit mode; nothing acts on it today.
+- `mode: 'edit'` opens the post's existing video (`existingMedia`) to change its chapters, subtitles, audio tracks, angles and storyboard, without encoding. It opens the newest revision in the video's folder, and the response's `hlsUrl` says which — it may be newer than the one sent.
 - Creating or reusing a session fires the host's session hook, which brings the desktop window forward — the user has a file to choose.
 
-The CMS then subscribes to `eventsUrl`. The first `encoding` event carries `hlsUrl` and `encryptionKeyHex` together; that pair is what the CMS saves against its document.
+The CMS then subscribes to `eventsUrl` (the first event on every connection is a snapshot of the session) and stores `hlsUrl` with the key from `GET /api/sessions/:id/key`. **`hlsUrl` changes on every edit**: each one writes a new master revision (`master_r1.m3u8`, `master_r2.m3u8`, …) beside the old ones, which stay playable. The CMS stores each new value and acknowledges it with `POST /api/sessions/:id/ack?token=read_…` (`{ hlsUrl }`); until it has, further edits are refused with `409 CMS_NOT_ACKNOWLEDGED`. The full contract, including when the CMS auto-saves, is in `docs/claude/api-architecture.md` ("The CMS contract").
 
 ### HLS edit
 
-Stateless operations against inline S3 credentials, used for post-encode edits:
+Stateless, read-only operations against inline S3 credentials:
 
-| Path                           | Description                                                                                                                        |
-| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `POST /api/hls/read`           | Fetch and parse a master playlist; returns the parsed master + current ETag                                                        |
-| `POST /api/hls/mutate`         | Apply ordered operations (upsert/remove subtitle, upsert/remove chapters) with `If-Match`; returns the new ETag. `409` on mismatch |
-| `POST /api/hls/discover`       | Scan a folder prefix for HLS masters / angles                                                                                      |
-| `POST /api/hls/chapters/read`  | Read `chapters/<lang>.vtt`; `404` when absent                                                                                      |
-| `POST /api/hls/chapters/write` | Write `chapters/<lang>.vtt` (≤ 1 MiB, `text/vtt`)                                                                                  |
-| `POST /api/hls/waveform/read`  | Read `waveform.json`; `404` when absent                                                                                            |
+| Path                          | Description                                                                                                                                    |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /api/hls/read`          | Fetch and parse a master playlist; returns the parsed master + current ETag                                                                    |
+| `POST /api/hls/discover`      | Scan a folder prefix for HLS masters / angles                                                                                                  |
+| `POST /api/hls/chapters/read` | Read a language's chapters through the newest master revision under the prefix (its index line, else `chapters/<lang>.vtt`); `404` when absent |
+| `POST /api/hls/waveform/read` | Read `waveform.json`; `404` when absent                                                                                                        |
 
-The session-scoped `GET`/`PUT /api/sessions/:id/chapters` routes are the same operations with the bucket and prefix resolved from the session, so the caller supplies nothing but a language.
+`POST /api/hls/mutate` and `POST /api/hls/chapters/write` were removed: they rewrote files in place. Every write now goes through a session (`PUT /api/sessions/:id/chapters`, and the edit-session `/media/*` routes), which writes a new master revision — see `docs/claude/api-reference.md`.
 
 ---
 
@@ -450,7 +453,8 @@ With byte-range mode on (the default), segments are packed into **shared chunk c
 
 ```
 {pathPrefix}/{sessionId}/          # CMS sessions get a per-session subfolder
-├── master.m3u8
+├── master.m3u8                    # revision 0, never rewritten
+├── master_r1.m3u8                 # each edit: a new revision beside it (the newest is current)
 ├── waveform.json
 ├── media/
 │   ├── v0_0.m4s                   # angle 0 chain: every rendition of that angle
@@ -466,10 +470,14 @@ With byte-range mode on (the default), segments are packed into **shared chunk c
 │   └── …
 ├── thumbnails/
 │   ├── thumbnails.vtt
+│   ├── thumbnails_<8hex>.vtt      # a regenerated storyboard (edit session)
 │   └── sprite_*.jpg
-└── chapters/
-    └── en.vtt                     # written by the chapter editor, when used
+└── chapters/                      # written by the chapter editor, when used
+    ├── en_<8hex>.vtt              # a new name per save; the master names it
+    └── en.vtt                     # legacy copy for viewers that build this URL
 ```
+
+The master names its current chapter and thumbnail files in `#EXT-X-SESSION-DATA` lines (`com.luminary.chapters`, `com.luminary.thumbnails`); a master without them falls back to `chapters/<lang>.vtt` and `thumbnails/thumbnails.vtt`. Files an edit replaces are not deleted — older revisions still name them.
 
 Stream directory names derive from the rendition labels. Players can warm the next chunk ahead of the boundary — see `docs/chunk-warming.md`; `@luminary-media-converter/player-web` implements it.
 
