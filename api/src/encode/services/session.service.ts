@@ -136,6 +136,14 @@ export interface Session {
      * it continues, and survives a restart, exactly as one does.
      */
     stopped?: boolean;
+    /**
+     * How many encoder sessions this session's ladder plans its waves around,
+     * decided when its first encode starts (see `ladderSessionCap`) and kept:
+     * a continued encode has to plan the same waves as the run it continues.
+     * Absent on a session that has not encoded, or that did before this was
+     * recorded, which means every session.
+     */
+    encoderSessionCap?: number;
     segmentFormat?: SegmentFormat;
     ingestTotalBytes?: number;
     /**
@@ -863,6 +871,14 @@ export class SessionService implements OnModuleInit {
         const session = this.sessions.get(id);
         if (session) {
             session.networkFailure = networkFailure || undefined;
+            this.persist(session);
+        }
+    }
+
+    setEncoderSessionCap(id: string, cap: number): void {
+        const session = this.sessions.get(id);
+        if (session) {
+            session.encoderSessionCap = cap;
             this.persist(session);
         }
     }
