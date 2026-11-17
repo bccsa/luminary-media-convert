@@ -51,8 +51,7 @@ api/
 │   │       ├── s3.service.ts                # MinIO upload, canonicalPrefix()
 │   │       ├── thumbnail.service.ts         # Output sprite sheets + WebVTT, and the pre-encode source storyboard
 │   │       ├── waveform.service.ts          # Waveform peaks (cached per session, written as waveform.json sidecar)
-│   │       ├── preview.service.ts           # Converted HLS preview for sources the browser cannot play: one rendition (H.264 copied, else ≤720p), lazy, GPU or CPU per segment
-│   │       ├── gpu-load.ts                  # GPU utilisation (nvidia-smi / ioreg), sampled only while preview segments are asked for
+│   │       ├── preview.service.ts           # Converted HLS preview for sources the browser cannot play: one rendition (H.264 copied on keyframe boundaries computed from the probe or scanned, else ≤720p), lazy, rolling cache
 │   │       ├── disk-space.ts                # Free-space guard with a reserve, checked before ingest and before encode
 │   │       ├── output-estimate.ts           # Estimated output size / formatBytes
 │   │       └── media-extensions.ts          # ALLOWED_EXTENSIONS allow-list (re-exported from bootstrap for the host's file picker)
