@@ -280,7 +280,10 @@ export function bitrateToVideoCrf(
     return Math.max(16, Math.min(34, Math.round(crf)));
 }
 
-/** A preview rendition's bitrate where the encoder needs one named: enough for its height, no more. */
+/**
+ * A preview rendition's bitrate where the encoder needs one named: enough for
+ * its height, no more. The preview is made at up to 720 lines.
+ */
 function previewBitrate(scaleFilter: string | undefined): string {
     const height = Number((scaleFilter ?? '').split(':')[1]);
     if (height > 480) return '2500k';
@@ -289,41 +292,20 @@ function previewBitrate(scaleFilter: string | undefined): string {
 }
 
 /**
- * Every preview path names the same profile, so one rendition can hold segments
- * from the GPU and the CPU side by side: each segment is encoded on its own, and
- * the player decodes them as one stream. Left to the encoders the profile was
- * whatever each defaults to — High, Main, Baseline.
- */
-const PREVIEW_PROFILE = ['-profile:v', 'high'];
-
-/**
- * 8-bit 4:2:0 out of a software encoder, whatever came in. High profile cannot
- * carry anything else, and a ProRes or 10-bit source decoded in software arrives
- * as 4:2:2 or 10-bit, which libx264 would otherwise encode as it is — into a
- * profile no browser decodes. The hardware paths convert on the device.
- */
-const SOFTWARE_PIX_FMT = ['-pix_fmt', 'yuv420p'];
-
-/**
  * Encoder and scaler for one preview segment.
  *
  * Presets are the fastest each encoder offers, because a preview is generated
  * while somebody waits for it — the opposite of the ladder's tradeoff.
  *
- * `scaleFilter` is a `w:h` pair, stated in full on every path.
- *
- * `useGpu` false is the software path, for a segment the GPU cannot take right
- * now — every session held by the ladder, or the GPU itself saturated. That is
- * the operating system's own software encoder, since the FFmpeg we ship has no
- * libx264: VideoToolbox told to stay off the hardware on macOS, and Media
- * Foundation's default software encoder on Windows. Only a user's own FFmpeg
- * with libx264 (`'cpu'` mode), or a platform with neither, uses libx264.
+ * `scaleFilter` is a `w:h` pair. Note VideoToolbox takes only the width and
+ * derives the height: it is the one path that scales by aspect rather than to
+ * exact dimensions, which is fine for a preview and would not be for a ladder
+ * rung that has to match its playlist.
  */
 export function previewVideoArgs(
     mode: AccelMode,
     useGpu: boolean,
-    scaleFilter?: string,
-    platform: NodeJS.Platform = process.platform
+    scaleFilter?: string
 ): string[] {
     assertEncodable(mode);
     // `,setsar=1` on every scaled path, and inside this helper rather than at
@@ -336,24 +318,7 @@ export function previewVideoArgs(
     // a scale filter derives its output link's ratio from its input.
     const scale = (expr: string) =>
         scaleFilter ? ['-vf', `${expr},setsar=1`] : [];
-    if (!useGpu) {
-        if (mode !== 'cpu' && platform === 'darwin') {
-            return [
-                '-c:v',
-                'h264_videotoolbox',
-                '-require_sw',
-                '1',
-                '-realtime',
-                '1',
-                ...PREVIEW_PROFILE,
-                ...SOFTWARE_PIX_FMT,
-                '-b:v',
-                previewBitrate(scaleFilter),
-                ...scale(`scale=${scaleFilter}`),
-            ];
-        }
-        mode = mode !== 'cpu' && platform === 'win32' ? 'mediafoundation' : 'cpu';
-    }
+    if (!useGpu) mode = 'cpu';
 
     switch (mode) {
         case 'nvidia':
@@ -362,7 +327,6 @@ export function previewVideoArgs(
                 'h264_nvenc',
                 '-preset',
                 'p1',
-                ...PREVIEW_PROFILE,
                 ...scale(`scale_cuda=${scaleFilter}`),
             ];
         case 'intel': {
@@ -373,7 +337,6 @@ export function previewVideoArgs(
                 'h264_qsv',
                 '-preset',
                 'veryfast',
-                ...PREVIEW_PROFILE,
                 ...scale(`vpp_qsv=w=${w}:h=${h}`),
             ];
         }
@@ -385,23 +348,10 @@ export function previewVideoArgs(
                 'transcoding',
                 '-quality',
                 'speed',
-                ...PREVIEW_PROFILE,
                 ...scale(`scale=${scaleFilter}`),
             ];
         case 'mediafoundation':
-            // Software unless told otherwise (`-hw_encoding`). The profile is
-            // numeric because h264_mf has no profile names of its own (100 is
-            // High), and the bitrate is stated because its default is 200k.
-            return [
-                '-c:v',
-                'h264_mf',
-                '-profile:v',
-                '100',
-                ...SOFTWARE_PIX_FMT,
-                '-b:v',
-                previewBitrate(scaleFilter),
-                ...scale(`scale=${scaleFilter}`),
-            ];
+            return ['-c:v', 'h264_mf', ...scale(`scale=${scaleFilter}`)];
         case 'apple':
             return [
                 '-c:v',
@@ -410,7 +360,6 @@ export function previewVideoArgs(
                 '1',
                 '-realtime',
                 '0',
-                ...PREVIEW_PROFILE,
                 '-b:v',
                 previewBitrate(scaleFilter),
                 // Both dimensions, never `-2`: that derives the height from
@@ -432,8 +381,6 @@ export function previewVideoArgs(
                 '28',
                 '-tune',
                 'zerolatency',
-                ...PREVIEW_PROFILE,
-                ...SOFTWARE_PIX_FMT,
                 ...scale(`scale=${scaleFilter}`),
             ];
     }
