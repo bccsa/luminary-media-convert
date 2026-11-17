@@ -2,8 +2,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
     acquireEncoderSession,
     acquireEncoderSessions,
+    forgetPreviewSession,
     heldEncoderSessions,
+    ladderSessionCap,
     MAX_HARDWARE_SESSIONS,
+    notePreviewNeedsSession,
     resetEncoderSessions,
 } from './encoder-sessions';
 
@@ -135,5 +138,35 @@ describe('acquireEncoderSessions', () => {
         expect(heldEncoderSessions()).toBe(0);
         release();
         expect(heldEncoderSessions()).toBe(0);
+    });
+});
+
+describe('ladderSessionCap', () => {
+    const MINUTE = 60 * 1000;
+    const now = 1_000_000_000;
+
+    it('plans on every session when no transcoded preview is in use', () => {
+        expect(ladderSessionCap('s1', now)).toBe(MAX_HARDWARE_SESSIONS);
+    });
+
+    it("holds one back for the session's own transcoded preview, however long ago it was asked", () => {
+        notePreviewNeedsSession('s1', now - 60 * MINUTE);
+        expect(ladderSessionCap('s1', now)).toBe(MAX_HARDWARE_SESSIONS - 1);
+    });
+
+    it("holds one back for another session's preview asked within ten minutes", () => {
+        notePreviewNeedsSession('other', now - 9 * MINUTE);
+        expect(ladderSessionCap('s1', now)).toBe(MAX_HARDWARE_SESSIONS - 1);
+    });
+
+    it("plans on every session once another session's preview has gone quiet", () => {
+        notePreviewNeedsSession('other', now - 11 * MINUTE);
+        expect(ladderSessionCap('s1', now)).toBe(MAX_HARDWARE_SESSIONS);
+    });
+
+    it('stops holding one back once the preview is forgotten', () => {
+        notePreviewNeedsSession('s1', now);
+        forgetPreviewSession('s1');
+        expect(ladderSessionCap('s1', now)).toBe(MAX_HARDWARE_SESSIONS);
     });
 });

@@ -142,7 +142,7 @@ const REBUILD_INDEX_STEP = 1_000_000;
  * interval is where two keyframes happened to fall — a scene cut, on an encoder
  * that places them by content — and says nothing about the next one.
  */
-function regularKeyframeInterval(track: VideoTrackInfo): number | null {
+export function regularKeyframeInterval(track: VideoTrackInfo): number | null {
     const { gopFrames, gopRegular, frameRate } = track;
     if (!gopRegular || !gopFrames || !(frameRate > 0)) return null;
     if (gopFrames * 2 >= GOP_SAMPLE_FRAMES) return null;
@@ -165,7 +165,7 @@ function regularKeyframeInterval(track: VideoTrackInfo): number | null {
  * by a few frames would otherwise get a segment of its own starting on a
  * keyframe that was never written.
  */
-function cadenceBoundaries(
+export function cadenceBoundaries(
     firstKeyframe: number,
     gopFrames: number,
     frameRate: number,
