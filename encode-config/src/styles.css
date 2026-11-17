@@ -1304,3 +1304,106 @@ html.dark .ecf-root--session .ecf-btn-primary-disabled:hover {
 .ecf-menu-check { width: 1rem; height: 1rem; flex-shrink: 0; color: #a1a1aa; }
 
 .ecf-menu-empty { padding: 0.5rem 0.75rem; font-size: 0.75rem; color: #a1a1aa; }
+
+/* ── Ladder mode (copy / re-encode) ─────────────────────────────── */
+
+.ecf-seg {
+    display: inline-flex;
+    border: 1px solid rgb(63 63 70 / 0.6);
+    border-radius: 0.5rem;
+    overflow: hidden;
+}
+
+.ecf-seg-btn {
+    padding: 0.3125rem 0.75rem;
+    font-family: inherit;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: #a1a1aa;
+    background: rgb(24 24 27 / 0.25);
+    border: 0;
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease;
+}
+
+.ecf-seg-btn + .ecf-seg-btn {
+    border-left: 1px solid rgb(63 63 70 / 0.6);
+}
+
+.ecf-seg-btn--on {
+    background: #0f172a;
+    color: #fff;
+}
+
+.ecf-seg-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.ecf-seg-btn:hover:not(:disabled):not(.ecf-seg-btn--on) {
+    background: rgb(63 63 70 / 0.4);
+    color: #e4e4e7;
+}
+
+.ecf-box-hint--warn {
+    color: #fbbf24;
+}
+
+/* A further quality of the angle above: indented under the track naming it. */
+.ecf-tr--member > .ecf-td:nth-child(2) {
+    padding-left: 1.25rem;
+}
+
+.ecf-root--session .ecf-seg {
+    border-color: rgb(203 213 225);
+}
+
+.ecf-root--session .ecf-seg-btn {
+    color: #475569;
+    background: #fff;
+}
+
+.ecf-root--session .ecf-seg-btn + .ecf-seg-btn {
+    border-left-color: rgb(203 213 225);
+}
+
+.ecf-root--session .ecf-seg-btn:hover:not(:disabled):not(.ecf-seg-btn--on) {
+    background: rgb(241 245 249);
+    color: #0f172a;
+}
+
+.ecf-root--session .ecf-seg-btn--on {
+    background: #0f172a;
+    color: #fff;
+}
+
+.ecf-root--session .ecf-box-hint--warn {
+    color: #b45309;
+}
+
+html.dark .ecf-root--session .ecf-seg {
+    border-color: rgb(51 65 85 / 0.7);
+}
+
+html.dark .ecf-root--session .ecf-seg-btn {
+    color: #94a3b8;
+    background: rgb(15 23 42 / 0.55);
+}
+
+html.dark .ecf-root--session .ecf-seg-btn + .ecf-seg-btn {
+    border-left-color: rgb(51 65 85 / 0.7);
+}
+
+html.dark .ecf-root--session .ecf-seg-btn:hover:not(:disabled):not(.ecf-seg-btn--on) {
+    background: rgb(30 41 59 / 0.8);
+    color: #e2e8f0;
+}
+
+html.dark .ecf-root--session .ecf-seg-btn--on {
+    background: #e2e8f0;
+    color: #0f172a;
+}
+
+html.dark .ecf-root--session .ecf-box-hint--warn {
+    color: #fbbf24;
+}

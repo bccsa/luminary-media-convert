@@ -56,6 +56,21 @@ export interface VideoTrackInfo {
      * absent when the container does not say.
      */
     level?: number;
+    /**
+     * The camera angle this track is one quality of, when the source carries
+     * the same picture more than once: the lowest track index in that angle.
+     * An identifier, not a ranking. Absent on a track that is its own angle,
+     * and on every track when {@link ProbeResult.anglesDetected} is not set.
+     */
+    pictureGroup?: number;
+    /**
+     * The keyframe grid this track is cut on: the lowest index among the video
+     * tracks that cut keyframes at the same instants, sampled through the whole
+     * file, and run as long as it does. Tracks with the same id can be copied as
+     * rungs of one ladder; a track alone on its grid carries its own index.
+     * Absent when the tracks' keyframes were not compared.
+     */
+    keyframeGrid?: number;
 }
 
 export interface AudioTrackInfo {
@@ -80,6 +95,13 @@ export interface ProbeResult {
     format: FormatInfo;
     videoTracks: VideoTrackInfo[];
     audioTracks: AudioTrackInfo[];
+    /**
+     * The video tracks were compared for which show the same picture. Without
+     * it, a track with no `pictureGroup` was never compared — a session from
+     * before detection, or one where it failed — rather than found to be an
+     * angle of its own, and the form keeps treating every track as an angle.
+     */
+    anglesDetected?: boolean;
 }
 
 // --- Encode Config Types ---
@@ -90,6 +112,13 @@ export interface VideoRendition {
     videoBitrateKbps: number;
     copyStream: boolean;
     sourceTrackIndex?: number;
+    /**
+     * The camera angle this rendition belongs to, by angle id — the id its
+     * `videoTrackNames` entry is filed under. Several source tracks can be one
+     * angle (a copied ladder), so it is not always the source track. Defaults
+     * to `sourceTrackIndex` on the API.
+     */
+    angle?: number;
     audioGroupId: string;
     label?: string;
     vbr?: boolean;
