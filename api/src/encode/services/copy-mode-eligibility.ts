@@ -242,3 +242,62 @@ function copyModeTrackRejection(
 
     return null;
 }
+
+/**
+ * Why the config's copied renditions cannot share their angles, or null when
+ * they can.
+ *
+ * Copying a source's own ladder files several source tracks under one angle,
+ * and a player stepping between those rungs expects segment N of each to start
+ * at the same instant. Each copied stream is cut at its own keyframes, so that
+ * only holds when the tracks cut keyframes together and run the same length —
+ * which the probe measured through the whole file and recorded as each track's
+ * `keyframeGrid`. Tracks on different grids, or never compared, are refused
+ * rather than copied hopefully, as an unknown cadence is.
+ *
+ * Whether the tracks show the same picture is not asked. Which tracks make an
+ * angle is the operator's to say — the probe's grouping is a suggestion they
+ * can overrule — and tracks that share a grid cut cleanly whatever they show.
+ *
+ * A copied rendition alone in its angle, or sharing it only with re-encodes, is
+ * not this rule's business: a re-encode is cut on the segment grid by
+ * construction.
+ */
+export function copiedLadderRejection(
+    probeResult: ProbeResult | undefined,
+    encodeConfig: EncodeConfigDto
+): string | null {
+    if (encodeConfig.type !== 'video') return null;
+    const videoTracks = probeResult?.videoTracks ?? [];
+
+    const tracksByAngle = new Map<number, Set<number>>();
+    for (const r of encodeConfig.videoRenditions ?? []) {
+        if (!r.copyStream) continue;
+        const angle = r.angle ?? r.sourceTrackIndex ?? 0;
+        if (!tracksByAngle.has(angle)) tracksByAngle.set(angle, new Set());
+        tracksByAngle.get(angle)!.add(r.sourceTrackIndex ?? 0);
+    }
+
+    for (const [angle, tracks] of tracksByAngle) {
+        if (tracks.size < 2) continue;
+        const list = [...tracks].sort((a, b) => a - b);
+        const grids = list.map((index) => videoTracks[index]?.keyframeGrid);
+        const unknown = list.find((_, i) => grids[i] == null);
+        if (unknown != null) {
+            return (
+                `Video track ${unknown} is copied into angle ${angle} beside ` +
+                `other tracks, but its keyframes were never compared with ` +
+                `theirs — re-encode this angle instead.`
+            );
+        }
+        const stray = list.find((_, i) => grids[i] !== grids[0]);
+        if (stray != null) {
+            return (
+                `Video tracks ${list[0]} and ${stray} are copied into angle ` +
+                `${angle}, but they do not line up (keyframes or length) — ` +
+                `re-encode this angle instead.`
+            );
+        }
+    }
+    return null;
+}

@@ -125,6 +125,28 @@ export class VideoTrackInfoDto {
     })
     @Expose()
     level?: number;
+
+    @ApiPropertyOptional({
+        example: 0,
+        description:
+            'The camera angle this track is one quality of, when the source ' +
+            'carries the same picture more than once: the lowest track index in ' +
+            'that angle. Absent on a track that is its own angle, and on every ' +
+            'track when `anglesDetected` is not set.',
+    })
+    @Expose()
+    pictureGroup?: number;
+
+    @ApiPropertyOptional({
+        example: 0,
+        description:
+            'The keyframe grid this track is cut on: the lowest index among the ' +
+            'video tracks that cut keyframes at the same instants and run as ' +
+            'long as it does. Tracks with the same id can be copied as rungs of ' +
+            'one ladder. Absent when the keyframes were not compared.',
+    })
+    @Expose()
+    keyframeGrid?: number;
 }
 
 export class AudioTrackInfoDto {
@@ -198,4 +220,14 @@ export class ProbeResultDto {
     @Type(() => AudioTrackInfoDto)
     @Expose()
     audioTracks: AudioTrackInfoDto[];
+
+    @ApiPropertyOptional({
+        example: true,
+        description:
+            'The video tracks were compared for which show the same picture. ' +
+            'Without it, a track with no `pictureGroup` was never compared, ' +
+            'rather than found to be an angle of its own.',
+    })
+    @Expose()
+    anglesDetected?: boolean;
 }

@@ -18,6 +18,7 @@ import type { ProbeResult, AudioTrackInfo } from './probe.service.js';
 import { FfmpegService } from './ffmpeg.service.js';
 import { ffmpegBin, ffprobeBin } from './ffbin.js';
 import { displayDimensionsOf, isAnamorphic } from './aspect.js';
+import { defaultAngleTracks } from './picture-groups.js';
 
 const MAX_AUDIO_BITRATE_KBPS = 150;
 
@@ -516,7 +517,10 @@ export class PreviewService {
 
     /** Build ABR renditions from available video tracks, capped at MAX_PREVIEW_HEIGHT */
     private buildRenditions(probe: ProbeResult): Rendition[] {
-        const videos = probe.videoTracks;
+        // One camera's tracks: several tracks are only a quality ladder when
+        // they are one picture, and offering two cameras as two qualities made
+        // the preview change picture when it changed size.
+        const videos = defaultAngleTracks(probe);
         if (videos.length === 0) return [];
 
         const codec = videos[0].codec.toLowerCase();

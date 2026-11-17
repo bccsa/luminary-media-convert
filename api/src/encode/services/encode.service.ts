@@ -52,6 +52,7 @@ import {
 import type { EncodeConfigDto } from '../dto/encode-config.dto.js';
 import { EncryptionService } from './encryption.service.js';
 import { ThumbnailService } from './thumbnail.service.js';
+import { defaultAngleTracks } from './picture-groups.js';
 import {
     readCachedWaveform,
     WAVEFORM_SIDECAR_VERSION,
@@ -684,7 +685,11 @@ export class EncodeService implements OnModuleInit {
                                 session.probeResult?.format?.duration ?? 0,
                             alignmentOffset: encodeResult.alignmentOffset,
                             trimSegments: session.encodeConfig.trimSegments,
-                            videoTracks: session.probeResult?.videoTracks,
+                            // The angle the storyboard was primed from, so
+                            // the packed thumbnails match the cached ones.
+                            videoTracks: session.probeResult
+                                ? defaultAngleTracks(session.probeResult)
+                                : undefined,
                         });
                     if (thumbResult) {
                         thumbnailsVttRelPath = thumbResult.vttRelativePath;
