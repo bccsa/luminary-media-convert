@@ -2,6 +2,7 @@ import {
     IsArray,
     IsBoolean,
     IsIn,
+    IsInt,
     IsNotEmpty,
     IsNumber,
     IsOptional,
@@ -50,6 +51,20 @@ export class VideoRenditionDto {
     @IsOptional()
     @Expose()
     sourceTrackIndex?: number;
+
+    @ApiPropertyOptional({
+        description:
+            'Which camera angle this rendition belongs to, by angle id — the ' +
+            "id its videoTrackNames entry is filed under. Several source tracks " +
+            'can be one angle (a copied ladder), so this is not always the ' +
+            'source track. Defaults to sourceTrackIndex.',
+        example: 0,
+    })
+    @IsInt()
+    @Min(0)
+    @IsOptional()
+    @Expose()
+    angle?: number;
 
     @ApiProperty({
         description: 'Audio group ID this rendition uses.',
