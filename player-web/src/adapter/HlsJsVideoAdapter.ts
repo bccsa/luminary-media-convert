@@ -35,6 +35,13 @@ import type {
 const HLS_MIME_TYPE = 'application/vnd.apple.mpegurl';
 
 /**
+ * The type that routes a source away from hls.js, to the element's native delegate. It names no codec and decides
+ * nothing about the file: a WebM or an MP3 handed over under it plays the same, because the `<video>` sniffs what it
+ * is given. It only has to be a type the element knows is not HLS.
+ */
+const FILE_MIME_TYPE = 'video/mp4';
+
+/**
  * Thrown by {@link HlsJsVideoAdapter.loadSource} when the browser has no Media Source
  * implementation and the source *requires* munged playback. The wrapper maps the `code` onto
  * `PlayerError{ code: 'unsupported-browser', fatal: true }`.
@@ -284,8 +291,10 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
     }
 
     /**
-     * A media file for the browser's own player. With no `type`, `<hlsjs-video>` sees no HLS and hands the URL to
-     * its native delegate: no hls.js, no MSE, the `<video>` fetches byte ranges itself.
+     * A media file for the browser's own player: no hls.js, no MSE, the `<video>` fetches byte ranges itself.
+     *
+     * The type is not optional. With none, `<hlsjs-video>` infers one from the URL, and anything whose path does not
+     * end in `.mp4` is taken for HLS and handed to hls.js, which fetches the whole file as a playlist and fails.
      */
     private loadFile(url: string): void {
         this.bindNativeTracks();
@@ -293,7 +302,7 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         this.emit('audiotracks-updated', undefined);
         this.emit('videotracks-updated', undefined);
         const sameUrl = this.el.src === url;
-        this.el.source = { src: url };
+        this.el.source = { src: url, type: FILE_MIME_TYPE };
         // An equal source is no change to the element, which would leave the file where it was.
         if (sameUrl) void this.el.load();
     }
