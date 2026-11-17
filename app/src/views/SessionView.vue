@@ -133,7 +133,7 @@ const trimDeletions = useTrimDeletions(editorSegments);
 function onTimelineSegmentRemoved(segment: Segment) {
     if (!showProbeConfig.value) return;
     const [inSourceTime] = timelineIsShortened.value
-        ? mapSegmentsFromTimeline([segment], timelineRanges.value)
+        ? mapSegmentsFromTimeline([segment], effectiveKeepRanges.value)
         : [segment];
     trimDeletions.record(inSourceTime);
 }
@@ -763,22 +763,20 @@ const sourceProbeDuration = computed(() => {
 });
 
 const trimEditorProbeDuration = computed(() => {
-    if (timelineIsShortened.value) return trimmedDuration(timelineRanges.value);
-    if (showsOutputTimeline.value) {
-        // Completed: the player holds the encoded file, whose reported duration
-        // is the output's real length — and the storyboard beside it was sampled
-        // from that same file, so the two agree.
-        if (isCompleted.value) {
-            const player = playerDuration.value;
-            if (player != null && player > 0) return player;
-        }
-        // During the encode the player still holds the *preview*, which is the
-        // whole source: the trims are skipped as it plays, not cut out of it, so
-        // its duration is the source's. The storyboard is re-timed from the
-        // exact trim ranges, so the exact trimmed duration is what matches it.
-        return trimmedDuration(submittedTrimSegments.value);
+    const ranges = timelineKeepRanges.value;
+    if (!ranges) return chaptersSidePanelDuration.value;
+    // Completed: the player holds the encoded file, whose reported duration
+    // is the output's real length — and the storyboard beside it was sampled
+    // from that same file, so the two agree.
+    if (isCompleted.value) {
+        const player = playerDuration.value;
+        if (player != null && player > 0) return player;
     }
-    return chaptersSidePanelDuration.value;
+    // Until then the player holds the *preview*, which is the whole source: the
+    // cuts are skipped as it plays, not cut out of it, so its duration is the
+    // source's. The storyboard is re-timed from the exact ranges, so the exact
+    // trimmed duration is what matches it.
+    return trimmedDuration(ranges);
 });
 
 /**
@@ -791,20 +789,12 @@ const trimEditorProbeDuration = computed(() => {
  * trimmed sidecar to fall back on any more.
  */
 const timelineWaveformPeaks = computed(() => {
-    if (timelineIsShortened.value) {
-        return slicePeaksToTrims(
-            waveformPeaks.value,
-            sourceProbeDuration.value,
-            timelineRanges.value
-        );
-    }
-    if (!showsOutputTimeline.value) {
-        return waveformPeaks.value;
-    }
+    const ranges = timelineKeepRanges.value;
+    if (!ranges) return waveformPeaks.value;
     return slicePeaksToTrims(
         waveformPeaks.value,
         sourceProbeDuration.value,
-        submittedTrimSegments.value
+        ranges
     );
 });
 
@@ -893,13 +883,36 @@ watch(
     }
 );
 
-// A source file that failed to play gets the converted preview instead.
+/** When the converted preview was last loaded again after failing, ms. */
+let convertedPreviewRetriedAt = 0;
+/** No sooner than this after the last: a preview that cannot play must not loop. */
+const CONVERTED_PREVIEW_RETRY_MS = 60_000;
+
+/**
+ * What a preview that failed to play is replaced with.
+ *
+ * A source file that failed gets the converted preview instead. A converted
+ * preview that failed is loaded again, once: the encoder lays a copied
+ * preview's playlist out afresh when the source turns out not to keep the
+ * keyframe interval its opening seconds showed, and the playlist the player
+ * holds is then one whose segments no longer exist. The fresh load waits for
+ * the new playlist and carries the position across.
+ */
 watch(
     () => playerRef.value?.lifecycle,
     (lifecycle) => {
-        if (lifecycle === 'error' && previewIsDirect.value) {
+        if (lifecycle !== 'error') return;
+        if (previewIsDirect.value) {
             directPlaybackFailed.value = true;
+            return;
         }
+        if (isCompleted.value || !previewPlaybackUrl.value) return;
+        const now = Date.now();
+        if (now - convertedPreviewRetriedAt < CONVERTED_PREVIEW_RETRY_MS) {
+            return;
+        }
+        convertedPreviewRetriedAt = now;
+        playerRef.value?.reload?.();
     }
 );
 
@@ -946,10 +959,6 @@ const trimModeHint = computed<string | null>(() => {
     return 'Mix of copy and re-encode streams — trimming needs all or none in copy mode.';
 });
 
-const timelineRanges = computed<TrimSegment[]>(() =>
-    invertRanges(deletedRanges.value, sourceProbeDuration.value)
-);
-
 const timelineIsShortened = computed(
     () =>
         showProbeConfig.value &&
@@ -957,14 +966,32 @@ const timelineIsShortened = computed(
         sourceProbeDuration.value > 0
 );
 
+/**
+ * The ranges of the source the timeline is made of, when it is shorter than
+ * the source; null when the timeline is the source itself.
+ *
+ * Before the encode that is what the deletions so far leave, and from the
+ * moment it is submitted, the trims it was submitted with. The ruler, the
+ * waveform, the filmstrip and the preview's own clock all have to agree on
+ * which, so they all read it from here.
+ */
+const timelineKeepRanges = computed<TrimSegment[] | null>(() => {
+    if (timelineIsShortened.value) return effectiveKeepRanges.value;
+    if (showsOutputTimeline.value) return submittedTrimSegments.value;
+    return null;
+});
+
 const timelineSegments = computed<Segment[]>({
     get: () =>
         timelineIsShortened.value
-            ? mapSegmentsToTimeline(editorSegments.value, timelineRanges.value)
+            ? mapSegmentsToTimeline(
+                  editorSegments.value,
+                  effectiveKeepRanges.value
+              )
             : editorSegments.value,
     set: (next) => {
         editorSegments.value = timelineIsShortened.value
-            ? mapSegmentsFromTimeline(next, timelineRanges.value)
+            ? mapSegmentsFromTimeline(next, effectiveKeepRanges.value)
             : next;
     },
 });
@@ -978,13 +1005,9 @@ const timelineSegments = computed<Segment[]>({
  * is done the player holds the output, which is already cut, and runs on the
  * timeline's own time.
  */
-const previewKeepRanges = computed<TrimSegment[]>(() => {
-    if (isCompleted.value) return [];
-    if (showProbeConfig.value) {
-        return timelineIsShortened.value ? timelineRanges.value : [];
-    }
-    return showsOutputTimeline.value ? submittedTrimSegments.value : [];
-});
+const previewKeepRanges = computed<TrimSegment[]>(() =>
+    isCompleted.value ? [] : (timelineKeepRanges.value ?? [])
+);
 
 /** The player runs on source time; the timeline may be shorter than that. */
 function timelineCurrentTime(): number {
@@ -1227,12 +1250,9 @@ const rawThumbnailVttUrl = computed(() => {
  * completion is sampled from the encoded output instead, so it already matches
  * and must be left alone — re-timing it would shift frames that are correct.
  */
-const storyboardTrimRanges = computed<TrimSegment[]>(() => {
-    if (!sourceStoryboardActive.value) return [];
-    if (timelineIsShortened.value) return timelineRanges.value;
-    if (showsOutputTimeline.value) return submittedTrimSegments.value;
-    return [];
-});
+const storyboardTrimRanges = computed<TrimSegment[]>(() =>
+    sourceStoryboardActive.value ? (timelineKeepRanges.value ?? []) : []
+);
 
 const storyboardVtt = useStoryboardVttUrl({
     url: rawThumbnailVttUrl,

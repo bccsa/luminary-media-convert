@@ -64,34 +64,78 @@ export function detectPlaybackCapabilities(): PlaybackCapabilities {
 const CONTAINERS: {
     /** Any of ffprobe's comma-separated names for the demuxer. */
     names: string[];
+    /** What to call it when it is the reason a codec is refused. */
+    label: string;
     video: Set<string>;
     audio: Set<string>;
 }[] = [
     {
         // MP4, MOV, M4A: ffprobe has one demuxer for the family.
         names: ['mov', 'mp4', 'm4a'],
+        label: 'MP4/MOV',
         video: new Set(['h264', 'hevc', 'av1', 'vp9']),
         audio: new Set(['aac', 'mp3', 'opus', 'flac']),
     },
     {
+        // A WebM holding a codec refused here is an MKV in all but name.
         names: ['matroska', 'webm'],
+        label: 'MKV',
         video: new Set(['vp8', 'vp9', 'av1']),
         audio: new Set(['opus', 'vorbis']),
     },
     {
         names: ['ogg'],
+        label: 'Ogg',
         video: new Set(),
         audio: new Set(['opus', 'vorbis', 'flac']),
     },
-    { names: ['mp3'], video: new Set(), audio: new Set(['mp3']) },
+    {
+        names: ['mp3'],
+        label: 'MP3',
+        video: new Set(),
+        audio: new Set(['mp3']),
+    },
     {
         names: ['wav'],
+        label: 'WAV',
         video: new Set(),
         audio: new Set(['pcm_s16le', 'pcm_s24le', 'pcm_f32le', 'pcm_u8']),
     },
-    { names: ['flac'], video: new Set(), audio: new Set(['flac']) },
-    { names: ['aac'], video: new Set(), audio: new Set(['aac']) },
+    {
+        names: ['flac'],
+        label: 'FLAC',
+        video: new Set(),
+        audio: new Set(['flac']),
+    },
+    {
+        names: ['aac'],
+        label: 'AAC',
+        video: new Set(),
+        audio: new Set(['aac']),
+    },
 ];
+
+/**
+ * Codecs a browser plays from *some* container above. One of these refused is
+ * refused for where it is, not for what it is, and the reason has to say so:
+ * "H.264 video" on its own reads as though H.264 does not play.
+ */
+const PLAYABLE_SOMEWHERE = {
+    video: new Set(CONTAINERS.flatMap((c) => [...c.video])),
+    audio: new Set(CONTAINERS.flatMap((c) => [...c.audio])),
+};
+
+/** A codec this container is not trusted to carry, named for the label. */
+function misplaced(
+    kind: 'video' | 'audio',
+    codec: string,
+    containerLabel: string
+): string {
+    const what = `${codecLabel(codec)} ${kind}`;
+    return PLAYABLE_SOMEWHERE[kind].has(codec)
+        ? `${what} in ${containerLabel}`
+        : what;
+}
 
 const CONTAINER_LABELS: Record<string, string> = {
     mov: 'MOV',
@@ -150,10 +194,11 @@ const TEN_BIT_420 = new Set(['yuv420p10le']);
 function videoProblem(
     track: VideoTrackInfo,
     allowed: Set<string>,
+    containerLabel: string,
     caps: PlaybackCapabilities
 ): string | null {
     const codec = track.codec;
-    if (!allowed.has(codec)) return `${codecLabel(codec)} video`;
+    if (!allowed.has(codec)) return misplaced('video', codec, containerLabel);
     const pixFmt = track.pixFmt;
     const eightBit = !!pixFmt && EIGHT_BIT_420.has(pixFmt);
     const tenBit = !!pixFmt && TEN_BIT_420.has(pixFmt);
@@ -188,9 +233,12 @@ function pixFmtLabel(pixFmt: string | undefined): string {
 
 function audioProblem(
     track: AudioTrackInfo,
-    allowed: Set<string>
+    allowed: Set<string>,
+    containerLabel: string
 ): string | null {
-    return allowed.has(track.codec) ? null : `${codecLabel(track.codec)} audio`;
+    return allowed.has(track.codec)
+        ? null
+        : misplaced('audio', track.codec, containerLabel);
 }
 
 /**
@@ -233,11 +281,20 @@ export function previewPlayability(
     }
 
     for (const track of videos) {
-        const problem = videoProblem(track, container.video, caps);
+        const problem = videoProblem(
+            track,
+            container.video,
+            container.label,
+            caps
+        );
         if (problem) return { direct: false, reason: problem };
     }
     for (const track of audios) {
-        const problem = audioProblem(track, container.audio);
+        const problem = audioProblem(
+            track,
+            container.audio,
+            container.label
+        );
         if (problem) return { direct: false, reason: problem };
     }
 

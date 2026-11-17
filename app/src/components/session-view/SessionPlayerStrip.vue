@@ -132,12 +132,13 @@ const canPlay = computed(() => state.value.lifecycle === 'ready');
  * new load starts on the file's default.
  */
 watch(
-    () =>
-        [
-            props.nativePreviewAudio,
-            selectedAudioTrack.value,
-            state.value.audioTracks,
-        ] as const,
+    // Three sources, not one getter over the whole state: the state object is
+    // replaced on every tick of the playhead, and this has nothing to do then.
+    [
+        () => props.nativePreviewAudio,
+        selectedAudioTrack,
+        () => state.value.audioTracks,
+    ] as const,
     ([native, index, tracks]) => {
         if (!native) return;
         const track = tracks[index];
