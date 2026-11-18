@@ -205,7 +205,10 @@ describe('EncodeController', () => {
             thumbnailService,
             (addAudioTrackService = makeAddAudioTrackService()),
             {} as any,
-            (addVideoAngleService = makeAddVideoAngleService())
+            (addVideoAngleService = makeAddVideoAngleService()),
+            {} as any,
+            // A CMS that has stored every version.
+            { assertCmsReady: vi.fn().mockResolvedValue(undefined) } as any
         );
     });
 
@@ -2901,5 +2904,95 @@ describe('EncodeController — masked session key', () => {
                 })
             )
         ).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+});
+
+/**
+ * The CMS check can take seconds. A busy check made before it would let two
+ * jobs through that both started while it ran.
+ */
+describe('EncodeController — busy checks after the CMS check', () => {
+    let sessionService: SessionService;
+    let busy: boolean;
+    let cmsAnswers: () => void;
+    let audio: { isBusy: ReturnType<typeof vi.fn>; start: ReturnType<typeof vi.fn> };
+    let angle: { isBusy: ReturnType<typeof vi.fn>; start: ReturnType<typeof vi.fn> };
+    let thumbnails: { job: ReturnType<typeof vi.fn>; start: ReturnType<typeof vi.fn> };
+    let controller: EncodeController;
+
+    beforeEach(() => {
+        sessionService = new SessionService({ emit: () => {} } as any);
+        busy = false;
+        audio = { isBusy: vi.fn(() => busy), start: vi.fn() };
+        angle = { isBusy: vi.fn(() => false), start: vi.fn() };
+        thumbnails = { job: vi.fn(), start: vi.fn() };
+        const videoRevisions = {
+            assertCmsReady: vi.fn(
+                () => new Promise<void>((resolve) => (cmsAnswers = resolve))
+            ),
+        };
+        controller = new EncodeController(
+            sessionService,
+            { emit: vi.fn() } as any,
+            {} as any,
+            { unavailableReason: vi.fn().mockReturnValue(null) } as any,
+            {} as any,
+            {} as any,
+            {} as any,
+            {} as any,
+            {} as any,
+            audio as any,
+            thumbnails as any,
+            angle as any,
+            {} as any,
+            videoRevisions as any
+        );
+    });
+
+    const editSession = () =>
+        sessionService.createWith(() => makeConfig(), {
+            origin: 'cms',
+            edit: { masterKey: 'posts/p1/s1/master.m3u8', encrypted: false },
+        });
+
+    /** Starts the request, lets a track start meanwhile, then lets the CMS answer. */
+    async function whileTheCmsAnswers(request: Promise<unknown>) {
+        await Promise.resolve();
+        busy = true;
+        cmsAnswers();
+        await expect(request).rejects.toThrow(ConflictException);
+    }
+
+    it('refuses a track when another started while the CMS answered', async () => {
+        const session = editSession();
+        await whileTheCmsAnswers(
+            controller.addAudioTrack(session.id, {
+                path: '/tmp/fr.wav',
+                sourceTrackIndex: 0,
+                language: 'fra',
+                name: 'Français',
+                ifMatch: 'v1',
+            })
+        );
+        expect(audio.start).not.toHaveBeenCalled();
+    });
+
+    it('refuses an angle when a track started while the CMS answered', async () => {
+        const session = editSession();
+        await whileTheCmsAnswers(
+            controller.addVideoAngle(session.id, {
+                path: '/tmp/pulpit.mp4',
+                sourceTrackIndex: 0,
+                name: 'Pulpit',
+                ifMatch: 'v1',
+            })
+        );
+        expect(angle.start).not.toHaveBeenCalled();
+    });
+
+    it('refuses new thumbnails when a track started while the CMS answered', async () => {
+        const session = editSession();
+        await whileTheCmsAnswers(controller.regenerateThumbnails(session.id));
+        expect(thumbnails.start).not.toHaveBeenCalled();
     });
 });

@@ -1320,11 +1320,12 @@ export class EncodeController {
         @Body() dto: AddAudioTrackDto
     ): Promise<AddAudioTrackJobDto> {
         this.assertEncoderAvailable();
+        // Checked now rather than when the job publishes minutes later; if the
+        // CMS has gone by then, the version is written and waits for it. First,
+        // because it can take seconds: a job started meanwhile is caught below.
+        await this.videoRevisions.assertCmsReady(sessionId);
         this.assertMasterIdle(sessionId);
         this.assertNoThumbnailsJob(sessionId);
-        // Checked now rather than when the job publishes minutes later; if the
-        // CMS has gone by then, the version is written and waits for it.
-        await this.videoRevisions.assertCmsReady(sessionId);
         return this.addAudioTrackService.start(sessionId, {
             ...dto,
             offsetSec: dto.offsetSec ?? 0,
@@ -1512,9 +1513,11 @@ export class EncodeController {
         @Body() dto: AddVideoAngleDto
     ): Promise<AddVideoAngleJobDto> {
         this.assertEncoderAvailable();
+        // The CMS check first: it can take seconds, and a job started
+        // meanwhile is caught by the checks after it.
+        await this.videoRevisions.assertCmsReady(sessionId);
         this.assertMasterIdle(sessionId);
         this.assertNoThumbnailsJob(sessionId);
-        await this.videoRevisions.assertCmsReady(sessionId);
         return this.addVideoAngleService.start(sessionId, {
             ...dto,
             offsetSec: dto.offsetSec ?? 0,
@@ -1843,13 +1846,14 @@ export class EncodeController {
         }
         // The source is gone by now: the frames come from the video itself.
         if (session.edit) {
-            // A track or an angle being added writes the revision after the one
-            // it read: a strip published meanwhile would take that number and
-            // fail the job at its very end.
-            this.assertMasterIdle(sessionId);
             // The new strip ends in a new version of the video, so the CMS has
             // to be there to store it; checked now, before minutes of work.
             await this.videoRevisions.assertCmsReady(sessionId);
+            // After the CMS check, which can take seconds. A track or an angle
+            // being added writes the revision after the one it read: a strip
+            // published meanwhile would take that number and fail the job at
+            // its very end.
+            this.assertMasterIdle(sessionId);
             this.existingThumbnailsService.start(
                 sessionId,
                 this.editedVideo(sessionId)
