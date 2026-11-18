@@ -8,7 +8,10 @@ import {
 } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import type { HlsVariant } from '@luminary-media-converter/hls-core';
+import {
+    listThumbnailEntries,
+    type HlsVariant,
+} from '@luminary-media-converter/hls-core';
 import {
     ExistingThumbnailsService,
     decryptSegment,
@@ -16,6 +19,12 @@ import {
     pickVariant,
 } from './existing-thumbnails.service.js';
 import { decryptTextAsset, encryptTextAsset } from './lmcenc.js';
+import { VideoRevisionService } from './video-revision.service.js';
+import { HlsEditService } from '../../hls-edit/hls-edit.service.js';
+import {
+    IMMUTABLE_CACHE_CONTROL,
+    MasterRevisionService,
+} from '../../hls-edit/master-revision.service.js';
 
 const variant = (
     uri: string,
@@ -108,6 +117,7 @@ describe('ExistingThumbnailsService', () => {
     let s3Etag: any;
     let thumbnails: any;
     let sessions: any;
+    let session: { edit: { masterKey: string }; masterPlaylist: string };
     let videoBytes: Buffer | null;
 
     beforeEach(() => {
@@ -161,12 +171,20 @@ describe('ExistingThumbnailsService', () => {
                     length: number
                 ) => objects.get(k)!.subarray(offset, offset + length)
             ),
-            putObject: vi.fn(async () => ({ etag: 'e' })),
-            listKeys: vi.fn(async () => [
-                'posts/s1/thumbnails/thumbnails.vtt',
-                'posts/s1/thumbnails/sprite_001.webp',
-                'posts/s1/thumbnails/sprite_002.webp',
-            ]),
+            putObject: vi.fn(async (_c: unknown, k: string, body: Buffer) => {
+                objects.set(k, Buffer.from(body));
+                return { etag: 'e' };
+            }),
+            putObjectIfAbsent: vi.fn(
+                async (_c: unknown, k: string, body: Buffer | string) => {
+                    if (objects.has(k)) return undefined;
+                    objects.set(k, Buffer.from(body));
+                    return 'e';
+                }
+            ),
+            objectExists: vi.fn(async (_c: unknown, k: string) =>
+                objects.has(k)
+            ),
             deleteObjects: vi.fn(async () => undefined),
         };
         thumbnails = {
@@ -185,8 +203,36 @@ describe('ExistingThumbnailsService', () => {
                 }
             ),
         };
-        sessions = { setThumbnailsVtt: vi.fn() };
+        // An edit session: its master's name relative to the folder.
+        session = {
+            edit: { masterKey: 'posts/s1/master.m3u8' },
+            masterPlaylist: 'master.m3u8',
+        };
+        sessions = {
+            get: vi.fn(() => session),
+            setMasterRevision: vi.fn((_id: string, masterKey: string) => {
+                session.edit.masterKey = masterKey;
+            }),
+            setThumbnailsVtt: vi.fn(),
+        };
     });
+
+    /** The service, with the real revision chain over the fake bucket. */
+    const service = () => {
+        const revisions = new MasterRevisionService(s3Etag);
+        return new ExistingThumbnailsService(
+            sessions,
+            s3Etag,
+            thumbnails,
+            new HlsEditService(s3Etag, revisions),
+            new VideoRevisionService(sessions, revisions, {} as any)
+        );
+    };
+
+    const vttWrite = () =>
+        s3Etag.putObject.mock.calls.find((c: any[]) =>
+            /^posts\/s1\/thumbnails\/thumbnails_[0-9a-f]{8}\.vtt$/.test(c[1])
+        )!;
 
     afterEach(() => {
         delete process.env.WORK_DIR;
@@ -200,8 +246,9 @@ describe('ExistingThumbnailsService', () => {
             keyHex: key.toString('hex'),
         });
 
-    it("makes the storyboard again from the video's smallest rendition, and replaces it", async () => {
-        const svc = new ExistingThumbnailsService(sessions, s3Etag, thumbnails);
+    it("makes the storyboard again from the video's smallest rendition, and names it in a new master revision", async () => {
+        const masterBefore = objects.get('posts/s1/master.m3u8');
+        const svc = service();
 
         start(svc);
         await until(() => svc.job('s1')?.state !== 'running', 'the job to end');
@@ -225,27 +272,75 @@ describe('ExistingThumbnailsService', () => {
         )!;
         expect(sprite).toMatch(/^posts\/s1\/thumbnails\/sprite_\w+_001\.webp$/);
 
-        const vttCall = s3Etag.putObject.mock.calls.find(
-            (c: any[]) => c[1] === 'posts/s1/thumbnails/thumbnails.vtt'
+        // Under a name of its own, encrypted like the playlists beside it, and
+        // naming the new sprite. Both are cached for good: nothing is written
+        // under their names again.
+        const [, vttKey, vttBody, vttType, vttOpts] = vttWrite();
+        const vttPath = vttKey.slice('posts/s1/'.length);
+        expect(decryptTextAsset(vttBody, key)).toContain(
+            `${sprite.split('/').pop()}#xywh=0,0,160,90`
+        );
+        expect(vttType).toBe('application/octet-stream');
+        expect(vttOpts).toEqual({ cacheControl: IMMUTABLE_CACHE_CONTROL });
+        const spriteCall = s3Etag.putObject.mock.calls.find(
+            (c: any[]) => c[1] === sprite
         )!;
-        // Encrypted like the playlists beside it, and naming the new sprite.
-        const vtt = decryptTextAsset(vttCall[2], key);
-        expect(vtt).toContain(`${sprite.split('/').pop()}#xywh=0,0,160,90`);
-        expect(vttCall[4]).toEqual({ cacheControl: 'no-cache' });
+        expect(spriteCall[4]).toEqual({
+            cacheControl: IMMUTABLE_CACHE_CONTROL,
+        });
 
-        expect(s3Etag.deleteObjects).toHaveBeenCalledWith(s3, [
-            'posts/s1/thumbnails/sprite_001.webp',
-            'posts/s1/thumbnails/sprite_002.webp',
+        // The next revision names it, encrypted like the one before; that
+        // one, and the strip it names, stay as they were.
+        const next = objects.get('posts/s1/master_r1.m3u8')!;
+        expect(listThumbnailEntries(decryptTextAsset(next, key))).toEqual([
+            expect.objectContaining({ uri: vttPath }),
         ]);
+        expect(objects.get('posts/s1/master.m3u8')).toBe(masterBefore);
+        expect(s3Etag.deleteObjects).not.toHaveBeenCalled();
+        expect(sessions.setMasterRevision).toHaveBeenCalledWith(
+            's1',
+            'posts/s1/master_r1.m3u8'
+        );
+        expect(sessions.setThumbnailsVtt).toHaveBeenCalledWith('s1', vttPath);
+    });
+
+    it('names the strip in the revision after the one the session is on when it is done', async () => {
+        // A save made while the job ran moved the session on.
+        objects.set(
+            'posts/s1/master_r1.m3u8',
+            objects.get('posts/s1/master.m3u8')!
+        );
+        session.edit.masterKey = 'posts/s1/master_r1.m3u8';
+        const svc = service();
+
+        start(svc);
+        await until(() => svc.job('s1')?.state !== 'running', 'the job to end');
+
+        expect(svc.job('s1')).toEqual({ state: 'done' });
+        expect(objects.has('posts/s1/master_r2.m3u8')).toBe(true);
+        expect(sessions.setMasterRevision).toHaveBeenCalledWith(
+            's1',
+            'posts/s1/master_r2.m3u8'
+        );
+    });
+
+    it('names the strip by its key for a finished encode, as the session names its master', async () => {
+        session.masterPlaylist = 'posts/s1/master.m3u8';
+        const svc = service();
+
+        start(svc);
+        await until(() => svc.job('s1')?.state !== 'running', 'the job to end');
+
+        expect(svc.job('s1')).toEqual({ state: 'done' });
         expect(sessions.setThumbnailsVtt).toHaveBeenCalledWith(
             's1',
-            'thumbnails/thumbnails.vtt'
+            vttWrite()[1]
         );
     });
 
     it('says why when no thumbnails could be made, and touches nothing', async () => {
         thumbnails.packForDelivery.mockResolvedValue(null);
-        const svc = new ExistingThumbnailsService(sessions, s3Etag, thumbnails);
+        const svc = service();
 
         start(svc);
         await until(() => svc.job('s1')?.state !== 'running', 'the job to end');
@@ -255,11 +350,11 @@ describe('ExistingThumbnailsService', () => {
             error: 'No thumbnails could be made from this video',
         });
         expect(s3Etag.putObject).not.toHaveBeenCalled();
-        expect(s3Etag.deleteObjects).not.toHaveBeenCalled();
+        expect(s3Etag.putObjectIfAbsent).not.toHaveBeenCalled();
     });
 
     it('runs one at a time per session', () => {
-        const svc = new ExistingThumbnailsService(sessions, s3Etag, thumbnails);
+        const svc = service();
         start(svc);
         expect(() => start(svc)).toThrow(/already being made again/);
     });
