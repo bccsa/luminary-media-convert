@@ -1338,4 +1338,279 @@ describe('ProbeService', () => {
             expect(odd.displayHeight! % 2).toBe(0);
         });
     });
+
+    /**
+     * Angle detection, run end to end against a fake source: every ffprobe and
+     * ffmpeg call is answered from a model of the file, so what is asked for —
+     * which frames, at which instants, read how — is what is checked.
+     */
+    describe('angle detection', () => {
+        /** A 32x18 frame with plenty of contrast, a different one per seed. */
+        function picture(seed: number): Uint8Array {
+            const frame = new Uint8Array(32 * 18);
+            let x = (seed * 2654435761) >>> 0 || 1;
+            for (let i = 0; i < frame.length; i++) {
+                x ^= x << 13;
+                x >>>= 0;
+                x ^= x >>> 17;
+                x ^= x << 5;
+                x >>>= 0;
+                frame[i] = 40 + (x % 176);
+            }
+            return frame;
+        }
+
+        /** The same picture at half the contrast: a lower quality of it. */
+        function lower(frame: Uint8Array): Uint8Array {
+            return Uint8Array.from(frame, (v) => 64 + (v >> 1));
+        }
+
+        /** Two cameras, each cutting to a new shot every second. */
+        const camA = (t: number) => picture(1000 + Math.floor(t));
+        const camB = (t: number) => picture(5000 + Math.floor(t));
+
+        interface FakeTrack {
+            width: number;
+            height: number;
+            fps: string;
+            /** What the track shows `t` seconds into the container's timeline. */
+            show: (t: number) => Uint8Array | null;
+        }
+
+        interface Grab {
+            track: number;
+            /** Seconds on the container's timeline the frame was asked for. */
+            at: number;
+            /** Where the input was sought, or null when it was read from the top. */
+            inputSeek: number | null;
+        }
+
+        /**
+         * Answer every call `probe()` makes from `tracks`. `clock` stands in for
+         * `Date.now()` and moves on by `perGrab` ms with every frame taken.
+         */
+        function fakeSource(
+            tracks: FakeTrack[],
+            options: {
+                duration?: number;
+                formatName?: string;
+                startTime?: number;
+                packets?: string;
+                perGrab?: number;
+            } = {}
+        ) {
+            const duration = options.duration ?? 60;
+            const startTime = options.startTime ?? 0;
+            const grabs: Grab[] = [];
+            const reads: string[] = [];
+            let clock = 1_700_000_000_000;
+            vi.spyOn(Date, 'now').mockImplementation(() => clock);
+
+            mockExecFile.mockImplementation((_cmd, args, _opts, cb) => {
+                const reply = (stdout: any) => cb(null, { stdout, stderr: '' });
+                if (args.includes('-show_streams')) {
+                    return reply(
+                        JSON.stringify({
+                            streams: tracks.map((t, index) => ({
+                                index,
+                                codec_type: 'video',
+                                codec_name: 'h264',
+                                width: t.width,
+                                height: t.height,
+                                bit_rate: String(t.width * 2000),
+                                r_frame_rate: t.fps,
+                                avg_frame_rate: t.fps,
+                                start_time: String(startTime),
+                                duration: String(duration),
+                            })),
+                            format: {
+                                duration: String(duration),
+                                bit_rate: '9000000',
+                                format_name:
+                                    options.formatName ??
+                                    'mov,mp4,m4a,3gp,3g2,mj2',
+                                start_time: String(startTime),
+                            },
+                        })
+                    );
+                }
+                if (args.includes('-show_frames')) {
+                    // A regular two-second GOP at 25 fps.
+                    const gop = ['I', ...Array(49).fill('P')];
+                    return reply([...gop, ...gop, 'I'].join('\n') + '\n');
+                }
+                if (args.includes('packet=stream_index,pts_time,flags')) {
+                    reads.push(args[args.indexOf('-read_intervals') + 1]);
+                    return reply(options.packets ?? '');
+                }
+                if (args.includes('-frames:v')) {
+                    const input = args.indexOf('-i');
+                    const before = args.indexOf('-ss');
+                    const after = args.indexOf('-ss', input);
+                    const from =
+                        before >= 0 && before < input
+                            ? parseFloat(args[before + 1])
+                            : null;
+                    const discard =
+                        after > input ? parseFloat(args[after + 1]) : 0;
+                    const track = Number(
+                        args[args.indexOf('-map') + 1].split(':')[2]
+                    );
+                    const at = startTime + (from ?? 0) + discard;
+                    grabs.push({ track, at, inputSeek: from });
+                    clock += options.perGrab ?? 0;
+                    const frame = tracks[track].show(at);
+                    return reply(frame ? Buffer.from(frame) : Buffer.alloc(0));
+                }
+                throw new Error(`unexpected call: ${args.join(' ')}`);
+            });
+            return { grabs, reads };
+        }
+
+        const hd = (show: FakeTrack['show'], fps = '25/1'): FakeTrack => ({
+            width: 1920,
+            height: 1080,
+            fps,
+            show,
+        });
+        const sd = (show: FakeTrack['show'], fps = '25/1'): FakeTrack => ({
+            width: 640,
+            height: 360,
+            fps,
+            show,
+        });
+
+        /** Keyframe packets as ffprobe prints them, one line each. */
+        const keyframePackets = (entries: [number, number][]) =>
+            entries
+                .map(
+                    ([stream, pts]) =>
+                        `stream_index=${stream}|pts_time=${pts.toFixed(6)}|flags=K__`
+                )
+                .join('\n') + '\n';
+
+        afterEach(() => {
+            vi.restoreAllMocks();
+        });
+
+        describe('keyframe grids', () => {
+            const ladder = () => [hd(camA), sd((t) => lower(camA(t)))];
+            const every2s = (from: number, to: number) =>
+                Array.from(
+                    { length: (to - from) / 2 + 1 },
+                    (_, i) => from + i * 2
+                );
+
+            // What ffprobe printed for a 60 s two-track MP4: its windows
+            // overlap, so 40-46 s comes twice for both streams, and a seek
+            // that lands the second stream a keyframe early repeats 38 s for
+            // it alone.
+            it('counts a keyframe the overlapping windows read twice only once', async () => {
+                const packets = keyframePackets([
+                    [1, 4],
+                    ...every2s(6, 22).flatMap((pts): [number, number][] => [
+                        [0, pts],
+                        [1, pts],
+                    ]),
+                    [1, 28],
+                    ...every2s(30, 46).flatMap((pts): [number, number][] => [
+                        [0, pts],
+                        [1, pts],
+                    ]),
+                    [1, 38],
+                    ...every2s(40, 56).flatMap((pts): [number, number][] => [
+                        [0, pts],
+                        [1, pts],
+                    ]),
+                ]);
+                fakeSource(ladder(), { packets });
+
+                const result = await service.probe('/tmp/overlap.mp4');
+
+                expect(result.videoTracks.map((t) => t.keyframeGrid)).toEqual([
+                    0, 0,
+                ]);
+            });
+
+            // A 287 s MP4: each later read starts at the keyframe before its
+            // window, and a keyframe earlier still for the second stream.
+            it('leaves out the keyframes a read runs in with before its window', async () => {
+                const window = (from: number, to: number, runIn: number[]) => [
+                    ...runIn.map((pts): [number, number] => [1, pts]),
+                    ...runIn.slice(-1).map((pts): [number, number] => [0, pts]),
+                    ...every2s(from, to).flatMap((pts): [number, number][] => [
+                        [0, pts],
+                        [1, pts],
+                    ]),
+                ];
+                const packets = keyframePackets([
+                    ...window(30, 48, [26, 28]),
+                    ...window(144, 162, [140, 142]),
+                    ...window(260, 278, [256, 258]),
+                ]);
+                const { reads } = fakeSource(ladder(), {
+                    duration: 287,
+                    packets,
+                });
+
+                const result = await service.probe('/tmp/long.mp4');
+
+                expect(reads).toEqual(['28.7%+20,143.5%+20,258.3%+20']);
+                expect(result.videoTracks.map((t) => t.keyframeGrid)).toEqual([
+                    0, 0,
+                ]);
+            });
+
+            // An MPEG-TS from a recorder can start an hour in: its packets and
+            // ffprobe's read intervals are both on that timeline.
+            it('reads the windows on the container’s timeline when it starts late', async () => {
+                const packets = keyframePackets(
+                    [30, 144, 260].flatMap((from) =>
+                        every2s(3600 + from, 3600 + from + 18).flatMap(
+                            (pts): [number, number][] => [
+                                [0, pts],
+                                [1, pts],
+                            ]
+                        )
+                    )
+                );
+                const { reads } = fakeSource(ladder(), {
+                    duration: 287,
+                    startTime: 3600,
+                    formatName: 'mpegts',
+                    packets,
+                });
+
+                const result = await service.probe('/tmp/recorder.ts');
+
+                expect(reads).toEqual(['3628.7%+20,3743.5%+20,3858.3%+20']);
+                expect(result.videoTracks.map((t) => t.keyframeGrid)).toEqual([
+                    0, 0,
+                ]);
+            });
+
+            it('reads a short source from its top without seeking, wherever it starts', async () => {
+                const packets = keyframePackets(
+                    every2s(2, 20).flatMap((pts): [number, number][] => [
+                        [0, 1.4 + pts],
+                        [1, 1.4 + pts],
+                    ])
+                );
+                const { reads } = fakeSource(ladder(), {
+                    duration: 30,
+                    startTime: 1.4,
+                    formatName: 'mpegts',
+                    packets,
+                });
+
+                const result = await service.probe('/tmp/short.ts');
+
+                expect(reads).toEqual(['%+20']);
+                expect(result.videoTracks.map((t) => t.keyframeGrid)).toEqual([
+                    0, 0,
+                ]);
+            });
+        });
+
+    });
 });

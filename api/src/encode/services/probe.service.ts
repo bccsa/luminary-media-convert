@@ -652,7 +652,19 @@ export class ProbeService {
         duration: number
     ): Promise<void> {
         const windowSeconds = Math.min(20, duration);
-        const windows = this.packetSampleStarts(duration, windowSeconds);
+        // On the container's own timeline, where packet timestamps and
+        // ffprobe's read-interval starts both live: a recorder's MPEG-TS can
+        // start hours in, and windows counted from zero would be read from the
+        // file's head and match none of its keyframes. A lone window from the
+        // top is still read without a seek, which in MPEG-TS can land a
+        // stream past its first keyframe.
+        const formatStart = parseStartTime(data.format.start_time);
+        const fromZero = this.packetSampleStarts(duration, windowSeconds);
+        const windows = fromZero.map((start) => start + formatStart);
+        const intervals = this.readIntervalsArg(
+            fromZero.length === 1 && fromZero[0] === 0 ? fromZero : windows,
+            windowSeconds
+        );
         const rawToVideo = new Map<number, number>();
         let vi = 0;
         for (const s of data.streams) {
@@ -671,7 +683,7 @@ export class ProbeService {
                 '-print_format',
                 'compact=p=0',
                 '-read_intervals',
-                this.readIntervalsArg(windows, windowSeconds),
+                intervals,
                 '-show_entries',
                 'packet=stream_index,pts_time,flags',
                 filePath,
@@ -699,10 +711,25 @@ export class ProbeService {
                     video,
                     windows.map(() => [])
                 );
-            keyframes.get(video)![this.sampleIndexFor(pts, windows)].push(pts);
+            // Only inside the window it was read for. ffprobe starts a read at
+            // the keyframe before the window, and in MP4 a keyframe earlier
+            // still for every stream but the first; filed into the window
+            // before, that run-in made two tracks cut alike count unequal.
+            const w = this.sampleIndexFor(pts, windows);
+            if (
+                pts < windows[w] - KEYFRAME_TOLERANCE_SECONDS ||
+                pts > windows[w] + windowSeconds + KEYFRAME_TOLERANCE_SECONDS
+            )
+                continue;
+            keyframes.get(video)![w].push(pts);
         }
+        // Each keyframe once. On a source under about 80 s the windows overlap
+        // and ffprobe reads the overlap twice; where its seek lands one stream
+        // a keyframe earlier than another, that stream's repeat falls into the
+        // window before, and two tracks cut identically compared unequal.
         for (const perWindow of keyframes.values())
-            for (const list of perWindow) list.sort((x, y) => x - y);
+            for (let w = 0; w < perWindow.length; w++)
+                perWindow[w] = [...new Set(perWindow[w])].sort((x, y) => x - y);
 
         // Compared window by window, so the gap between two windows is never
         // read as a stretch with no keyframes in it. A window too short to hold
