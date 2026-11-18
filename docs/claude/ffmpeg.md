@@ -12,11 +12,15 @@
 
 ## GPU Detection
 
-At startup `FfmpegService.onModuleInit()` detects the acceleration mode (`AccelMode`: `'cpu' | 'nvidia' | 'apple'`):
+`AccelMode` (`encoder-selection.ts`) has seven values: `none`, `cpu`, `nvidia`, `apple`, `intel`, `amd`, `mediafoundation`; `ENCODER_FOR` maps each but `none` to its H.264 encoder. At startup `FfmpegService.onModuleInit()` picks one (`detectAcceleration()`), in this order:
 
 1. **NVIDIA**: `nvidia-smi` available + `ffmpeg -hwaccels` includes `cuda` → `h264_nvenc`, `scale_cuda`, `-hwaccel cuda -hwaccel_output_format cuda`
 2. **Apple Silicon**: `darwin` + `arm64` + `videotoolbox` in `-hwaccels` + `h264_videotoolbox` in `-encoders` + `scale_vt` in `-filters` → `h264_videotoolbox`, `scale_vt`, `-hwaccel videotoolbox -hwaccel_output_format videotoolbox_vld`
-3. **CPU fallback**: `libx264` with resolution-based presets. Audio always encodes on CPU
+3. **Intel Quick Sync** (Windows): `h264_qsv`
+4. **`cpu`**: `libx264`, only when the FFmpeg in use has it — a user's own GPL build. The bundled FFmpeg is LGPL and has no libx264, so there is no software H.264 fallback in a packaged app
+5. **`none`**: nothing usable; an encode is refused with a message that says so
+
+`amd` (`h264_amf`) and `mediafoundation` (`h264_mf`) have argument tables and a place in `WINDOWS_CHAIN`, but startup detection does not select them yet. Audio always encodes on the CPU.
 
 `PreviewService` shares the same detection. The active mode is reported as `encoder` on status responses and SSE events.
 
