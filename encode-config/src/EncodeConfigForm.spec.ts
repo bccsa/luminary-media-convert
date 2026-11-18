@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import EncodeConfigForm from './EncodeConfigForm.vue';
+import SelectMenu from './SelectMenu.vue';
 import { computeLayoutKey } from './layoutStorage';
 import type {
     AudioTrackInfo,
@@ -2153,5 +2154,167 @@ describe('EncodeConfigForm restoring a failed encode', () => {
         // source track: track 0 is angle 0 here.
         expect(config.videoRenditions).toEqual([{ ...rendition, angle: 0 }]);
         expect(config.audioGroups).toEqual([audio]);
+    });
+});
+
+/**
+ * Detection can only ever make one picture likely. Where it is less sure than
+ * usual — cut short by the time allowed, or two tracks encoded the way one
+ * recorder's camera tracks are — the form says so and does not suggest copying
+ * the grouping as a ladder; where it kept two tracks apart without deciding,
+ * it says that too.
+ */
+describe('EncodeConfigForm doubtful angle groupings', () => {
+    function probeOf(videoTracks: VideoTrackInfo[]): ProbeResult {
+        return {
+            format: { duration: 60, bitrateKbps: 6000, formatName: 'mov,mp4' },
+            videoTracks,
+            audioTracks: [
+                {
+                    index: 0,
+                    codec: 'aac',
+                    bitrateKbps: 128,
+                    channels: 2,
+                    sampleRate: 48000,
+                    startTime: 0,
+                },
+            ],
+            anglesDetected: true,
+        } as ProbeResult;
+    }
+
+    /** Two tracks detection grouped, on one keyframe grid, verified unless said otherwise. */
+    const grouped = (
+        a: Partial<VideoTrackInfo>,
+        b: Partial<VideoTrackInfo>
+    ) => [
+        videoTrack({
+            index: 0,
+            pictureGroup: 0,
+            pictureMatches: 48,
+            pictureVerified: true,
+            keyframeGrid: 0,
+            ...a,
+        }),
+        videoTrack({
+            index: 1,
+            pictureGroup: 0,
+            pictureMatches: 48,
+            pictureVerified: true,
+            keyframeGrid: 0,
+            ...b,
+        }),
+    ];
+    const proxy = { width: 640, height: 360, bitrateKbps: 800 };
+
+    function mountWith(videoTracks: VideoTrackInfo[]) {
+        return mount(EncodeConfigForm, {
+            props: { probeResult: probeOf(videoTracks), byteRange: true },
+        });
+    }
+
+    const texts = (wrapper: FormWrapper, test: string) =>
+        wrapper.findAll(`[data-test="${test}"]`).map((n) => n.text());
+
+    const copied = (wrapper: FormWrapper) =>
+        (
+            (wrapper.vm as any).buildEncodeConfig() as EncodeConfig
+        ).videoRenditions!.map((r) => r.copyStream);
+
+    async function moveTrack(
+        wrapper: FormWrapper,
+        index: number,
+        target: number | 'new'
+    ) {
+        const menu = wrapper
+            .findAllComponents(SelectMenu)
+            .find((c) => c.props('ariaLabel') === `Angle of track ${index}`);
+        expect(menu, `no angle menu for track ${index}`).toBeDefined();
+        menu!.vm.$emit('update:modelValue', target);
+        await wrapper.vm.$nextTick();
+    }
+
+    it('copies a verified ladder of the source’s own, with nothing to say', () => {
+        const wrapper = mountWith(grouped({}, proxy));
+
+        expect(texts(wrapper, 'angle-doubt')).toEqual([]);
+        expect(copied(wrapper)).toEqual([true, true]);
+    });
+
+    it('suggests re-encoding two tracks encoded alike, and says why', () => {
+        const wrapper = mountWith(grouped({}, { bitrateKbps: 4800 }));
+
+        const [doubt] = texts(wrapper, 'angle-doubt');
+        expect(doubt).toContain('#0 and #1');
+        expect(doubt).toContain('encoded alike');
+        expect(texts(wrapper, 'ladder-angle-doubt')).toHaveLength(1);
+        expect(copied(wrapper).every((c) => !c)).toBe(true);
+        // Still the operator's to choose once they have looked.
+        expect(
+            wrapper
+                .find('[data-test="ladder-mode-copy"]')
+                .attributes('disabled')
+        ).toBeUndefined();
+    });
+
+    it('suggests re-encoding a grouping the time allowed cut short, and says so', () => {
+        const wrapper = mountWith(
+            grouped(
+                { pictureMatches: 16, pictureVerified: false },
+                { ...proxy, pictureMatches: 16, pictureVerified: false }
+            )
+        );
+
+        expect(texts(wrapper, 'angle-doubt')[0]).toContain('ran out of time');
+        expect(copied(wrapper).every((c) => !c)).toBe(true);
+    });
+
+    it('has no doubt left once the doubted track is an angle of its own', async () => {
+        const wrapper = mountWith(grouped({}, { bitrateKbps: 4800 }));
+
+        await moveTrack(wrapper, 1, 'new');
+
+        expect(texts(wrapper, 'angle-doubt')).toEqual([]);
+        expect(texts(wrapper, 'ladder-angle-doubt')).toEqual([]);
+    });
+
+    it('does not doubt a grouping the operator made', async () => {
+        const wrapper = mountWith([
+            videoTrack({ index: 0, keyframeGrid: 0 }),
+            videoTrack({ index: 1, bitrateKbps: 4900, keyframeGrid: 0 }),
+        ]);
+
+        await moveTrack(wrapper, 1, 0);
+
+        expect(texts(wrapper, 'angle-doubt')).toEqual([]);
+    });
+
+    it('says which tracks detection kept apart undecided, until they are put together', async () => {
+        const wrapper = mountWith([
+            videoTrack({ index: 0, pictureUndecided: [1], keyframeGrid: 0 }),
+            videoTrack({
+                index: 1,
+                ...proxy,
+                pictureUndecided: [0],
+                keyframeGrid: 0,
+            }),
+        ]);
+
+        const [note] = texts(wrapper, 'angle-undecided');
+        expect(note).toContain('#0 and #1');
+        expect(note).toContain('separate angles');
+
+        await moveTrack(wrapper, 1, 0);
+
+        expect(texts(wrapper, 'angle-undecided')).toEqual([]);
+    });
+
+    it('says nothing about angles in Audio only mode', async () => {
+        const wrapper = mountWith(grouped({}, { bitrateKbps: 4800 }));
+        expect(texts(wrapper, 'angle-doubt')).toHaveLength(1);
+
+        await clickButton(wrapper, 'Audio only');
+
+        expect(texts(wrapper, 'angle-doubt')).toEqual([]);
     });
 });

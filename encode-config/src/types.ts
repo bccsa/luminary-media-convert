@@ -64,6 +64,24 @@ export interface VideoTrackInfo {
      */
     pictureGroup?: number;
     /**
+     * The fewest sampled moments at which this track was seen to show the same
+     * picture as another member of its `pictureGroup`. Absent without a group.
+     */
+    pictureMatches?: number;
+    /**
+     * The comparison behind `pictureGroup` ran to the end. False when the time
+     * allowed cut it short: the tracks agreed everywhere they were compared,
+     * but at fewer moments than a grouping is normally trusted on. Absent
+     * without a group, and on sessions probed before it was recorded.
+     */
+    pictureVerified?: boolean;
+    /**
+     * Tracks this one may show the same picture as, but was kept apart from:
+     * they agreed at enough moments, and a disagreement was still waiting to be
+     * re-checked when the time allowed ran out. Absent when there are none.
+     */
+    pictureUndecided?: number[];
+    /**
      * The keyframe grid this track is cut on: the lowest index among the video
      * tracks that cut keyframes at the same instants, sampled through the whole
      * file, and run as long as it does. Tracks with the same id can be copied as

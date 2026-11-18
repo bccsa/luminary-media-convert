@@ -1345,7 +1345,8 @@ html.dark .ecf-root--session .ecf-btn-primary-disabled:hover {
     color: #e4e4e7;
 }
 
-.ecf-box-hint--warn {
+.ecf-box-hint--warn,
+.ecf-hint--warn {
     color: #fbbf24;
 }
 
@@ -1377,7 +1378,8 @@ html.dark .ecf-root--session .ecf-btn-primary-disabled:hover {
     color: #fff;
 }
 
-.ecf-root--session .ecf-box-hint--warn {
+.ecf-root--session .ecf-box-hint--warn,
+.ecf-root--session .ecf-hint--warn {
     color: #b45309;
 }
 
@@ -1404,6 +1406,7 @@ html.dark .ecf-root--session .ecf-seg-btn--on {
     color: #0f172a;
 }
 
-html.dark .ecf-root--session .ecf-box-hint--warn {
+html.dark .ecf-root--session .ecf-box-hint--warn,
+html.dark .ecf-root--session .ecf-hint--warn {
     color: #fbbf24;
 }

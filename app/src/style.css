@@ -298,6 +298,7 @@
     .ecf-sr-only { @apply sr-only; }
     .ecf-stack { @apply flex flex-col gap-3; }
     .ecf-hint { @apply -mt-0.5 mb-2 text-xs leading-snug text-slate-500; }
+    .ecf-hint--warn { @apply text-amber-700 dark:text-amber-400; }
     .ecf-em { @apply font-semibold text-slate-800 dark:text-slate-100; }
 
     /* Info panel */

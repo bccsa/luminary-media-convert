@@ -107,6 +107,108 @@ export function anglesOf(
 }
 
 /**
+ * Bitrates this close, as a share of the larger, count as the same encoding.
+ */
+const ALIKE_BITRATE_SHARE = 0.15;
+
+/**
+ * Same size, codec, frame rate and, within {@link ALIKE_BITRATE_SHARE},
+ * bitrate: the mark of one recorder's camera tracks. A source's own ladder
+ * steps down in size or bitrate from rung to rung, so its rungs never are.
+ * Where either bitrate is unknown, nothing is left to tell two tracks of one
+ * size apart, and they count as alike too.
+ */
+function encodedAlike(a: VideoTrackInfo, b: VideoTrackInfo): boolean {
+    const da = displayDimensionsOf(a);
+    const db = displayDimensionsOf(b);
+    if (da.width !== db.width || da.height !== db.height) return false;
+    if (a.codec !== b.codec || a.frameRate !== b.frameRate) return false;
+    if (!(a.bitrateKbps > 0 && b.bitrateKbps > 0)) return true;
+    const larger = Math.max(a.bitrateKbps, b.bitrateKbps);
+    return (
+        Math.abs(a.bitrateKbps - b.bitrateKbps) / larger <= ALIKE_BITRATE_SHARE
+    );
+}
+
+/**
+ * Why the angle's grouping should be checked by eye before its tracks are
+ * copied as one ladder, or null.
+ *
+ * Detection settles a pair of tracks as two pictures the moment they disagree,
+ * but agreement can only ever make one picture likely. Two things leave it
+ * less likely than usual: the comparison was cut short by the time allowed,
+ * or the tracks are encoded alike — a programme feed and the camera it sits on
+ * most of the time, recorded side by side, agree almost everywhere.
+ *
+ * Only tracks detection put together are asked about. Ones the operator moved
+ * into an angle are their call.
+ */
+export function angleDoubt(angle: Angle): string | null {
+    const grouped = angle.included.filter((t) => t.pictureGroup != null);
+    for (let i = 0; i < grouped.length; i++) {
+        for (let j = i + 1; j < grouped.length; j++) {
+            const [a, b] = [grouped[i], grouped[j]].sort(
+                (x, y) => x.index - y.index
+            );
+            if (a.pictureGroup !== b.pictureGroup) continue;
+            const pair = `#${a.index} and #${b.index}`;
+            if (a.pictureVerified === false || b.pictureVerified === false) {
+                const matches = Math.min(
+                    a.pictureMatches ?? Infinity,
+                    b.pictureMatches ?? Infinity
+                );
+                const counted = Number.isFinite(matches)
+                    ? ` (they matched at ${matches})`
+                    : '';
+                return (
+                    `detection ran out of time before it had compared ${pair} ` +
+                    `at as many moments as it normally does${counted}, so it ` +
+                    `is not sure they show one picture.`
+                );
+            }
+            if (encodedAlike(a, b))
+                return (
+                    `${pair} showed the same picture, but they are encoded alike ` +
+                    `(same size, codec and frame rate, and bitrates close or ` +
+                    `unknown), as tracks from one recorder are and the ` +
+                    `qualities of a ladder are not.`
+                );
+        }
+    }
+    return null;
+}
+
+/**
+ * The pairs of tracks detection could not decide on, as one sentence each:
+ * kept as separate angles because the time allowed ran out before a
+ * disagreement between them was re-checked. Only pairs still in separate
+ * angles, both included — once the operator has put them together, or left
+ * one out, there is nothing left to decide.
+ */
+export function undecidedPairs(angles: readonly Angle[]): string[] {
+    const angleOf = new Map<number, number>();
+    for (const angle of angles)
+        for (const track of angle.included) angleOf.set(track.index, angle.id);
+    const notes: string[] = [];
+    for (const angle of angles) {
+        for (const track of angle.included) {
+            for (const other of track.pictureUndecided ?? []) {
+                // Each pair once: both of its tracks list the other.
+                if (other <= track.index) continue;
+                const otherAngle = angleOf.get(other);
+                if (otherAngle == null || otherAngle === angle.id) continue;
+                notes.push(
+                    `Detection ran out of time before deciding whether ` +
+                        `#${track.index} and #${other} show the same picture, ` +
+                        `so it kept them as separate angles.`
+                );
+            }
+        }
+    }
+    return notes;
+}
+
+/**
  * Each angle's display name, unique among the angles.
  *
  * The angle's own track (its id) names it if it has a name, else the first

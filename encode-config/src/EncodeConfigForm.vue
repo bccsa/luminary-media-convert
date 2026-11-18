@@ -25,12 +25,14 @@ import {
 } from './audioGroups';
 import { applySavedTrackLabels } from './trackLabels';
 import {
+    angleDoubt,
     anglesOf,
     angleNames,
     initialAssignment,
     moveTrack,
     normalize,
     rankTracks,
+    undecidedPairs,
     type AngleAssignment,
 } from './angles';
 import LanguageSelect from './LanguageSelect.vue';
@@ -400,6 +402,23 @@ const allAngles = computed(() =>
 
 const angleNameById = computed(() => angleNames(allAngles.value));
 
+/**
+ * The angles of the encode whose grouping by detection should be checked by
+ * eye, with why. See {@link angleDoubt}.
+ */
+const angleDoubts = computed(() =>
+    currentAngles.value.flatMap((angle) => {
+        const doubt = angleDoubt(angle);
+        return doubt ? [{ id: angle.id, doubt }] : [];
+    })
+);
+
+/**
+ * Tracks detection kept apart without deciding: they may be qualities of one
+ * picture. See {@link undecidedPairs}.
+ */
+const angleUndecided = computed(() => undecidedPairs(currentAngles.value));
+
 /** The angle a row belongs to: the one it says, else its source track's. */
 function rowAngle(r: VideoRendition): number {
     return (
@@ -500,12 +519,19 @@ const copyLadderBlockedReason = computed<string | null>(() => {
  * ladder was already built for streaming. Otherwise every angle is re-encoded
  * from its best track, which for a one-track source is the ladder it has
  * always had.
+ *
+ * Not Copy while an angle's grouping is in doubt, though: copied, two cameras
+ * taken for one picture publish a ladder that changes camera when it changes
+ * quality. Re-encoded, the angle is made from one track, and the notice asks
+ * the operator to check the grouping before choosing Copy themselves.
  */
 function defaultSuggestMode(): SuggestMode {
     if (!anglesKnown.value && includedVideoTracks.value.length > 1)
         return 'legacy';
     const carriesLadder = currentAngles.value.some((a) => a.included.length > 1);
-    return carriesLadder && copyLadderBlockedReason.value == null
+    return carriesLadder &&
+        copyLadderBlockedReason.value == null &&
+        angleDoubts.value.length === 0
         ? 'copy'
         : 'reencode';
 }
@@ -2130,6 +2156,24 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                         wrongly. Re-encoding makes every rendition of an angle
                         from its best ticked track.
                     </p>
+                    <p
+                        v-for="d in choosableVideo ? angleDoubts : []"
+                        :key="d.id"
+                        class="ecf-hint ecf-hint--warn"
+                        data-test="angle-doubt"
+                    >
+                        Check {{ angleNameById.get(d.id) }}: {{ d.doubt }} If they
+                        show different cameras, move one to New angle.
+                    </p>
+                    <p
+                        v-for="note in choosableVideo ? angleUndecided : []"
+                        :key="note"
+                        class="ecf-hint ecf-hint--warn"
+                        data-test="angle-undecided"
+                    >
+                        {{ note }} If they are qualities of one camera, move one
+                        into the other's angle.
+                    </p>
                     <div class="ecf-table-wrap">
                         <table class="ecf-table">
                             <thead class="ecf-thead">
@@ -2421,6 +2465,19 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                         data-test="ladder-mode-notice"
                     >
                         {{ ladderModeNotice }}
+                    </p>
+                    <p
+                        v-else-if="
+                            angleDoubts.length > 0 &&
+                            copyLadderBlockedReason == null &&
+                            shownLadderMode !== 'copy'
+                        "
+                        class="ecf-box-hint ecf-box-hint--warn"
+                        data-test="ladder-angle-doubt"
+                    >
+                        Copy was not suggested: check the grouping of
+                        {{ angleDoubts.map((d) => angleNameById.get(d.id)).join(', ') }}
+                        under Detected Media first.
                     </p>
                     <p
                         v-else-if="copyLadderBlockedReason && editableVideoTracks.length > 1"
