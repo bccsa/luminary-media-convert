@@ -603,6 +603,57 @@ describe('ProbeService', () => {
                 expect(result.audioTracks[0].bitrateKbps).toBe(256);
             });
 
+            const videoOnly = (duration: string) => ({
+                streams: [oneVideoOneAudio.streams[0]],
+                format: { ...oneVideoOneAudio.format, duration },
+            });
+
+            it('never asks for samples that overlap', async () => {
+                // A file just over two samples long clamps 50% and 90% to the
+                // same late start, which overlapped the first sample (#423).
+                mockExecFileSequence([
+                    makeFfprobeOutput(videoOnly('20.008')),
+                    'stream_index=0|pts_time=2.0|size=1000\n',
+                ]);
+
+                await service.probe('/tmp/short.webm');
+
+                const args = mockExecFile.mock.calls[1][1] as string[];
+                expect(args).toContain('2.001%+10');
+            });
+
+            it('keeps the samples that fit one after another', async () => {
+                mockExecFileSequence([
+                    makeFfprobeOutput(videoOnly('25.0')),
+                    'stream_index=0|pts_time=2.5|size=1000\n',
+                ]);
+
+                await service.probe('/tmp/medium.webm');
+
+                const args = mockExecFile.mock.calls[1][1] as string[];
+                expect(args).toContain('2.5%+10,12.5%+10');
+            });
+
+            it('counts a packet printed by two reads once', async () => {
+                // The second read starts at the keyframe before 300 s, so it
+                // prints packets the first sample already counted.
+                mockExecFileSequence([
+                    makeFfprobeOutput(oneVideoOneAudio),
+                    [
+                        'stream_index=1|pts_time=298.0|size=100000',
+                        'stream_index=1|pts_time=299.0|size=100000',
+                        'stream_index=1|pts_time=298.0|size=100000',
+                        'stream_index=1|pts_time=299.0|size=100000',
+                        'stream_index=1|pts_time=300.0|size=10000',
+                    ].join('\n') + '\n',
+                ]);
+
+                const result = await service.probe('/tmp/seek-back.mkv');
+
+                // 200000 bytes over 10 s → 160 kbps, not 320.
+                expect(result.audioTracks[0].bitrateKbps).toBe(160);
+            });
+
             it('asks ffprobe for the timestamps it needs to separate samples', async () => {
                 mockExecFileSequence([
                     makeFfprobeOutput(oneVideoOneAudio),
