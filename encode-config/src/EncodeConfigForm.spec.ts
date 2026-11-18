@@ -583,6 +583,7 @@ const RENDITION_DTO_KEYS = [
     'videoBitrateKbps',
     'copyStream',
     'sourceTrackIndex',
+    'angle',
     'audioGroupId',
     'label',
     'vbr',
@@ -2065,7 +2066,9 @@ describe('EncodeConfigForm restoring a failed encode', () => {
 
         const config = (wrapper.vm as any).buildEncodeConfig() as EncodeConfig;
         expect(config.type).toBe('video');
-        expect(config.videoRenditions).toEqual([rendition]);
+        // Named with its angle, which the config it ran with left to the
+        // source track: track 0 is angle 0 here.
+        expect(config.videoRenditions).toEqual([{ ...rendition, angle: 0 }]);
         expect(config.audioGroups).toEqual([audio]);
     });
 });
