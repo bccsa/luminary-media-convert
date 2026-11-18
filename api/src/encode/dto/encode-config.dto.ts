@@ -185,6 +185,23 @@ export class VideoTrackNameDto {
     name: string;
 }
 
+export class VideoTrackAngleDto {
+    @ApiProperty({ description: 'Source video track index.', example: 1 })
+    @IsInt()
+    @Min(0)
+    @Expose()
+    index: number;
+
+    @ApiProperty({
+        description: 'The angle id the track belongs to.',
+        example: 0,
+    })
+    @IsInt()
+    @Min(0)
+    @Expose()
+    angle: number;
+}
+
 export class TrimSegmentDto {
     @ApiProperty({ description: 'In-point in seconds.', example: 11.954 })
     @IsNumber()
@@ -260,6 +277,25 @@ export class EncodeConfigDto {
     @ValidateIf((o) => o.type === 'video')
     @Expose()
     videoTrackNames?: VideoTrackNameDto[];
+
+    @ApiPropertyOptional({
+        description:
+            'The angle each kept source track belongs to. Not used by the ' +
+            'encode, whose renditions name their own angle; kept with the ' +
+            'session so a restored config puts a track no rendition is made ' +
+            'from back in its angle.',
+        example: [
+            { index: 0, angle: 0 },
+            { index: 1, angle: 0 },
+        ],
+    })
+    @IsArray()
+    @IsOptional()
+    @ValidateNested({ each: true })
+    @Type(() => VideoTrackAngleDto)
+    @ValidateIf((o) => o.type === 'video')
+    @Expose()
+    videoTrackAngles?: VideoTrackAngleDto[];
 
     @ApiPropertyOptional({
         description:

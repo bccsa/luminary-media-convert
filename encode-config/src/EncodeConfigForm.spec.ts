@@ -599,6 +599,7 @@ const CONFIG_DTO_KEYS = [
     'videoRenditions',
     'audioGroups',
     'videoTrackNames',
+    'videoTrackAngles',
     'byteRange',
     'trimSegments',
     'audioTrackMetadata',
@@ -2042,6 +2043,88 @@ describe('EncodeConfigForm restoring a failed encode', () => {
         expect(config.type).toBe('audio');
         expect(config.audioGroups).toEqual([audio]);
         expect(config.videoRenditions).toBeUndefined();
+    });
+
+    it('restores the angle of a track no row was made from', async () => {
+        // Two cameras with two qualities each. The operator moved #1 to the
+        // second camera and re-encoded, so only #0 and #2 have rows; the
+        // encode failed and is restored.
+        const probe: ProbeResult = {
+            format: { duration: 30, bitrateKbps: 9000, formatName: 'mov,mp4' },
+            videoTracks: [
+                videoTrack({
+                    index: 0,
+                    width: 640,
+                    height: 360,
+                    pictureGroup: 0,
+                    keyframeGrid: 0,
+                }),
+                videoTrack({
+                    index: 1,
+                    width: 320,
+                    height: 180,
+                    pictureGroup: 0,
+                    keyframeGrid: 0,
+                }),
+                videoTrack({
+                    index: 2,
+                    width: 640,
+                    height: 360,
+                    pictureGroup: 2,
+                    keyframeGrid: 0,
+                }),
+                videoTrack({
+                    index: 3,
+                    width: 320,
+                    height: 180,
+                    pictureGroup: 2,
+                    keyframeGrid: 0,
+                }),
+            ],
+            audioTracks: [
+                {
+                    index: 0,
+                    codec: 'aac',
+                    bitrateKbps: 96,
+                    channels: 1,
+                    sampleRate: 48000,
+                    startTime: 0,
+                },
+            ],
+            anglesDetected: true,
+        } as ProbeResult;
+        const row = (track: number): VideoRendition => ({
+            width: 640,
+            height: 360,
+            videoBitrateKbps: 700,
+            copyStream: false,
+            sourceTrackIndex: track,
+            angle: track,
+            audioGroupId: 'mid',
+        });
+        const restoreConfig: EncodeConfig = {
+            type: 'video',
+            segmentDuration: 6,
+            videoRenditions: [row(0), row(2)],
+            audioGroups: [audio],
+            videoTrackAngles: [
+                { index: 0, angle: 0 },
+                { index: 1, angle: 2 },
+                { index: 2, angle: 2 },
+                { index: 3, angle: 2 },
+            ],
+        };
+        const wrapper = mount(EncodeConfigForm, {
+            props: { probeResult: probe, byteRange: true, restoreConfig },
+        });
+
+        await wrapper.find('[data-test="ladder-mode-copy"]').trigger('click');
+        const config = (wrapper.vm as any).buildEncodeConfig() as EncodeConfig;
+        const angleOf = (track: number) =>
+            config.videoRenditions!.find((r) => r.sourceTrackIndex === track)
+                ?.angle;
+        expect(angleOf(1)).toBe(angleOf(2));
+        expect(angleOf(1)).not.toBe(angleOf(0));
     });
 
     it('keeps the ladder it ran with, and the angle it left out stays out', () => {

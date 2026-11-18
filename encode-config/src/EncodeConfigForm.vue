@@ -1192,6 +1192,10 @@ function restore(config: EncodeConfig): void {
             // names its angle, or — written before rows did — its source track
             // was its angle. Re-keyed afterwards, so ids stay lowest members.
             const assignment = new Map(angleAssignment.value);
+            // Every kept track's angle, rowless ones included, as written.
+            for (const { index, angle } of config.videoTrackAngles ?? []) {
+                assignment.set(index, angle);
+            }
             for (const r of rows) {
                 const track = r.sourceTrackIndex ?? 0;
                 assignment.set(track, r.angle ?? track);
@@ -1926,6 +1930,14 @@ function buildEncodeConfig(): EncodeConfig | null {
         // that is one more quality of an angle is listed only if it has a name
         // of its own to remember: a made-up `Angle <n>` for it would come back
         // as a real name the next time these labels are loaded.
+        if (multiTrack.value) {
+            config.videoTrackAngles = editableVideoTracks
+                .filter((t) => !excludedVideo.has(t.index))
+                .map((t) => ({
+                    index: t.index,
+                    angle: angleAssignment.value.get(t.index) ?? t.index,
+                }));
+        }
         config.videoTrackNames = editableVideoTracks.flatMap((t) => {
             if (namesAngle(t))
                 return [

@@ -160,6 +160,13 @@ export interface EncodeConfig {
     videoRenditions?: VideoRendition[];
     audioGroups?: AudioGroup[];
     videoTrackNames?: { index: number; name: string }[];
+    /**
+     * The angle each kept track of a multi-track source belongs to, by angle
+     * id. The encode does not use it: rows name their own angle. It is what a
+     * restore needs for a track no row is made from — one more quality of a
+     * re-encoded angle — which would otherwise go back to detection's angle.
+     */
+    videoTrackAngles?: { index: number; angle: number }[];
     /** Audio track metadata (name, language) for restored configs — persisted in localStorage only */
     audioTrackMetadata?: { index: number; name?: string; language?: string }[];
     /** Trim segments — when set, only these time ranges are encoded and concatenated */
