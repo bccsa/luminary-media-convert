@@ -1493,6 +1493,148 @@ describe('ProbeService', () => {
             vi.restoreAllMocks();
         });
 
+        // The case PR #422's rule got wrong: the programme sits on camera A at
+        // seven of the eight first-look instants, and one disagreement was
+        // forgiven. Looked at again half a second either side, the cutaway is
+        // still there, and one lasting disagreement is proof of two pictures.
+        it('keeps a programme feed apart from the camera it shows most of the time', async () => {
+            const programme = (t: number) =>
+                t >= 32 && t < 36 ? camB(t) : camA(t);
+            fakeSource([hd(camA), hd(programme)]);
+
+            const result = await service.probe('/tmp/iso.mp4');
+
+            expect(result.anglesDetected).toBe(true);
+            expect(result.videoTracks.map((t) => t.pictureGroup)).toEqual([
+                undefined,
+                undefined,
+            ]);
+        });
+
+        it('groups the qualities of one picture after verifying them at frames they share', async () => {
+            const { grabs } = fakeSource([
+                hd(camA, '50/1'),
+                sd((t) => lower(camA(t)), '25/1'),
+            ]);
+
+            const result = await service.probe('/tmp/ladder.mp4');
+
+            expect(result.videoTracks.map((t) => t.pictureGroup)).toEqual([
+                0, 0,
+            ]);
+            expect(result.videoTracks.map((t) => t.pictureMatches)).toEqual([
+                48, 48,
+            ]);
+            expect(result.videoTracks.map((t) => t.pictureVerified)).toEqual([
+                true,
+                true,
+            ]);
+            expect(grabs).toHaveLength(2 * 48);
+            // On the 25 fps track's frames, asked for half a 50 fps frame early.
+            for (const grab of grabs) {
+                const frames = (grab.at + 0.01) / 0.04;
+                expect(Math.abs(frames - Math.round(frames))).toBeLessThan(
+                    1e-6
+                );
+            }
+        });
+
+        it('excuses a disagreement the frames half a second either side agree on', async () => {
+            // A flash on one track, caught by the first look at 11.24 s.
+            const flashed = (t: number) =>
+                t >= 11.2 && t < 11.25 ? picture(-1) : lower(camA(t));
+            fakeSource([hd(camA), sd(flashed)]);
+
+            const result = await service.probe('/tmp/flash.mp4');
+
+            expect(result.videoTracks.map((t) => t.pictureGroup)).toEqual([
+                0, 0,
+            ]);
+            expect(result.videoTracks[0].pictureVerified).toBe(true);
+        });
+
+        it('marks a group unverified when time runs out while it is verified', async () => {
+            // 16 frames for the first look take 24 s of the 45; the first
+            // verifying batch runs past the deadline.
+            fakeSource([hd(camA), sd((t) => lower(camA(t)))], {
+                perGrab: 1500,
+            });
+
+            const result = await service.probe('/tmp/slow.mp4');
+
+            expect(result.anglesDetected).toBe(true);
+            expect(result.videoTracks.map((t) => t.pictureGroup)).toEqual([
+                0, 0,
+            ]);
+            expect(result.videoTracks.map((t) => t.pictureVerified)).toEqual([
+                false,
+                false,
+            ]);
+            expect(result.videoTracks[0].pictureMatches).toBeGreaterThanOrEqual(
+                8
+            );
+            expect(result.videoTracks[0].pictureMatches).toBeLessThan(48);
+        });
+
+        // A disagreement nobody could excuse is what a programme feed and its
+        // camera look like: grouping them would at worst drop a camera, so
+        // they are kept apart, and each track names the other as undecided.
+        it('keeps a pair apart, undecided, when time runs out before a disagreement is re-checked', async () => {
+            const programme = (t: number) =>
+                t >= 32 && t < 36 ? camB(t) : camA(t);
+            // The 16 first-look frames end at 44.8 s; one re-check frame fits.
+            const { grabs } = fakeSource([hd(camA), hd(programme)], {
+                perGrab: 2800,
+            });
+
+            const result = await service.probe('/tmp/undecided.mp4');
+
+            expect(result.anglesDetected).toBe(true);
+            expect(grabs).toHaveLength(17);
+            expect(result.videoTracks.map((t) => t.pictureGroup)).toEqual([
+                undefined,
+                undefined,
+            ]);
+            expect(result.videoTracks.map((t) => t.pictureUndecided)).toEqual([
+                [1],
+                [0],
+            ]);
+        });
+
+        it('abandons detection when the first look does not fit the time allowed', async () => {
+            fakeSource([hd(camA), sd((t) => lower(camA(t)))], {
+                perGrab: 4000,
+            });
+
+            const result = await service.probe('/tmp/too-slow.mp4');
+
+            expect(result.anglesDetected).toBeUndefined();
+            expect(
+                result.videoTracks.every((t) => t.pictureGroup == null)
+            ).toBe(true);
+            expect(
+                result.videoTracks.every((t) => t.keyframeGrid == null)
+            ).toBe(true);
+        });
+
+        it('stops asking a track that gave no frame at the first look', async () => {
+            const { grabs } = fakeSource([
+                hd(camA),
+                sd((t) => lower(camA(t))),
+                sd(() => null),
+            ]);
+
+            const result = await service.probe('/tmp/dead.mp4');
+
+            expect(grabs.filter((g) => g.track === 2)).toHaveLength(8);
+            expect(result.videoTracks.map((t) => t.pictureGroup)).toEqual([
+                0,
+                0,
+                undefined,
+            ]);
+            expect(result.videoTracks[0].pictureVerified).toBe(true);
+        });
+
         describe('keyframe grids', () => {
             const ladder = () => [hd(camA), sd((t) => lower(camA(t)))];
             const every2s = (from: number, to: number) =>

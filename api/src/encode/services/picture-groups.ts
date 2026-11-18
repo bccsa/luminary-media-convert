@@ -9,8 +9,16 @@ import { displayDimensionsOf, type AspectTrack } from './aspect.js';
  * built. Several *pictures* — two cameras in one recording — are separate
  * angles, each wanting a ladder of its own. Metadata cannot tell them apart:
  * two cameras on one switcher share a frame size, a frame rate and a duration.
- * The pixels can, so a handful of tiny frames is taken from every track at the
- * same instants and compared.
+ * The pixels can, so tiny frames are taken from every track at the same
+ * instants and compared.
+ *
+ * Agreement and disagreement are not equal evidence. Two qualities of one
+ * picture never show different things, so one disagreement that a scene cut
+ * cannot explain proves two pictures. Agreement proves nothing on its own: a
+ * programme feed that sits on one camera most of the time agrees with that
+ * camera at almost every instant. So a pair is settled the moment it
+ * disagrees, and a pair that keeps agreeing is sampled further before it is
+ * believed — see {@link comparePair}.
  *
  * Pure, so it can be reasoned about without ffmpeg: the probe grabs the frames
  * and this decides what they mean.
@@ -21,8 +29,38 @@ export const SAMPLE_WIDTH = 32;
 export const SAMPLE_HEIGHT = 18;
 export const SAMPLE_BYTES = SAMPLE_WIDTH * SAMPLE_HEIGHT;
 
-/** Instants sampled per track. */
+/** Instants sampled from every track: the first look. */
 export const SAMPLE_COUNT = 8;
+
+/**
+ * Further instants sampled from the tracks of a pair that agreed at the first
+ * look, before the pair is believed to be one picture.
+ *
+ * Agreement is weak evidence, and how weak depends on how often the tracks
+ * show the same thing anyway. A programme feed on one camera 90% of the time
+ * slips through 8 instants nearly half the time even when every disagreement
+ * counts; through 48, under 1%. Only pairs still agreeing pay for these, so
+ * two different cameras — settled at the first disagreement — cost nothing
+ * more. What sampling cannot catch, a feed on one camera nearly all of the
+ * time, the form flags by other means.
+ */
+export const VERIFY_SAMPLE_COUNT = 40;
+
+/** Further instants taken per round, before the pairs are judged again. */
+export const VERIFY_BATCH = 8;
+
+/**
+ * How far either side of a disagreement the two tracks are looked at again,
+ * in milliseconds.
+ *
+ * Two qualities of one picture can still disagree at an instant: tracks at
+ * different frame rates do not hold a frame at the same moment, and a sample
+ * landing on a scene cut can catch one track either side of it. Half a second
+ * either way steps clear of the cut, and of any frame offset, so tracks that
+ * agree there were one picture all along. Two pictures go on disagreeing,
+ * unless a cutaway was shorter than a second and centred on the instant.
+ */
+export const RECHECK_OFFSET_MS = 500;
 
 /**
  * Correlation between two frames' pixels at or above which they show one
@@ -52,15 +90,8 @@ export const MATCH_CORRELATION = 0.95;
  */
 export const FLAT_THRESHOLD = 3;
 
-/** Informative instants a pair needs before it may be called one picture. */
+/** Agreeing instants a pair needs before it may be called one picture. */
 export const MIN_INFORMATIVE = 5;
-
-/**
- * Informative instants a matching pair may still disagree on. One, because
- * tracks at different frame rates do not hold a frame at the same instant, and
- * a sample landing on a scene cut can catch one track either side of it.
- */
-export const MAX_MISMATCHES = 1;
 
 /** Display aspect ratios further apart than this are never one picture. */
 export const ASPECT_TOLERANCE = 0.02;
@@ -70,13 +101,218 @@ export interface PictureTrack extends AspectTrack {
 }
 
 /**
- * One track's frames, one entry per sampled instant, in the same order for
- * every track. Null where the track had no frame to give there.
+ * One track's frames, by instant in whole milliseconds on the source timeline.
+ * Null where the track had no frame to give there; absent where it was not
+ * asked.
  */
-export type TrackSamples = readonly (Uint8Array | null)[];
+export type TrackFrames = ReadonlyMap<number, Uint8Array | null>;
+
+/** What comparing two tracks has shown so far. See {@link comparePair}. */
+export interface PairEvidence {
+    /** Instants where at least one of the two frames had a picture. */
+    informative: number;
+    /** Of those, the instants where the frames showed the same picture. */
+    matched: number;
+    /** Disagreements the frames either side explained: a cut or frame offset. */
+    explained: number;
+    /**
+     * A disagreement the frames either side did not explain — proof of two
+     * pictures. Comparison stops at the first, so this is 0 or 1.
+     */
+    confirmed: number;
+    /**
+     * Instants not yet sampled that the earliest unexplained disagreement
+     * needs looked at, from both tracks, before the pair can be judged. Empty
+     * when every disagreement found so far is accounted for.
+     */
+    needed: number[];
+}
+
+/**
+ * Compare two tracks at `instants`, re-checking each disagreement at the
+ * instants `neighbours` gives for it.
+ *
+ * An instant either track gave no frame at is skipped, and so is one where
+ * both frames are flat: every source agrees on what black looks like. One
+ * where only one frame is flat is still compared, and a flat frame correlates
+ * with a picture only when it is a dim copy of it — a proxy is not black while
+ * its master shows a picture. See {@link framesAgree}, which judges the
+ * neighbours by the same rule.
+ *
+ * A disagreement is looked at again either side. If the tracks agree at every
+ * neighbour that has frames from both, it is explained. If they disagree at
+ * any, it is confirmed and the pair is settled. Neighbours not yet sampled are
+ * asked for, only for the earliest disagreement in want of them, so a pair of
+ * different cameras costs one re-check, not one per instant.
+ */
+export function comparePair(
+    a: TrackFrames,
+    b: TrackFrames,
+    instants: readonly number[],
+    neighbours: (instant: number) => readonly number[]
+): PairEvidence {
+    const evidence: PairEvidence = {
+        informative: 0,
+        matched: 0,
+        explained: 0,
+        confirmed: 0,
+        needed: [],
+    };
+    for (const instant of instants) {
+        const fa = a.get(instant);
+        const fb = b.get(instant);
+        if (!fa || !fb) continue;
+        const sa = frameStats(fa);
+        const sb = frameStats(fb);
+        if (sa.stdDev < FLAT_THRESHOLD && sb.stdDev < FLAT_THRESHOLD) continue;
+        evidence.informative++;
+        if (frameCorrelation(fa, sa, fb, sb) >= MATCH_CORRELATION) {
+            evidence.matched++;
+            continue;
+        }
+
+        let seen = 0;
+        const missing: number[] = [];
+        for (const n of neighbours(instant)) {
+            const na = a.get(n);
+            const nb = b.get(n);
+            if (na === undefined || nb === undefined) {
+                missing.push(n);
+                continue;
+            }
+            // A track with no frame there says nothing either way.
+            if (!na || !nb) continue;
+            seen++;
+            if (!framesAgree(na, nb)) {
+                evidence.confirmed = 1;
+                evidence.needed = [];
+                return evidence;
+            }
+        }
+        if (missing.length > 0) {
+            if (evidence.needed.length === 0) evidence.needed = missing;
+            continue;
+        }
+        // Nothing either side to excuse it with: it stands.
+        if (seen === 0) {
+            evidence.confirmed = 1;
+            evidence.needed = [];
+            return evidence;
+        }
+        evidence.explained++;
+    }
+    return evidence;
+}
+
+/**
+ * The pair has shown that it is two pictures.
+ *
+ * Only a confirmed disagreement does. Explained ones are not counted against a
+ * pair however many there are: tracks at frame rates that do not divide each
+ * other, on fast motion, can disagree at many instants and still be one
+ * picture. Two cameras framed so nearly alike that they agree a second either
+ * side of every disagreement are a question for {@link MATCH_CORRELATION}.
+ */
+export function provenDifferent(evidence: PairEvidence): boolean {
+    return evidence.confirmed > 0;
+}
+
+/**
+ * The pair may be one picture on what has been compared: nothing proves two,
+ * nothing is waiting to be re-checked, and enough instants agreed. Whether
+ * enough instants were *compared* to believe it is the caller's question.
+ */
+export function stillAlike(evidence: PairEvidence): boolean {
+    return (
+        !provenDifferent(evidence) &&
+        evidence.needed.length === 0 &&
+        evidence.matched >= MIN_INFORMATIVE
+    );
+}
+
+/** When a track's frames fall: its first frame and the time between, seconds. */
+export interface FrameCadence {
+    start: number;
+    period: number;
+}
+
+/** Where on the timeline a sample is taken, and how to ask for it. */
+export interface InstantAligner {
+    /** The instant (ms) moved onto a frame the tracks share, where they do. */
+    align(instant: number): number;
+    /**
+     * Where to seek for the frame at an aligned instant: seconds on the source
+     * timeline, from which the first frame is the one wanted.
+     */
+    seekFor(instant: number): number;
+}
+
+/**
+ * Sample at frames the tracks hold at the same moment.
+ *
+ * A seek returns a track's first frame at or after the instant asked for, and
+ * tracks at different frame rates hold different frames there: at 11.25 s a
+ * 50 fps track gives its frame at 11.26, a 25 fps one its frame at 11.28. On
+ * fast motion, or with a cut between the two, one picture reads as two. So
+ * every instant is moved onto the slowest track's frame grid — which a ladder
+ * that halves its frame rate for the low rungs shares with every rung — and
+ * the frame is asked for half the fastest track's frame early, so rounding to
+ * a millisecond cannot push it to the next one. Where the rates do not divide
+ * each other, the faster tracks give their first frame after, as before.
+ *
+ * Unaligned when any track's cadence is unknown.
+ */
+export function instantAligner(
+    cadences: readonly (FrameCadence | undefined)[]
+): InstantAligner {
+    const unaligned: InstantAligner = {
+        align: (instant) => instant,
+        seekFor: (instant) => instant / 1000,
+    };
+    const known = cadences.filter(
+        (c): c is FrameCadence =>
+            c != null && Number.isFinite(c.start) && c.period > 0
+    );
+    if (known.length === 0 || known.length !== cadences.length)
+        return unaligned;
+    const grid = known.reduce((a, b) => (b.period > a.period ? b : a));
+    const early = Math.min(...known.map((c) => c.period)) / 2;
+    // Under a millisecond the rounding could land past the frame wanted.
+    if (early < 0.001) return unaligned;
+    return {
+        align: (instant) =>
+            Math.round(
+                (grid.start +
+                    Math.round((instant / 1000 - grid.start) / grid.period) *
+                        grid.period) *
+                    1000
+            ),
+        seekFor: (instant) => instant / 1000 - early,
+    };
+}
+
+/**
+ * The instants either side of `instant` that a disagreement there is checked
+ * at, inside `start`..`end`. All three in whole milliseconds.
+ */
+export function recheckInstants(
+    instant: number,
+    start: number,
+    end: number
+): number[] {
+    return [instant - RECHECK_OFFSET_MS, instant + RECHECK_OFFSET_MS].filter(
+        (n) => n >= start && n <= end
+    );
+}
 
 /**
  * Which tracks show the same picture, as a map from track index to group id.
+ *
+ * `alike` answers for a pair of track indices; tracks of different shapes are
+ * never asked. A track joins the first group it is alike with *every* member
+ * of, so a chain — A like B, B like C, but A proven unlike C — cannot pull A
+ * and C into one angle. Were the evidence an exact equivalence that would make
+ * no difference; it is not, and it errs here towards keeping pictures apart.
  *
  * Only tracks in a group of two or more appear. The id is the group's lowest
  * track index: an identifier, deliberately not a verdict on which member is
@@ -85,44 +321,22 @@ export type TrackSamples = readonly (Uint8Array | null)[];
  */
 export function groupPictures(
     tracks: readonly PictureTrack[],
-    samples: ReadonlyMap<number, TrackSamples>
+    alike: (a: number, b: number) => boolean
 ): Map<number, number> {
-    const parent = new Map<number, number>();
-    const find = (i: number): number => {
-        let root = i;
-        while (parent.get(root)! !== root) root = parent.get(root)!;
-        parent.set(i, root);
-        return root;
-    };
-    for (const t of tracks) parent.set(t.index, t.index);
-
-    for (let a = 0; a < tracks.length; a++) {
-        for (let b = a + 1; b < tracks.length; b++) {
-            const ta = tracks[a];
-            const tb = tracks[b];
-            if (!sameAspect(ta, tb)) continue;
-            const sa = samples.get(ta.index);
-            const sb = samples.get(tb.index);
-            if (!sa || !sb) continue;
-            if (!samePicture(sa, sb)) continue;
-            const ra = find(ta.index);
-            const rb = find(tb.index);
-            if (ra !== rb) parent.set(Math.max(ra, rb), Math.min(ra, rb));
-        }
-    }
-
-    const members = new Map<number, number[]>();
-    for (const t of tracks) {
-        const root = find(t.index);
-        if (!members.has(root)) members.set(root, []);
-        members.get(root)!.push(t.index);
+    const same = (a: PictureTrack, b: PictureTrack) =>
+        sameAspect(a, b) && alike(a.index, b.index);
+    const found: PictureTrack[][] = [];
+    for (const track of tracks) {
+        const home = found.find((g) => g.every((m) => same(m, track)));
+        if (home) home.push(track);
+        else found.push([track]);
     }
 
     const groups = new Map<number, number>();
-    for (const list of members.values()) {
-        if (list.length < 2) continue;
-        const id = Math.min(...list);
-        for (const index of list) groups.set(index, id);
+    for (const members of found) {
+        if (members.length < 2) continue;
+        const id = Math.min(...members.map((m) => m.index));
+        for (const m of members) groups.set(m.index, id);
     }
     return groups;
 }
@@ -139,29 +353,16 @@ export function sameAspect(a: AspectTrack, b: AspectTrack): boolean {
 }
 
 /**
- * Two tracks' samples show one picture: enough informative instants, and all
- * but {@link MAX_MISMATCHES} of them correlated at {@link MATCH_CORRELATION}.
- *
- * An instant where both frames are flat is skipped. One where only one is flat
- * counts against the pair: a proxy is not black while its master shows a
- * picture.
+ * Two frames show the same thing: both flat — black, a fade — or correlated at
+ * {@link MATCH_CORRELATION}. The rule a sampled instant is matched by, so a
+ * dim pair either side of the flat threshold is not one picture as a sample
+ * and two as a neighbour.
  */
-export function samePicture(a: TrackSamples, b: TrackSamples): boolean {
-    let informative = 0;
-    let mismatches = 0;
-    const n = Math.min(a.length, b.length);
-    for (let i = 0; i < n; i++) {
-        const fa = a[i];
-        const fb = b[i];
-        if (!fa || !fb) continue;
-        const sa = frameStats(fa);
-        const sb = frameStats(fb);
-        if (sa.stdDev < FLAT_THRESHOLD && sb.stdDev < FLAT_THRESHOLD) continue;
-        informative++;
-        if (frameCorrelation(fa, sa, fb, sb) < MATCH_CORRELATION) mismatches++;
-        if (mismatches > MAX_MISMATCHES) return false;
-    }
-    return informative >= MIN_INFORMATIVE;
+export function framesAgree(a: Uint8Array, b: Uint8Array): boolean {
+    const sa = frameStats(a);
+    const sb = frameStats(b);
+    if (sa.stdDev < FLAT_THRESHOLD && sb.stdDev < FLAT_THRESHOLD) return true;
+    return frameCorrelation(a, sa, b, sb) >= MATCH_CORRELATION;
 }
 
 export interface FrameStats {
@@ -201,19 +402,25 @@ export function frameStats(frame: Uint8Array): FrameStats {
 }
 
 /**
- * The instants to sample, inside the span every track covers.
+ * The instants to sample, inside the span every track covers, in whole
+ * milliseconds: `count` of them, `phase` of the way into each of `count` equal
+ * slices.
  *
- * Centred in eight equal slices, so neither the head (slates, black) nor the
- * very end (a track that stops a frame early) is asked for a frame.
+ * Centred by default, so neither the head (slates, black) nor the very end (a
+ * track that stops a frame early) is asked for a frame. The verifying round
+ * takes a different count and phase, so none of its instants repeats one of
+ * the first look's.
  */
-export function sampleInstants(start: number, end: number): number[] {
+export function sampleInstants(
+    start: number,
+    end: number,
+    count = SAMPLE_COUNT,
+    phase = 0.5
+): number[] {
     const span = end - start;
-    if (!(span > 0)) return [];
-    return Array.from(
-        { length: SAMPLE_COUNT },
-        (_, i) =>
-            Math.round((start + (span * (i + 0.5)) / SAMPLE_COUNT) * 1000) /
-            1000
+    if (!(span > 0) || count < 1) return [];
+    return Array.from({ length: count }, (_, i) =>
+        Math.round(start + (span * (i + phase)) / count)
     );
 }
 
