@@ -1751,6 +1751,60 @@ describe('EncodeController', () => {
                 { inputPath: '/tmp/input.mp4', durationSec: 166.68 }
             );
         });
+
+        /** An edit session: a published video, opened without a source file. */
+        const editSession = () =>
+            sessionService.create(
+                {
+                    ...makeConfig(),
+                    s3: { ...makeConfig().s3, pathPrefix: 'posts/p1/s1' },
+                },
+                {
+                    edit: {
+                        masterKey: 'posts/p1/s1/master_r2.m3u8',
+                        encrypted: true,
+                    },
+                }
+            );
+
+        it('gives an edit session the waveform its video was published with', async () => {
+            hlsEditService.readWaveform = vi.fn().mockResolvedValue({
+                version: 2,
+                sampleRate: 8000,
+                numPeaks: 3,
+                peaks: [0.1, 0.5, 0.2],
+            });
+            const session = editSession();
+
+            const result = await controller.getWaveform(
+                session.id,
+                session.sessionToken
+            );
+
+            expect(result).toEqual({ peaks: [0.1, 0.5, 0.2], numPeaks: 3 });
+            expect(hlsEditService.readWaveform).toHaveBeenCalledWith(
+                expect.objectContaining({ bucket: 'test' }),
+                'posts/p1/s1'
+            );
+            expect(waveformService.getOrComputeCached).not.toHaveBeenCalled();
+        });
+
+        it('answers 404 for an edit session whose video has no published waveform', async () => {
+            hlsEditService.readWaveform = vi.fn().mockResolvedValue(null);
+            const session = editSession();
+
+            await expect(
+                controller.getWaveform(session.id, session.sessionToken)
+            ).rejects.toThrow(NotFoundException);
+        });
+
+        it('still refuses a new session with no source file yet', async () => {
+            const session = sessionService.create(makeConfig());
+
+            await expect(
+                controller.getWaveform(session.id, session.sessionToken)
+            ).rejects.toThrow(BadRequestException);
+        });
     });
 
     describe('streamEvents - encoder field', () => {

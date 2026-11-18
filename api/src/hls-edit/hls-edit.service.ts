@@ -896,10 +896,7 @@ function chaptersKey(folderPrefix: string, lang: string): string {
 }
 
 function waveformKey(folderPrefix: string): string {
-    const prefix = folderPrefix.endsWith('/')
-        ? folderPrefix
-        : folderPrefix + '/';
-    return `${prefix}waveform.json`;
+    return `${withSlash(folderPrefix)}waveform.json`;
 }
 
 function withSlash(folderPrefix: string): string {
