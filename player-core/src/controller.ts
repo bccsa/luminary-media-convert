@@ -508,18 +508,26 @@ export class PlayerController implements PlayerControllerApi {
      *
      * Asked again on every angle switch, because a master can name a strip per
      * angle. One strip for every angle is the common case, and then a switch
-     * resolves to the URL already shown and reads nothing.
+     * resolves to the URL already shown and reads nothing — unless reading it
+     * gave no frames, which the next switch tries again.
      */
     private async attachThumbnails(generation: number): Promise<void> {
         const url = this.thumbnailStripFor(this.state.activeAngleId);
         if (url === this.thumbnailStripUrl) return;
         this.thumbnailStripUrl = url;
+        // The last angle's frames would preview the wrong picture: none until
+        // this angle's strip is in.
+        if (this.thumbnailCues.length > 0) {
+            this.thumbnailCues = [];
+            this.updateThumbnailsReady();
+        }
         const cues =
             (await this.sidecarLoader?.loadThumbnails(
                 url ? { url } : undefined,
             )) ?? [];
         if (generation !== this.generation || this.thumbnailStripUrl !== url)
             return;
+        if (cues.length === 0) this.thumbnailStripUrl = undefined;
         this.thumbnailCues = cues;
         this.updateThumbnailsReady();
     }
