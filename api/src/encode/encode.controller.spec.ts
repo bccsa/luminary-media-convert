@@ -17,6 +17,7 @@ import { SessionService } from './services/session.service.js';
 import { QueueService } from './services/queue.service.js';
 import { FfmpegService } from './services/ffmpeg.service.js';
 import { PreviewService } from './services/preview.service.js';
+import { VideoRevisionService } from './services/video-revision.service.js';
 import type { CreateSessionDto } from './dto/create-session.dto.js';
 import type { EncodeConfigDto } from './dto/encode-config.dto.js';
 import type { Response } from 'express';
@@ -132,6 +133,7 @@ describe('EncodeController', () => {
     let hlsEditService: any;
     let waveformService: any;
     let thumbnailService: any;
+    let cmsAckService: any;
     let testWorkDir: string;
 
     beforeEach(() => {
@@ -176,7 +178,11 @@ describe('EncodeController', () => {
         };
         hlsEditService = {
             readChapters: vi.fn().mockResolvedValue(null),
-            writeChapters: vi.fn().mockResolvedValue(undefined),
+            writeChapterFile: vi.fn(async (_s3, _prefix, lang: string) => ({
+                lang,
+                uri: `chapters/${lang}_0123abcd.vtt`,
+            })),
+            writeLegacyChapters: vi.fn().mockResolvedValue(undefined),
         };
         waveformService = {
             getOrComputeCached: vi
@@ -193,6 +199,19 @@ describe('EncodeController', () => {
                 pipe: vi.fn().mockReturnValue({ subscribe: vi.fn() }),
             }),
         } as any;
+        // A CMS that has stored every version, and stores each new one.
+        cmsAckService = {
+            assertReady: vi.fn().mockResolvedValue(undefined),
+            awaitAck: vi.fn().mockResolvedValue(true),
+        };
+        // Saves run one at a time; the revision written is the one the
+        // edit-service stand-in says it wrote.
+        const masterRevisions = {
+            withVideoLock: vi.fn((_key: string, fn: () => Promise<unknown>) =>
+                fn()
+            ),
+            latestRevision: vi.fn(),
+        };
         controller = new EncodeController(
             sessionService,
             sessionEventsService,
@@ -204,11 +223,14 @@ describe('EncodeController', () => {
             waveformService,
             thumbnailService,
             (addAudioTrackService = makeAddAudioTrackService()),
-            {} as any,
+            { job: vi.fn().mockReturnValue(undefined), start: vi.fn() } as any,
             (addVideoAngleService = makeAddVideoAngleService()),
-            {} as any,
-            // A CMS that has stored every version.
-            { assertCmsReady: vi.fn().mockResolvedValue(undefined) } as any
+            cmsAckService,
+            new VideoRevisionService(
+                sessionService,
+                masterRevisions as any,
+                cmsAckService
+            )
         );
     });
 
@@ -257,13 +279,20 @@ describe('EncodeController', () => {
     describe('an edit session on an existing video', () => {
         const KEY = '000102030405060708090a0b0c0d0e0f';
         const MASTER_KEY = 'posts/p1/s1/master.m3u8';
+        const R1 = 'posts/p1/s1/master_r1.m3u8';
+        const R2 = 'posts/p1/s1/master_r2.m3u8';
+        const CDN = 'https://cdn.example.com/posts/p1/s1';
         function editSession(encrypted: boolean) {
             const session = sessionService.createWith(
                 () => ({
                     ...makeConfig(),
                     s3: { ...makeConfig().s3, pathPrefix: 'posts/p1/s1' },
                 }),
-                { origin: 'cms', edit: { masterKey: MASTER_KEY, encrypted } }
+                {
+                    origin: 'cms',
+                    edit: { masterKey: MASTER_KEY, encrypted },
+                    hlsUrl: `${CDN}/master.m3u8`,
+                }
             );
             sessionService.setEncryptionKey(session.id, KEY);
             return session;
@@ -283,36 +312,99 @@ describe('EncodeController', () => {
             ).rejects.toThrow(ConflictException);
         });
 
-        it('writes chapters encrypted beside an encrypted video, asking the CDN to check back', async () => {
+        it('writes chapters encrypted beside an encrypted video, names them in a new revision, then updates the legacy copy', async () => {
             const session = editSession(true);
-            await controller.putChapters(session.id, { vtt: 'WEBVTT\n' }, 'en');
-            expect(hlsEditService.writeChapters).toHaveBeenCalledWith(
+            hlsEditService.publishChapters = vi
+                .fn()
+                .mockResolvedValue({ masterKey: R1, etag: 'v2' });
+
+            const result = await controller.putChapters(
+                session.id,
+                { vtt: 'WEBVTT\n' },
+                'en'
+            );
+
+            expect(hlsEditService.writeChapterFile).toHaveBeenCalledWith(
                 expect.anything(),
                 'posts/p1/s1',
                 'en',
                 'WEBVTT\n',
-                KEY,
-                { cacheControl: 'no-cache' }
+                KEY
+            );
+            expect(hlsEditService.publishChapters).toHaveBeenCalledWith(
+                expect.anything(),
+                MASTER_KEY,
+                { en: 'chapters/en_0123abcd.vtt' },
+                KEY
+            );
+            expect(hlsEditService.writeLegacyChapters).toHaveBeenCalledWith(
+                expect.anything(),
+                'posts/p1/s1',
+                'en',
+                'WEBVTT\n',
+                KEY
+            );
+            // Only once the save has landed: a refused one leaves older
+            // viewers on the chapters they had.
+            expect(
+                hlsEditService.writeLegacyChapters.mock.invocationCallOrder[0]
+            ).toBeGreaterThan(
+                hlsEditService.publishChapters.mock.invocationCallOrder[0]
+            );
+            expect(result).toEqual({
+                hlsUrl: `${CDN}/master_r1.m3u8`,
+                masterPlaylist: R1,
+                etag: 'v2',
+                published: true,
+            });
+            expect(sessionService.get(session.id)?.edit?.masterKey).toBe(R1);
+            expect(cmsAckService.awaitAck).toHaveBeenCalledWith(
+                session.id,
+                `${CDN}/master_r1.m3u8`
             );
         });
 
         it('writes chapters in plaintext beside a plaintext video, though it holds a key', async () => {
             const session = editSession(false);
+            hlsEditService.publishChapters = vi
+                .fn()
+                .mockResolvedValue({ masterKey: R1, etag: 'v2' });
             await controller.putChapters(session.id, { vtt: 'WEBVTT\n' }, 'en');
             expect(
-                hlsEditService.writeChapters.mock.calls[0][4]
+                hlsEditService.writeChapterFile.mock.calls[0][4]
             ).toBeUndefined();
+            expect(
+                hlsEditService.writeLegacyChapters.mock.calls[0][4]
+            ).toBeUndefined();
+        });
+
+        it('writes no chapters, and leaves the legacy copy alone, when the CMS has not stored the current version', async () => {
+            const session = editSession(false);
+            hlsEditService.publishChapters = vi.fn();
+            cmsAckService.assertReady.mockRejectedValue(
+                new ConflictException({ code: 'CMS_NOT_ACKNOWLEDGED' })
+            );
+            await expect(
+                controller.putChapters(session.id, { vtt: 'WEBVTT\n' }, 'en')
+            ).rejects.toThrow(ConflictException);
+            expect(hlsEditService.writeChapterFile).not.toHaveBeenCalled();
+            expect(hlsEditService.publishChapters).not.toHaveBeenCalled();
+            expect(hlsEditService.writeLegacyChapters).not.toHaveBeenCalled();
         });
 
         it('reads and saves the audio tracks of the video it opened', async () => {
             const session = editSession(true);
             hlsEditService.readEncodedMedia = vi
                 .fn()
-                .mockResolvedValue({ etag: 'v1' });
+                .mockResolvedValue({ etag: 'v1', masterKey: MASTER_KEY });
             hlsEditService.saveAudioTracks = vi
                 .fn()
-                .mockResolvedValue({ etag: 'v2' });
-            await controller.getEncodedMedia(session.id);
+                .mockResolvedValue({ etag: 'v2', masterKey: R1 });
+            expect(await controller.getEncodedMedia(session.id)).toEqual({
+                etag: 'v1',
+                hlsUrl: `${CDN}/master.m3u8`,
+                masterPlaylist: MASTER_KEY,
+            });
             expect(hlsEditService.readEncodedMedia).toHaveBeenCalledWith(
                 expect.anything(),
                 MASTER_KEY,
@@ -326,7 +418,7 @@ describe('EncodeController', () => {
                 },
             ];
             const remove = [{ language: 'en', name: 'English' }];
-            await controller.putAudioTracks(session.id, {
+            const saved = await controller.putAudioTracks(session.id, {
                 ifMatch: 'v1',
                 edits,
                 remove,
@@ -339,13 +431,24 @@ describe('EncodeController', () => {
                 KEY,
                 remove
             );
+            // Answered with the revision it wrote, and that the CMS stored it.
+            expect(saved).toEqual({
+                etag: 'v2',
+                hlsUrl: `${CDN}/master_r1.m3u8`,
+                masterPlaylist: R1,
+                published: true,
+            });
         });
 
         it("reads, writes and removes a language's subtitles of the video it opened, with its key", async () => {
             const session = editSession(true);
             hlsEditService.readSubtitles = vi.fn().mockResolvedValue({ language: 'fr', name: 'Français', vtt: 'WEBVTT\n' });
-            hlsEditService.saveSubtitles = vi.fn().mockResolvedValue({ etag: 'v2' });
-            hlsEditService.removeSubtitles = vi.fn().mockResolvedValue({ etag: 'v3' });
+            hlsEditService.saveSubtitles = vi
+                .fn()
+                .mockResolvedValue({ etag: 'v2', masterKey: R1 });
+            hlsEditService.removeSubtitles = vi
+                .fn()
+                .mockResolvedValue({ etag: 'v3', masterKey: R2 });
 
             await controller.getSubtitles(session.id, 'fr');
             expect(hlsEditService.readSubtitles).toHaveBeenCalledWith(expect.anything(), MASTER_KEY, 'fr', KEY);
@@ -359,8 +462,16 @@ describe('EncodeController', () => {
                 KEY
             );
 
+            // The session is on the revision the save wrote, and builds on it.
             await controller.deleteSubtitles(session.id, 'fr', 'v2');
-            expect(hlsEditService.removeSubtitles).toHaveBeenCalledWith(expect.anything(), MASTER_KEY, 'v2', 'fr', KEY);
+            expect(hlsEditService.removeSubtitles).toHaveBeenCalledWith(
+                expect.anything(),
+                R1,
+                'v2',
+                'fr',
+                KEY
+            );
+            expect(sessionService.get(session.id)?.edit?.masterKey).toBe(R2);
             await expect(controller.deleteSubtitles(session.id, 'fr', '')).rejects.toThrow(BadRequestException);
         });
 
@@ -378,7 +489,7 @@ describe('EncodeController', () => {
             const session = editSession(false);
             hlsEditService.readEncodedMedia = vi
                 .fn()
-                .mockResolvedValue({ etag: 'v1' });
+                .mockResolvedValue({ etag: 'v1', masterKey: MASTER_KEY });
             const adding = {
                 state: 'running',
                 phase: 'encoding',
@@ -389,6 +500,8 @@ describe('EncodeController', () => {
             addAudioTrackService.job.mockReturnValue(adding);
             expect(await controller.getEncodedMedia(session.id)).toEqual({
                 etag: 'v1',
+                hlsUrl: `${CDN}/master.m3u8`,
+                masterPlaylist: MASTER_KEY,
                 adding,
             });
         });
@@ -428,7 +541,7 @@ describe('EncodeController', () => {
             const session = editSession(false);
             hlsEditService.readEncodedMedia = vi
                 .fn()
-                .mockResolvedValue({ etag: 'v1' });
+                .mockResolvedValue({ etag: 'v1', masterKey: MASTER_KEY });
             const addingAngle = {
                 state: 'running',
                 phase: 'encoding',
@@ -438,6 +551,8 @@ describe('EncodeController', () => {
             addVideoAngleService.job.mockReturnValue(addingAngle);
             expect(await controller.getEncodedMedia(session.id)).toEqual({
                 etag: 'v1',
+                hlsUrl: `${CDN}/master.m3u8`,
+                masterPlaylist: MASTER_KEY,
                 addingAngle,
             });
         });
@@ -446,7 +561,7 @@ describe('EncodeController', () => {
             const session = editSession(true);
             hlsEditService.saveVideoAngles = vi
                 .fn()
-                .mockResolvedValue({ etag: 'v2' });
+                .mockResolvedValue({ etag: 'v2', masterKey: R1 });
             const edits = [{ id: 'pulpit', name: 'Pulpit camera' }];
             await controller.putVideoAngles(session.id, {
                 ifMatch: 'v1',
@@ -455,7 +570,7 @@ describe('EncodeController', () => {
             });
             expect(hlsEditService.saveVideoAngles).toHaveBeenCalledWith(
                 expect.anything(),
-                expect.any(String),
+                MASTER_KEY,
                 'v1',
                 edits,
                 KEY,
@@ -1674,7 +1789,7 @@ describe('EncodeController', () => {
 
         it('should map SSE events to include encoder field in data', async () => {
             const { Subject } = await import('rxjs');
-            const { firstValueFrom } = await import('rxjs');
+            const { firstValueFrom, take, toArray } = await import('rxjs');
 
             ffmpegService.getAccelMode.mockReturnValue('apple');
             const subject = new Subject<any>();
@@ -1702,16 +1817,24 @@ describe('EncodeController', () => {
                 session.sessionToken
             );
 
-            // Emit an event and capture what the mapped observable produces
-            const resultPromise = firstValueFrom(observable);
+            // The session as it stands comes first, then each event; both
+            // carry the encoder.
+            const resultPromise = firstValueFrom(
+                observable.pipe(take(2), toArray())
+            );
             subject.next({
                 sessionId: session.id,
                 status: 'encoding',
                 progress: 50,
             });
 
-            const result = await resultPromise;
-            expect(result).toEqual({
+            const [snapshot, event] = await resultPromise;
+            expect(snapshot.data).toMatchObject({
+                sessionId: session.id,
+                status: 'created',
+                encoder: 'apple',
+            });
+            expect(event).toEqual({
                 data: {
                     sessionId: session.id,
                     status: 'encoding',
@@ -2257,6 +2380,7 @@ describe('EncodeController', () => {
 describe('EncodeController — source storyboard', () => {
     let sessionService: SessionService;
     let thumbnailService: any;
+    let videoRevisions: { assertCmsReady: ReturnType<typeof vi.fn> };
     let ctrl: EncodeController;
 
     const VTT = [
@@ -2310,7 +2434,11 @@ describe('EncodeController — source storyboard', () => {
             thumbnailService,
             (addAudioTrackService = makeAddAudioTrackService()),
             {} as any,
-            (addVideoAngleService = makeAddVideoAngleService())
+            (addVideoAngleService = makeAddVideoAngleService()),
+            {} as any,
+            (videoRevisions = {
+                assertCmsReady: vi.fn().mockResolvedValue(undefined),
+            }) as any
         );
     });
 
@@ -2685,6 +2813,10 @@ describe('EncodeController — source storyboard', () => {
 
             await ctrl.regenerateThumbnails(session.id);
 
+            // The new strip ends in a new version: the CMS is checked first.
+            expect(videoRevisions.assertCmsReady).toHaveBeenCalledWith(
+                session.id
+            );
             expect(start).toHaveBeenCalledWith(session.id, video);
             expect(thumbnailService.regeneratePreview).not.toHaveBeenCalled();
         });
