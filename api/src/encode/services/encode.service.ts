@@ -26,6 +26,7 @@ import {
     isNetworkFailure,
 } from './failure-message.js';
 import { freeBytes } from './disk-space.js';
+import { ladderSessionCap, MAX_HARDWARE_SESSIONS } from './encoder-sessions.js';
 import {
     SESSION_STATE_FILENAME,
     SessionService,
@@ -608,6 +609,12 @@ export class EncodeService implements OnModuleInit {
                     outputDir,
                     encodeConfig,
                     onProgress: onEncodeProgress,
+                    // Named only when it holds a session back: an encode with
+                    // every session is asked for exactly as it always was.
+                    ...(session.encoderSessionCap !== undefined &&
+                    session.encoderSessionCap < MAX_HARDWARE_SESSIONS
+                        ? { sessionCap: session.encoderSessionCap }
+                        : {}),
                     ...(thisRun.ffmpegResume
                         ? { resume: thisRun.ffmpegResume }
                         : {}),
@@ -982,6 +989,23 @@ export class EncodeService implements OnModuleInit {
         const previous = await store.readState();
         const attempt = previous ? previous.attempt + 1 : 0;
 
+        // Decided once per session and kept, because the waves a continue
+        // skips are the waves the run before it planned. A session with a run
+        // behind it and no cap recorded encoded before this was recorded, with
+        // every session.
+        if (session.encoderSessionCap === undefined) {
+            const cap = previous
+                ? MAX_HARDWARE_SESSIONS
+                : ladderSessionCap(session.id);
+            this.sessionService.setEncoderSessionCap(session.id, cap);
+            session.encoderSessionCap = cap;
+            if (cap < MAX_HARDWARE_SESSIONS) {
+                this.logger.log(
+                    `Session ${session.id}: keeping one encoder session free for the preview`
+                );
+            }
+        }
+
         // Cleared until this run fails and works out a new one.
         this.sessionService.setResumeFrom(session.id, undefined);
         let next: Omit<ResumeState, 'attempt' | 'ivHex'> | null = null;
@@ -997,7 +1021,10 @@ export class EncodeService implements OnModuleInit {
         if (session.filePath && !blocker) {
             try {
                 const source = await stat(session.filePath);
-                layout = this.ffmpegService.waveLayout(config);
+                layout = this.ffmpegService.waveLayout(
+                    config,
+                    session.encoderSessionCap
+                );
                 next = {
                     // What decides the output's bytes and where they go.
                     configHash: stableHash({
@@ -1269,7 +1296,10 @@ export class EncodeService implements OnModuleInit {
             if (!config || (await store.readState()) === null) return null;
             const c = this.continuation(
                 store,
-                this.ffmpegService.waveLayout(config),
+                this.ffmpegService.waveLayout(
+                    config,
+                    session.encoderSessionCap
+                ),
                 session,
                 true
             );

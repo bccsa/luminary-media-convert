@@ -72,6 +72,62 @@ export async function acquireEncoderSessions(
     };
 }
 
+/**
+ * How long after its last segment a transcoded preview still counts as in use,
+ * for an encode of some *other* session. Long enough to cover somebody who
+ * stopped scrubbing to fill in a form and is about to scrub again.
+ */
+const PREVIEW_IN_USE_MS = 10 * 60 * 1000;
+
+/** Sessions whose preview is transcoded, and when each last asked for a segment. */
+const transcodedPreviews = new Map<string, number>();
+
+/**
+ * A session's preview is being transcoded: it opens an encoder for every
+ * segment. Called when such a preview is built and again on each segment, so
+ * the time is that of its last use.
+ *
+ * Only a transcoded preview is ever noted. One the browser plays from the file,
+ * one that is remuxed, and an audio-only one open no encoder session.
+ */
+export function notePreviewNeedsSession(
+    sessionId: string,
+    now: number = Date.now()
+): void {
+    transcodedPreviews.set(sessionId, now);
+}
+
+/** The session's preview is gone, and with it any claim on a session. */
+export function forgetPreviewSession(sessionId: string): void {
+    transcodedPreviews.delete(sessionId);
+}
+
+/**
+ * How many sessions a ladder about to encode `sessionId` may plan its waves
+ * around: all of them, or one fewer when a transcoded preview is in use.
+ *
+ * The preview stalled, the moment an encode started, because its segments
+ * queued behind waves that held every session for minutes at a time. Holding
+ * one back removes the queue at its source — but it costs the ladder a third of
+ * its width, so it is held back only when a preview will actually open an
+ * encoder: the encoding session's own preview is a transcoded one, or another
+ * session's was asked for a segment recently.
+ *
+ * Asked once, when a session's first encode starts, and kept with the session:
+ * a continued encode has to plan the same waves as the run it continues.
+ */
+export function ladderSessionCap(
+    sessionId: string,
+    now: number = Date.now()
+): number {
+    for (const [id, lastUsed] of transcodedPreviews) {
+        if (id === sessionId || now - lastUsed <= PREVIEW_IN_USE_MS) {
+            return Math.max(1, MAX_HARDWARE_SESSIONS - 1);
+        }
+    }
+    return MAX_HARDWARE_SESSIONS;
+}
+
 /** How many sessions are held. For tests and for logging a stall. */
 export function heldEncoderSessions(): number {
     return held;
@@ -81,4 +137,5 @@ export function heldEncoderSessions(): number {
 export function resetEncoderSessions(): void {
     held = 0;
     waiting.length = 0;
+    transcodedPreviews.clear();
 }

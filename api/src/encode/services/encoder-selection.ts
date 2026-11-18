@@ -281,6 +281,17 @@ export function bitrateToVideoCrf(
 }
 
 /**
+ * A preview rendition's bitrate where the encoder needs one named: enough for
+ * its height, no more. The preview is made at up to 720 lines.
+ */
+function previewBitrate(scaleFilter: string | undefined): string {
+    const height = Number((scaleFilter ?? '').split(':')[1]);
+    if (height > 480) return '2500k';
+    if (height > 360) return '1500k';
+    return '1000k';
+}
+
+/**
  * Encoder and scaler for one preview segment.
  *
  * Presets are the fastest each encoder offers, because a preview is generated
@@ -350,7 +361,7 @@ export function previewVideoArgs(
                 '-realtime',
                 '0',
                 '-b:v',
-                '1500k',
+                previewBitrate(scaleFilter),
                 // Both dimensions, never `-2`: that derives the height from
                 // the input's *storage* ratio, so `scale_vt=w=854:h=-2` on a
                 // 720x576 source gives 683, not 480.

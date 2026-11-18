@@ -44,11 +44,15 @@ the user did not ask for:
 
 - The source is **read where it lies**. It is never copied into the app's
   directories, never moved, and never written to or deleted — including on
-  failure. What crosses the API is an absolute path, not bytes.
+  failure. What crosses the API inbound is an absolute path, not bytes. The
+  one way bytes leave it is back to the app's own window, over loopback: the
+  preview of a source the browser can play is the file itself, streamed by
+  `GET /api/sessions/:id/source` to the holder of that session's token.
 - The output goes only to the S3 destination the CMS supplied.
 - Nothing is uploaded to the project or to any third party.
 
-**Derived artefacts** — waveform peaks, storyboard sprites, preview segments —
+**Derived artefacts** — waveform peaks, storyboard sprites, and preview
+segments for a source the browser cannot play directly —
 are made from the source and live under `<userData>/work/<sessionId>/`. They are
 removed when the session is deleted, which removes the directory whole.
 

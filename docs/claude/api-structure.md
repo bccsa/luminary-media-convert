@@ -22,7 +22,7 @@ api/
 │   │   └── cms-session-hook.ts          # CMS_SESSION_HOOK — fire-and-forget "bring your window forward"
 │   ├── encode/
 │   │   ├── encode.module.ts
-│   │   ├── encode.controller.ts         # /api/sessions — create, list, local-file, encode, status, SSE, delete, chapters, waveform, preview, storyboard
+│   │   ├── encode.controller.ts         # /api/sessions — create, list, local-file, encode, status, SSE, delete, chapters, waveform, source, preview, storyboard
 │   │   ├── cms.controller.ts            # /api/cms — health, sessions (origin-gated)
 │   │   ├── session-status.ts            # SessionStatus union
 │   │   ├── dto/
@@ -39,7 +39,7 @@ api/
 │   │       ├── session-events.service.ts    # SSE event subject (SessionEvent shape)
 │   │       ├── session-cleanup.service.ts   # Hourly sweep of abandoned sessions
 │   │       ├── credential-cipher.ts         # CredentialCipher interface + CREDENTIAL_CIPHER token
-│   │       ├── ingest.service.ts            # Shared post-ingest pipeline: probe → preview init → uploaded → prime waveform/storyboard
+│   │       ├── ingest.service.ts            # Shared post-ingest pipeline: probe → uploaded → prime waveform/storyboard
 │   │       ├── probe.service.ts             # ffprobe wrapper + multi-strategy bitrate detection
 │   │       ├── queue.service.ts             # FIFO encoding queue (one at a time, graceful drain)
 │   │       ├── ffmpeg.service.ts            # FFmpeg process management, GPU detection, multi-angle master, stream-alignment probe
@@ -51,7 +51,8 @@ api/
 │   │       ├── s3.service.ts                # MinIO upload, canonicalPrefix()
 │   │       ├── thumbnail.service.ts         # Output sprite sheets + WebVTT, and the pre-encode source storyboard
 │   │       ├── waveform.service.ts          # Waveform peaks (cached per session, written as waveform.json sidecar)
-│   │       ├── preview.service.ts           # On-demand HLS preview (ABR, MPEG-TS, trim-aware, GPU-accelerated)
+│   │       ├── encoder-sessions.ts          # Process-wide hardware encoder-session semaphore and ladderSessionCap(): one session left free while a transcoded preview is in use
+│   │       ├── preview.service.ts           # Converted HLS preview for sources the browser cannot play: one rendition (H.264 copied on keyframe boundaries computed from the probe or scanned, else ≤720p), lazy, rolling cache
 │   │       ├── disk-space.ts                # Free-space guard with a reserve, checked before ingest and before encode
 │   │       ├── output-estimate.ts           # Estimated output size / formatBytes
 │   │       └── media-extensions.ts          # ALLOWED_EXTENSIONS allow-list (re-exported from bootstrap for the host's file picker)

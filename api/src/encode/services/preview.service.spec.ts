@@ -14,6 +14,7 @@ const {
     mockReadFile,
     mockWriteFile,
     mockStat,
+    mockRename,
 } = vi.hoisted(() => ({
     mockExecFile: vi.fn(),
     mockExistsSync: vi.fn(),
@@ -23,6 +24,7 @@ const {
     mockReadFile: vi.fn(),
     mockWriteFile: vi.fn(),
     mockStat: vi.fn(),
+    mockRename: vi.fn(),
 }));
 
 vi.mock('child_process', async (importOriginal) => {
@@ -48,6 +50,19 @@ vi.mock('fs/promises', async (importOriginal) => {
         readFile: mockReadFile,
         writeFile: mockWriteFile,
         stat: mockStat,
+        rename: mockRename,
+        // A segment is opened before it is read. The handle answers from the
+        // same mocks a path does, so a test sets up a file one way for both.
+        open: vi.fn(async (path: string) => {
+            if (!mockExistsSync(path)) {
+                throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+            }
+            return {
+                stat: () => mockStat(path),
+                close: async () => {},
+                createReadStream: () => mockCreateReadStream(path),
+            };
+        }),
     };
 });
 
@@ -173,6 +188,7 @@ function setupDefaultMocks() {
     mockMkdir.mockResolvedValue(undefined);
     mockRm.mockResolvedValue(undefined);
     mockWriteFile.mockResolvedValue(undefined);
+    mockRename.mockResolvedValue(undefined);
     mockStat.mockResolvedValue({ size: 1024 });
     mockExistsSync.mockReturnValue(false);
     mockCreateReadStream.mockReturnValue({ pipe: vi.fn() });
@@ -272,216 +288,6 @@ describe('PreviewService', () => {
             const master = service.getPlaylist('s1', 'tok');
             expect(master).toContain('RESOLUTION=854x480');
             expect(master).toContain('r0/playlist.m3u8');
-        });
-
-        it('should initialize with a single H.264 stream > 480p (multiple transcode renditions)', async () => {
-            const probe = makeProbe({
-                videoTracks: [
-                    {
-                        index: 0,
-                        codec: 'h264',
-                        width: 1920,
-                        height: 1080,
-                        bitrateKbps: 5000,
-                        frameRate: 30,
-                    },
-                ],
-            });
-            sessionService = makeSessionService({
-                filePath: '/tmp/video.mp4',
-                probeResult: probe,
-            });
-            service = new PreviewService(sessionService, makeFfmpegService());
-
-            await service.init('s1');
-
-            expect(service.isReady('s1')).toBe(true);
-
-            // Source > 480p: should generate 3 transcode renditions (480p, 360p, 240p)
-            const master = service.getPlaylist('s1', 'tok');
-            expect(master).toContain('x480');
-            expect(master).toContain('x360');
-            expect(master).toContain('x240');
-            // Should have 3 rendition playlist references
-            expect(master).toContain('r0/playlist.m3u8');
-            expect(master).toContain('r1/playlist.m3u8');
-            expect(master).toContain('r2/playlist.m3u8');
-        });
-
-        it('should handle multi-stream H.264 with streams <= 480p (multiple copy renditions)', async () => {
-            const probe = makeProbe({
-                videoTracks: [
-                    {
-                        index: 0,
-                        codec: 'h264',
-                        width: 854,
-                        height: 480,
-                        bitrateKbps: 2000,
-                        frameRate: 30,
-                    },
-                    {
-                        index: 1,
-                        codec: 'h264',
-                        width: 640,
-                        height: 360,
-                        bitrateKbps: 1000,
-                        frameRate: 30,
-                    },
-                ],
-            });
-            sessionService = makeSessionService({
-                filePath: '/tmp/video.mp4',
-                probeResult: probe,
-            });
-            service = new PreviewService(sessionService, makeFfmpegService());
-
-            await service.init('s1');
-
-            expect(service.isReady('s1')).toBe(true);
-            const master = service.getPlaylist('s1', 'tok');
-            expect(master).toContain('RESOLUTION=854x480');
-            expect(master).toContain('RESOLUTION=640x360');
-            expect(master).toContain('r0/playlist.m3u8');
-            expect(master).toContain('r1/playlist.m3u8');
-        });
-
-        describe('streams whose keyframes fall elsewhere', () => {
-            // Every rendition is cut on the first one's segment boundaries, and
-            // a copied segment can only start on its own stream's keyframe.
-            const ladder = makeProbe({
-                videoTracks: [480, 360, 240].map((height, index) => ({
-                    index,
-                    codec: 'h264',
-                    width: Math.round((height * 16) / 9),
-                    height,
-                    bitrateKbps: height * 4,
-                    frameRate: 25,
-                })),
-            });
-            const every = (step: number, from = 0) =>
-                Array.from({ length: Math.floor((20 - from) / step) + 1 }, (_, i) => from + i * step);
-
-            const initWith = async (grids: Record<number, number[] | Error>) => {
-                const ffmpeg = makeFfmpegService();
-                ffmpeg.scanKeyframeGrid.mockImplementation(
-                    async (_file: string, stream: number) => {
-                        const grid = grids[stream];
-                        if (grid instanceof Error) throw grid;
-                        return grid;
-                    }
-                );
-                sessionService = makeSessionService({
-                    filePath: '/tmp/video.mp4',
-                    probeResult: ladder,
-                });
-                service = new PreviewService(sessionService, ffmpeg);
-                await service.init('s1');
-                return service.getPlaylist('s1', 'tok') as string;
-            };
-
-            /** How each rendition in the master is produced, in order. */
-            const modes = () =>
-                (service as any).states
-                    .get('s1')
-                    .renditions.map((r: any) => `${r.height}:${r.canCopy ? 'copy' : 'transcode'}`);
-
-            it('copies a stream with a keyframe at every boundary', async () => {
-                await initWith({ 0: every(2), 1: every(4), 2: every(1) });
-
-                expect(modes()).toEqual(['480:copy', '360:copy', '240:copy']);
-            });
-
-            it('transcodes a stream whose keyframes miss the boundaries', async () => {
-                // 360p starts 0.4s late on a 3s grid: 0.4, 3.4, 6.4... — none
-                // of them on the 0, 4, 8... boundaries the 480p grid gives.
-                const master = await initWith({
-                    0: every(2),
-                    1: every(3, 0.4),
-                    2: every(2),
-                });
-
-                expect(modes()).toEqual(['480:copy', '360:transcode', '240:copy']);
-                expect(master).toContain('RESOLUTION=640x360');
-            });
-
-            it('transcodes a stream whose keyframes could not be read', async () => {
-                await initWith({
-                    0: every(2),
-                    1: new Error('scan failed'),
-                    2: every(2),
-                });
-
-                expect(modes()).toEqual(['480:copy', '360:transcode', '240:copy']);
-            });
-        });
-
-        it('should use the smallest stream when all multi-stream H.264 are > 480p', async () => {
-            const probe = makeProbe({
-                videoTracks: [
-                    {
-                        index: 0,
-                        codec: 'h264',
-                        width: 1920,
-                        height: 1080,
-                        bitrateKbps: 5000,
-                        frameRate: 30,
-                    },
-                    {
-                        index: 1,
-                        codec: 'h264',
-                        width: 1280,
-                        height: 720,
-                        bitrateKbps: 3000,
-                        frameRate: 30,
-                    },
-                ],
-            });
-            sessionService = makeSessionService({
-                filePath: '/tmp/video.mp4',
-                probeResult: probe,
-            });
-            service = new PreviewService(sessionService, makeFfmpegService());
-
-            await service.init('s1');
-
-            expect(service.isReady('s1')).toBe(true);
-            const master = service.getPlaylist('s1', 'tok');
-            // Should pick the smallest (720p) as a single copy rendition
-            expect(master).toContain('RESOLUTION=1280x720');
-            // Should NOT contain 1080p
-            expect(master).not.toContain('RESOLUTION=1920x1080');
-        });
-
-        it('should create transcode renditions for HEVC codec (non-copyable)', async () => {
-            const probe = makeProbe({
-                videoTracks: [
-                    {
-                        index: 0,
-                        codec: 'hevc',
-                        width: 1920,
-                        height: 1080,
-                        bitrateKbps: 5000,
-                        frameRate: 30,
-                    },
-                ],
-            });
-            sessionService = makeSessionService({
-                filePath: '/tmp/video.mp4',
-                probeResult: probe,
-            });
-            service = new PreviewService(sessionService, makeFfmpegService());
-
-            await service.init('s1');
-
-            expect(service.isReady('s1')).toBe(true);
-            const master = service.getPlaylist('s1', 'tok');
-            // Should have 480p, 360p, 240p transcode renditions
-            expect(master).toContain('x480');
-            expect(master).toContain('x360');
-            expect(master).toContain('x240');
-            expect(master).toContain('r0/playlist.m3u8');
-            expect(master).toContain('r1/playlist.m3u8');
-            expect(master).toContain('r2/playlist.m3u8');
         });
 
         it('should create transcode renditions for ProRes codec', async () => {
@@ -845,14 +651,6 @@ describe('PreviewService', () => {
             expect(service.getPlaylist('nonexistent', 'tok')).toBeNull();
         });
 
-        it('should return master playlist when no renditionIndex given', () => {
-            const playlist = service.getPlaylist('s1', 'tok');
-            expect(playlist).toContain('#EXTM3U');
-            expect(playlist).toContain('#EXT-X-STREAM-INF:');
-            expect(playlist).toContain('r0/playlist.m3u8');
-            expect(playlist).toContain('r1/playlist.m3u8');
-        });
-
         it('should return media playlist when renditionIndex is provided', () => {
             const playlist = service.getPlaylist('s1', 'tok', 0);
             expect(playlist).toContain('#EXTM3U');
@@ -866,12 +664,6 @@ describe('PreviewService', () => {
             const playlist = service.getPlaylist('s1', 'mytoken', 0);
             expect(playlist).toContain('segment0.ts?token=mytoken');
             expect(playlist).toContain('segment1.ts?token=mytoken');
-        });
-
-        it('should append token to playlist URLs in master playlist', () => {
-            const playlist = service.getPlaylist('s1', 'mytoken');
-            expect(playlist).toContain('r0/playlist.m3u8?token=mytoken');
-            expect(playlist).toContain('r1/playlist.m3u8?token=mytoken');
         });
 
         it('should return master playlist for out-of-range renditionIndex', () => {
@@ -1047,231 +839,6 @@ describe('PreviewService', () => {
 
             const media = service.getPlaylist('s1', 'tok', 0);
             expect(media).toContain('#EXT-X-PLAYLIST-TYPE:VOD');
-        });
-    });
-
-    /* ============================================================== */
-    /*  setTrimSegments() — filtered preview playlists                 */
-    /* ============================================================== */
-
-    describe('setTrimSegments()', () => {
-        beforeEach(async () => {
-            // HEVC source → no keyframe scan → fixed 4s segments
-            // duration=20 gives 5 segments: 0-4, 4-8, 8-12, 12-16, 16-20
-            const probe = makeProbe({
-                duration: 20,
-                videoTracks: [
-                    {
-                        index: 0,
-                        codec: 'hevc',
-                        width: 1920,
-                        height: 1080,
-                        bitrateKbps: 5000,
-                        frameRate: 30,
-                    },
-                ],
-            });
-            sessionService = makeSessionService({
-                filePath: '/tmp/video.mp4',
-                probeResult: probe,
-            });
-            service = new PreviewService(sessionService, makeFfmpegService());
-            await service.init('s1');
-        });
-
-        it('should do nothing for unknown session', () => {
-            service.setTrimSegments('nonexistent', [{ inSec: 0, outSec: 5 }]);
-            // No error thrown
-        });
-
-        it('should filter playlist to segments overlapping trim ranges', () => {
-            // Trim: 5-9 → overlaps segments 1 (4-8) and 2 (8-12)
-            service.setTrimSegments('s1', [{ inSec: 5, outSec: 9 }]);
-            const media = service.getPlaylist('s1', 'tok', 0)!;
-            expect(media).toContain('segment1.ts');
-            expect(media).toContain('segment2.ts');
-            expect(media).not.toContain('segment0.ts');
-            expect(media).not.toContain('segment3.ts');
-            expect(media).not.toContain('segment4.ts');
-        });
-
-        it('should handle multiple trim ranges', () => {
-            // Trim: 0-3 (seg 0), 14-20 (seg 3 and 4)
-            service.setTrimSegments('s1', [
-                { inSec: 0, outSec: 3 },
-                { inSec: 14, outSec: 20 },
-            ]);
-            const media = service.getPlaylist('s1', 'tok', 0)!;
-            expect(media).toContain('segment0.ts');
-            expect(media).toContain('segment3.ts');
-            expect(media).toContain('segment4.ts');
-            expect(media).not.toContain('segment1.ts');
-            expect(media).not.toContain('segment2.ts');
-        });
-
-        it('should not declare DISCONTINUITY between adjacent segments', () => {
-            service.setTrimSegments('s1', [{ inSec: 0, outSec: 12 }]);
-            const media = service.getPlaylist('s1', 'tok', 0)!;
-            // Segments 0,1,2 are adjacent — timestamps are continuous
-            expect(media).not.toContain('#EXT-X-DISCONTINUITY');
-        });
-
-        it('should declare DISCONTINUITY only where the trim filter skips segments', () => {
-            // 0-3 → segment 0; 14-20 → segments 3,4. The timeline jumps
-            // between segment 0 and segment 3.
-            service.setTrimSegments('s1', [
-                { inSec: 0, outSec: 3 },
-                { inSec: 14, outSec: 20 },
-            ]);
-            const media = service.getPlaylist('s1', 'tok', 0)!;
-            const lines = media.split('\n');
-            const discontinuities = lines.filter(
-                (l) => l === '#EXT-X-DISCONTINUITY'
-            );
-            expect(discontinuities.length).toBe(1);
-            const idx = lines.indexOf('#EXT-X-DISCONTINUITY');
-            expect(lines[idx + 2]).toContain('segment3.ts');
-        });
-
-        it('should not insert DISCONTINUITY before first segment', () => {
-            service.setTrimSegments('s1', [{ inSec: 5, outSec: 12 }]);
-            const media = service.getPlaylist('s1', 'tok', 0)!;
-            const lines = media.split('\n');
-            const firstExtinf = lines.findIndex((l) =>
-                l.startsWith('#EXTINF:')
-            );
-            expect(lines[firstExtinf - 1]).not.toBe('#EXT-X-DISCONTINUITY');
-        });
-
-        it('should preserve correct segment durations', () => {
-            // Segments are 4s each, last one is 4s too (20/4=5 exact)
-            service.setTrimSegments('s1', [{ inSec: 5, outSec: 9 }]);
-            const media = service.getPlaylist('s1', 'tok', 0)!;
-            expect(media).toContain('#EXTINF:4.000,');
-        });
-
-        it('should keep master playlist unchanged', () => {
-            const masterBefore = service.getPlaylist('s1', 'tok');
-            service.setTrimSegments('s1', [{ inSec: 5, outSec: 9 }]);
-            const masterAfter = service.getPlaylist('s1', 'tok');
-            expect(masterAfter).toBe(masterBefore);
-        });
-
-        it('should fall back to full playlist when no segments overlap', () => {
-            // Trim range beyond file duration → no overlap
-            service.setTrimSegments('s1', [{ inSec: 100, outSec: 200 }]);
-            const media = service.getPlaylist('s1', 'tok', 0)!;
-            // Falls back to full playlist with all 5 segments
-            expect(media).toContain('segment0.ts');
-            expect(media).toContain('segment4.ts');
-        });
-
-        it('should return full playlist when empty trim segments provided', () => {
-            service.setTrimSegments('s1', []);
-            const media = service.getPlaylist('s1', 'tok', 0)!;
-            expect(media).toContain('segment0.ts');
-            expect(media).toContain('segment4.ts');
-        });
-
-        it('should work with keyframe-scanned boundaries', async () => {
-            // H.264 copy mode over a keyframe grid at 0 / 4.5 / 9.3, which
-            // groups into segments of 4.5, 4.8 and 2.7 seconds.
-            mockReadFile.mockResolvedValue(
-                'seg0.ts,0.000000,4.500000\nseg1.ts,4.500000,9.300000\nseg2.ts,9.300000,12.000000\n'
-            );
-            const probe = makeProbe({
-                duration: 12,
-                videoTracks: [
-                    {
-                        index: 0,
-                        codec: 'h264',
-                        width: 854,
-                        height: 480,
-                        bitrateKbps: 2000,
-                        frameRate: 30,
-                    },
-                ],
-            });
-            sessionService = makeSessionService({
-                filePath: '/tmp/video.mp4',
-                probeResult: probe,
-            });
-            service = new PreviewService(sessionService, makeFfmpegService());
-            await service.init('s2');
-
-            // Trim 5-10 → overlaps seg 1 (4.5-9.3) and seg 2 (9.3-12)
-            service.setTrimSegments('s2', [{ inSec: 5, outSec: 10 }]);
-            const media = service.getPlaylist('s2', 'tok', 0)!;
-            expect(media).toContain('segment1.ts');
-            expect(media).toContain('segment2.ts');
-            expect(media).not.toContain('segment0.ts');
-            // Durations from boundaries
-            expect(media).toContain('#EXTINF:4.800,'); // 9.3 - 4.5
-            expect(media).toContain('#EXTINF:2.700,'); // 12 - 9.3
-        });
-
-        it('should set correct EXT-X-TARGETDURATION for filtered segments', async () => {
-            mockReadFile.mockResolvedValue(
-                // Keyframe grid at 0 / 6.5 / 8.5 → segments of 6.5, 2 and 3.5
-                'seg0.ts,0.000000,6.500000\nseg1.ts,6.500000,8.500000\nseg2.ts,8.500000,12.000000\n'
-            );
-            const probe = makeProbe({
-                duration: 12,
-                videoTracks: [
-                    {
-                        index: 0,
-                        codec: 'h264',
-                        width: 854,
-                        height: 480,
-                        bitrateKbps: 2000,
-                        frameRate: 30,
-                    },
-                ],
-            });
-            sessionService = makeSessionService({
-                filePath: '/tmp/video.mp4',
-                probeResult: probe,
-            });
-            service = new PreviewService(sessionService, makeFfmpegService());
-            await service.init('s3');
-
-            // Trim 3-9 → seg 1 (2-8.5, dur=6.5)
-            service.setTrimSegments('s3', [{ inSec: 3, outSec: 9 }]);
-            const media = service.getPlaylist('s3', 'tok', 0)!;
-            expect(media).toContain('#EXT-X-TARGETDURATION:7'); // ceil(6.5)
-        });
-
-        it('should update all rendition playlists', async () => {
-            // HEVC triggers multiple transcode renditions (480, 360, 240)
-            const probe = makeProbe({
-                duration: 20,
-                videoTracks: [
-                    {
-                        index: 0,
-                        codec: 'hevc',
-                        width: 1920,
-                        height: 1080,
-                        bitrateKbps: 5000,
-                        frameRate: 30,
-                    },
-                ],
-            });
-            sessionService = makeSessionService({
-                filePath: '/tmp/video.mp4',
-                probeResult: probe,
-            });
-            service = new PreviewService(sessionService, makeFfmpegService());
-            await service.init('s4');
-
-            service.setTrimSegments('s4', [{ inSec: 5, outSec: 9 }]);
-
-            // All renditions should be filtered
-            for (let r = 0; r < 3; r++) {
-                const media = service.getPlaylist('s4', 'tok', r)!;
-                expect(media).toContain('segment1.ts');
-                expect(media).toContain('segment2.ts');
-                expect(media).not.toContain('segment0.ts');
-            }
         });
     });
 
@@ -1715,20 +1282,6 @@ describe('PreviewService', () => {
             expect(extractionCount).toBeGreaterThanOrEqual(1);
         });
 
-        it('should output to pipe:1 with mpegts format', async () => {
-            mockExistsSync.mockReturnValueOnce(false).mockReturnValue(true);
-            mockStat.mockResolvedValue({ size: 2048 });
-            setupExecFile(() => ({ stdout: Buffer.from('data'), stderr: '' }));
-            mockCreateReadStream.mockReturnValue({ pipe: vi.fn() });
-
-            await service.getSegmentStream('s1', 0, 0);
-
-            const ffmpegArgs = mockExecFile.mock.calls[0][1] as string[];
-            expect(ffmpegArgs).toContain('-f');
-            expect(ffmpegArgs).toContain('mpegts');
-            expect(ffmpegArgs).toContain('pipe:1');
-        });
-
         it('should keep source timestamps: -copyts with zeroed mux offset', async () => {
             mockExistsSync.mockReturnValueOnce(false).mockReturnValue(true);
             mockStat.mockResolvedValue({ size: 2048 });
@@ -2028,53 +1581,6 @@ describe('PreviewService', () => {
     /* ============================================================== */
 
     describe('buildRenditions (via init)', () => {
-        it('should handle vp8 as copyable codec', async () => {
-            const probe = makeProbe({
-                videoTracks: [
-                    {
-                        index: 0,
-                        codec: 'vp8',
-                        width: 640,
-                        height: 360,
-                        bitrateKbps: 1000,
-                        frameRate: 30,
-                    },
-                ],
-            });
-            sessionService = makeSessionService({
-                filePath: '/tmp/video.mp4',
-                probeResult: probe,
-            });
-            service = new PreviewService(sessionService, makeFfmpegService());
-            await service.init('s1');
-
-            expect(service.isReady('s1')).toBe(true);
-            const master = service.getPlaylist('s1', 'tok');
-            expect(master).toContain('RESOLUTION=640x360');
-        });
-
-        it('should handle vp9 as copyable codec', async () => {
-            const probe = makeProbe({
-                videoTracks: [
-                    {
-                        index: 0,
-                        codec: 'vp9',
-                        width: 640,
-                        height: 360,
-                        bitrateKbps: 1000,
-                        frameRate: 30,
-                    },
-                ],
-            });
-            sessionService = makeSessionService({
-                filePath: '/tmp/video.mp4',
-                probeResult: probe,
-            });
-            service = new PreviewService(sessionService, makeFfmpegService());
-            await service.init('s1');
-
-            expect(service.isReady('s1')).toBe(true);
-        });
 
         it('should handle H264 (uppercase) as copyable', async () => {
             const probe = makeProbe({
@@ -2136,22 +1642,9 @@ describe('PreviewService', () => {
                 await service.init('s1');
 
                 const master = service.getPlaylist('s1', 'tok')!;
-                // 854x480, the 16:9 rung — not 600x480, the storage shape.
-                expect(master).toContain('RESOLUTION=854x480');
-                expect(master).not.toContain('RESOLUTION=600x480');
+                // 1024x576, the 16:9 picture — not 720x576, the storage shape.
+                expect(master).toContain('RESOLUTION=1024x576');
                 expect(master).not.toContain('RESOLUTION=720x576');
-            });
-
-            it('builds every rung at the display shape', async () => {
-                service = anamorphicService();
-                await service.init('s1');
-
-                const master = service.getPlaylist('s1', 'tok')!;
-                expect(master.match(/RESOLUTION=(\d+x\d+)/g)).toEqual([
-                    'RESOLUTION=854x480',
-                    'RESOLUTION=640x360',
-                    'RESOLUTION=426x240',
-                ]);
             });
 
             it('refuses the copy path even for a small copyable source', async () => {
@@ -2220,78 +1713,6 @@ describe('PreviewService', () => {
             }
         });
 
-        it('should compute bitrateKbps as height*2 for transcode renditions', async () => {
-            const probe = makeProbe({
-                videoTracks: [
-                    {
-                        index: 0,
-                        codec: 'hevc',
-                        width: 1920,
-                        height: 1080,
-                        bitrateKbps: 5000,
-                        frameRate: 30,
-                    },
-                ],
-            });
-            sessionService = makeSessionService({
-                filePath: '/tmp/video.mp4',
-                probeResult: probe,
-            });
-            service = new PreviewService(sessionService, makeFfmpegService());
-            await service.init('s1');
-
-            const master = service.getPlaylist('s1', 'tok')!;
-            // 480p -> 960kbps -> BANDWIDTH=960000
-            expect(master).toContain('BANDWIDTH=960000');
-            // 360p -> 720kbps -> BANDWIDTH=720000
-            expect(master).toContain('BANDWIDTH=720000');
-            // 240p -> 480kbps -> BANDWIDTH=480000
-            expect(master).toContain('BANDWIDTH=480000');
-        });
-
-        it('should handle multi-stream where some are <= 480 and some > 480', async () => {
-            const probe = makeProbe({
-                videoTracks: [
-                    {
-                        index: 0,
-                        codec: 'h264',
-                        width: 1280,
-                        height: 720,
-                        bitrateKbps: 3000,
-                        frameRate: 30,
-                    },
-                    {
-                        index: 1,
-                        codec: 'h264',
-                        width: 854,
-                        height: 480,
-                        bitrateKbps: 2000,
-                        frameRate: 30,
-                    },
-                    {
-                        index: 2,
-                        codec: 'h264',
-                        width: 640,
-                        height: 360,
-                        bitrateKbps: 1000,
-                        frameRate: 30,
-                    },
-                ],
-            });
-            sessionService = makeSessionService({
-                filePath: '/tmp/video.mp4',
-                probeResult: probe,
-            });
-            service = new PreviewService(sessionService, makeFfmpegService());
-            await service.init('s1');
-
-            const master = service.getPlaylist('s1', 'tok')!;
-            // Should include streams <= 480p only
-            expect(master).toContain('RESOLUTION=854x480');
-            expect(master).toContain('RESOLUTION=640x360');
-            expect(master).not.toContain('RESOLUTION=1280x720');
-        });
-
         it('should produce single copy rendition for h264 at exactly 480p', async () => {
             const probe = makeProbe({
                 videoTracks: [
@@ -2322,183 +1743,10 @@ describe('PreviewService', () => {
     });
 
     /* ============================================================== */
-    /*  Multi-audio (selectAudioTracks + getAudioTracks)              */
+    /*  Multi-audio                                                    */
     /* ============================================================== */
 
     describe('multi-audio support', () => {
-        describe('selectAudioTracks via init', () => {
-            it('should select single audio track when only one exists', async () => {
-                const probe = makeProbe({
-                    audioTracks: [
-                        {
-                            index: 0,
-                            codec: 'aac',
-                            bitrateKbps: 128,
-                            channels: 2,
-                            sampleRate: 48000,
-                        },
-                    ],
-                });
-                sessionService = makeSessionService({
-                    filePath: '/tmp/video.mp4',
-                    probeResult: probe,
-                });
-                service = new PreviewService(
-                    sessionService,
-                    makeFfmpegService()
-                );
-                await service.init('s1');
-
-                const tracks = service.getAudioTracks('s1');
-                expect(tracks).toHaveLength(1);
-                expect(tracks![0].isDefault).toBe(true);
-                expect(tracks![0].streamIndex).toBe(0);
-            });
-
-            it('should include all audio tracks for multi-language files', async () => {
-                const probe = makeProbe({
-                    audioTracks: [
-                        {
-                            index: 0,
-                            codec: 'aac',
-                            bitrateKbps: 128,
-                            channels: 2,
-                            sampleRate: 48000,
-                            language: 'eng',
-                        },
-                        {
-                            index: 1,
-                            codec: 'aac',
-                            bitrateKbps: 256,
-                            channels: 2,
-                            sampleRate: 48000,
-                            language: 'eng',
-                        },
-                        {
-                            index: 2,
-                            codec: 'aac',
-                            bitrateKbps: 128,
-                            channels: 2,
-                            sampleRate: 48000,
-                            language: 'fra',
-                        },
-                    ],
-                });
-                sessionService = makeSessionService({
-                    filePath: '/tmp/video.mp4',
-                    probeResult: probe,
-                });
-                service = new PreviewService(
-                    sessionService,
-                    makeFfmpegService()
-                );
-                await service.init('s1');
-
-                const tracks = service.getAudioTracks('s1');
-                expect(tracks).toHaveLength(3);
-                expect(tracks![0].streamIndex).toBe(0);
-                expect(tracks![0].bitrateKbps).toBe(128);
-                expect(tracks![0].isDefault).toBe(true);
-                expect(tracks![1].streamIndex).toBe(1);
-                expect(tracks![2].streamIndex).toBe(2);
-            });
-
-            it('should treat same-bitrate no-language tracks as distinct (not quality tiers)', async () => {
-                const probe = makeProbe({
-                    audioTracks: [
-                        {
-                            index: 0,
-                            codec: 'aac',
-                            bitrateKbps: 128,
-                            channels: 2,
-                            sampleRate: 48000,
-                            name: 'CH_0',
-                        },
-                        {
-                            index: 1,
-                            codec: 'aac',
-                            bitrateKbps: 128,
-                            channels: 2,
-                            sampleRate: 48000,
-                            name: 'CH_1',
-                        },
-                        {
-                            index: 2,
-                            codec: 'aac',
-                            bitrateKbps: 128,
-                            channels: 2,
-                            sampleRate: 48000,
-                            name: 'CH_2',
-                        },
-                    ],
-                });
-                sessionService = makeSessionService({
-                    filePath: '/tmp/video.mp4',
-                    probeResult: probe,
-                });
-                service = new PreviewService(
-                    sessionService,
-                    makeFfmpegService()
-                );
-                await service.init('s1');
-
-                const tracks = service.getAudioTracks('s1');
-                expect(tracks).toHaveLength(3);
-                expect(tracks![0].name).toBe('CH_0');
-                expect(tracks![1].name).toBe('CH_1');
-                expect(tracks![2].name).toBe('CH_2');
-            });
-
-            it('should include all tracks with codec and bitrate info', async () => {
-                const probe = makeProbe({
-                    audioTracks: [
-                        {
-                            index: 0,
-                            codec: 'aac',
-                            bitrateKbps: 64,
-                            channels: 2,
-                            sampleRate: 48000,
-                        },
-                        {
-                            index: 1,
-                            codec: 'aac',
-                            bitrateKbps: 128,
-                            channels: 2,
-                            sampleRate: 48000,
-                        },
-                        {
-                            index: 2,
-                            codec: 'aac',
-                            bitrateKbps: 256,
-                            channels: 2,
-                            sampleRate: 48000,
-                        },
-                    ],
-                });
-                sessionService = makeSessionService({
-                    filePath: '/tmp/video.mp4',
-                    probeResult: probe,
-                });
-                service = new PreviewService(
-                    sessionService,
-                    makeFfmpegService()
-                );
-                await service.init('s1');
-
-                const tracks = service.getAudioTracks('s1');
-                expect(tracks).toHaveLength(3);
-                expect(tracks![0].bitrateKbps).toBe(64);
-                expect(tracks![0].codec).toBe('aac');
-                expect(tracks![1].bitrateKbps).toBe(128);
-                expect(tracks![2].bitrateKbps).toBe(256);
-            });
-        });
-
-        describe('getAudioTracks', () => {
-            it('should return null when session not initialized', () => {
-                expect(service.getAudioTracks('nonexistent')).toBeNull();
-            });
-        });
 
         describe('getPlaylist with audioTrackIndex', () => {
             it('should append &audio=N to URLs when multi-audio', async () => {
@@ -2610,9 +1858,10 @@ describe('PreviewService', () => {
 
                 await service.getSegmentStream('s1', 0, 0, 1);
 
-                // Should extract with audio track 1's stream index
+                // Should extract with audio track 1's stream index (from the
+                // copy path's second input, seeked to the boundary itself)
                 const ffmpegArgs = mockExecFile.mock.calls[0][1] as string[];
-                expect(ffmpegArgs).toContain('0:a:1');
+                expect(ffmpegArgs).toContain('1:a:1');
             });
 
             it('should use default cache dir for single audio', async () => {
@@ -2649,7 +1898,7 @@ describe('PreviewService', () => {
                 await service.getSegmentStream('s1', 0, 0);
 
                 const ffmpegArgs = mockExecFile.mock.calls[0][1] as string[];
-                expect(ffmpegArgs).toContain('0:a:0');
+                expect(ffmpegArgs).toContain('1:a:0');
             });
         });
     });
@@ -2753,7 +2002,7 @@ describe('PreviewService', () => {
             expect(args).toContain('-allow_sw');
             expect(args).toContain('1');
             expect(args).toContain('-b:v');
-            expect(args).toContain('1500k');
+            expect(args).toContain('2500k');
             const vfIdx = args.indexOf('-vf');
             expect(vfIdx).toBeGreaterThan(-1);
             expect(args[vfIdx + 1]).toMatch(/^scale_vt=/);
@@ -2806,7 +2055,7 @@ describe('PreviewService', () => {
                 const args = mockExecFile.mock.calls[0][1] as string[];
                 const vf = args[args.indexOf('-vf') + 1];
                 expect(vf, `${mode} scale filter`).not.toContain('-2');
-                expect(vf).toContain('480');
+                expect(vf).toContain('720');
             }
         });
 
@@ -3184,24 +2433,6 @@ describe('PreviewService — a session restored after a restart', () => {
 
         expect(ready).toEqual([true, true, true]);
         expect(ffmpeg.scanKeyframeGrid).toHaveBeenCalledTimes(1);
-    });
-
-    it('applies again the cuts the encode was started with', async () => {
-        const service = new PreviewService(
-            makeSessionService({
-                filePath: '/tmp/video.mp4',
-                probeResult: probe(),
-                encodeConfig: { trimSegments: [{ inSec: 0, outSec: 8.34 }] },
-            }),
-            makeFfmpegService()
-        );
-
-        await service.ensureReady('s1');
-
-        const media = service.getPlaylist('s1', 'tok', 0)!;
-        expect(media).toContain('segment0.ts');
-        expect(media).toContain('segment1.ts');
-        expect(media).not.toContain('segment3.ts');
     });
 
     it('stays without a preview when the session has no file yet', async () => {

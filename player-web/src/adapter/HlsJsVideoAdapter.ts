@@ -10,6 +10,7 @@ import {
     type AdapterSource,
     type AdapterTextTrack,
     type AdapterVariant,
+    type AdapterVideoTrack,
     type ChunkBoundary,
     type ChunkWarmOptions,
     type PlayerAdapter,
@@ -26,10 +27,19 @@ import type {
     HlsErrorData,
     HlsJsConfig,
     HlsJsVideoElement,
+    NativeMediaTrack,
+    NativeMediaTrackList,
 } from './hlsTypes';
 
 /** The MIME type that routes a source to hls.js; a blob master has no `.m3u8` to infer it from. */
 const HLS_MIME_TYPE = 'application/vnd.apple.mpegurl';
+
+/**
+ * The type that routes a source away from hls.js, to the element's native delegate. It names no codec and decides
+ * nothing about the file: a WebM or an MP3 handed over under it plays the same, because the `<video>` sniffs what it
+ * is given. It only has to be a type the element knows is not HLS.
+ */
+const FILE_MIME_TYPE = 'video/mp4';
 
 /**
  * Thrown by {@link HlsJsVideoAdapter.loadSource} when the browser has no Media Source
@@ -73,6 +83,45 @@ function variantId(rendition: {
     return rendition.height
         ? String(rendition.height)
         : `b${rendition.bitrate ?? 0}`;
+}
+
+/** `MediaError.MEDIA_ERR_NETWORK`, spelled out: the global is absent where the specs run. */
+const MEDIA_ERR_NETWORK = 2;
+
+/**
+ * How long a file may take to report its metadata before it counts as one the browser cannot play. A stuck load
+ * reports no error of its own; a file on the same machine that has said nothing about itself by then never will.
+ */
+const FILE_METADATA_TIMEOUT_MS = 20_000;
+
+interface NativeTrackEntry {
+    id: string;
+    lang: string | undefined;
+    label: string;
+    track: NativeMediaTrack;
+}
+
+/**
+ * A native track list as the wrapper sees it. Every track gets an id and a name that no other track in the list has:
+ * the wrapper folds tracks sharing a name and language into one, and here each one is a stream of its own, which a
+ * host addresses by its position in the file.
+ */
+function nativeTrackEntries(list: NativeMediaTrackList, fallbackLabel: (index: number) => string): NativeTrackEntry[] {
+    const entries: NativeTrackEntry[] = [];
+    const ids = new Set<string>();
+    const names = new Set<string>();
+    for (let i = 0; i < list.length; i++) {
+        const track = list[i];
+        if (!track) continue;
+        const id = track.id && !ids.has(track.id) ? track.id : `t${i}`;
+        ids.add(id);
+        const lang = track.language || undefined;
+        let label = track.label || fallbackLabel(i);
+        if (names.has(`${lang ?? ''}|${label}`)) label = `${label} (${i + 1})`;
+        names.add(`${lang ?? ''}|${label}`);
+        entries.push({ id, lang, label, track });
+    }
+    return entries;
 }
 
 export interface HlsJsVideoAdapterOptions {
@@ -135,6 +184,13 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
      * refused until the element has rebuilt it.
      */
     private audioTracksOutgoing = false;
+    /**
+     * A `kind: 'file'` source whose metadata the element has not read yet. Until it has, the `<video>`'s own track
+     * lists and `readyState` may still be the outgoing source's, so the lists read as empty and a seek waits.
+     */
+    private fileMetadataPending = false;
+    private fileMetadataTimer: ReturnType<typeof setTimeout> | null = null;
+    private nativeTrackListeners: (() => void)[] = [];
     private listeners = new Map<
         AdapterEventName,
         Set<(payload: never) => void>
@@ -211,6 +267,12 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         // must not wipe the count deciding what is left.
         this.ladder.noteSourceLoaded();
 
+        if (src.kind === 'file') {
+            this.retireAudioTracks();
+            this.loadFile(src.url);
+            return;
+        }
+
         if (!isHlsEngineSupported()) {
             if (src.isBlob) {
                 const error = new UnsupportedBrowserError();
@@ -233,6 +295,23 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         }
         this.retireAudioTracks();
         this.setElementSource(src.url);
+    }
+
+    /**
+     * A media file for the browser's own player: no hls.js, no MSE, the `<video>` fetches byte ranges itself.
+     *
+     * The type is not optional. With none, `<hlsjs-video>` infers one from the URL, and anything whose path does not
+     * end in `.mp4` is taken for HLS and handed to hls.js, which fetches the whole file as a playlist and fails.
+     */
+    private loadFile(url: string): void {
+        this.bindNativeTracks();
+        this.awaitFileMetadata();
+        this.emit('audiotracks-updated', undefined);
+        this.emit('videotracks-updated', undefined);
+        const sameUrl = this.el.src === url;
+        this.el.source = { src: url, type: FILE_MIME_TYPE };
+        // An equal source is no change to the element, which would leave the file where it was.
+        if (sameUrl) void this.el.load();
     }
 
     private setElementSource(url: string): void {
@@ -267,9 +346,17 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         const wasPlaying = !this.el.paused;
 
         this.cancelDeferredSeek();
-        this.retireAudioTracks();
-        this.engineGeneration++;
-        this.setElementSource(src.url);
+        if (src.kind === 'file') {
+            // No engine to rebuild: the `<video>` loads the file again.
+            this.awaitFileMetadata();
+            this.emit('audiotracks-updated', undefined);
+            this.emit('videotracks-updated', undefined);
+            void this.el.load();
+        } else {
+            this.retireAudioTracks();
+            this.engineGeneration++;
+            this.setElementSource(src.url);
+        }
 
         if (seekTo > 0) this.seek(seekTo);
         // A refused resume is swallowed: the picture is back either way, and the viewer can press play.
@@ -300,7 +387,7 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
 
     seek(seconds: number): void {
         this.cancelDeferredSeek();
-        if (this.el.readyState === 0) {
+        if (this.el.readyState === 0 || (this.lastSource?.kind === 'file' && this.fileMetadataPending)) {
             // Nothing to seek in yet. This is the angle-switch path: the wrapper restores the
             // previous position right after a new source, and setting currentTime now is discarded.
             const handler = (): void => {
@@ -454,6 +541,9 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
     }
 
     getAudioTracks(): AdapterAudioTrack[] {
+        if (this.lastSource?.kind === 'file') {
+            return this.fileAudioTracks().map(({ id, lang, label }) => ({ id, lang, label }));
+        }
         const tracks = this.el.audioTracks;
         if (!tracks || this.audioTracksOutgoing) return [];
         const result: AdapterAudioTrack[] = [];
@@ -471,6 +561,24 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
     }
 
     setAudioTrack(id: string): void {
+        if (this.lastSource?.kind === 'file') {
+            const entries = this.fileAudioTracks();
+            const chosen = entries.find((entry) => entry.id === id);
+            if (!chosen) return;
+            // A native list plays every enabled track at once, so the choice is the only one left enabled.
+            // Every change restarts playback, and with no track enabled for a moment Chromium restarts
+            // without sound and stalls: the choice is enabled first, and nothing already right is touched.
+            if (chosen.track.enabled && entries.every((entry) => entry === chosen || !entry.track.enabled)) return;
+            if (!chosen.track.enabled) chosen.track.enabled = true;
+            for (const entry of entries) {
+                if (entry !== chosen && entry.track.enabled) entry.track.enabled = false;
+            }
+            // Chromium restarts the sound alone and loses sync with the picture, which freezes or plays on
+            // silent. A seek to where it stands restarts both together.
+            const target = this.mediaTarget();
+            if (target) target.currentTime = target.currentTime;
+            return;
+        }
         const engine = this.el.engine;
         const tracks = this.el.audioTracks;
         // The wrapper hands its choice to the new list once that arrives.
@@ -484,6 +592,133 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
             }
             i++;
         }
+    }
+
+    // -- native tracks (kind: 'file') ---------------------------------------
+
+    /**
+     * The `<video>`'s own track lists. `<hlsjs-video>` reports tracks only for hls.js, so a file played by its native
+     * delegate has them here or nowhere: Safari always, Chromium with its `AudioVideoTracks` feature (the desktop
+     * shell turns it on). Absent, a file plays its default tracks and offers no others.
+     */
+    private nativeTrackList(kind: 'audioTracks' | 'videoTracks'): NativeMediaTrackList | null {
+        const target = this.mediaTarget() as (HTMLVideoElement & Partial<Record<typeof kind, NativeMediaTrackList>>) | null;
+        return target?.[kind] ?? null;
+    }
+
+    private fileAudioTracks(): NativeTrackEntry[] {
+        const list = this.nativeTrackList('audioTracks');
+        if (!list || this.fileMetadataPending) return [];
+        return nativeTrackEntries(list, (i) => `Track ${i + 1}`);
+    }
+
+    private fileVideoTracks(): NativeTrackEntry[] {
+        const list = this.nativeTrackList('videoTracks');
+        if (!list || this.fileMetadataPending) return [];
+        return nativeTrackEntries(list, (i) => `Angle ${i + 1}`);
+    }
+
+    getVideoTracks(): AdapterVideoTrack[] {
+        if (this.lastSource?.kind !== 'file') return [];
+        return this.fileVideoTracks().map(({ id, lang, label, track }) => ({
+            id,
+            lang,
+            label,
+            selected: track.selected === true,
+        }));
+    }
+
+    setVideoTrack(id: string): void {
+        if (this.lastSource?.kind !== 'file') return;
+        const entry = this.fileVideoTracks().find((candidate) => candidate.id === id);
+        // A video track list is exclusive: selecting one deselects the one showing.
+        if (entry) entry.track.selected = true;
+    }
+
+    /** The lists live on the `<video>` and outlast every source, so they are bound per file and unbound with it. */
+    private bindNativeTracks(): void {
+        this.unbindNativeTracks();
+        const bind = (kind: 'audioTracks' | 'videoTracks', event: 'audiotracks-updated' | 'videotracks-updated'): void => {
+            const list = this.nativeTrackList(kind);
+            if (!list) return;
+            const handler = (): void => {
+                // The outgoing file's tracks leaving, or the new one's arriving before its metadata: announced at once
+                // when the metadata is read.
+                if (!this.fileMetadataPending) this.emit(event, undefined);
+            };
+            for (const type of ['addtrack', 'removetrack', 'change'] as const) {
+                list.addEventListener(type, handler);
+                this.nativeTrackListeners.push(() => list.removeEventListener(type, handler));
+            }
+        };
+        bind('audioTracks', 'audiotracks-updated');
+        bind('videoTracks', 'videotracks-updated');
+    }
+
+    private unbindNativeTracks(): void {
+        for (const unbind of this.nativeTrackListeners) unbind();
+        this.nativeTrackListeners = [];
+    }
+
+    /** The file was handed to the browser: its tracks wait for its metadata, and so does the timeout. */
+    private awaitFileMetadata(): void {
+        this.fileMetadataPending = true;
+        this.clearFileMetadataTimer();
+        this.fileMetadataTimer = setTimeout(() => {
+            this.fileMetadataTimer = null;
+            if (this.lastSource?.kind !== 'file' || !this.fileMetadataPending) return;
+            this.emit('error', {
+                category: 'media',
+                fatal: true,
+                detail: new Error('The file did not load'),
+            });
+        }, FILE_METADATA_TIMEOUT_MS);
+    }
+
+    private stopAwaitingFileMetadata(): void {
+        this.fileMetadataPending = false;
+        this.clearFileMetadataTimer();
+    }
+
+    private clearFileMetadataTimer(): void {
+        if (this.fileMetadataTimer) clearTimeout(this.fileMetadataTimer);
+        this.fileMetadataTimer = null;
+    }
+
+    /**
+     * The file's metadata is in: its tracks are the ones listed now, and its picture has a size — or has none, because
+     * the browser dropped a video stream it cannot decode and plays the sound on its own. That is a failure for a source
+     * that was expected to have one; the host's fallback is a converted preview, which only the host can arrange.
+     */
+    private onFileMetadata(): void {
+        const src = this.lastSource;
+        if (src?.kind !== 'file') return;
+        this.stopAwaitingFileMetadata();
+        this.emit('audiotracks-updated', undefined);
+        this.emit('videotracks-updated', undefined);
+        if (src.expectVideo && (this.mediaTarget()?.videoWidth ?? 0) === 0) {
+            this.emit('error', {
+                category: 'media',
+                fatal: true,
+                detail: new Error('The file has no picture this browser can decode'),
+            });
+        }
+    }
+
+    /**
+     * A file the browser cannot play fails as a whole, with no engine primitive or re-munge that would change that:
+     * the error goes straight out, and the host decides what to play instead. An HLS source's errors come from hls.js
+     * and go through the recovery ladder.
+     */
+    private onFileError(): void {
+        if (this.lastSource?.kind !== 'file') return;
+        this.clearFileMetadataTimer();
+        const error = this.el.error as { code?: number } | null;
+        this.emit('error', {
+            category: error?.code === MEDIA_ERR_NETWORK ? 'network' : 'media',
+            fatal: true,
+            detail: error ?? undefined,
+        });
     }
 
     // -- text ---------------------------------------------------------------
@@ -669,6 +904,8 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         // The engine is built when the source loads and replaced when its options change, so
         // everything that hangs off it is re-subscribed per load.
         add('loadstart', () => this.bindEngine(this.el.engine));
+        add('loadedmetadata', () => this.onFileMetadata());
+        add('error', () => this.onFileError());
         add('durationchange', () =>
             this.emit('durationchange', { duration: this.getDuration() })
         );
@@ -867,6 +1104,8 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         this.cancelDeferredSeek();
         this.stallSignals.clear();
         this.removeTextTracks();
+        this.unbindNativeTracks();
+        this.stopAwaitingFileMetadata();
         this.keyBytes = null;
         this.lastSource = null;
     }

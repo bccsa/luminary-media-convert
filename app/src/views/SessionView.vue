@@ -79,6 +79,10 @@ import type {
 import { formatBytes, formatRelative } from '../utils/format';
 import { unmaskSessionKey } from '../utils/keyMask';
 import { errorMessage } from '../utils/errors';
+import {
+    detectPlaybackCapabilities,
+    previewPlayability,
+} from '../utils/previewPlayback';
 import { statusLabel } from '../utils/status';
 
 const route = useRoute();
@@ -129,7 +133,7 @@ const trimDeletions = useTrimDeletions(editorSegments);
 function onTimelineSegmentRemoved(segment: Segment) {
     if (!showProbeConfig.value) return;
     const [inSourceTime] = timelineIsShortened.value
-        ? mapSegmentsFromTimeline([segment], timelineRanges.value)
+        ? mapSegmentsFromTimeline([segment], effectiveKeepRanges.value)
         : [segment];
     trimDeletions.record(inSourceTime);
 }
@@ -525,7 +529,8 @@ interface PreviewAudioTrack {
 function audioTrackLabel(track: PreviewAudioTrack): string {
     // Use editable track metadata from the encode config form when available
     const formTrack =
-        outputPanelRef.value?.getEncodeForm()?.editableAudioTracks?.[
+        // Optional call: labels render from the probe alone until the form is up.
+        outputPanelRef.value?.getEncodeForm?.()?.editableAudioTracks?.[
             track.index
         ];
     const name = formTrack?.name ?? track.name;
@@ -538,16 +543,34 @@ function audioTrackLabel(track: PreviewAudioTrack): string {
     return parts.join(' · ');
 }
 
-const previewAudioTracks = ref<PreviewAudioTrack[]>([]);
+/** The source's probe, from whichever of the two places has it first. */
+const sourceProbe = computed<ProbeResult | null>(
+    () => probeResult.value ?? session.value?.probeResult ?? null
+);
+
+/** The source's audio tracks, in the file's order: the preview's audio selector. */
+const previewAudioTracks = computed<PreviewAudioTrack[]>(() =>
+    (sourceProbe.value?.audioTracks ?? []).map((t, i) => ({
+        index: i,
+        streamIndex: t.index,
+        language: t.language,
+        name: t.name,
+        bitrateKbps: t.bitrateKbps,
+        codec: t.codec,
+        isDefault: i === 0,
+    }))
+);
 const selectedAudioTrack = ref(0);
 const isPreviewPlaying = ref(false);
 
 /**
  * Quality, camera angle and post-encode audio tracks are all read off the
  * master by the player wrapper and driven through its controller, so the strip
- * owns those selectors now. The preview's audio track is the one exception —
- * the encoder bakes a single audio rendition into the preview stream, so
- * choosing another is a source swap, which is why it still lives here.
+ * owns those selectors now. The preview's audio track is the one exception: it
+ * is labelled from the probe and the encode form, which the player knows
+ * nothing of. Played directly, the choice switches the file's own track in the
+ * player; converted, the preview stream carries one audio track chosen by URL,
+ * so the choice is a source swap.
  */
 const previewAudioSelectOptions = computed(() =>
     previewAudioTracks.value.map((t) => ({
@@ -556,29 +579,44 @@ const previewAudioSelectOptions = computed(() =>
     }))
 );
 
-async function fetchPreviewAudioTracks() {
-    if (!sessionToken.value) return;
-    try {
-        const res = await fetch(
-            `${API_BASE}/api/sessions/${sessionId.value}/preview/audio-tracks?token=${sessionToken.value}`
-        );
-        if (res.ok) {
-            const tracks = await res.json();
-            previewAudioTracks.value = tracks;
-            const defaultTrack = tracks.find(
-                (t: PreviewAudioTrack) => t.isDefault
-            );
-            if (defaultTrack) selectedAudioTrack.value = defaultTrack.index;
-        }
-    } catch {
-        // Preview audio tracks not available — single track
-    }
-}
+/** Read once: what this browser decodes does not change under a running page. */
+const playbackCapabilities = detectPlaybackCapabilities();
+
+/**
+ * Whether the browser can play the source file as it is. Most sources it can,
+ * and then the preview is the file itself: no FFmpeg, no segments, seeks that
+ * land at once whatever the encoder is doing to the GPU meanwhile.
+ */
+const sourcePlayability = computed(() => {
+    const probe = sourceProbe.value;
+    return probe
+        ? previewPlayability(probe, playbackCapabilities)
+        : { direct: false };
+});
+
+/**
+ * The file was handed to the player and did not play: an error, or a picture
+ * the browser dropped. The rule is strict, but no rule knows every file; this
+ * one gets the converted preview instead for as long as the session is open.
+ */
+const directPlaybackFailed = ref(false);
+watch(sessionId, () => {
+    directPlaybackFailed.value = false;
+});
+
+const previewMode = computed<'direct' | 'converted'>(() =>
+    sourcePlayability.value.direct && !directPlaybackFailed.value
+        ? 'direct'
+        : 'converted'
+);
 
 const previewPlaybackUrl = computed(() => {
     if (!sessionToken.value) return null;
     const s = currentStatus.value;
     if (!s || s === 'created' || s === 'uploading') return null;
+    // Which preview this is depends on the probe, and starting one only to
+    // swap it for the other a moment later would load the source twice.
+    if (!sourceProbe.value) return null;
     // Absolute, always. Packaged, API_BASE is '' (same origin), which would make
     // this a bare path — and the player uses it as the base for resolving the
     // rendition references inside the master. A relative base resolves nothing,
@@ -587,18 +625,36 @@ const previewPlaybackUrl = computed(() => {
     // Every packaged build failed the preview this way; browser dev never saw it
     // because API_BASE is absolute there.
     const origin = API_BASE || window.location.origin;
-    let url = `${origin}/api/sessions/${sessionId.value}/preview/playlist.m3u8?token=${sessionToken.value}`;
+    const base = `${origin}/api/sessions/${sessionId.value}`;
+    if (previewMode.value === 'direct') {
+        return `${base}/source?token=${sessionToken.value}`;
+    }
+    let url = `${base}/preview/playlist.m3u8?token=${sessionToken.value}`;
     if (previewAudioTracks.value.length > 1) {
         url += `&audio=${selectedAudioTrack.value}`;
     }
     return url;
 });
 
-// Fetch audio tracks when preview becomes available
-watch(previewPlaybackUrl, (url) => {
-    if (url && previewAudioTracks.value.length === 0) {
-        fetchPreviewAudioTracks();
-    }
+/** The player is showing the source file itself. */
+const previewIsDirect = computed(
+    () =>
+        !isCompleted.value &&
+        !!previewPlaybackUrl.value &&
+        previewMode.value === 'direct'
+);
+
+/**
+ * Said quietly beside the selectors whenever the preview is a conversion, so a
+ * slower seek or a softer picture has a visible reason.
+ */
+const previewNote = computed<string | null>(() => {
+    if (isCompleted.value || !previewPlaybackUrl.value) return null;
+    if (previewMode.value === 'direct') return null;
+    const reason = directPlaybackFailed.value
+        ? "the file didn't play directly"
+        : sourcePlayability.value.reason;
+    return reason ? `Converted preview · ${reason}` : 'Converted preview';
 });
 
 /**
@@ -616,17 +672,16 @@ const keySettled = computed(() => keyFetched.value || !sessionToken.value);
 // encrypted stream without one fails the load rather than degrading.
 //
 // Once the session is finished there is deliberately no fall back to the
-// preview. The preview is a different thing — renditions the encoder made up
-// on the spot, transcoded on this machine for as long as someone watches — so
+// preview. The preview is a different thing — the untrimmed source file, or a
+// conversion of it made on this machine for as long as someone watches — so
 // serving it in place of the delivered output would misreport what is playing
 // and hide the reason the output cannot be reached. A session with no
 // deliverable address shows `deliveryProblem` instead of a player.
 const activePlaybackUrl = computed(() => {
     if (isCompleted.value) {
         // Delivered output or nothing. While the key question is open we hold
-        // rather than reach for the preview: it is the wrong renditions, it
-        // transcodes on this machine for as long as anyone watches, and it
-        // would stand in for the delivered output indefinitely if the key
+        // rather than reach for the preview: it is not what was delivered, and
+        // it would stand in for the delivered output indefinitely if the key
         // question never closed.
         return keySettled.value ? playbackUrl.value : null;
     }
@@ -708,23 +763,20 @@ const sourceProbeDuration = computed(() => {
 });
 
 const trimEditorProbeDuration = computed(() => {
-    if (timelineIsShortened.value) return trimmedDuration(timelineRanges.value);
-    if (showsOutputTimeline.value) {
-        // Completed: the player holds the encoded file, whose reported duration
-        // is the output's real length — and the storyboard beside it was sampled
-        // from that same file, so the two agree.
-        if (isCompleted.value) {
-            const player = playerDuration.value;
-            if (player != null && player > 0) return player;
-        }
-        // During the encode the player still holds the *preview*, which cuts on
-        // its 4-second segment grid and so reports up to ~8s more than the trims
-        // actually keep. Sizing the timeline from it left a strip of ruler past
-        // the last thumbnail — the storyboard is re-timed from the exact trim
-        // ranges, so the exact trimmed duration is what matches it.
-        return trimmedDuration(submittedTrimSegments.value);
+    const ranges = timelineKeepRanges.value;
+    if (!ranges) return chaptersSidePanelDuration.value;
+    // Completed: the player holds the encoded file, whose reported duration
+    // is the output's real length — and the storyboard beside it was sampled
+    // from that same file, so the two agree.
+    if (isCompleted.value) {
+        const player = playerDuration.value;
+        if (player != null && player > 0) return player;
     }
-    return chaptersSidePanelDuration.value;
+    // Until then the player holds the *preview*, which is the whole source: the
+    // cuts are skipped as it plays, not cut out of it, so its duration is the
+    // source's. The storyboard is re-timed from the exact ranges, so the exact
+    // trimmed duration is what matches it.
+    return trimmedDuration(ranges);
 });
 
 /**
@@ -737,20 +789,12 @@ const trimEditorProbeDuration = computed(() => {
  * trimmed sidecar to fall back on any more.
  */
 const timelineWaveformPeaks = computed(() => {
-    if (timelineIsShortened.value) {
-        return slicePeaksToTrims(
-            waveformPeaks.value,
-            sourceProbeDuration.value,
-            timelineRanges.value
-        );
-    }
-    if (!showsOutputTimeline.value) {
-        return waveformPeaks.value;
-    }
+    const ranges = timelineKeepRanges.value;
+    if (!ranges) return waveformPeaks.value;
     return slicePeaksToTrims(
         waveformPeaks.value,
         sourceProbeDuration.value,
-        submittedTrimSegments.value
+        ranges
     );
 });
 
@@ -806,6 +850,78 @@ const chapterSegmentEditorRef = ref<{
 const playerRef = computed(() => sessionPlayerStripRef.value ?? null);
 
 /**
+ * Where the delivered output should pick up when it replaces the preview.
+ *
+ * The preview runs on source time and the output is already cut, so the
+ * position the player carries across the swap is late by whatever was cut
+ * before it. Read the moment the encode completes — synchronously, while the
+ * player still holds the preview — and applied once the output is ready, after
+ * the player's own carried-over seek.
+ */
+let outputHandoffTime: number | null = null;
+watch(
+    isCompleted,
+    (done, was) => {
+        if (!done || was) return;
+        const ranges = submittedTrimSegments.value;
+        const player = playerRef.value;
+        if (ranges.length === 0 || !player) return;
+        outputHandoffTime = sourceToOutputClamped(
+            player.getCurrentTime(),
+            ranges
+        );
+    },
+    { flush: 'sync' }
+);
+watch(
+    () => playerRef.value?.lifecycle,
+    (lifecycle) => {
+        if (lifecycle !== 'ready' || outputHandoffTime === null) return;
+        if (!isCompleted.value) return;
+        playerRef.value?.seek(outputHandoffTime);
+        outputHandoffTime = null;
+    }
+);
+
+/** When the converted preview was last loaded again after failing, ms. */
+let convertedPreviewRetriedAt = 0;
+/** No sooner than this after the last: a preview that cannot play must not loop. */
+const CONVERTED_PREVIEW_RETRY_MS = 60_000;
+
+/**
+ * What a preview that failed to play is replaced with.
+ *
+ * A source file that failed gets the converted preview instead, unless the
+ * failure was a network one. A converted preview that failed is loaded again,
+ * at most once every {@link CONVERTED_PREVIEW_RETRY_MS}: the encoder lays a copied
+ * preview's playlist out afresh when the source turns out not to keep the
+ * keyframe interval its opening seconds showed, and the playlist the player
+ * holds is then one whose segments no longer exist. The fresh load waits for
+ * the new playlist and carries the position across.
+ */
+watch(
+    () => playerRef.value?.lifecycle,
+    (lifecycle) => {
+        if (lifecycle !== 'error') return;
+        if (previewIsDirect.value) {
+            // A read of a file on this machine that dropped is retried from
+            // the player's own error panel; converting the file is for one the
+            // browser cannot play.
+            if (playerRef.value?.errorCode === 'network') return;
+            directPlaybackFailed.value = true;
+            return;
+        }
+        if (isCompleted.value || !previewPlaybackUrl.value) return;
+        const now = Date.now();
+        if (now - convertedPreviewRetriedAt < CONVERTED_PREVIEW_RETRY_MS) {
+            return;
+        }
+        convertedPreviewRetriedAt = now;
+        playerRef.value?.reload?.();
+    }
+);
+
+/**
  * Deleting a clip takes that material out of the video, so the timeline loses it:
  * the waveform closes up, the total shortens, and the clips after it move earlier.
  * Material that was merely never marked stays put — it is still there to mark, and
@@ -848,10 +964,6 @@ const trimModeHint = computed<string | null>(() => {
     return 'Mix of copy and re-encode streams — trimming needs all or none in copy mode.';
 });
 
-const timelineRanges = computed<TrimSegment[]>(() =>
-    invertRanges(deletedRanges.value, sourceProbeDuration.value)
-);
-
 const timelineIsShortened = computed(
     () =>
         showProbeConfig.value &&
@@ -859,42 +971,93 @@ const timelineIsShortened = computed(
         sourceProbeDuration.value > 0
 );
 
+/**
+ * The ranges of the source the timeline is made of, when it is shorter than
+ * the source; null when the timeline is the source itself.
+ *
+ * Before the encode that is what the deletions so far leave, and from the
+ * moment it is submitted, the trims it was submitted with. The ruler, the
+ * waveform, the filmstrip and the preview's own clock all have to agree on
+ * which, so they all read it from here.
+ */
+const timelineKeepRanges = computed<TrimSegment[] | null>(() => {
+    if (timelineIsShortened.value) return effectiveKeepRanges.value;
+    if (showsOutputTimeline.value) return submittedTrimSegments.value;
+    return null;
+});
+
 const timelineSegments = computed<Segment[]>({
     get: () =>
         timelineIsShortened.value
-            ? mapSegmentsToTimeline(editorSegments.value, timelineRanges.value)
+            ? mapSegmentsToTimeline(
+                  editorSegments.value,
+                  effectiveKeepRanges.value
+              )
             : editorSegments.value,
     set: (next) => {
         editorSegments.value = timelineIsShortened.value
-            ? mapSegmentsFromTimeline(next, timelineRanges.value)
+            ? mapSegmentsFromTimeline(next, effectiveKeepRanges.value)
             : next;
     },
 });
 
+/**
+ * What of the source the preview plays, while the timeline is shorter than it.
+ *
+ * The preview is always the whole source, on source time: the cuts are skipped
+ * as it plays rather than cut out of it, before the encode (the deletions so
+ * far) and during it (the trims it was submitted with) alike. Once the encode
+ * is done the player holds the output, which is already cut, and runs on the
+ * timeline's own time.
+ */
+const previewKeepRanges = computed<TrimSegment[]>(() =>
+    isCompleted.value ? [] : (timelineKeepRanges.value ?? [])
+);
+
 /** The player runs on source time; the timeline may be shorter than that. */
 function timelineCurrentTime(): number {
     const t = playerRef.value?.getCurrentTime() ?? 0;
-    if (!timelineIsShortened.value) return t;
+    const ranges = previewKeepRanges.value;
+    if (ranges.length === 0) return t;
     // Playback can be inside material the timeline no longer shows; the playhead
     // belongs at the seam, not back at zero.
-    return sourceToOutputClamped(t, timelineRanges.value);
+    return sourceToOutputClamped(t, ranges);
 }
 
 function timelineSeek(t: number) {
-    playerRef.value?.seek(
-        timelineIsShortened.value ? outputToSource(t, timelineRanges.value) : t
-    );
+    const ranges = previewKeepRanges.value;
+    playerRef.value?.seek(ranges.length > 0 ? outputToSource(t, ranges) : t);
 }
 
 useTrimPlayback({
-    ranges: effectiveKeepRanges,
-    active: computed(
-        () => showProbeConfig.value && effectiveKeepRanges.value.length > 0
-    ),
+    ranges: previewKeepRanges,
+    active: computed(() => previewKeepRanges.value.length > 0),
     isPlaying: isPreviewPlaying,
     getCurrentTime: () => playerRef.value?.getCurrentTime() ?? 0,
     seek: (t: number) => playerRef.value?.seek(t),
 });
+
+/**
+ * The list beside the player holds clips before the encode, in source time, and
+ * chapters from then on, in the timeline's time — the same clock as the
+ * timeline below it.
+ */
+const asidePanelDuration = computed(() =>
+    showProbeConfig.value
+        ? chaptersSidePanelDuration.value
+        : trimEditorProbeDuration.value
+);
+
+function asidePanelCurrentTime(): number {
+    return showProbeConfig.value
+        ? (playerRef.value?.getCurrentTime() ?? 0)
+        : timelineCurrentTime();
+}
+
+function asidePanelSeek(t: number) {
+    if (showProbeConfig.value) playerRef.value?.seek(t);
+    else timelineSeek(t);
+}
 
 const displayMasterPlaylist = computed(
     () => poller.masterPlaylist.value ?? session.value?.masterPlaylist
@@ -1092,12 +1255,9 @@ const rawThumbnailVttUrl = computed(() => {
  * completion is sampled from the encoded output instead, so it already matches
  * and must be left alone — re-timing it would shift frames that are correct.
  */
-const storyboardTrimRanges = computed<TrimSegment[]>(() => {
-    if (!sourceStoryboardActive.value) return [];
-    if (timelineIsShortened.value) return timelineRanges.value;
-    if (showsOutputTimeline.value) return submittedTrimSegments.value;
-    return [];
-});
+const storyboardTrimRanges = computed<TrimSegment[]>(() =>
+    sourceStoryboardActive.value ? (timelineKeepRanges.value ?? []) : []
+);
 
 const storyboardVtt = useStoryboardVttUrl({
     url: rawThumbnailVttUrl,
@@ -1262,6 +1422,11 @@ const playerSource = computed<PlayerSource | null>(() => {
     };
     return {
         masterUrl: url,
+        // The source file, played as it is. A file with video that shows no
+        // picture failed, and falls back to the converted preview.
+        ...(previewIsDirect.value
+            ? { kind: 'file' as const, expectVideo: sourceHasVideoTrack.value }
+            : {}),
         preservePosition: true,
         ...(encryptionKeyHex.value ? { keyHex: encryptionKeyHex.value } : {}),
         ...(Object.keys(sidecars).length > 0 ? { sidecars } : {}),
@@ -1565,13 +1730,6 @@ async function onEncodeSubmit(config: EncodeConfig) {
         if (probeResult.value) {
             const layoutKey = computeLayoutKey(probeResult.value, config.type);
             saveConfig(layoutKey, config);
-        }
-
-        // The preview playlist is regenerated against the submitted trims, at
-        // the same URL — so nothing about the source changes and the player has
-        // to be told to read it again.
-        if (submittedTrims.length > 0 && previewPlaybackUrl.value) {
-            playerRef.value?.reload();
         }
 
         // Start polling for encoding progress
@@ -2244,6 +2402,8 @@ onUnmounted(() => {
                             :preview-audio-select-options="
                                 previewAudioSelectOptions
                             "
+                            :native-preview-audio="previewIsDirect"
+                            :preview-note="previewNote"
                             v-model:selected-audio-track="selectedAudioTrack"
                             @playing-change="isPreviewPlaying = $event"
                             @duration-change="playerDuration = $event"
@@ -2867,14 +3027,11 @@ onUnmounted(() => {
                                         mode="chapters"
                                         embedded
                                         split-list-panel
-                                        :duration="chaptersSidePanelDuration"
+                                        :duration="asidePanelDuration"
                                         :get-current-time="
-                                            () =>
-                                                playerRef?.getCurrentTime() ?? 0
+                                            asidePanelCurrentTime
                                         "
-                                        :on-seek="
-                                            (t: number) => playerRef?.seek(t)
-                                        "
+                                        :on-seek="asidePanelSeek"
                                         :on-play-pause="
                                             () => playerRef?.togglePlay()
                                         "
@@ -3219,10 +3376,8 @@ onUnmounted(() => {
                                 canEditChaptersPlayback
                             "
                             :probe-duration="trimEditorProbeDuration"
-                            :get-current-time="
-                                () => playerRef?.getCurrentTime() ?? 0
-                            "
-                            :on-seek="(t: number) => playerRef?.seek(t)"
+                            :get-current-time="timelineCurrentTime"
+                            :on-seek="timelineSeek"
                             :on-play-pause="() => playerRef?.togglePlay()"
                             :is-preview-playing="isPreviewPlaying"
                             :segment-editor-probe-fps="segmentEditorProbeFps"

@@ -204,7 +204,7 @@ export class EncodeController {
         description:
             'For the local UI, which is the only thing holding the instance token. ' +
             'Includes each session token so the UI can reach the session-scoped ' +
-            'preview and waveform routes without having kept one from creation. ' +
+            'source, preview and waveform routes without having kept one from creation. ' +
             'Newest first.',
     })
     @ApiResponse({ status: 200, type: SessionSummaryDto, isArray: true })
@@ -520,10 +520,6 @@ export class EncodeController {
         }
 
         this.sessionService.setEncodeConfig(sessionId, dto);
-
-        if (dto.trimSegments?.length) {
-            this.previewService.setTrimSegments(sessionId, dto.trimSegments);
-        }
 
         const position = this.queueService.enqueue(sessionId);
 
@@ -1471,25 +1467,89 @@ export class EncodeController {
         }
     }
 
+    @Get(':sessionId/source')
+    @ApiOperation({
+        summary: 'Stream the source file',
+        description:
+            'Serves the source file as it is on disk, with byte ranges, so the ' +
+            'preview can play a browser-playable source directly instead of ' +
+            'through the HLS preview. Which sources that is, the client decides.',
+    })
+    @ApiParam({ name: 'sessionId', description: 'Session ID' })
+    @ApiResponse({ status: 200, description: 'The whole file.' })
+    @ApiResponse({ status: 206, description: 'The requested byte range.' })
+    @ApiResponse({ status: 416, description: 'Range not satisfiable.' })
+    @ApiResponse({ status: 401, description: 'Missing or wrong token.' })
+    @ApiResponse({
+        status: 404,
+        description: 'No source file yet, or it is no longer on disk.',
+    })
+    getSource(
+        @Param('sessionId') sessionId: string,
+        @Query('token') token: string,
+        @Res() res: Response
+    ): void {
+        this.validatePreviewToken(sessionId, token);
+
+        const session = this.sessionService.get(sessionId);
+        const filePath = session?.filePath;
+        if (
+            !session ||
+            !filePath ||
+            !isAbsolute(filePath) ||
+            session.status === 'created' ||
+            session.status === 'uploading'
+        ) {
+            throw new NotFoundException('Source file not available');
+        }
+
+        // `send` answers Range, If-Range and HEAD itself, with 206 and 416 as
+        // due. `dotfiles: 'allow'` because the source is wherever the user
+        // keeps it, and any dot-folder on the way would otherwise 404.
+        res.sendFile(
+            filePath,
+            {
+                acceptRanges: true,
+                dotfiles: 'allow',
+                headers: {
+                    'Cache-Control': 'no-cache',
+                    // A `<video src>` request is no-cors, and helmet's default
+                    // same-origin policy would refuse it to the Vite dev client.
+                    'Cross-Origin-Resource-Policy': 'cross-origin',
+                },
+            },
+            (err?: Error & { status?: number; code?: string }) => {
+                if (!err) return;
+                // The player abandons ranges whenever it seeks; that is not
+                // worth a line in the log.
+                if (err.code === 'ECONNABORTED' || err.code === 'ECONNRESET')
+                    return;
+                if (res.headersSent) {
+                    res.destroy();
+                    return;
+                }
+                const status = err.status ?? 500;
+                if (status >= 500) {
+                    this.logger.warn(
+                        `Source for session ${sessionId} could not be served: ${err.message}`
+                    );
+                }
+                res.status(status).end();
+            }
+        );
+    }
+
     // -----------------------------------------------------------------------
     // Preview HLS endpoints
     // -----------------------------------------------------------------------
 
-    @Get(':sessionId/preview/audio-tracks')
-    @ApiOperation({ summary: 'Get available preview audio tracks' })
-    async getPreviewAudioTracks(
-        @Param('sessionId') sessionId: string,
-        @Query('token') token: string
-    ): Promise<any> {
-        this.validatePreviewToken(sessionId, token);
-        await this.previewService.ensureReady(sessionId);
-        const tracks = this.previewService.getAudioTracks(sessionId);
-        if (!tracks) throw new NotFoundException('Preview not ready');
-        return tracks;
-    }
-
     @Get(':sessionId/preview/playlist.m3u8')
-    @ApiOperation({ summary: 'Get preview HLS master playlist' })
+    @ApiOperation({
+        summary: 'Get the converted preview HLS master playlist',
+        description:
+            'For sources the browser cannot play directly. The preview is ' +
+            'built on the first preview request, playlist or segment.',
+    })
     async getPreviewMasterPlaylist(
         @Param('sessionId') sessionId: string,
         @Query('token') token: string,
@@ -1517,7 +1577,7 @@ export class EncodeController {
     }
 
     @Get(':sessionId/preview/r:rendition/playlist.m3u8')
-    @ApiOperation({ summary: 'Get preview HLS rendition playlist' })
+    @ApiOperation({ summary: 'Get the converted preview HLS rendition playlist' })
     async getPreviewRenditionPlaylist(
         @Param('sessionId') sessionId: string,
         @Param('rendition') rendition: string,
@@ -1547,7 +1607,7 @@ export class EncodeController {
     }
 
     @Get(':sessionId/preview/r:rendition/:filename')
-    @ApiOperation({ summary: 'Get preview HLS segment' })
+    @ApiOperation({ summary: 'Get a converted preview HLS segment' })
     async getPreviewSegment(
         @Param('sessionId') sessionId: string,
         @Param('rendition') rendition: string,
@@ -1580,6 +1640,10 @@ export class EncodeController {
             'Content-Length': String(result.size),
             'Cache-Control': 'public, max-age=3600',
         });
+        // Unheard, a failed read is an uncaught error that ends the process.
+        // The headers are out by then, so all that is left is to cut the
+        // response short.
+        result.stream.on('error', () => res.destroy());
         result.stream.pipe(res);
     }
 

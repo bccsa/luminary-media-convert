@@ -90,6 +90,13 @@ export interface EncodeOptions {
     };
     /** Told when a wave of a ladder run in waves has finished. */
     onWaveDone?: (index: number) => Promise<void> | void;
+    /**
+     * How many encoder sessions the ladder may plan its waves around. Absent
+     * means every session; one fewer leaves a session free for a transcoded
+     * preview. Must be the value {@link FfmpegService.waveLayout} was given for
+     * the same encode.
+     */
+    sessionCap?: number;
 }
 
 /**
@@ -1392,15 +1399,22 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
      * The runs of ffmpeg a video encode of `config` makes, in order, with the
      * stream directories each writes: one for a ladder within the session cap,
      * one per wave otherwise. The audio rides with the first.
+     *
+     * `sessionCap` is the session's own (`Session.encoderSessionCap`): the
+     * layout has to be the one the encode itself runs, and a continued encode
+     * the one the run before it ran.
      */
-    waveLayout(config: EncodeConfigDto): WaveLayout[] {
+    waveLayout(
+        config: EncodeConfigDto,
+        sessionCap: number = MAX_HARDWARE_SESSIONS
+    ): WaveLayout[] {
         const names = this.videoStreamNames(config.videoRenditions ?? []);
         const audio = (config.audioGroups ?? []).map(
             (g) => `stream_${this.buildAudioStreamName(g)}`
         );
         const waves = planLadderWaves(
             config.videoRenditions ?? [],
-            MAX_HARDWARE_SESSIONS
+            sessionCap
         );
         if (waves.length <= 1) {
             return [
@@ -1481,7 +1495,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             type === 'video'
                 ? planLadderWaves(
                       encodeConfig.videoRenditions!,
-                      MAX_HARDWARE_SESSIONS
+                      opts.sessionCap ?? MAX_HARDWARE_SESSIONS
                   )
                 : [];
 
@@ -1549,7 +1563,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         this.logger.log(
             `Ladder of ${waves.reduce((n, w) => n + w.sessionCount, 0)} encoded ` +
                 `renditions split into ${waves.length} waves of at most ` +
-                `${MAX_HARDWARE_SESSIONS}: ` +
+                `${opts.sessionCap ?? MAX_HARDWARE_SESSIONS}: ` +
                 waves
                     .map((w) =>
                         w.renditions

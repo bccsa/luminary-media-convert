@@ -13,7 +13,7 @@ Sessions are opened by the Luminary CMS, not here — this app has no "new sessi
 3. **Trim** — waveform, storyboard frames and zoomable timeline, backed by the API's source waveform and storyboard endpoints. Cuts become `trimSegments` on the encode config.
 4. **Configure** — `EncodeConfigForm` from `@luminary-media-converter/encode-config` computes a suggested ladder from the probe results; the user adjusts renditions, audio groups, copy/VBR.
 5. **Encode** — progress over SSE with a polling fallback.
-6. **Review** — preview player during, encoded HLS playback (with angle and audio-track selection) after, plus chapter authoring written back as `chapters/<lang>.vtt`.
+6. **Review** — preview during (the source file played directly when the browser can, a converted HLS stream otherwise), encoded HLS playback (with angle and audio-track selection) after, plus chapter authoring written back as `chapters/<lang>.vtt`.
 
 ## Authentication
 
@@ -22,7 +22,7 @@ There is none, in the user-facing sense. The app's credential for the local API 
 - In the desktop app, the main process mints it per launch and hands it over the preload bridge (`window.luminary.getApiToken()`). It is never written to disk and never embedded in the bundle.
 - In a plain browser, `VITE_API_TOKEN` stands in for it.
 
-Per-session routes (preview, waveform, storyboard) use the session's own `sess_*` token instead, passed as a `?token=` query parameter where the browser cannot set headers.
+Per-session routes (source, preview, waveform, storyboard) use the session's own `sess_*` token instead, passed as a `?token=` query parameter where the browser cannot set headers.
 
 ## Routes
 

@@ -145,12 +145,19 @@ with an argv array — never `shell: true`. The only `execSync` calls interpolat
 extension allow-list; the file is only ever read, never written or moved. Preview
 and storyboard routes bound their indices numerically and pin filenames with
 anchored regexes. S3 keys pass through `canonicalPrefix`.
+`GET /api/sessions/:id/source` streams the attached file back over loopback to
+the holder of that session's token: it serves only the absolute path the
+session recorded, takes no path from the request, and is refused to read
+tokens. It sets `dotfiles: 'allow'` (the source lives wherever the user keeps
+it) and `Cross-Origin-Resource-Policy: cross-origin` (a `<video src>` request
+is no-cors) deliberately.
 
 **Read tokens** reach exactly one route plus the SSE stream for their own session.
 They cannot start, cancel, or reach the source file.
 
 **Electron shell.** `contextIsolation: true`, `nodeIntegration: false`,
-`sandbox: true`. The preload exposes five narrow calls and no general escape
+`sandbox: true`; the only Blink feature turned on is `AudioVideoTracks`, for
+the preview's track switching. The preload exposes five narrow calls and no general escape
 hatch. External links go to the system browser. There is no renderer navigation
 sink an attacker-controlled string could drive.
 

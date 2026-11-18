@@ -77,6 +77,14 @@ export interface AudioTrackInfo {
 }
 
 /** What {@link ProbeService.probeGopInfo} could work out about a track's GOP. */
+/**
+ * How many frames off the head {@link ProbeService.probeGopInfo} reads to
+ * measure a track's keyframe cadence. Exported because what a reading is worth
+ * depends on it: a cadence seen once in this window is one interval, not a
+ * pattern.
+ */
+export const GOP_SAMPLE_FRAMES = 200;
+
 export interface GopInfo {
     gopFrames: number;
     gopSeconds: number;
@@ -378,7 +386,7 @@ export class ProbeService {
                     '-of',
                     'csv=p=0',
                     '-read_intervals',
-                    '%+#200',
+                    `%+#${GOP_SAMPLE_FRAMES}`,
                     filePath,
                 ],
                 { timeout: 60000 }
