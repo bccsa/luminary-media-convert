@@ -128,6 +128,64 @@ describe('a file source', () => {
         ]).toEqual([false, true]);
     });
 
+    /** Records how many tracks are enabled after every change the adapter makes. */
+    const watchEnabled = () => {
+        const counts: number[] = [];
+        const tracks = [video.audioTracks[0], video.audioTracks[1]];
+        const state = tracks.map((t) => t.enabled === true);
+        tracks.forEach((track, i) =>
+            Object.defineProperty(track, 'enabled', {
+                get: () => state[i],
+                set: (on: boolean) => {
+                    state[i] = on;
+                    counts.push(state.filter(Boolean).length);
+                },
+            })
+        );
+        return counts;
+    };
+
+    it('never leaves the file without an enabled audio track while switching', async () => {
+        // With none enabled for a moment, Chromium restarts playback with no sound and stalls.
+        await loadFile();
+        metadataRead();
+        const counts = watchEnabled();
+        adapter.setAudioTrack('2');
+        expect(counts).not.toContain(0);
+        adapter.setAudioTrack('1');
+        expect(counts).not.toContain(0);
+        expect(video.audioTracks[0].enabled).toBe(true);
+        expect(video.audioTracks[1].enabled).toBe(false);
+    });
+
+    it('seeks to where it stands after switching, so picture and sound restart together', async () => {
+        await loadFile();
+        metadataRead();
+        let position = 12.5;
+        const seeks: number[] = [];
+        Object.defineProperty(video, 'currentTime', {
+            configurable: true,
+            get: () => position,
+            set: (t: number) => {
+                seeks.push(t);
+                position = t;
+            },
+        });
+        adapter.setAudioTrack('2');
+        expect(seeks).toEqual([12.5]);
+        adapter.setAudioTrack('2');
+        expect(seeks).toEqual([12.5]);
+    });
+
+    it('leaves the tracks alone when the chosen one is already playing', async () => {
+        // Every change to the list restarts playback.
+        await loadFile();
+        metadataRead();
+        const counts = watchEnabled();
+        adapter.setAudioTrack('1');
+        expect(counts).toEqual([]);
+    });
+
     it('ignores an audio track the file does not have', async () => {
         await loadFile();
         metadataRead();

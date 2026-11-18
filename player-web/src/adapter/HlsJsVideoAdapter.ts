@@ -556,9 +556,20 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
     setAudioTrack(id: string): void {
         if (this.lastSource?.kind === 'file') {
             const entries = this.fileAudioTracks();
-            if (!entries.some((entry) => entry.id === id)) return;
+            const chosen = entries.find((entry) => entry.id === id);
+            if (!chosen) return;
             // A native list plays every enabled track at once, so the choice is the only one left enabled.
-            for (const entry of entries) entry.track.enabled = entry.id === id;
+            // Every change restarts playback, and with no track enabled for a moment Chromium restarts
+            // without sound and stalls: the choice is enabled first, and nothing already right is touched.
+            if (chosen.track.enabled && entries.every((entry) => entry === chosen || !entry.track.enabled)) return;
+            if (!chosen.track.enabled) chosen.track.enabled = true;
+            for (const entry of entries) {
+                if (entry !== chosen && entry.track.enabled) entry.track.enabled = false;
+            }
+            // Chromium restarts the sound alone and loses sync with the picture, which freezes or plays on
+            // silent. A seek to where it stands restarts both together.
+            const target = this.mediaTarget();
+            if (target) target.currentTime = target.currentTime;
             return;
         }
         const engine = this.el.engine;
