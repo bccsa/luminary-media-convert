@@ -894,6 +894,12 @@ export class ProbeService {
         timeout = SAMPLE_GRAB_TIMEOUT_MS
     ): Promise<Uint8Array | null | undefined> {
         const at = Math.max(0, seek);
+        // A lead that reaches the top of the file decodes from the top, with
+        // no input seek at all. Seeking to 0 is not the same: in Matroska the
+        // file is still positioned by the first video stream, and a second one
+        // whose only earlier keyframe is the very first waits for its next —
+        // so every instant in a long-GOP proxy's first GOP read as the frame
+        // after it.
         const from = Math.max(0, at - lead);
         // Output timestamps count from the input seek, so the frame at `at` is
         // the one `at - from` into the output.
@@ -905,8 +911,7 @@ export class ProbeService {
                     '-v',
                     'error',
                     '-nostdin',
-                    '-ss',
-                    from.toFixed(3),
+                    ...(from > 0 ? ['-ss', from.toFixed(3)] : []),
                     '-i',
                     filePath,
                     '-map',

@@ -1754,5 +1754,26 @@ describe('ProbeService', () => {
             });
         });
 
+        // In Matroska the file is positioned by its first video stream: a
+        // second one whose only earlier keyframe is the very first waits for
+        // its next, so seeking to 0 is not the same as not seeking.
+        it('decodes from the top, without seeking, when a frame’s lead reaches the start', async () => {
+            const { grabs } = fakeSource(
+                [hd(camA), sd((t) => lower(camA(t)))],
+                {
+                    formatName: 'matroska,webm',
+                }
+            );
+
+            await service.probe('/tmp/proxy.mkv');
+
+            // A two-second GOP is sought 2.5 s early.
+            const early = grabs.filter((g) => g.at < 2.5);
+            const later = grabs.filter((g) => g.at > 2.5);
+            expect(early.length).toBeGreaterThan(0);
+            expect(early.every((g) => g.inputSeek === null)).toBe(true);
+            for (const grab of later)
+                expect(grab.inputSeek).toBeCloseTo(grab.at - 2.5, 2);
+        });
     });
 });
