@@ -66,6 +66,23 @@ describe('previewPlayability', () => {
         ).toEqual({ direct: true });
     });
 
+    // Each pairing heard to play in Electron and Chrome before it went in.
+    it.each([
+        ['an H.264 and AAC MKV', 'matroska,webm', 'aac'],
+        ['an H.264 and MP3 MKV', 'matroska,webm', 'mp3'],
+        ['an H.264 and FLAC MKV', 'matroska,webm', 'flac'],
+        ['an H.264 and Opus MKV', 'matroska,webm', 'opus'],
+        ['an H.264 MOV with 16-bit PCM', MP4, 'pcm_s16le'],
+        ['an H.264 MOV with 24-bit PCM', MP4, 'pcm_s24le'],
+    ])('plays %s directly', (_, formatName, codec) => {
+        expect(
+            previewPlayability(
+                probe(formatName, [video('h264')], [audio(codec)]),
+                chromium
+            )
+        ).toEqual({ direct: true });
+    });
+
     it.each([
         ['MP3', 'mp3', 'mp3'],
         ['FLAC', 'flac', 'flac'],
@@ -135,24 +152,42 @@ describe('previewPlayability', () => {
     });
 
     describe('codecs refused for their container, not for themselves', () => {
-        // "H.264 video" alone would read as though H.264 does not play.
-        it('names the container for H.264 in MKV', () => {
+        // "HEVC video" alone would read as though HEVC does not play.
+        it('names the container for HEVC in MKV', () => {
             expect(
                 previewPlayability(
-                    probe('matroska,webm', [video('h264')], [audio('aac')]),
-                    chromium
+                    probe('matroska,webm', [video('hevc')], [audio('aac')]),
+                    { ...chromium, hevc: true }
                 )
-            ).toEqual({ direct: false, reason: 'H.264 video in MKV' });
+            ).toEqual({ direct: false, reason: 'HEVC video in MKV' });
         });
 
-        it('names the container for PCM in MOV', () => {
+        it('names the container for PCM in MKV', () => {
             expect(
                 previewPlayability(
-                    probe(MP4, [video('h264')], [audio('pcm_s16le')]),
+                    probe(
+                        'matroska,webm',
+                        [video('h264')],
+                        [audio('pcm_s16le')]
+                    ),
                     chromium
                 )
-            ).toEqual({ direct: false, reason: 'PCM audio in MP4/MOV' });
+            ).toEqual({ direct: false, reason: 'PCM audio in MKV' });
         });
+    });
+
+    // In an MKV these play as a picture in silence, with no error to fall back
+    // on, so they must never be let through to direct play.
+    it.each([
+        ['AC-3', 'ac3', 'AC-3 audio'],
+        ['E-AC-3', 'eac3', 'E-AC-3 audio'],
+    ])('converts an H.264 MKV with %s audio', (_, codec, reason) => {
+        expect(
+            previewPlayability(
+                probe('matroska,webm', [video('h264')], [audio(codec)]),
+                chromium
+            )
+        ).toEqual({ direct: false, reason });
     });
 
     it.each([

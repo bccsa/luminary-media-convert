@@ -74,14 +74,26 @@ const CONTAINERS: {
         names: ['mov', 'mp4', 'm4a'],
         label: 'MP4/MOV',
         video: new Set(['h264', 'hevc', 'av1', 'vp9']),
-        audio: new Set(['aac', 'mp3', 'opus', 'flac']),
+        // PCM as a camera or editor writes it into a MOV, heard to play.
+        audio: new Set([
+            'aac',
+            'mp3',
+            'opus',
+            'flac',
+            'pcm_s16le',
+            'pcm_s24le',
+        ]),
     },
     {
         // A WebM holding a codec refused here is an MKV in all but name.
+        // Chromium plays H.264 out of Matroska although `canPlayType` denies
+        // it, which is why this table does not ask. AC-3 and E-AC-3 stay out:
+        // in an MKV they play as a picture in silence, with no error to fall
+        // back on.
         names: ['matroska', 'webm'],
         label: 'MKV',
-        video: new Set(['vp8', 'vp9', 'av1']),
-        audio: new Set(['opus', 'vorbis']),
+        video: new Set(['h264', 'vp8', 'vp9', 'av1']),
+        audio: new Set(['opus', 'vorbis', 'aac', 'mp3', 'flac']),
     },
     {
         names: ['ogg'],
@@ -118,7 +130,7 @@ const CONTAINERS: {
 /**
  * Codecs a browser plays from *some* container above. One of these refused is
  * refused for where it is, not for what it is, and the reason has to say so:
- * "H.264 video" on its own reads as though H.264 does not play.
+ * "HEVC video" on its own reads as though HEVC does not play.
  */
 const PLAYABLE_SOMEWHERE = {
     video: new Set(CONTAINERS.flatMap((c) => [...c.video])),
@@ -218,7 +230,9 @@ function videoProblem(
                 ? null
                 : `${pixFmtLabel(pixFmt)} ${codecLabel(codec)} video`;
         default:
-            return eightBit ? null : `${pixFmtLabel(pixFmt)} ${codecLabel(codec)} video`;
+            return eightBit
+                ? null
+                : `${pixFmtLabel(pixFmt)} ${codecLabel(codec)} video`;
     }
 }
 
@@ -290,11 +304,7 @@ export function previewPlayability(
         if (problem) return { direct: false, reason: problem };
     }
     for (const track of audios) {
-        const problem = audioProblem(
-            track,
-            container.audio,
-            container.label
-        );
+        const problem = audioProblem(track, container.audio, container.label);
         if (problem) return { direct: false, reason: problem };
     }
 
