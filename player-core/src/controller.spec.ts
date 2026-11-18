@@ -1208,6 +1208,44 @@ describe('PlayerController — chapters', () => {
         expect(calls.filter((url) => url === FR_CHAPTERS)).toHaveLength(1);
     });
 
+    it("keeps the host's chapter files for languages the master does not name", async () => {
+        // A video from before the index, with English and French chapters. An
+        // English save names only English in the master; French is still the
+        // host's file.
+        const EN_SAVED = `${BASE}/chapters/en_1a2b3c4d.vtt`;
+        const master = SIMPLE_MASTER.replace(
+            '#EXTM3U\n',
+            '#EXTM3U\n#EXT-X-SESSION-DATA:DATA-ID="com.luminary.chapters",LANGUAGE="en",URI="chapters/en_1a2b3c4d.vtt",FORMAT=RAW\n',
+        );
+        const { controller } = setup({
+            ...simpleRoutes,
+            [MASTER_URL]: master,
+            [EN_SAVED]: CHAPTERS_VTT,
+            [FR_CHAPTERS]: FR_VTT,
+        });
+        await controller.load({
+            masterUrl: MASTER_URL,
+            sidecars: {
+                chapters: [
+                    { lang: 'en', label: 'English', url: EN_CHAPTERS },
+                    { lang: 'fr', label: 'Français', url: FR_CHAPTERS },
+                ],
+            },
+        });
+        await flush();
+
+        const tracks = controller.getState().chapterTracks;
+        expect(tracks.map((t) => [t.lang, t.label])).toEqual([
+            ['en', 'English'],
+            ['fr', 'Français'],
+        ]);
+        controller.setChapterTrack('c:fr');
+        await flush();
+        expect(controller.getState().chapters.map((c) => c.title)).toEqual([
+            'Ouverture',
+        ]);
+    });
+
     it('reads encrypted chapter sidecars with the session key', async () => {
         const { controller } = setup({
             ...simpleRoutes,

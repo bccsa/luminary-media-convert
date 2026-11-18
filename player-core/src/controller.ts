@@ -869,26 +869,36 @@ export class PlayerController implements PlayerControllerApi {
     }
 
     /**
-     * The chapter files the master names win over the host's. Each chapter
-     * save writes a new name and records it in the master, so a host-built
-     * `chapters/<lang>.vtt` is at best the legacy copy — kept for the master
-     * that names none, from before the index. The host still knows what to
-     * call a language, so its label carries over to the master's file for it.
+     * The chapter files the master names win over the host's, language by
+     * language. Each chapter save writes a new name and records it in the
+     * master, so a host-built `chapters/<lang>.vtt` is the legacy copy — kept
+     * for every language the master does not name, which on a video from
+     * before the index is each one not saved since. The host still knows what
+     * to call a language, so its label carries over to the master's file.
      */
     private prepareChapterTracks(info: MasterInfo) {
         const hosted = this.source?.sidecars?.chapters ?? [];
         const declared = info.chapters ?? [];
+        const named = new Set(declared.map((sidecar) => sidecar.lang));
         this.sidecarLoader?.setChapters(
-            declared.length === 0
-                ? hosted
-                : declared.map((sidecar) => {
-                      const label = hosted.find(
-                          (entry) => entry.lang === sidecar.lang,
-                      )?.label;
-                      return label === undefined
-                          ? sidecar
-                          : { ...sidecar, label };
-                  }),
+            hosted
+                .map((entry) => {
+                    if (!named.has(entry.lang)) return entry;
+                    const sidecar = declared.find(
+                        (d) => d.lang === entry.lang,
+                    )!;
+                    return entry.label === undefined
+                        ? sidecar
+                        : { ...sidecar, label: entry.label };
+                })
+                .concat(
+                    declared.filter(
+                        (sidecar) =>
+                            !hosted.some(
+                                (entry) => entry.lang === sidecar.lang,
+                            ),
+                    ),
+                ),
         );
         return this.sidecarLoader?.chapterTracks() ?? [];
     }
