@@ -26,7 +26,7 @@ object, not to produce data anybody uses.
 | Whether to warm, how far ahead, how many bytes, whether to log | **player-core** — `PlayerControllerOptions.prefetch`, resolved in `PlayerController` | Policy stays in one place so every platform warms identically |
 | The pacing loop: sampling the buffer, deciding the moment, issuing the request | **The adapter** — `PlayerAdapter.warmChunks` | Platform work. A JS interval is throttled or suspended once the app is backgrounded, exactly when a native player carries on playing |
 
-The wrapper calls `warmChunks(schedules, options)` on every source attach —
+The wrapper calls `warmChunks(schedules, options)` on every HLS source attach —
 initial load, angle switch, recovery reload — with the chains that attach will
 actually pull, and calls it with an **empty array** to mean *stop*. Implementing
 it is optional: an adapter that omits it simply never warms, and playback is

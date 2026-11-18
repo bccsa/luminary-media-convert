@@ -230,7 +230,8 @@ function isPlaying(): boolean {
 /**
  * Re-run the load for the current source. The player reloads by itself whenever
  * the `source` object changes, so this is for the case where the URL is stable
- * but what it serves is not — a master edited in place.
+ * but what it serves is not — a master edited in place, or a converted preview
+ * whose playlist the API laid out afresh.
  */
 function reload(): void {
     if (props.source) void controller.value?.load(props.source);

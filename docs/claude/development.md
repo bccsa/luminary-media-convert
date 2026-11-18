@@ -33,6 +33,8 @@ VITE_API_TOKEN=dev-token
 
 Browser dev has no preload bridge, so a dropped file cannot be resolved to a real path — the local-file flow only works inside the Electron shell.
 
+The direct-play preview switches a file's audio tracks and angles through `audioTracks`/`videoTracks`, which Chromium ships behind its `AudioVideoTracks` feature. Electron turns it on; in a plain Chrome a source with several audio tracks gets the converted preview ("several audio tracks"), and a multi-angle file plays only its default camera, unless Chrome is started with `--enable-blink-features=AudioVideoTracks`.
+
 ### Desktop development
 
 ```bash

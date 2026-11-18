@@ -629,6 +629,10 @@ export interface ChunkWarmOptions {
  *
  * Only then is the obligation spent, and `error` means exactly that.
  *
+ * The obligation is for HLS sources. A `kind: 'file'` source
+ * ({@link AdapterSource.kind}) has nothing to re-attach or re-munge: its
+ * failure is raised fatal at once, and the host decides what to play instead.
+ *
  * A platform whose engine already provides rungs 1–2 satisfies the obligation
  * with it: ExoPlayer's `LoadErrorHandlingPolicy` is precisely a
  * retry-count-plus-backoff policy, and re-implementing ours beside it would be

@@ -81,6 +81,10 @@ of its own — you must have climbed this ladder, tuned by the
 
 Then, and only then, `error`.
 
+The obligation is for HLS sources. A `kind: 'file'` source
+(`AdapterSource.kind`) has nothing to re-attach or re-munge: its failure is
+raised fatal at once, and the host decides what to play instead.
+
 **If your engine already does rungs 1–2, use it.** ExoPlayer's
 `LoadErrorHandlingPolicy` is precisely a retry-count-plus-backoff policy; wiring
 ours alongside would be two ladders on one engine, fighting. AVPlayer has no

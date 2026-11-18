@@ -891,8 +891,9 @@ const CONVERTED_PREVIEW_RETRY_MS = 60_000;
 /**
  * What a preview that failed to play is replaced with.
  *
- * A source file that failed gets the converted preview instead. A converted
- * preview that failed is loaded again, once: the encoder lays a copied
+ * A source file that failed gets the converted preview instead, unless the
+ * failure was a network one. A converted preview that failed is loaded again,
+ * at most once every {@link CONVERTED_PREVIEW_RETRY_MS}: the encoder lays a copied
  * preview's playlist out afresh when the source turns out not to keep the
  * keyframe interval its opening seconds showed, and the playlist the player
  * holds is then one whose segments no longer exist. The fresh load waits for
