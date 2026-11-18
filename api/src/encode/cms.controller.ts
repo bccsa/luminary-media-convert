@@ -214,6 +214,17 @@ export class CmsController {
             existing.edit &&
             videoOf(existing.edit.masterKey) === videoOf(heldKey)
         ) {
+            // Another machine may have saved a newer revision since this
+            // session last moved, and the CMS is handed whatever it holds.
+            if (this.masterRevisions) {
+                const newest = await this.masterRevisions.latestRevision(
+                    existing.config.s3,
+                    existing.edit.masterKey
+                );
+                if (newest !== existing.edit.masterKey) {
+                    this.sessionService.setMasterRevision(existing.id, newest);
+                }
+            }
             // The CMS just sent this URL, so it holds it: as good as an ack.
             if (existing.hlsUrl === media.hlsUrl) {
                 this.sessionService.setAckedHlsUrl(existing.id, media.hlsUrl);
