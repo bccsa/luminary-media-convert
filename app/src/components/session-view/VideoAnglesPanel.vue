@@ -400,6 +400,23 @@ watch(() => [props.sessionId, props.sessionToken] as const, load, {
             v-else-if="media"
             class="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-8 text-center"
         >
+            <div
+                class="flex h-11 w-11 items-center justify-center rounded-full border border-neutral-200 bg-neutral-50 text-slate-500 dark:border-slate-600/55 dark:bg-slate-900/45 dark:text-slate-400"
+                aria-hidden="true"
+            >
+                <svg
+                    class="h-5 w-5"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.75"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                >
+                    <path d="m16 10 5-3v10l-5-3" />
+                    <rect x="3" y="6" width="13" height="12" rx="2" />
+                </svg>
+            </div>
             <p
                 class="m-0 text-[0.8125rem] font-semibold text-zinc-900 dark:text-slate-200"
             >
