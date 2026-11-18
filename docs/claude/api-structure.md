@@ -33,7 +33,7 @@ api/
 │   │   │   ├── encode-config.dto.ts         # type, video renditions, audio groups, VBR, labels, trimSegments
 │   │   │   ├── encryption-config.dto.ts     # enabled + optional keyUrl
 │   │   │   ├── chapters.dto.ts              # session-scoped chapter write body
-│   │   │   └── s3-config.dto.ts, probe-result.dto.ts, session-response.dto.ts, rendition.dto.ts, review-range.dto.ts
+│   │   │   └── s3-config.dto.ts, probe-result.dto.ts, session-response.dto.ts, rendition.dto.ts
 │   │   └── services/
 │   │       ├── session.service.ts           # Session store + tokens + persistence (session.json, credentials.enc) + restore/sweep
 │   │       ├── session-events.service.ts    # SSE event subject (SessionEvent shape)

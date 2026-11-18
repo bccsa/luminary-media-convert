@@ -22,7 +22,7 @@
 
 ## Conventions
 
-- The renderer's only privileged capabilities are the three preload calls. Everything else it does goes over HTTP to the local API like any other client, which keeps one set of rules about what is allowed
+- The renderer's only privileged capabilities are the five preload calls. Everything else it does goes over HTTP to the local API like any other client, which keeps one set of rules about what is allowed
 
 ## Project Structure (`app-electron/`)
 

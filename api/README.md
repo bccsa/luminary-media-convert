@@ -129,6 +129,8 @@ Interactive OpenAPI docs at `/api/docs` when Swagger is enabled.
 | GET       | `/api/sessions`                                        | token                       | List every session, newest first (includes session tokens)                |
 | POST      | `/api/sessions/:id/local-file`                         | token, session              | Attach a file already on this machine                                     |
 | POST      | `/api/sessions/:id/encode`                             | token, session              | Submit the encode config and enqueue                                      |
+| POST      | `/api/sessions/:id/continue`                           | token, session              | Run a failed encode again, continuing where it can                        |
+| POST      | `/api/sessions/:id/stop`                               | token, session              | End a running encode and keep it, to continue later                       |
 | GET       | `/api/sessions/:id`                                    | token, session, read        | Poll status                                                               |
 | GET       | `/api/sessions/:id/events`                             | `?token=` (session or read) | SSE event stream                                                          |
 | DELETE    | `/api/sessions/:id`                                    | token, session              | Cancel and delete (not while `encrypting` / `uploading_to_s3`)            |
@@ -138,6 +140,8 @@ Interactive OpenAPI docs at `/api/docs` when Swagger is enabled.
 | GET       | `/api/sessions/:id/waveform`                           | `?token=`                   | Waveform peaks for the source                                             |
 | GET       | `/api/sessions/:id/preview/**`                         | `?token=`                   | On-demand preview master / rendition playlists and MPEG-TS segments       |
 | GET       | `/api/sessions/:id/thumbnails/**`                      | `?token=`                   | Pre-encode source storyboard VTT and sprite sheets                        |
+| POST      | `/api/sessions/:id/thumbnails/regenerate`              | token, session              | Sample the storyboard again, or rebuild an edit session's                 |
+| GET       | `/api/sessions/:id/thumbnails/regenerate`              | token, session              | Progress of an edit session's storyboard rebuild                          |
 | GET       | `/api/cms/health`                                      | none                        | Liveness probe for the CMS                                                |
 | POST      | `/api/cms/sessions`                                    | Origin                      | Open (or reuse) a session for a CMS document                              |
 | POST      | `/api/hls/{read,discover,chapters/read,waveform/read}` | token                       | Stateless, read-only HLS operations against inline S3 credentials         |
@@ -213,13 +217,13 @@ X-API-Key: <instance token>
 | `uploading`       | Source ingest in progress               | `progress`, `ingestTotalBytes`                                                   |
 | `uploaded`        | Source in place and probed              | `probeResult`                                                                    |
 | `queued`          | Waiting in the FIFO queue               | `queuePosition`                                                                  |
-| `encoding`        | FFmpeg running                          | `progress`, `pipelineProgress`, `hlsUrl`, `encryptionKeyHex`                     |
+| `encoding`        | FFmpeg running                          | `progress`, `pipelineProgress`, `hlsUrl`                                         |
 | `encrypting`      | Segment encryption                      | `progress`, `pipelineProgress`                                                   |
 | `uploading_to_s3` | Output going to the bucket              | `progress`, `pipelineProgress`                                                   |
 | `completed`       | Done                                    | `files`, `masterPlaylist`, `thumbnailsVtt`, `segmentFormat`                      |
 | `failed`          | Error                                   | `error`, and `canRetry` when the source and credentials are both still available |
 
-`hlsUrl` and `encryptionKeyHex` appear from the moment encoding starts, not at completion — a caller that reconnects mid-encode has to be able to ask for them again. `title`, `documentId`, `encoder` and any submitted `trimSegments` are always reported.
+`hlsUrl` appears from the moment encoding starts, not at completion — a caller that reconnects mid-encode has to be able to ask for it again. The key is never on a status response or the event stream: it is fetched, masked, from `GET /api/sessions/:id/key`. `title`, `documentId`, `encoder` and any submitted `trimSegments` are always reported.
 
 ### 4. Start encoding
 
@@ -401,7 +405,7 @@ S3 credentials arrive per session and must survive a restart without ever sittin
 
 ## Encrypted HLS and the `luminary://key` contract
 
-Keys are generated locally (`randomBytes(16)`) and never leave the machine, so there is nothing to serve them over HTTP. With no explicit `keyUrl`, `#EXT-X-KEY` carries the sentinel `luminary://key` (`LUMINARY_KEY_PLACEHOLDER_URI`, exported from `@luminary-media-converter/hls-core`). A player is expected to recognise it and swap in the key it already holds — the hex reported as `encryptionKeyHex` on the session and on the SSE stream — typically by rewriting the playlist and pointing the URI at a blob URL of the raw bytes. `app/src/components/HlsPlayer.vue` is the reference implementation.
+Keys are generated locally (`randomBytes(16)`) and never leave the machine, so there is nothing to serve them over HTTP. With no explicit `keyUrl`, `#EXT-X-KEY` carries the sentinel `luminary://key` (`LUMINARY_KEY_PLACEHOLDER_URI`, exported from `@luminary-media-converter/hls-core`). A player is expected to recognise it and answer it with the key it holds — fetched masked from `GET /api/sessions/:id/key` — without the key leaving memory. `player-web/src/adapter/hlsLoaders.ts` is the reference implementation: its hls.js loader answers `luminary://key` itself, with no blob URL.
 
 Multi-angle output is a single spec-correct master: each angle is an `#EXT-X-MEDIA:TYPE=VIDEO` group and every `#EXT-X-STREAM-INF` carries `VIDEO="<group>"`. Players that want to pin one angle, or drop video entirely, narrow the playlist client-side with `listVideoAngles` / `extractAnglePlaylist` / `extractAudioOnlyPlaylist` from the same package.
 
