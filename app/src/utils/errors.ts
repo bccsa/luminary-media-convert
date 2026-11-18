@@ -37,7 +37,7 @@ export const CHANGED_ELSEWHERE = 'CHANGED_ELSEWHERE';
 
 /** By the Save or Start button the CMS refusal came back from. */
 export const CMS_NOT_STORED_WARNING =
-    "Luminary CMS hasn't stored the current version of this video. Open the post in Luminary CMS, save it if it has unsaved changes, then save again here.";
+    "Luminary CMS hasn't confirmed the current version of this video. Open the post in Luminary CMS and keep it open, save it there if it has unsaved changes, then save again here.";
 
 /** The banner over the player while a saved version waits for the CMS. */
 export const CMS_PENDING_NOTICE =

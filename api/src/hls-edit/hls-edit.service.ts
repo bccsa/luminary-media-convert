@@ -492,7 +492,8 @@ export class HlsEditService {
      * `removed` ones out of it, as {@link saveAudioTracks} does for tracks: a
      * new master revision, written only from the version `ifMatch` names,
      * encrypted when it was read encrypted. A removed angle's files stay in
-     * storage; the master stops naming its thumbnail strip too.
+     * storage; the master stops naming its thumbnail strip too, unless it is
+     * the video's only one.
      */
     async saveVideoAngles(
         s3: S3ConfigDto,
@@ -524,9 +525,20 @@ export class HlsEditService {
             edits,
             removed
         );
-        // A rename keeps the GROUP-ID, so only a removed angle's strip goes.
+        // A rename keeps the GROUP-ID, so only a removed angle's strip goes —
+        // unless it is the video's only strip, shown on every angle: that one
+        // stays, for every angle, rather than the video losing its thumbnails.
         for (const id of removed) {
-            rewritten = removeSessionData(rewritten, thumbnailsDataId(id));
+            const strips = listThumbnailEntries(rewritten);
+            const own = strips.find((e) => e.dataId === thumbnailsDataId(id));
+            if (!own) continue;
+            rewritten = removeSessionData(rewritten, own.dataId);
+            if (strips.length === 1 && own.uri) {
+                rewritten = upsertSessionData(
+                    rewritten,
+                    thumbnailsEntry(own.uri)
+                );
+            }
         }
         const next = await this.writeEditedMaster(
             s3,

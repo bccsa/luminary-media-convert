@@ -74,7 +74,7 @@ export class CmsAckService {
     async assertReady(sessionId: string): Promise<void> {
         const session = this.sessionService.get(sessionId);
         if (!session?.readToken) return;
-        const followed = () => (this.listeners.get(sessionId) ?? 0) > 0;
+        const followed = () => this.followed(sessionId);
         if (followed()) {
             await this.waitFor(
                 sessionId,
@@ -85,14 +85,15 @@ export class CmsAckService {
         if (this.isReady(sessionId)) return;
         throw new ConflictException({
             message:
-                "Luminary CMS hasn't stored the current version of this video. Open the post in Luminary CMS, save it if it has unsaved changes, then save again here.",
+                "Luminary CMS hasn't confirmed the current version of this video. Open the post in Luminary CMS and keep it open, save it there if it has unsaved changes, then save again here.",
             code: 'CMS_NOT_ACKNOWLEDGED',
         });
     }
 
     /**
-     * Waits up to {@link CMS_ACK_WAIT_MS} for the CMS to store `hlsUrl`.
-     * Undefined for a session with no CMS behind it.
+     * Waits up to {@link CMS_ACK_WAIT_MS} for the CMS to store `hlsUrl`, and
+     * gives up early when no CMS page is following the session. Undefined for
+     * a session with no CMS behind it.
      */
     async awaitAck(
         sessionId: string,
@@ -100,19 +101,24 @@ export class CmsAckService {
     ): Promise<boolean | undefined> {
         const session = this.sessionService.get(sessionId);
         if (!session?.readToken || !hlsUrl) return undefined;
-        return this.waitFor(
+        const acked = () =>
+            this.sessionService.get(sessionId)?.ackedHlsUrl === hlsUrl;
+        await this.waitFor(
             sessionId,
-            () => this.sessionService.get(sessionId)?.ackedHlsUrl === hlsUrl,
+            () => acked() || !this.followed(sessionId),
             CMS_ACK_WAIT_MS
         );
+        return acked();
+    }
+
+    private followed(sessionId: string): boolean {
+        return (this.listeners.get(sessionId) ?? 0) > 0;
     }
 
     private isReady(sessionId: string): boolean {
         const session = this.sessionService.get(sessionId);
         if (!session) return false;
-        return (
-            (this.listeners.get(sessionId) ?? 0) > 0 && !isCmsPending(session)
-        );
+        return this.followed(sessionId) && !isCmsPending(session);
     }
 
     private waitFor(

@@ -11,6 +11,7 @@ import {
     keyFromHex,
 } from '../encode/services/lmcenc.js';
 import type { S3ConfigDto } from '../encode/dto/s3-config.dto.js';
+import { listThumbnailEntries } from '@luminary-media-converter/hls-core';
 
 const MASTER = [
     '#EXTM3U',
@@ -276,6 +277,47 @@ describe('HlsEditService — an existing video', () => {
                 ])
             ).rejects.toThrow(ConflictException);
             expect(etag.putObjectIfAbsent).not.toHaveBeenCalled();
+        });
+
+        const strip = (angle: string, uri: string) =>
+            `#EXT-X-SESSION-DATA:DATA-ID="com.luminary.thumbnails.${angle}",VIDEO="${angle}",URI="${uri}",FORMAT=RAW`;
+        const withStrips = (...lines: string[]) =>
+            ANGLES_MASTER.replace(
+                '#EXTM3U\n',
+                `#EXTM3U\n${lines.join('\n')}\n`
+            );
+        const stripsAfterRemovingSide = async (master: string) => {
+            etag = makeEtag(master, [MASTER_KEY]);
+            service = makeService(etag);
+            await service.saveVideoAngles(s3, MASTER_KEY, 'v1', [], undefined, [
+                'side',
+            ]);
+            const { body } = revisionWrite(etag);
+            return listThumbnailEntries(String(body)).map((e) => ({
+                video: e.video,
+                uri: e.uri,
+            }));
+        };
+
+        it("keeps the video's only strip, for every angle, when the angle it was sampled from goes", async () => {
+            expect(
+                await stripsAfterRemovingSide(
+                    withStrips(strip('side', 'thumbnails/thumbnails_9f8e.vtt'))
+                )
+            ).toEqual([
+                { video: undefined, uri: 'thumbnails/thumbnails_9f8e.vtt' },
+            ]);
+        });
+
+        it("drops a removed angle's strip when another strip remains", async () => {
+            expect(
+                await stripsAfterRemovingSide(
+                    withStrips(
+                        strip('main', 'thumbnails/main.vtt'),
+                        strip('side', 'thumbnails/side.vtt')
+                    )
+                )
+            ).toEqual([{ video: 'main', uri: 'thumbnails/main.vtt' }]);
         });
     });
 });
