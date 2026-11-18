@@ -134,9 +134,9 @@ describe('SessionView', () => {
         });
         waveform.mockResolvedValue({ peaks: [0.1, 0.9, 0.4] });
         deleteSessionMock.mockResolvedValue(undefined);
-        // Routed by URL: a single blanket shape made previewAudioTracks a
-        // non-array and the resulting render error took the whole mount down,
-        // which then looked like "the view never loaded the session".
+        // Routed by URL: a single blanket shape once handed a list-reading
+        // route a non-array, and the resulting render error took the whole
+        // mount down, which then looked like "the view never loaded the session".
         vi.stubGlobal(
             'fetch',
             vi.fn().mockImplementation((input: unknown) => {
@@ -148,7 +148,6 @@ describe('SessionView', () => {
                     json: async () => body,
                     text: async () => text,
                 });
-                if (url.includes('/preview/audio-tracks')) return reply([]);
                 if (url.includes('/waveform')) return reply({ peaks: [0.2, 0.6] });
                 if (url.includes('thumbnails.vtt'))
                     return Promise.resolve(reply({}, 'WEBVTT\n'));
