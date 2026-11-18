@@ -1453,7 +1453,9 @@ async function fetchWaveform() {
             `${API_BASE}/api/sessions/${sessionId.value}/waveform?token=${sessionToken.value}`
         );
         if (!response.ok) {
-            scheduleWaveformRetry();
+            // 404: a video published without a waveform. Asking again finds
+            // none either; anything else may still be on its way.
+            if (response.status !== 404) scheduleWaveformRetry();
             return;
         }
         const data = await response.json();

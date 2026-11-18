@@ -1589,6 +1589,25 @@ export class EncodeController {
      * playlists must not be handed a key here, or its sidecars would start
      * coming back encrypted halfway through its life.
      */
+    /**
+     * The peaks the encode published as `waveform.json` beside the master.
+     * 404 for a video encoded before the sidecar existed: there is nothing to
+     * draw, and the client stops asking.
+     */
+    private async publishedWaveform(
+        sessionId: string
+    ): Promise<{ peaks: number[]; numPeaks: number }> {
+        const { s3, folderPrefix } = this.sessionStorage(sessionId);
+        const sidecar = await this.hlsEditService.readWaveform(
+            s3,
+            folderPrefix
+        );
+        if (!Array.isArray(sidecar?.peaks) || sidecar.peaks.length === 0) {
+            throw new NotFoundException('This video has no published waveform');
+        }
+        return { peaks: sidecar.peaks, numPeaks: sidecar.peaks.length };
+    }
+
     private sessionStorage(sessionId: string): {
         s3: CreateSessionDto['s3'];
         folderPrefix: string;
@@ -1636,7 +1655,8 @@ export class EncodeController {
         summary: 'Get audio waveform peaks',
         description:
             'Returns computed waveform peak data for the uploaded source file. ' +
-            'The session must be in "uploaded" or later status. ' +
+            'The session must be in "uploaded" or later status. An edit session, ' +
+            'which has no source file, gets the waveform.json its video was published with. ' +
             'Peaks are normalized to 0–1 amplitude values sampled at regular intervals.',
     })
     @ApiParam({
@@ -1662,7 +1682,11 @@ export class EncodeController {
         status: 400,
         description: 'Session source file not yet uploaded.',
     })
-    @ApiResponse({ status: 404, description: 'Session not found.' })
+    @ApiResponse({
+        status: 404,
+        description:
+            'Session not found, or an edit session whose video has no published waveform.',
+    })
     async getWaveform(
         @Param('sessionId') sessionId: string,
         @Query('token') token: string
@@ -1675,6 +1699,12 @@ export class EncodeController {
         }
 
         const filePath = session.filePath;
+        // An edit session has no source file. The encode published the
+        // video's peaks next to its master, on the timeline the video plays,
+        // which is the timeline an edit session shows.
+        if (!filePath && session.edit) {
+            return this.publishedWaveform(sessionId);
+        }
         if (!filePath) {
             throw new BadRequestException('Source file not yet uploaded');
         }
