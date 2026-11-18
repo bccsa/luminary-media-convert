@@ -204,7 +204,7 @@ export class EncodeController {
         description:
             'For the local UI, which is the only thing holding the instance token. ' +
             'Includes each session token so the UI can reach the session-scoped ' +
-            'preview and waveform routes without having kept one from creation. ' +
+            'source, preview and waveform routes without having kept one from creation. ' +
             'Newest first.',
     })
     @ApiResponse({ status: 200, type: SessionSummaryDto, isArray: true })
@@ -1478,6 +1478,7 @@ export class EncodeController {
     @ApiParam({ name: 'sessionId', description: 'Session ID' })
     @ApiResponse({ status: 200, description: 'The whole file.' })
     @ApiResponse({ status: 206, description: 'The requested byte range.' })
+    @ApiResponse({ status: 416, description: 'Range not satisfiable.' })
     @ApiResponse({ status: 401, description: 'Missing or wrong token.' })
     @ApiResponse({
         status: 404,
@@ -1543,7 +1544,12 @@ export class EncodeController {
     // -----------------------------------------------------------------------
 
     @Get(':sessionId/preview/playlist.m3u8')
-    @ApiOperation({ summary: 'Get preview HLS master playlist' })
+    @ApiOperation({
+        summary: 'Get the converted preview HLS master playlist',
+        description:
+            'For sources the browser cannot play directly. The preview is ' +
+            'built on the first preview request, playlist or segment.',
+    })
     async getPreviewMasterPlaylist(
         @Param('sessionId') sessionId: string,
         @Query('token') token: string,
@@ -1571,7 +1577,7 @@ export class EncodeController {
     }
 
     @Get(':sessionId/preview/r:rendition/playlist.m3u8')
-    @ApiOperation({ summary: 'Get preview HLS rendition playlist' })
+    @ApiOperation({ summary: 'Get the converted preview HLS rendition playlist' })
     async getPreviewRenditionPlaylist(
         @Param('sessionId') sessionId: string,
         @Param('rendition') rendition: string,
@@ -1601,7 +1607,7 @@ export class EncodeController {
     }
 
     @Get(':sessionId/preview/r:rendition/:filename')
-    @ApiOperation({ summary: 'Get preview HLS segment' })
+    @ApiOperation({ summary: 'Get a converted preview HLS segment' })
     async getPreviewSegment(
         @Param('sessionId') sessionId: string,
         @Param('rendition') rendition: string,
