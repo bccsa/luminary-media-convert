@@ -1496,6 +1496,7 @@ describe('ThumbnailService', () => {
 
             expect(result).toEqual({
                 vttRelativePath: 'thumbnails/thumbnails.vtt',
+                trackIndex: 0,
             });
             // 60s of output is 12 cues at five seconds each.
             expect(packed()).toEqual([
@@ -1841,19 +1842,23 @@ describe('ThumbnailService', () => {
 
             expect(result).toEqual({
                 vttRelativePath: 'thumbnails/thumbnails.vtt',
+                trackIndex: 0,
             });
             expect(passCalls(THUMBS)).toHaveLength(1);
             expect(readdirSync(sourceDir())).not.toContain('sprite_001.webp');
             expect(packed()[0]).toBe('thumb_000001.webp');
         });
 
-        it('samples the deliberately chosen angle when it has to resample', async () => {
-            await pack({
+        it('samples the deliberately chosen angle when it has to resample, and says which', async () => {
+            const result = await pack({
                 videoTracks: [
                     { index: 0, width: 3840, height: 2160 },
                     { index: 1, width: 640, height: 360 },
                 ],
             });
+
+            // The strip is labelled with the angle it shows.
+            expect(result?.trackIndex).toBe(1);
 
             const args = passArgs(THUMBS);
             expect(args[args.indexOf('-map') + 1]).toBe('0:v:1');
@@ -1922,6 +1927,7 @@ describe('ThumbnailService', () => {
 
             expect(await packing).toEqual({
                 vttRelativePath: 'thumbnails/thumbnails.vtt',
+                trackIndex: 0,
             });
             // It joined the pass already running rather than starting another.
             expect(passCalls(THUMBS)).toHaveLength(1);

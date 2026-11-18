@@ -31,9 +31,18 @@ import {
 } from './dto/cms-session-response.dto.js';
 import { CreateSessionDto } from './dto/create-session.dto.js';
 import { HlsEditService } from '../hls-edit/hls-edit.service.js';
+import {
+    MasterRevisionService,
+    siblingKey,
+    videoOf,
+} from '../hls-edit/master-revision.service.js';
 import { PreviewService } from './services/preview.service.js';
 import { S3Service } from './services/s3.service.js';
-import { SessionService, type Session } from './services/session.service.js';
+import {
+    SessionService,
+    replaceUrlFileName,
+    type Session,
+} from './services/session.service.js';
 
 /** Addresses that mean "this machine", for a request that carried no Origin. */
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
@@ -67,7 +76,9 @@ export class CmsController {
         @Optional()
         private readonly hlsEditService?: HlsEditService,
         @Optional()
-        private readonly previewService?: PreviewService
+        private readonly previewService?: PreviewService,
+        @Optional()
+        private readonly masterRevisions?: MasterRevisionService
     ) {}
 
     @Get('health')
@@ -173,7 +184,9 @@ export class CmsController {
                 'existingMedia.hlsKey must be a 32-character hex AES-128 key'
             );
         }
-        const masterKey = masterKeyOf(media.hlsUrl, dto.publicBaseUrl);
+        // The master the CMS holds. Each edit writes a new revision beside it,
+        // so it may not be the newest one.
+        const heldKey = masterKeyOf(media.hlsUrl, dto.publicBaseUrl);
 
         // The video is about to be replaced: edits made to it now would be
         // lost, so the running encode comes forward instead.
@@ -193,7 +206,29 @@ export class CmsController {
             callerOrigin,
             true
         );
-        if (existing?.readToken && existing.edit?.masterKey === masterKey) {
+        // The same video, whichever of its revisions either side holds: the
+        // session's key moves on with every edit, and the CMS may be a
+        // revision or more behind if an announcement went unheard.
+        if (
+            existing?.readToken &&
+            existing.edit &&
+            videoOf(existing.edit.masterKey) === videoOf(heldKey)
+        ) {
+            // Another machine may have saved a newer revision since this
+            // session last moved, and the CMS is handed whatever it holds.
+            if (this.masterRevisions) {
+                const newest = await this.masterRevisions.latestRevision(
+                    existing.config.s3,
+                    existing.edit.masterKey
+                );
+                if (newest !== existing.edit.masterKey) {
+                    this.sessionService.setMasterRevision(existing.id, newest);
+                }
+            }
+            // The CMS just sent this URL, so it holds it: as good as an ack.
+            if (existing.hlsUrl === media.hlsUrl) {
+                this.sessionService.setAckedHlsUrl(existing.id, media.hlsUrl);
+            }
             this.notifyHost(existing.id);
             return this.describe(existing, req, true);
         }
@@ -201,6 +236,23 @@ export class CmsController {
         if (!this.hlsEditService) {
             throw new Error('Editing needs the HLS edit service');
         }
+
+        // The newest revision wins. An edit saved while the CMS was not there
+        // to store it is still the video's latest version; opening it here,
+        // and handing its URL back, is how the CMS catches up.
+        const masterKey = this.masterRevisions
+            ? await this.masterRevisions.latestRevision(dto.s3, heldKey)
+            : heldKey;
+        const hlsUrl =
+            masterKey === heldKey
+                ? media.hlsUrl
+                : replaceUrlFileName(media.hlsUrl, posix.basename(masterKey));
+        if (masterKey !== heldKey) {
+            this.logger.log(
+                `Document ${dto.documentId} holds ${posix.basename(heldKey)}; opening the newer ${posix.basename(masterKey)}`
+            );
+        }
+
         let encrypted: boolean;
         let thumbnailsVtt: string | undefined;
         try {
@@ -235,10 +287,13 @@ export class CmsController {
                 publicBaseUrl: dto.publicBaseUrl,
                 origin: 'cms',
                 createdByOrigin: callerOrigin,
-                hlsUrl: media.hlsUrl,
+                hlsUrl,
                 masterPlaylist: posix.basename(masterKey),
                 ...(thumbnailsVtt ? { thumbnailsVtt } : {}),
                 edit: { masterKey, encrypted },
+                // What the CMS holds is stored; a newer revision opened here
+                // leaves the session pending until the CMS stores that too.
+                ackedHlsUrl: media.hlsUrl,
             }
         );
         if (media.hlsKey) {
@@ -346,6 +401,9 @@ export class CmsController {
             eventsUrl: `${base}/api/sessions/${session.id}/events?token=${token}`,
             apiVersion: API_VERSION,
             reused,
+            // A published video's current revision, for the CMS to store at
+            // once rather than wait for an event.
+            ...(session.edit && session.hlsUrl ? { hlsUrl: session.hlsUrl } : {}),
         };
     }
 

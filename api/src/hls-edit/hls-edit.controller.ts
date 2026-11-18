@@ -20,17 +20,15 @@ import { AuthTypes } from '../auth/auth-types.decorator.js';
 import {
     HlsEditService,
     type HlsDiscoverResult,
-    type HlsMutateResult,
     type HlsReadResult,
 } from './hls-edit.service.js';
+import { MasterRevisionService } from './master-revision.service.js';
 import { HlsReadRequestDto } from './dto/read.dto.js';
-import { HlsMutateRequestDto } from './dto/mutate.dto.js';
 import { HlsDiscoverRequestDto } from './dto/discover.dto.js';
 import {
     HlsChaptersReadRequestDto,
     type HlsChaptersReadResult,
 } from './dto/chapters-read.dto.js';
-import { HlsChaptersWriteRequestDto } from './dto/chapters-write.dto.js';
 import {
     HlsWaveformReadRequestDto,
     type HlsWaveformReadResult,
@@ -42,7 +40,10 @@ import {
 export class HlsEditController {
     private readonly logger = new Logger(HlsEditController.name);
 
-    constructor(private readonly service: HlsEditService) {}
+    constructor(
+        private readonly service: HlsEditService,
+        private readonly masterRevisions: MasterRevisionService
+    ) {}
 
     @Post('read')
     @HttpCode(HttpStatus.OK)
@@ -52,41 +53,13 @@ export class HlsEditController {
     @ApiOperation({
         summary: 'Fetch and parse a master playlist',
         description:
-            'Stateless — takes inline S3 credentials. Returns parsed master plus the current ETag for use with /mutate.',
+            'Stateless — takes inline S3 credentials. Returns the parsed master and its current ETag.',
     })
     @ApiResponse({ status: 200, description: 'Parsed master and ETag.' })
     @ApiResponse({ status: 400, description: 'Invalid request.' })
     @ApiResponse({ status: 401, description: 'Unauthorized.' })
     async read(@Body() dto: HlsReadRequestDto): Promise<HlsReadResult> {
         return this.service.read(dto);
-    }
-
-    @Post('mutate')
-    @HttpCode(HttpStatus.OK)
-    @UseGuards(AuthResolverGuard)
-    @AuthTypes('instance')
-    @ApiSecurity('apikey')
-    @ApiOperation({
-        summary: 'Apply mutations to a master playlist',
-        description:
-            'Applies ordered operations and rewrites master.m3u8 with If-Match. Returns the new ETag.',
-    })
-    @ApiResponse({ status: 200, description: 'Mutation applied.' })
-    @ApiResponse({
-        status: 400,
-        description: 'Invalid request or unknown operation.',
-    })
-    @ApiResponse({ status: 401, description: 'Unauthorized.' })
-    @ApiResponse({
-        status: 409,
-        description: 'ETag mismatch — master.m3u8 was modified since read.',
-    })
-    @ApiResponse({
-        status: 501,
-        description: 'Operation type recognised but not yet implemented.',
-    })
-    async mutate(@Body() dto: HlsMutateRequestDto): Promise<HlsMutateResult> {
-        return this.service.mutate(dto);
     }
 
     @Post('discover')
@@ -116,7 +89,7 @@ export class HlsEditController {
     @ApiOperation({
         summary: 'Read the chapter sidecar VTT for a session prefix',
         description:
-            'Stateless — takes inline S3 credentials and a folder prefix. Returns the WebVTT body or 404 when the file does not exist.',
+            "Stateless — takes inline S3 credentials and a folder prefix. Reads the file the folder's newest master revision names for the language, else chapters/<lang>.vtt. Returns the WebVTT body or 404 when there is none.",
     })
     @ApiResponse({ status: 200, description: 'Chapter VTT body.' })
     @ApiResponse({
@@ -126,49 +99,32 @@ export class HlsEditController {
     @ApiResponse({ status: 401, description: 'Unauthorized.' })
     @ApiResponse({
         status: 404,
-        description: 'No chapter file at chapters/<lang>.vtt under the prefix.',
+        description: 'No chapter file for the language under the prefix.',
     })
     async chaptersRead(
         @Body() dto: HlsChaptersReadRequestDto
     ): Promise<HlsChaptersReadResult> {
+        // The folder's newest master names the current chapter file. A
+        // missing master is no error: readChapters then falls back to the
+        // fixed name.
+        const prefix =
+            !dto.folderPrefix || dto.folderPrefix.endsWith('/')
+                ? dto.folderPrefix
+                : `${dto.folderPrefix}/`;
+        const masterKey = await this.masterRevisions.latestRevision(
+            dto.s3,
+            `${prefix}master.m3u8`
+        );
         const result = await this.service.readChapters(
             dto.s3,
             dto.folderPrefix,
             dto.lang,
-            dto.keyHex
+            dto.keyHex,
+            { masterKey }
         );
         if (!result)
             throw new NotFoundException('No chapter file for this language');
         return result;
-    }
-
-    @Post('chapters/write')
-    @HttpCode(HttpStatus.NO_CONTENT)
-    @UseGuards(AuthResolverGuard)
-    @AuthTypes('instance')
-    @ApiSecurity('apikey')
-    @ApiOperation({
-        summary: 'Write the chapter sidecar VTT for a session prefix',
-        description:
-            'Stateless — takes inline S3 credentials, a folder prefix, language code, and the WebVTT body. Stores the file at chapters/<lang>.vtt with Content-Type: text/vtt.',
-    })
-    @ApiResponse({ status: 204, description: 'Chapter VTT stored.' })
-    @ApiResponse({
-        status: 400,
-        description: 'Invalid request (lang or VTT body).',
-    })
-    @ApiResponse({ status: 401, description: 'Unauthorized.' })
-    @ApiResponse({ status: 413, description: 'VTT body exceeds 1 MiB.' })
-    async chaptersWrite(
-        @Body() dto: HlsChaptersWriteRequestDto
-    ): Promise<void> {
-        await this.service.writeChapters(
-            dto.s3,
-            dto.folderPrefix,
-            dto.lang,
-            dto.vtt,
-            dto.keyHex
-        );
     }
 
     @Post('waveform/read')

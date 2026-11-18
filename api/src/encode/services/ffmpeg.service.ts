@@ -249,6 +249,49 @@ export function isHardwareEncoderFailure(err: unknown): boolean {
     );
 }
 
+/**
+ * The angle names a multi-angle encode gives its source video tracks, by track
+ * index. Undefined when the encode has a single picture, and so no `TYPE=VIDEO`
+ * groups at all.
+ */
+function angleNamesByTrack(config: EncodeConfigDto): Map<number, string> | undefined {
+    const renditions = config.videoRenditions ?? [];
+    const uniqueTracks = new Set(renditions.map((r) => r.sourceTrackIndex ?? 0));
+    if (uniqueTracks.size <= 1) return undefined;
+    const nameByTrackIndex = new Map<number, string>();
+    for (const tn of config.videoTrackNames ?? []) {
+        nameByTrackIndex.set(tn.index, tn.name ?? `Angle ${tn.index}`);
+    }
+    for (const idx of uniqueTracks) {
+        if (!nameByTrackIndex.has(idx)) nameByTrackIndex.set(idx, `Angle ${idx}`);
+    }
+    return nameByTrackIndex;
+}
+
+/** An angle's name as the `GROUP-ID` of its `TYPE=VIDEO` group. */
+function angleGroupId(name: string): string {
+    return (
+        name
+            .replace(/[^a-zA-Z0-9_-]/g, '_')
+            .replace(/_+/g, '_')
+            .replace(/^_|_$/g, '') || 'angle'
+    );
+}
+
+/**
+ * The `GROUP-ID` the master gives the angle encoded from source video track
+ * `trackIndex` — what the encode's thumbnail strip is labelled with when it was
+ * sampled from that track. Undefined for an encode without angles, or a track
+ * that is not one of them.
+ */
+export function angleGroupIdForTrack(
+    config: EncodeConfigDto,
+    trackIndex: number
+): string | undefined {
+    const name = angleNamesByTrack(config)?.get(trackIndex);
+    return name === undefined ? undefined : angleGroupId(name);
+}
+
 @Injectable()
 export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     private readonly logger = new Logger(FfmpegService.name);
@@ -2181,28 +2224,9 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         config: EncodeConfigDto
     ): string {
         const renditions = config.videoRenditions ?? [];
-        if (renditions.length === 0) return content;
-
-        const uniqueTracks = new Set(
-            renditions.map((r) => r.sourceTrackIndex ?? 0)
-        );
-        if (uniqueTracks.size <= 1) return content;
-
-        const nameByTrackIndex = new Map<number, string>();
-        for (const tn of config.videoTrackNames ?? []) {
-            nameByTrackIndex.set(tn.index, tn.name ?? `Angle ${tn.index}`);
-        }
-        for (const idx of uniqueTracks) {
-            if (!nameByTrackIndex.has(idx)) {
-                nameByTrackIndex.set(idx, `Angle ${idx}`);
-            }
-        }
-
-        const sanitize = (s: string): string =>
-            s
-                .replace(/[^a-zA-Z0-9_-]/g, '_')
-                .replace(/_+/g, '_')
-                .replace(/^_|_$/g, '') || 'angle';
+        const nameByTrackIndex = angleNamesByTrack(config);
+        if (!nameByTrackIndex) return content;
+        const sanitize = angleGroupId;
 
         const orderedRenditions = [
             ...renditions.filter((r) => !r.copyStream),

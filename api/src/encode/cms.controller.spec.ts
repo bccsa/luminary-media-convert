@@ -562,6 +562,33 @@ describe("CmsController — an edit session on the post's existing video", () =>
         expect(sessions.get(upload.sessionId)!.edit).toBeUndefined();
     });
 
+    it('moves a reused session to the newest revision before handing it back', async () => {
+        // This session holds r2; another machine has since saved r3. Handing
+        // r2 back would offer the CMS an older version than it can have.
+        let latest = 'posts/p1/s1/master.m3u8';
+        const controller = new CmsController(
+            sessions,
+            new OriginRegistry({ allowedOrigins: ['https://cms.test'] }),
+            onSessionCreated,
+            { readEncodedMedia } as never,
+            undefined,
+            { latestRevision: vi.fn(async () => latest) } as never
+        );
+        const first = await controller.createSession(editDto(), req());
+        sessions.setMasterRevision(first.sessionId, 'posts/p1/s1/master_r2.m3u8');
+
+        latest = 'posts/p1/s1/master_r3.m3u8';
+        const again = await controller.createSession(editDto(), req());
+
+        expect(again).toMatchObject({ sessionId: first.sessionId, reused: true });
+        expect(sessions.get(first.sessionId)!.edit!.masterKey).toBe(
+            'posts/p1/s1/master_r3.m3u8'
+        );
+        expect(sessions.get(first.sessionId)!.hlsUrl).toBe(
+            'https://cdn.example.com/media/posts/p1/s1/master_r3.m3u8'
+        );
+    });
+
     it.each([
         ['without existingMedia', { existingMedia: undefined }],
         [

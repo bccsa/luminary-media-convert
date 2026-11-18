@@ -35,6 +35,8 @@ interface SpriteFormat {
 
 export interface ThumbnailResult {
     vttRelativePath: string;
+    /** The source video track the frames were sampled from, when known: which angle the strip shows. */
+    trackIndex?: number;
 }
 
 /**
@@ -820,7 +822,10 @@ export class ThumbnailService {
                 `for ${Math.floor(outDuration)}s of output`
         );
 
-        return { vttRelativePath: 'thumbnails/thumbnails.vtt' };
+        return {
+            vttRelativePath: 'thumbnails/thumbnails.vtt',
+            trackIndex: track.index,
+        };
     }
 
     /**

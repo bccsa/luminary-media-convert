@@ -29,6 +29,11 @@ export interface SessionEvent {
      * in the same event.
      */
     hlsUrl?: string;
+    /**
+     * The CMS has not yet confirmed it stored `hlsUrl`: its document still
+     * names an older master. Further edits are refused until it does.
+     */
+    cmsPending?: boolean;
     segmentFormat?: string;
     encoder?: string;
     probeResult?: unknown;
