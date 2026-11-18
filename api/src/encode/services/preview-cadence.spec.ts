@@ -99,14 +99,28 @@ describe('PreviewService copy cache', () => {
         await rm(dir, { recursive: true, force: true });
     });
 
+    /** When each segment was made, seconds: segment 0 the oldest. */
+    const madeAt = new Map<number, number>();
+
     /** Writes segments 0..count-1, segment 0 the oldest. */
     const segments = async (count: number, bytes = 10) => {
         const now = Date.now() / 1000;
         for (let i = 0; i < count; i++) {
             const path = join(dir, `segment${i}.ts`);
             await writeFile(path, Buffer.alloc(bytes));
-            await utimes(path, now - (count - i), now - (count - i));
+            madeAt.set(i, now - (count - i));
+            await utimes(path, madeAt.get(i)!, madeAt.get(i)!);
         }
+    };
+
+    /**
+     * Sizes a segment without the disk (sparse), keeping when it was made:
+     * resizing a file stamps it as modified now, and the cache goes by that.
+     */
+    const resize = async (i: number, bytes: number) => {
+        const path = join(dir, `segment${i}.ts`);
+        await truncate(path, bytes);
+        await utimes(path, madeAt.get(i)!, madeAt.get(i)!);
     };
 
     const kept = async () =>
@@ -125,16 +139,11 @@ describe('PreviewService copy cache', () => {
 
     it('keeps fewer once the newest pass 500 MB, but never fewer than four', async () => {
         await segments(10);
-        // Sparse: sized without the disk.
-        for (let i = 0; i < 10; i++) {
-            await truncate(join(dir, `segment${i}.ts`), 100 * 1024 * 1024);
-        }
+        for (let i = 0; i < 10; i++) await resize(i, 100 * 1024 * 1024);
         await trim(dir);
         expect(await kept()).toEqual([5, 6, 7, 8, 9]);
 
-        for (const i of [5, 6, 7, 8, 9]) {
-            await truncate(join(dir, `segment${i}.ts`), 400 * 1024 * 1024);
-        }
+        for (const i of [5, 6, 7, 8, 9]) await resize(i, 400 * 1024 * 1024);
         await trim(dir);
         expect(await kept()).toEqual([6, 7, 8, 9]);
     });
