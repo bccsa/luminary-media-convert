@@ -337,10 +337,13 @@ const asideColStyle = computed(() =>
 );
 
 const lifecycle = computed(() => state.value.lifecycle);
+/** What kind of failure an `error` lifecycle is, so the host can choose what to try next. */
+const errorCode = computed(() => state.value.error?.code);
 
 defineExpose({
     controller,
     lifecycle,
+    errorCode,
     getCurrentTime,
     getDuration,
     seek,

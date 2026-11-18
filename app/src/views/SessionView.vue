@@ -903,6 +903,10 @@ watch(
     (lifecycle) => {
         if (lifecycle !== 'error') return;
         if (previewIsDirect.value) {
+            // A read of a file on this machine that dropped is retried from
+            // the player's own error panel; converting the file is for one the
+            // browser cannot play.
+            if (playerRef.value?.errorCode === 'network') return;
             directPlaybackFailed.value = true;
             return;
         }

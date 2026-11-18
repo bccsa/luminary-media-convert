@@ -1008,4 +1008,82 @@ describe('SessionView', () => {
             expect(strip().props('showAside')).toBe(true);
         });
     });
+
+    describe('a source file that does not play directly', () => {
+        /** The player strip, with the state SessionView reads off its ref. */
+        const playerStrip = {
+            ...PLAYER_STRIP_STUB,
+            data: () => ({ lifecycle: 'loading', errorCode: undefined }),
+            methods: { reload: vi.fn() },
+        };
+
+        /** An MP4 any Chromium plays as it is. */
+        const directProbe = {
+            format: { duration: 120, formatName: 'mov,mp4,m4a,3gp,3g2,mj2' },
+            videoTracks: [
+                {
+                    codec: 'h264',
+                    pixFmt: 'yuv420p',
+                    width: 1920,
+                    height: 1080,
+                    frameRate: 25,
+                },
+            ],
+            audioTracks: [{ codec: 'aac', language: 'eng' }],
+        };
+
+        async function mountDirect() {
+            detail.mockResolvedValue(
+                uploadedSession({ probeResult: directProbe })
+            );
+            status.mockResolvedValue({
+                status: 'uploaded',
+                probeResult: directProbe,
+            });
+            const wrapper = shallowMount(SessionView, {
+                global: {
+                    stubs: {
+                        Teleport: true,
+                        Transition: true,
+                        RouterLink: true,
+                        SessionPlayerStrip: playerStrip,
+                        SessionTopline: false,
+                    },
+                },
+            });
+            await flushPromises();
+            const strip = wrapper.findComponent({ name: 'SessionPlayerStrip' });
+            const player = strip.vm as unknown as {
+                lifecycle: string;
+                errorCode?: string;
+            };
+            return { strip, player };
+        }
+
+        const playsDirectly = (strip: { props: (k: string) => unknown }) =>
+            strip.props('nativePreviewAudio') === true;
+
+        it('gets the converted preview when the browser cannot play it', async () => {
+            const { strip, player } = await mountDirect();
+            expect(playsDirectly(strip)).toBe(true);
+
+            player.errorCode = 'media';
+            player.lifecycle = 'error';
+            await flushPromises();
+
+            expect(playsDirectly(strip)).toBe(false);
+        });
+
+        it('keeps playing it directly after a network error', async () => {
+            // The file is on this machine; a dropped read is worth retrying,
+            // not a reason to convert it for the rest of the session.
+            const { strip, player } = await mountDirect();
+
+            player.errorCode = 'network';
+            player.lifecycle = 'error';
+            await flushPromises();
+
+            expect(playsDirectly(strip)).toBe(true);
+        });
+    });
 });

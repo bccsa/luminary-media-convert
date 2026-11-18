@@ -88,6 +88,12 @@ function variantId(rendition: {
 /** `MediaError.MEDIA_ERR_NETWORK`, spelled out: the global is absent where the specs run. */
 const MEDIA_ERR_NETWORK = 2;
 
+/**
+ * How long a file may take to report its metadata before it counts as one the browser cannot play. A stuck load
+ * reports no error of its own; a file on the same machine that has said nothing about itself by then never will.
+ */
+const FILE_METADATA_TIMEOUT_MS = 20_000;
+
 interface NativeTrackEntry {
     id: string;
     lang: string | undefined;
@@ -183,6 +189,7 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
      * lists and `readyState` may still be the outgoing source's, so the lists read as empty and a seek waits.
      */
     private fileMetadataPending = false;
+    private fileMetadataTimer: ReturnType<typeof setTimeout> | null = null;
     private nativeTrackListeners: (() => void)[] = [];
     private listeners = new Map<
         AdapterEventName,
@@ -298,7 +305,7 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
      */
     private loadFile(url: string): void {
         this.bindNativeTracks();
-        this.fileMetadataPending = true;
+        this.awaitFileMetadata();
         this.emit('audiotracks-updated', undefined);
         this.emit('videotracks-updated', undefined);
         const sameUrl = this.el.src === url;
@@ -341,7 +348,7 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         this.cancelDeferredSeek();
         if (src.kind === 'file') {
             // No engine to rebuild: the `<video>` loads the file again.
-            this.fileMetadataPending = true;
+            this.awaitFileMetadata();
             this.emit('audiotracks-updated', undefined);
             this.emit('videotracks-updated', undefined);
             void this.el.load();
@@ -653,6 +660,31 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         this.nativeTrackListeners = [];
     }
 
+    /** The file was handed to the browser: its tracks wait for its metadata, and so does the timeout. */
+    private awaitFileMetadata(): void {
+        this.fileMetadataPending = true;
+        this.clearFileMetadataTimer();
+        this.fileMetadataTimer = setTimeout(() => {
+            this.fileMetadataTimer = null;
+            if (this.lastSource?.kind !== 'file' || !this.fileMetadataPending) return;
+            this.emit('error', {
+                category: 'media',
+                fatal: true,
+                detail: new Error('The file did not load'),
+            });
+        }, FILE_METADATA_TIMEOUT_MS);
+    }
+
+    private stopAwaitingFileMetadata(): void {
+        this.fileMetadataPending = false;
+        this.clearFileMetadataTimer();
+    }
+
+    private clearFileMetadataTimer(): void {
+        if (this.fileMetadataTimer) clearTimeout(this.fileMetadataTimer);
+        this.fileMetadataTimer = null;
+    }
+
     /**
      * The file's metadata is in: its tracks are the ones listed now, and its picture has a size — or has none, because
      * the browser dropped a video stream it cannot decode and plays the sound on its own. That is a failure for a source
@@ -661,7 +693,7 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
     private onFileMetadata(): void {
         const src = this.lastSource;
         if (src?.kind !== 'file') return;
-        this.fileMetadataPending = false;
+        this.stopAwaitingFileMetadata();
         this.emit('audiotracks-updated', undefined);
         this.emit('videotracks-updated', undefined);
         if (src.expectVideo && (this.mediaTarget()?.videoWidth ?? 0) === 0) {
@@ -680,6 +712,7 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
      */
     private onFileError(): void {
         if (this.lastSource?.kind !== 'file') return;
+        this.clearFileMetadataTimer();
         const error = this.el.error as { code?: number } | null;
         this.emit('error', {
             category: error?.code === MEDIA_ERR_NETWORK ? 'network' : 'media',
@@ -1072,7 +1105,7 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         this.stallSignals.clear();
         this.removeTextTracks();
         this.unbindNativeTracks();
-        this.fileMetadataPending = false;
+        this.stopAwaitingFileMetadata();
         this.keyBytes = null;
         this.lastSource = null;
     }

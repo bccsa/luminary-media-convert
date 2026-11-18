@@ -203,6 +203,34 @@ describe('a file source', () => {
         expect(video.videoTracks[1].selected).toBe(true);
     });
 
+    describe('a file the browser never finishes reading', () => {
+        afterEach(() => {
+            vi.useRealTimers();
+        });
+
+        it('fails as media, so the host can play something else', async () => {
+            // A stuck load reports no error of its own.
+            vi.useFakeTimers();
+            await loadFile();
+            const seen = events(adapter, 'error');
+            await vi.advanceTimersByTimeAsync(20_000);
+            expect(seen).toHaveLength(1);
+            expect(seen[0][1]).toMatchObject({
+                category: 'media',
+                fatal: true,
+            });
+        });
+
+        it('waits no longer once the metadata is in', async () => {
+            vi.useFakeTimers();
+            await loadFile();
+            const seen = events(adapter, 'error');
+            metadataRead();
+            await vi.advanceTimersByTimeAsync(60_000);
+            expect(seen).toHaveLength(0);
+        });
+    });
+
     it('fails as media when the browser finds no picture in a file that has one', async () => {
         // The browser drops a video stream it cannot decode and plays the sound alone.
         await loadFile({ expectVideo: true });
