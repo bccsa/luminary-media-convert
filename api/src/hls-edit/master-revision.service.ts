@@ -91,9 +91,11 @@ export class MasterRevisionService {
             currentKey,
             nextMasterRevisionName(posix.basename(currentKey))
         );
-        // Looked for first as well as written conditionally: a provider that
-        // ignores If-None-Match would otherwise let a second writer replace a
+        // Looked for first as well as written conditionally, for a provider
+        // that ignores If-None-Match: there a second writer could replace a
         // revision a viewer may already hold, under a name cached for a year.
+        // The look narrows that to the moment between it and the write; only
+        // the conditional write closes it, where the provider honours it.
         if (await this.s3EtagService.objectExists(s3, nextKey)) {
             throw new MasterRevisionConflict(nextKey);
         }
