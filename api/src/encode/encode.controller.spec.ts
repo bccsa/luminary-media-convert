@@ -1839,7 +1839,7 @@ describe('EncodeController', () => {
             it('should pipe segment stream to response', async () => {
                 const session = sessionService.create(makeConfig());
                 const res = makeRes();
-                const mockStream = { pipe: vi.fn() };
+                const mockStream = { pipe: vi.fn(), on: vi.fn() };
                 previewService.getSegmentStream.mockResolvedValue({
                     stream: mockStream as any,
                     size: 12345,
@@ -1972,7 +1972,7 @@ describe('EncodeController', () => {
             it('should pass audio param to getSegmentStream', async () => {
                 const session = sessionService.create(makeConfig());
                 const res = makeRes();
-                const mockStream = { pipe: vi.fn() };
+                const mockStream = { pipe: vi.fn(), on: vi.fn() };
                 previewService.getSegmentStream.mockResolvedValue({
                     stream: mockStream as any,
                     size: 100,

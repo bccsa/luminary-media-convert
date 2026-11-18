@@ -14,8 +14,8 @@ import {
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { join } from 'path';
-import { createReadStream, existsSync } from 'fs';
-import { mkdir, readdir, rename, rm, stat } from 'fs/promises';
+import { existsSync } from 'fs';
+import { mkdir, open, readdir, rename, rm, stat } from 'fs/promises';
 import type { ReadStream } from 'fs';
 import { SessionService } from './session.service.js';
 import {
@@ -575,17 +575,10 @@ export class PreviewService {
         const segDir = join(state.previewDir, cacheDir);
         const segPath = join(segDir, `segment${segmentIndex}.ts`);
 
-        // Return cached segment (ignore empty files left by killed FFmpeg
-        // processes). A file that vanishes between the two calls was evicted
-        // from the copy window, and is made again like any other miss.
-        if (existsSync(segPath)) {
-            const s = await stat(segPath).catch(() => null);
-            if (s && s.size > 0) {
-                return { stream: createReadStream(segPath), size: s.size };
-            }
-            // Empty file from cancelled extraction — delete and re-extract
-            if (s) await rm(segPath, { force: true }).catch(() => {});
-        }
+        // A segment evicted from the copy window is made again like any
+        // other miss.
+        const cached = await this.openSegment(segPath);
+        if (cached) return cached;
 
         // Extract on demand (deduplicate concurrent requests).
         // .catch on the stored promise prevents unhandled rejections
@@ -616,31 +609,45 @@ export class PreviewService {
             return null;
         }
 
-        if (existsSync(segPath)) {
-            const s = await stat(segPath);
-            if (s.size > 0) {
-                this.prefetchSegments(
-                    sessionId,
-                    state,
-                    cacheDir,
-                    renditionIndex,
-                    localIndex + 1,
-                    PREFETCH_SEGMENTS,
-                    ai
-                );
-                return { stream: createReadStream(segPath), size: s.size };
-            }
+        const made = await this.openSegment(segPath);
+        if (!made) {
             this.logger.warn(
-                `Segment r${renditionIndex}/s${segmentIndex} produced empty file, deleting`
+                `Segment r${renditionIndex}/s${segmentIndex} missing or empty after extraction`
             );
-            await rm(segPath, { force: true }).catch(() => {});
-        } else {
-            this.logger.warn(
-                `Segment r${renditionIndex}/s${segmentIndex} file not found after extraction`
-            );
+            return null;
         }
+        this.prefetchSegments(
+            sessionId,
+            state,
+            cacheDir,
+            renditionIndex,
+            localIndex + 1,
+            PREFETCH_SEGMENTS,
+            ai
+        );
+        return made;
+    }
 
-        return null;
+    /**
+     * A segment opened for reading, or null when it is missing or empty.
+     *
+     * Opened here rather than by whoever reads it: the copy window can evict
+     * the file at any moment, and an open file survives being unlinked where
+     * a path does not. An empty file is left by an FFmpeg killed before it
+     * wrote anything, and is cleared so the segment is made again.
+     */
+    private async openSegment(
+        path: string
+    ): Promise<{ stream: ReadStream; size: number } | null> {
+        const handle = await open(path, 'r').catch(() => null);
+        if (!handle) return null;
+        const s = await handle.stat().catch(() => null);
+        if (!s || s.size === 0) {
+            await handle.close().catch(() => {});
+            if (s) await rm(path, { force: true }).catch(() => {});
+            return null;
+        }
+        return { stream: handle.createReadStream(), size: s.size };
     }
 
     /** Pre-extract upcoming segments in background so they're cached for VHS */

@@ -159,3 +159,46 @@ describe('PreviewService copy cache', () => {
         await expect(trim(join(dir, 'missing'))).resolves.toBeUndefined();
     });
 });
+
+describe('PreviewService segment reads', () => {
+    let dir: string;
+    const service = new PreviewService({} as any, {} as any);
+    const open = (path: string) => (service as any).openSegment(path);
+
+    beforeEach(async () => {
+        dir = await mkdtemp(join(tmpdir(), 'preview-open-'));
+    });
+    afterEach(async () => {
+        await rm(dir, { recursive: true, force: true });
+    });
+
+    const read = async (stream: NodeJS.ReadableStream) => {
+        const chunks: Buffer[] = [];
+        for await (const chunk of stream) chunks.push(chunk as Buffer);
+        return Buffer.concat(chunks);
+    };
+
+    it('still reads a segment evicted after it was opened', async () => {
+        const path = join(dir, 'segment0.ts');
+        const bytes = Buffer.alloc(188 * 4, 0x47);
+        await writeFile(path, bytes);
+
+        const segment = await open(path);
+        await rm(path);
+
+        expect(segment.size).toBe(bytes.length);
+        expect(Buffer.compare(await read(segment.stream), bytes)).toBe(0);
+    });
+
+    it('is a miss when the segment is not there', async () => {
+        expect(await open(join(dir, 'segment9.ts'))).toBeNull();
+    });
+
+    it('is a miss, and clears the file, when the segment is empty', async () => {
+        // Left by an FFmpeg killed before it wrote anything.
+        const path = join(dir, 'segment1.ts');
+        await writeFile(path, '');
+        expect(await open(path)).toBeNull();
+        expect(await readdir(dir)).toEqual([]);
+    });
+});

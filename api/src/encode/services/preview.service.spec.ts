@@ -51,6 +51,18 @@ vi.mock('fs/promises', async (importOriginal) => {
         writeFile: mockWriteFile,
         stat: mockStat,
         rename: mockRename,
+        // A segment is opened before it is read. The handle answers from the
+        // same mocks a path does, so a test sets up a file one way for both.
+        open: vi.fn(async (path: string) => {
+            if (!mockExistsSync(path)) {
+                throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+            }
+            return {
+                stat: () => mockStat(path),
+                close: async () => {},
+                createReadStream: () => mockCreateReadStream(path),
+            };
+        }),
     };
 });
 

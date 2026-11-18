@@ -1634,6 +1634,10 @@ export class EncodeController {
             'Content-Length': String(result.size),
             'Cache-Control': 'public, max-age=3600',
         });
+        // Unheard, a failed read is an uncaught error that ends the process.
+        // The headers are out by then, so all that is left is to cut the
+        // response short.
+        result.stream.on('error', () => res.destroy());
         result.stream.pipe(res);
     }
 
