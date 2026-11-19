@@ -1476,21 +1476,13 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             mkdirSync(outputDir, { recursive: true });
         }
 
-        // Create output subdirectories
-        if (type === 'video') {
-            const totalStreams =
-                (encodeConfig.videoRenditions?.length ?? 0) +
-                (encodeConfig.audioGroups?.length ?? 0);
-            for (let i = 0; i < totalStreams; i++) {
-                const dir = join(outputDir, `stream_${i}`);
-                if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-            }
-        } else {
-            const numGroups = encodeConfig.audioGroups?.length ?? 1;
-            for (let i = 0; i < numGroups; i++) {
-                const dir = join(outputDir, `stream_${i}`);
-                if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-            }
+        // The stream directories FFmpeg writes into, by the names it gives
+        // them. Any other directory here is one the segment pipeline finds
+        // with no chunk chain and nothing in it.
+        const streamDirs = Object.keys(this.buildStreamChainMap(encodeConfig));
+        for (const name of streamDirs) {
+            const dir = join(outputDir, name);
+            if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
         }
 
         // Settled before anything is built: a source whose streams do not start
