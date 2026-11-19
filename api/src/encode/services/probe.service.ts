@@ -498,6 +498,10 @@ export class ProbeService {
             // Kept per sample so a quiet stretch cannot drag down a loud one.
             // Each packet carries the timestamp that places it in its sample.
             const bytesPerSample = new Map<number, number[]>();
+            // A read starts at the keyframe before its start, so the packets
+            // just before one sample can be printed again by the next: each
+            // is counted once, by stream and timestamp.
+            const counted = new Set<string>();
             for (const line of packets.split('\n')) {
                 if (!line) continue;
                 // Keyed, because ffprobe prints packet fields in its own order
@@ -514,16 +518,20 @@ export class ProbeService {
                 );
                 const size = parseInt(fields.get('size') ?? '', 10);
                 if (isNaN(streamIndex) || isNaN(size)) continue;
+                const ptsTime = fields.get('pts_time') ?? '';
+                const pts = parseFloat(ptsTime);
+                if (Number.isFinite(pts)) {
+                    const key = `${streamIndex}|${ptsTime}`;
+                    if (counted.has(key)) continue;
+                    counted.add(key);
+                }
                 if (!bytesPerSample.has(streamIndex)) {
                     bytesPerSample.set(
                         streamIndex,
                         new Array(starts.length).fill(0)
                     );
                 }
-                const sample = this.sampleIndexFor(
-                    parseFloat(fields.get('pts_time') ?? ''),
-                    starts
-                );
+                const sample = this.sampleIndexFor(pts, starts);
                 bytesPerSample.get(streamIndex)![sample] += size;
             }
 
@@ -601,9 +609,17 @@ export class ProbeService {
                         1000
                 ) / 1000
         );
-        // Clamping to the last usable start can collide on shorter files.
-        // Overlapping samples are harmless; duplicate reads are just waste.
-        return [...new Set(starts)];
+        // Clamping to the last usable start makes samples overlap on shorter
+        // files, and ffprobe prints a packet in an overlap once per sample, so
+        // a start that would overlap the sample before it is dropped.
+        const kept: number[] = [];
+        for (const start of starts) {
+            const previous = kept[kept.length - 1];
+            if (previous === undefined || start >= previous + sampleDuration) {
+                kept.push(start);
+            }
+        }
+        return kept;
     }
 
     /** ffprobe `-read_intervals`: `START%+DURATION`, comma separated. */
