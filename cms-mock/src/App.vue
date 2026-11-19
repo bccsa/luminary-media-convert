@@ -4,10 +4,12 @@ import ConnectionPanel from './components/ConnectionPanel.vue';
 import CreateSessionPanel from './components/CreateSessionPanel.vue';
 import EventConsole from './components/EventConsole.vue';
 import PlaybackCheck from './components/PlaybackCheck.vue';
-import { checkHealth } from './store';
+import { checkHealth, resume } from './store';
 
 onMounted(() => {
     void checkHealth();
+    // Like the real CMS: a reload picks the remembered session up again.
+    void resume();
 });
 </script>
 

@@ -11,6 +11,7 @@ import { LanguageSelect } from '@luminary-media-converter/encode-config';
 import { addAudioTrack, probeAudioSource } from '../../api';
 import FormSelect, { type SelectOption } from '../FormSelect.vue';
 import type { AddAudioTrackJob, AudioSource } from '../../types';
+import { saveErrorMessage } from '../../utils/errors';
 
 const props = defineProps<{
     open: boolean;
@@ -122,7 +123,9 @@ async function add(): Promise<void> {
         emit('started', job);
         emit('update:open', false);
     } catch (err) {
-        error.value = (err as Error).message;
+        // Refused before it starts when Luminary CMS has not stored the
+        // current version; the dialog stays open, filled in, to try again.
+        error.value = saveErrorMessage(err);
     } finally {
         starting.value = false;
     }

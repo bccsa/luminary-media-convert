@@ -78,7 +78,12 @@ import type {
 } from '../types';
 import { formatBytes, formatRelative } from '../utils/format';
 import { unmaskSessionKey } from '../utils/keyMask';
-import { errorMessage } from '../utils/errors';
+import {
+    CMS_PENDING_NOTICE,
+    errorMessage,
+    isChangedElsewhere,
+    saveErrorMessage,
+} from '../utils/errors';
 import { statusLabel } from '../utils/status';
 
 const route = useRoute();
@@ -1151,6 +1156,8 @@ async function onRegenerateThumbnails(): Promise<void> {
     const followed = sessionId.value;
     regeneratingExistingThumbnails.value = true;
     try {
+        // Refused at once, before any work, when Luminary CMS has not stored
+        // the version the new strip would be added to.
         await regenerateThumbnails(followed, token);
         for (;;) {
             await new Promise((resolve) => setTimeout(resolve, 1500));
@@ -1159,11 +1166,15 @@ async function onRegenerateThumbnails(): Promise<void> {
             const job = await getThumbnailsRegenerate(followed, token);
             if (job?.state === 'running') continue;
             if (job?.state === 'failed') throw new Error(job.error);
+            // The new strip is named in a new master revision, so the session's
+            // `thumbnailsVtt` and `hlsUrl` both moved: follow them before the
+            // timeline reads its strip again, or it reads the old one first.
+            await onMasterChanged('thumbnails');
             existingThumbnailsVersion.value++;
             return;
         }
     } catch (e) {
-        regenerateThumbnailsError.value = errorMessage(e);
+        regenerateThumbnailsError.value = saveErrorMessage(e);
     } finally {
         regeneratingExistingThumbnails.value = false;
     }
@@ -1206,9 +1217,13 @@ const pipelinePhaseLabel = computed(() => {
 /**
  * Chapter cues for the player, once the output is published.
  *
- * The same `chapters/<lang>.vtt` the editor writes beside the master. A session
- * that has never had chapters saved simply has no such object, and a sidecar
- * that 404s costs the player nothing — it reports the miss and plays on.
+ * Only a fallback now. A master names its current chapter file in a
+ * `com.luminary.chapters` line, a new name on every save, and the player reads
+ * that first. A master from before those lines has only the fixed
+ * `chapters/<lang>.vtt` beside it, which the editor still writes too. A
+ * session that has never had chapters saved simply has no such object, and a
+ * sidecar that 404s costs the player nothing — it reports the miss and plays
+ * on.
  */
 const playerChapterSidecars = computed(() => {
     if (!isCompleted.value) return undefined;
@@ -1438,7 +1453,9 @@ async function fetchWaveform() {
             `${API_BASE}/api/sessions/${sessionId.value}/waveform?token=${sessionToken.value}`
         );
         if (!response.ok) {
-            scheduleWaveformRetry();
+            // 404: a video published without a waveform. Asking again finds
+            // none either; anything else may still be on its way.
+            if (response.status !== 404) scheduleWaveformRetry();
             return;
         }
         const data = await response.json();
@@ -1771,14 +1788,35 @@ watch(
         // A finished encode opens as an edit of its own video: read the session
         // again so its audio tracks, angles and subtitles show without leaving.
         if (status === 'completed' && prev && prev !== 'completed') {
-            void refreshFinishedSession();
+            void refreshSession();
         }
     }
 );
 
-async function refreshFinishedSession(): Promise<void> {
-    const detail = await getSession(sessionId.value).catch(() => null);
-    if (detail && session.value) session.value = { ...session.value, ...detail };
+/**
+ * Read the session again, for what the event stream no longer reports: it
+ * ends at `completed`, and a finished video still changes. Every save to it
+ * writes a new master revision, so `hlsUrl`, `masterPlaylist` and
+ * `thumbnailsVtt` move, and `cmsPending` says whether Luminary CMS has stored
+ * the newest one.
+ *
+ * The poller gets the read too. It is what the playback URL, the master and
+ * the thumbnails are read from first, and it would otherwise go on offering
+ * the revision it saw last.
+ */
+async function refreshSession(): Promise<void> {
+    const followed = sessionId.value;
+    const detail = await getSession(followed).catch(() => null);
+    if (!detail || !session.value || sessionId.value !== followed) return;
+    // The API sends `cmsPending` only while it is true, so its absence is the
+    // news that the CMS caught up — merged as it stands, it would leave the
+    // banner up for good.
+    session.value = {
+        ...session.value,
+        ...detail,
+        cmsPending: detail.cmsPending === true,
+    };
+    poller.apply(detail);
 }
 
 // ---------------------------------------------------------------------------
@@ -1793,6 +1831,7 @@ watch(
             chapters.unload();
             chaptersSaveError.value = null;
             editorSegments.value = [];
+            stopFollowingCmsPending();
         }
     }
 );
@@ -1816,9 +1855,15 @@ watch(
 async function onSaveChapters() {
     chaptersSaveError.value = null;
     try {
-        await chapters.saveRemote();
+        const saved = await chapters.saveRemote();
+        // On a published video the save wrote a new master revision naming the
+        // chapter file: the player reloads onto it, and shows what was saved.
+        // During the encode it wrote only the file, and nothing moved.
+        if (saved.hlsUrl) void onMasterChanged('chapters', saved.published);
     } catch (err) {
-        chaptersSaveError.value = errorMessage(err);
+        // The draft stays, on screen and in localStorage, to save again.
+        chaptersSaveError.value = saveErrorMessage(err);
+        if (isChangedElsewhere(err)) void onMasterChanged('chapters');
     }
 }
 
@@ -1928,13 +1973,84 @@ const subtitleTrackSelected = computed<string | null>({
     },
 });
 
-/** The master changed: the player and the other tabs read it again. */
-function onMasterChanged(from: 'tracks' | 'angles' | 'subtitles'): void {
-    sessionPlayerStripRef.value?.reload?.();
-    if (from !== 'angles') void videoAnglesPanelRef.value?.load();
-    if (from !== 'tracks') void audioTracksPanelRef.value?.load();
-    if (from !== 'subtitles') void subtitlesPanelRef.value?.load();
+/**
+ * The master changed: a save here wrote a new revision, or another machine's
+ * did and the session moved on to it. Each revision has a name of its own, so
+ * the session is read again for its new `hlsUrl`, and the other tabs read the
+ * media again — the ETags they hold belong to the revision before.
+ *
+ * The player follows the new URL by itself: a new `source` is a reload, with
+ * the position kept. It is told to reload only when the URL stayed put — the
+ * read failed — so that it still shows what changed.
+ *
+ * `published` is the save's own answer: `false` when Luminary CMS had not
+ * stored the new version by the time the save returned.
+ */
+async function onMasterChanged(
+    from: 'tracks' | 'angles' | 'subtitles' | 'chapters' | 'thumbnails',
+    published?: boolean
+): Promise<void> {
+    if (published === false && session.value) {
+        session.value = { ...session.value, cmsPending: true };
+    }
+    if (from !== 'angles') void videoAnglesPanelRef.value?.load?.();
+    if (from !== 'tracks') void audioTracksPanelRef.value?.load?.();
+    if (from !== 'subtitles') void subtitlesPanelRef.value?.load?.();
+    const before = activePlaybackUrl.value;
+    await refreshSession();
+    if (activePlaybackUrl.value === before) {
+        sessionPlayerStripRef.value?.reload?.();
+    }
 }
+
+// ---------------------------------------------------------------------------
+// Luminary CMS — waiting for it to store the current version
+// ---------------------------------------------------------------------------
+
+/**
+ * Luminary CMS has not stored the version this session is on. Saves wait for
+ * it briefly and are then refused, so the banner says what to do before that
+ * happens. Only on a finished video: during an encode the post is expected
+ * to be saved later, and nothing can be refused yet.
+ */
+const cmsPending = computed(
+    () => isCompleted.value && session.value?.cmsPending === true
+);
+
+/**
+ * Nothing pushes the CMS's answer here — the event stream has ended by now —
+ * so while it is awaited the session is read again on a timer, and the banner
+ * goes when `cmsPending` does. One read at a time, as the panels poll.
+ */
+const CMS_PENDING_POLL_MS = 3000;
+let cmsPendingTimer: ReturnType<typeof setTimeout> | null = null;
+let followingCmsPending = false;
+
+function followCmsPending(): void {
+    if (followingCmsPending) return;
+    followingCmsPending = true;
+    cmsPendingTimer = setTimeout(pollCmsPending, CMS_PENDING_POLL_MS);
+}
+
+function stopFollowingCmsPending(): void {
+    followingCmsPending = false;
+    if (cmsPendingTimer) clearTimeout(cmsPendingTimer);
+    cmsPendingTimer = null;
+}
+
+async function pollCmsPending(): Promise<void> {
+    cmsPendingTimer = null;
+    await refreshSession();
+    if (followingCmsPending) {
+        cmsPendingTimer = setTimeout(pollCmsPending, CMS_PENDING_POLL_MS);
+    }
+}
+
+watch(
+    cmsPending,
+    (pending) => (pending ? followCmsPending() : stopFollowingCmsPending()),
+    { immediate: true }
+);
 
 const trimTimelineWorkspaceRef = ref<InstanceType<
     typeof SessionTrimWorkspace
@@ -2035,6 +2151,7 @@ onMounted(fetchSession);
 onUnmounted(() => {
     if (waveformRetryTimer) clearTimeout(waveformRetryTimer);
     poller.stop();
+    stopFollowingCmsPending();
     chapters.unload();
     document.documentElement.style.overflowY = '';
     setHeaderLayout('default');
@@ -2230,6 +2347,34 @@ onUnmounted(() => {
                                     {{ deliveryProblemText.body }}
                                 </p>
                             </div>
+                        </div>
+
+                        <!--
+                            One banner for the whole session, whichever save or
+                            job wrote the version: the CMS stores versions, not
+                            tabs.
+                        -->
+                        <div
+                            v-if="cmsPending"
+                            role="status"
+                            data-testid="cms-pending"
+                            class="mb-3 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/60 dark:text-amber-100"
+                        >
+                            <svg
+                                class="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                aria-hidden="true"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    d="M12 8v4l2.5 2.5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+                                />
+                            </svg>
+                            <p>{{ CMS_PENDING_NOTICE }}</p>
                         </div>
 
                         <SessionPlayerStrip
@@ -2517,7 +2662,7 @@ onUnmounted(() => {
                                     ref="audioTracksPanelRef"
                                     :session-id="sessionId"
                                     :session-token="sessionToken"
-                                    @saved="onMasterChanged('tracks')"
+                                    @saved="onMasterChanged('tracks', $event)"
                                 />
                                 <VideoAnglesPanel
                                     v-if="editsExistingVideo"
@@ -2525,7 +2670,7 @@ onUnmounted(() => {
                                     ref="videoAnglesPanelRef"
                                     :session-id="sessionId"
                                     :session-token="sessionToken"
-                                    @saved="onMasterChanged('angles')"
+                                    @saved="onMasterChanged('angles', $event)"
                                 />
                                 <SubtitlesPanel
                                     v-if="editsExistingVideo"
@@ -2538,7 +2683,7 @@ onUnmounted(() => {
                                         () => playerRef?.getCurrentTime() ?? 0
                                     "
                                     :on-seek="(t: number) => playerRef?.seek(t)"
-                                    @saved="onMasterChanged('subtitles')"
+                                    @saved="onMasterChanged('subtitles', $event)"
                                 />
 
                                 <!-- Encoding progress panel -->

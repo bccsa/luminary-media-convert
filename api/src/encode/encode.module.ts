@@ -22,6 +22,8 @@ import { WaveformService } from './services/waveform.service.js';
 import { AddAudioTrackService } from './services/add-audio-track.service.js';
 import { AddVideoAngleService } from './services/add-video-angle.service.js';
 import { ExistingThumbnailsService } from './services/existing-thumbnails.service.js';
+import { CmsAckService } from './services/cms-ack.service.js';
+import { VideoRevisionService } from './services/video-revision.service.js';
 
 @Module({
     // HlsEditModule is where chapter read/write lives; it imports this module in
@@ -50,6 +52,8 @@ import { ExistingThumbnailsService } from './services/existing-thumbnails.servic
         AddAudioTrackService,
         AddVideoAngleService,
         ExistingThumbnailsService,
+        CmsAckService,
+        VideoRevisionService,
     ],
     exports: [SessionService, SessionEventsService],
 })

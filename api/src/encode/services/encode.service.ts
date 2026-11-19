@@ -1,5 +1,13 @@
 import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
-import { LUMINARY_KEY_PLACEHOLDER_URI } from '@luminary-media-converter/hls-core';
+import {
+    LUMINARY_KEY_PLACEHOLDER_URI,
+    chaptersEntry,
+    thumbnailsEntry,
+    upsertSessionData,
+    type SessionDataEntry,
+} from '@luminary-media-converter/hls-core';
+import { HlsEditService } from '../../hls-edit/hls-edit.service.js';
+import { MasterRevisionService } from '../../hls-edit/master-revision.service.js';
 import {
     copyFileSync,
     existsSync,
@@ -37,6 +45,7 @@ import {
     type EncodeResult,
     type WaveLayout,
 } from './ffmpeg.service.js';
+import { angleGroupIdForTrack } from './output-angles.js';
 import {
     isQuickTrimConfig,
     isQuickTrimRejection,
@@ -143,6 +152,21 @@ function reEncodedConfig(config: EncodeConfigDto): EncodeConfigDto {
     return copy;
 }
 
+/**
+ * Names the video's sidecars in the master the encode is about to publish, as
+ * `#EXT-X-SESSION-DATA` lines. Runs on the plaintext master, before the text
+ * assets are encrypted.
+ */
+async function indexSidecars(
+    masterPath: string,
+    entries: SessionDataEntry[]
+): Promise<void> {
+    if (entries.length === 0 || !existsSync(masterPath)) return;
+    let text = await readFile(masterPath, 'utf-8');
+    for (const entry of entries) text = upsertSessionData(text, entry);
+    await writeFile(masterPath, text);
+}
+
 @Injectable()
 export class EncodeService implements OnModuleInit {
     private readonly logger = new Logger(EncodeService.name);
@@ -155,7 +179,9 @@ export class EncodeService implements OnModuleInit {
         private readonly encryptionService: EncryptionService,
         private readonly thumbnailService: ThumbnailService,
         private readonly waveformService: WaveformService,
-        private readonly segmentPipelineService: SegmentPipelineService
+        private readonly segmentPipelineService: SegmentPipelineService,
+        private readonly hlsEditService: HlsEditService,
+        private readonly masterRevisions: MasterRevisionService
     ) {}
 
     /**
@@ -667,6 +693,7 @@ export class EncodeService implements OnModuleInit {
             // filmstrip needs them whether or not the output ships a storyboard.
             // The flag's meaning — "no thumbnails in the output" — is unchanged.
             let thumbnailsVttRelPath: string | undefined;
+            let thumbnailsTrackIndex: number | undefined;
             if (
                 session.encodeConfig.type === 'video' &&
                 session.config.thumbnails !== false
@@ -693,6 +720,7 @@ export class EncodeService implements OnModuleInit {
                         });
                     if (thumbResult) {
                         thumbnailsVttRelPath = thumbResult.vttRelativePath;
+                        thumbnailsTrackIndex = thumbResult.trackIndex;
                         this.logger.log(
                             `Generated thumbnail sprites for session ${sessionId}`
                         );
@@ -803,6 +831,37 @@ export class EncodeService implements OnModuleInit {
                 }
             }
 
+            // The master names the video's sidecars, so nothing has to guess
+            // their names: the chapter files saved during the encode, and the
+            // thumbnail strip, labelled with the angle it was sampled from.
+            // The chapters as they stand now are what this master names; a
+            // save from here on is published as a revision after completion.
+            const chaptersAtPublish = {
+                ...(this.sessionService.get(sessionId)?.chapterFiles ?? {}),
+            };
+            this.sessionService.setChapterFilesInjected(
+                sessionId,
+                chaptersAtPublish
+            );
+            await indexSidecars(join(outputDir, encodeResult.masterPlaylist), [
+                ...Object.entries(chaptersAtPublish).map(([lang, uri]) =>
+                    chaptersEntry(lang, uri)
+                ),
+                ...(thumbnailsVttRelPath
+                    ? [
+                          thumbnailsEntry(
+                              thumbnailsVttRelPath,
+                              thumbnailsTrackIndex === undefined
+                                  ? undefined
+                                  : angleGroupIdForTrack(
+                                        session.encodeConfig,
+                                        thumbnailsTrackIndex
+                                    )
+                          ),
+                      ]
+                    : []),
+            ]);
+
             // Encrypt the text assets — playlists and VTT sidecars — last.
             //
             // Strictly after everything that reads or rewrites a playlist:
@@ -890,6 +949,9 @@ export class EncodeService implements OnModuleInit {
                 encodeResult.segmentFormat,
                 encryptionKey ? encryptionKey.toString('hex') : undefined
             );
+            // In the same turn as setCompleted, so it queues ahead of any
+            // chapter save that now finds the video published.
+            this.publishLateChapters(sessionId, chaptersAtPublish);
             // The client reads the storyboard from S3 from here on, so the one
             // built from the source is no longer looked at. Nothing else prunes
             // the session directory until the session is deleted.
@@ -1262,6 +1324,55 @@ export class EncodeService implements OnModuleInit {
             resume,
             doneSec: ((plan.skip + waveFraction) / layout.length) * duration,
         };
+    }
+
+    /**
+     * Chapters saved after the encode wrote its master but before it finished:
+     * published as the video's first revision, which announces its URL. Takes
+     * the video's lock before returning, so a chapter save arriving now waits
+     * behind it rather than racing it.
+     */
+    private publishLateChapters(
+        sessionId: string,
+        injected: Record<string, string>
+    ): void {
+        const session = this.sessionService.get(sessionId);
+        if (!session?.edit) return;
+        // Never fatal, like everything after setCompleted: the video is out
+        // and the session is done, and a late chapter save is not worth
+        // reporting a successful encode as failed over.
+        const warn = (err: Error) =>
+            this.logger.warn(
+                `Chapters saved while session ${sessionId} finished were not published: ${err.message}`
+            );
+        let locked: Promise<void>;
+        try {
+            locked = this.masterRevisions.withVideoLock(session.edit.masterKey, async () => {
+                const now = this.sessionService.get(sessionId);
+                if (!now?.edit) return;
+                const late = Object.fromEntries(
+                    Object.entries(now.chapterFiles ?? {}).filter(
+                        ([lang, uri]) => injected[lang] !== uri
+                    )
+                );
+                if (Object.keys(late).length === 0) return;
+                const written = await this.hlsEditService.publishChapters(
+                    now.config.s3,
+                    now.edit.masterKey,
+                    late,
+                    now.encryptionKeyHex
+                );
+                this.sessionService.setMasterRevision(sessionId, written.masterKey);
+                this.sessionService.setChapterFilesInjected(sessionId, {
+                    ...injected,
+                    ...late,
+                });
+            });
+        } catch (err) {
+            warn(err as Error);
+            return;
+        }
+        locked.catch(warn);
     }
 
     /** Where a continue would restart, as seconds of output reused, or null when it would start over. */

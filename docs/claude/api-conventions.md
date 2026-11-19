@@ -4,7 +4,7 @@ The API-side bullets of the former "Key Conventions" section; the player-side on
 
 ## Key Conventions (API)
 
-- DTOs use `class-validator` and are validated by a global `ValidationPipe` (whitelist + forbidNonWhitelisted). Even fields nothing acts on yet — `existingMedia` — are validated, because a shape that was never checked is a shape that will be wrong by the time something reads it
+- DTOs use `class-validator` and are validated by a global `ValidationPipe` (whitelist + forbidNonWhitelisted). Even fields a given mode ignores — `existingMedia` in an encode session — are validated, because a shape that was never checked is a shape that will be wrong by the time something reads it
 - Session-level options (`segmentDuration`, `byteRange`, `byteRangeMaxFileSizeMB`, `audioByteRangeMaxFileSizeMB`, `thumbnails`, `encryption` — incl. `encryption.encryptPlaylists`) belong to session creation; `trimSegments` belongs to the encode config submitted at encode start
 - Host-specific values reach the API through `AppModule.forRoot()` → `RuntimeOptionsModule` (a `@Global` module): `LOCAL_API_TOKEN`, `ORIGIN_POLICY`, `CREDENTIAL_CIPHER`, `CMS_SESSION_HOOK`. Never import `AppModule` directly — a bare import leaves those tokens unbound. `workDir` and the ffmpeg paths go through `process.env` instead, because that is how the services already read them and they are process-wide anyway
 - ffmpeg/ffprobe are resolved per call through `ffbin.ts` (`FFMPEG_PATH` / `FFPROBE_PATH`, else PATH), never captured at import time, so the host can set them before Nest instantiates anything. `shellQuote()` exists because a macOS install path always contains a space

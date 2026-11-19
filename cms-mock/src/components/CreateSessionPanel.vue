@@ -1,5 +1,16 @@
 <script setup lang="ts">
-import { createSession, form, session } from '../store';
+import { computed } from 'vue';
+import { createSession, documents, fillExistingMedia, form, session } from '../store';
+
+const storedForForm = computed(() => documents[form.documentId] ?? null);
+
+/** "Newest wins": the edit session opened a later revision than the one sent. */
+const openedNewer = computed(
+    () =>
+        !!session.response?.hlsUrl &&
+        !!session.requestedHlsUrl &&
+        session.response.hlsUrl !== session.requestedHlsUrl
+);
 </script>
 
 <template>
@@ -20,6 +31,56 @@ import { createSession, form, session } from '../store';
                 <input v-model="form.publicBaseUrl" type="text" spellcheck="false" />
             </label>
         </div>
+
+        <h3>Mode</h3>
+        <div class="row">
+            <label class="check">
+                <input v-model="form.mode" type="radio" value="encode" />
+                encode a new file
+            </label>
+            <label class="check">
+                <input v-model="form.mode" type="radio" value="edit" />
+                edit the existing video (<code>mode: 'edit'</code>)
+            </label>
+        </div>
+        <template v-if="form.mode === 'edit'">
+            <div class="grid" style="margin-top: 10px">
+                <label class="field">
+                    <span>existingMedia.hlsUrl</span>
+                    <input
+                        v-model="form.existingMedia.hlsUrl"
+                        type="text"
+                        spellcheck="false"
+                    />
+                </label>
+                <label class="field">
+                    <span>existingMedia.hlsKey (optional)</span>
+                    <input
+                        v-model="form.existingMedia.hlsKey"
+                        type="text"
+                        spellcheck="false"
+                    />
+                </label>
+            </div>
+            <div class="row" style="margin-top: 10px">
+                <button
+                    class="secondary"
+                    :disabled="!storedForForm"
+                    @click="fillExistingMedia()"
+                >
+                    Use stored media
+                </button>
+                <span class="note" style="margin: 0">
+                    <template v-if="storedForForm">
+                        {{ form.documentId }} holds
+                        <code>{{ storedForForm.hlsUrl }}</code>
+                    </template>
+                    <template v-else>
+                        Nothing stored for {{ form.documentId }} yet — encode first.
+                    </template>
+                </span>
+            </div>
+        </template>
 
         <h3>S3</h3>
         <div class="grid">
@@ -94,6 +155,7 @@ import { createSession, form, session } from '../store';
             </button>
             <span v-if="session.response?.reused" class="badge warn">reused</span>
             <span v-else-if="session.response" class="badge ok">new session</span>
+            <span v-if="openedNewer" class="badge warn">opened a newer revision</span>
         </div>
 
         <p v-if="session.error" class="note bad">{{ session.error }}</p>

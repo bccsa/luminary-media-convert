@@ -5,6 +5,7 @@ import {
     exportChaptersVtt,
 } from '../components/segment-editor';
 import { getChapters, putChapters } from '../api';
+import type { ChaptersSaveResult } from '../types';
 import { errorMessage } from '../utils/errors';
 
 const STORAGE_KEY_PREFIX = 'luminary_chapters_';
@@ -66,7 +67,12 @@ export interface UseChaptersOptions {
     /** Test seam — provide an alternate fetch. */
     fetchRemote?: (sessionId: string, lang: string, token: string) => Promise<{ vtt: string } | null>;
     /** Test seam — provide an alternate uploader. */
-    saveRemoteImpl?: (sessionId: string, lang: string, vtt: string, token: string) => Promise<void>;
+    saveRemoteImpl?: (
+        sessionId: string,
+        lang: string,
+        vtt: string,
+        token: string,
+    ) => Promise<ChaptersSaveResult | void>;
     /** Override the autosave debounce window (ms). Useful in tests. */
     autosaveMs?: number;
 }
@@ -155,16 +161,23 @@ export function useChapters(opts: UseChaptersOptions) {
         });
     }
 
-    async function saveRemote(): Promise<void> {
-        if (!activeSessionId) return;
+    /**
+     * Write the chapters, and hand back what the API answered: on a published
+     * video, the new master revision the save wrote, which the view has to
+     * follow. A refusal throws and leaves the draft — in memory and in
+     * localStorage — exactly as it was, to save again.
+     */
+    async function saveRemote(): Promise<ChaptersSaveResult> {
+        if (!activeSessionId) return {};
         isSaving.value = true;
         try {
             const vtt = exportChaptersVtt(segments.value);
             const token = await getSessionToken();
-            await saveRemoteImpl(activeSessionId, lang, vtt, token);
+            const result = await saveRemoteImpl(activeSessionId, lang, vtt, token);
             isDirty.value = false;
             lastSavedAt.value = new Date();
             clearLocal(activeSessionId);
+            return result || {};
         } finally {
             isSaving.value = false;
         }

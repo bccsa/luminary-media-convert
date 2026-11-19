@@ -33,13 +33,19 @@ import {
 } from '@nestjs/swagger';
 import { SkipAllThrottles } from '../throttle.js';
 import type { Request } from 'express';
-import { Observable, map } from 'rxjs';
+import { Observable, concat, defer, finalize, map, of } from 'rxjs';
 import { createReadStream, existsSync } from 'fs';
 import { rm, stat } from 'fs/promises';
 import { isAbsolute, join } from 'path';
 import { AuthResolverGuard } from '../auth/auth-resolver.guard.js';
 import { AuthTypes } from '../auth/auth-types.decorator.js';
-import { SessionService, type Session } from './services/session.service.js';
+import {
+    SessionService,
+    isCmsPending,
+    type Session,
+} from './services/session.service.js';
+import { CmsAckService } from './services/cms-ack.service.js';
+import { VideoRevisionService } from './services/video-revision.service.js';
 import {
     SessionEventsService,
     type SessionEvent,
@@ -50,7 +56,11 @@ import { PreviewService } from './services/preview.service.js';
 import { CreateSessionDto } from './dto/create-session.dto.js';
 import { EncodeConfigDto } from './dto/encode-config.dto.js';
 import { LocalFileDto } from './dto/local-file.dto.js';
-import { ChaptersWriteDto } from './dto/chapters.dto.js';
+import {
+    ChaptersSaveResultDto,
+    ChaptersWriteDto,
+} from './dto/chapters.dto.js';
+import { CmsAckDto } from './dto/cms-ack.dto.js';
 import {
     AddAudioTrackDto,
     AddAudioTrackJobDto,
@@ -85,8 +95,8 @@ import { trimCopyMode } from './services/quick-trim-plan.js';
 import { IngestService } from './services/ingest.service.js';
 import { S3Service } from './services/s3.service.js';
 import {
-    EDITED_CACHE_CONTROL,
     HlsEditService,
+    type EncodedMedia,
 } from '../hls-edit/hls-edit.service.js';
 import { WaveformService } from './services/waveform.service.js';
 import {
@@ -147,7 +157,9 @@ export class EncodeController {
         private readonly thumbnailService: ThumbnailService,
         private readonly addAudioTrackService: AddAudioTrackService,
         private readonly existingThumbnailsService: ExistingThumbnailsService,
-        private readonly addVideoAngleService: AddVideoAngleService
+        private readonly addVideoAngleService: AddVideoAngleService,
+        private readonly cmsAckService: CmsAckService,
+        private readonly videoRevisions: VideoRevisionService
     ) {}
 
     /**
@@ -623,7 +635,8 @@ export class EncodeController {
         description:
             'Server-Sent Events stream for real-time session status updates. ' +
             'Authenticate via the `token` query parameter, with either the session ' +
-            'token or the read token — EventSource cannot set headers.',
+            'token or the read token — EventSource cannot set headers. The first ' +
+            'event is the session as it stands, so a client that reconnects catches up.',
     })
     @ApiParam({ name: 'sessionId', description: 'Session ID' })
     streamEvents(
@@ -635,19 +648,69 @@ export class EncodeController {
         }
         // The read token is watching-only, and watching is all this endpoint
         // does — it is how the CMS follows an encode it opened but does not run.
+        const bySessionToken = this.sessionService.getBySessionToken(token);
         const session =
-            this.sessionService.getBySessionToken(token) ??
-            this.sessionService.getByReadToken(token);
+            bySessionToken ?? this.sessionService.getByReadToken(token);
         if (!session || session.id !== sessionId) {
             throw new UnauthorizedException('Invalid session token');
         }
 
         const accelMode = this.ffmpegService.getAccelMode();
-        return this.sessionEventsService.forSession(sessionId).pipe(
+        // The session as it stands, first: a CMS that reconnects after a new
+        // version was announced learns of it now rather than at the next event,
+        // and can store it and acknowledge.
+        const events = concat(
+            defer(() => {
+                const current = this.sessionService.get(sessionId);
+                return current ? of(this.sessionService.snapshotEvent(current)) : of();
+            }),
+            this.sessionEventsService.forSession(sessionId)
+        ).pipe(
             map((event) => ({
                 data: { ...event, encoder: accelMode },
             }))
         );
+        if (bySessionToken) return events;
+        // A read-token stream is the CMS page for the post following the
+        // session: while one is open, an edit has somewhere to be announced.
+        return defer(() => {
+            this.cmsAckService.opened(sessionId);
+            return events.pipe(
+                finalize(() => this.cmsAckService.closed(sessionId))
+            );
+        });
+    }
+
+    @Post(':sessionId/ack')
+    @HttpCode(HttpStatus.NO_CONTENT)
+    @UseGuards(AuthResolverGuard)
+    @AuthTypes('read')
+    @ApiOperation({
+        summary: 'The CMS confirms it has stored a version of the video',
+        description:
+            "Called by the CMS, with the session's read token, once the post's stored media URL " +
+            'equals the hlsUrl the encoder announced. Until the current hlsUrl is acknowledged ' +
+            'the session is pending (cmsPending) and further edits are refused with ' +
+            'CMS_NOT_ACKNOWLEDGED. An ack for any other URL is ignored.',
+    })
+    @ApiParam({ name: 'sessionId', description: 'Session ID' })
+    @ApiResponse({ status: 204, description: 'Acknowledgement recorded (or ignored).' })
+    @ApiResponse({ status: 401, description: 'Missing or wrong read token.' })
+    @ApiResponse({ status: 404, description: 'Session not found.' })
+    ack(
+        @Param('sessionId') sessionId: string,
+        @Query('token') token: string,
+        @Body() dto: CmsAckDto
+    ): void {
+        // The guard also lets a session token through on read routes; only the
+        // CMS's own read token may say the CMS stored something.
+        const session = this.sessionService.get(sessionId);
+        if (!session?.readToken || token !== session.readToken) {
+            throw new UnauthorizedException(
+                "Only the CMS's read token can acknowledge a version"
+            );
+        }
+        this.cmsAckService.ack(sessionId, dto.hlsUrl);
     }
 
     @Get(':sessionId')
@@ -701,6 +764,9 @@ export class EncodeController {
         // GET /api/sessions/:sessionId/key.
         if (session.hlsUrl) result.hlsUrl = session.hlsUrl;
         if (session.edit) result.mode = 'edit';
+        // The app polls this while a save waits on the CMS: its event stream
+        // has stopped by then, an edit session being completed from the start.
+        if (isCmsPending(session)) result.cmsPending = true;
 
         if (
             session.probeResult &&
@@ -946,10 +1012,11 @@ export class EncodeController {
     @AuthTypes('instance', 'session')
     @ApiSecurity('apikey')
     @ApiOperation({
-        summary: 'Read the chapter sidecar for this session',
+        summary: 'Read the chapters for this session',
         description:
             "Resolves the session's own bucket and prefix, so the caller supplies " +
-            'nothing but a language. Same storage and layout as /api/hls/chapters/read.',
+            'nothing but a language. Reads the file the current master revision names, ' +
+            'else a file saved during the encode, else the legacy chapters/<lang>.vtt.',
     })
     @ApiParam({ name: 'sessionId', description: 'Session ID' })
     @ApiResponse({
@@ -964,11 +1031,15 @@ export class EncodeController {
         @Query('lang') lang = 'en'
     ): Promise<{ vtt: string }> {
         const { s3, folderPrefix, keyHex } = this.sessionStorage(sessionId);
+        const session = this.sessionService.get(sessionId)!;
         const result = await this.hlsEditService.readChapters(
             s3,
             folderPrefix,
             lang,
-            keyHex
+            session.encryptionKeyHex ?? keyHex,
+            session.edit
+                ? { masterKey: session.edit.masterKey }
+                : { draftUri: session.chapterFiles?.[lang] }
         );
         // No sidecar yet is the normal state of a session nobody has authored
         // chapters for, so it answers with an empty document rather than 404.
@@ -984,39 +1055,144 @@ export class EncodeController {
     }
 
     @Put(':sessionId/chapters')
-    @HttpCode(HttpStatus.NO_CONTENT)
+    @HttpCode(HttpStatus.OK)
     @UseGuards(AuthResolverGuard)
     @AuthTypes('instance', 'session')
     @ApiSecurity('apikey')
     @ApiOperation({
-        summary: 'Write the chapter sidecar for this session',
+        summary: 'Write the chapters for this session',
         description:
-            "Stores the document at chapters/<lang>.vtt under the session's own " +
-            'prefix, with Content-Type: text/vtt.',
+            "Stores the document under a name of its own (chapters/<lang>_<hex>.vtt) in the session's " +
+            'prefix, plus the legacy chapters/<lang>.vtt for older viewers. Once the video is ' +
+            'published, a new master revision names the file and the answer says where it is and ' +
+            'whether the CMS stored it; during the encode the file waits for the master the encode ' +
+            'writes, and the answer is empty.',
     })
     @ApiParam({ name: 'sessionId', description: 'Session ID' })
-    @ApiResponse({ status: 204, description: 'Chapter VTT stored.' })
+    @ApiResponse({ status: 200, type: ChaptersSaveResultDto })
     @ApiResponse({
         status: 400,
         description: 'Malformed language code or VTT body.',
     })
     @ApiResponse({ status: 404, description: 'Session not found.' })
+    @ApiResponse({
+        status: 409,
+        description:
+            'CMS_NOT_ACKNOWLEDGED (the CMS has not stored the current version), CHANGED_ELSEWHERE, or busy.',
+    })
     @ApiResponse({ status: 413, description: 'VTT body exceeds 1 MiB.' })
     async putChapters(
         @Param('sessionId') sessionId: string,
         @Body() dto: ChaptersWriteDto,
         @Query('lang') lang = 'en'
-    ): Promise<void> {
-        const { s3, folderPrefix, keyHex, editing } =
-            this.sessionStorage(sessionId);
-        await this.hlsEditService.writeChapters(
+    ): Promise<ChaptersSaveResultDto> {
+        const { s3, folderPrefix, keyHex } = this.sessionStorage(sessionId);
+        const session = this.sessionService.get(sessionId)!;
+
+        if (session.edit) {
+            // Checked before the file is written, so a refusal leaves nothing behind.
+            await this.videoRevisions.assertCmsReady(sessionId);
+            this.assertMasterIdle(sessionId);
+            const file = await this.hlsEditService.writeChapterFile(
+                s3,
+                folderPrefix,
+                lang,
+                dto.vtt,
+                keyHex
+            );
+            const saved = await this.videoRevisions.save(
+                sessionId,
+                (masterKey) =>
+                    this.hlsEditService.publishChapters(
+                        s3,
+                        masterKey,
+                        { [file.lang]: file.uri },
+                        session.encryptionKeyHex
+                    ),
+                { gate: false, awaitAck: false }
+            );
+            // Only now that the save has landed: a refused save must leave
+            // older viewers on the chapters they had. Before waiting on the
+            // CMS, so both generations of viewer change together.
+            await this.hlsEditService.writeLegacyChapters(
+                s3,
+                folderPrefix,
+                file.lang,
+                dto.vtt,
+                keyHex
+            );
+            const published = await this.cmsAckService.awaitAck(
+                sessionId,
+                saved.hlsUrl
+            );
+            return {
+                hlsUrl: saved.hlsUrl,
+                masterPlaylist: saved.masterPlaylist,
+                etag: saved.etag,
+                ...(published === undefined ? {} : { published }),
+            };
+        }
+
+        // During the encode: no master exists yet to name the file, and nobody
+        // can have fetched it, so it is recorded as a draft and the one it
+        // replaces goes — unless the encode already wrote that one into its
+        // master, which is about to be published naming it.
+        const file = await this.hlsEditService.writeChapterFile(
             s3,
             folderPrefix,
             lang,
             dto.vtt,
-            keyHex,
-            editing ? { cacheControl: EDITED_CACHE_CONTROL } : {}
+            keyHex
         );
+        await this.hlsEditService.writeLegacyChapters(
+            s3,
+            folderPrefix,
+            file.lang,
+            dto.vtt,
+            keyHex
+        );
+        const previous = session.chapterFiles?.[file.lang];
+        this.sessionService.setChapterFiles(sessionId, {
+            ...session.chapterFiles,
+            [file.lang]: file.uri,
+        });
+        const now = this.sessionService.get(sessionId);
+        // A draft goes only while nothing can name it. Once the encode has
+        // finished, the chapters saved late are being published — or already
+        // are — in a revision that names this very file.
+        if (
+            previous &&
+            previous !== file.uri &&
+            !now?.edit &&
+            session.chapterFilesInjected?.[file.lang] !== previous
+        ) {
+            await this.hlsEditService.deleteChapterDraft(s3, folderPrefix, previous);
+        }
+        // The encode finished while this file was being written: its late
+        // chapters may already have been published without it, so this one is
+        // published now, as any save to a published video is.
+        if (now?.edit) {
+            const saved = await this.videoRevisions.save(
+                sessionId,
+                (masterKey) =>
+                    this.hlsEditService.publishChapters(
+                        s3,
+                        masterKey,
+                        { [file.lang]: file.uri },
+                        now.encryptionKeyHex
+                    ),
+                { gate: false }
+            );
+            return {
+                hlsUrl: saved.hlsUrl,
+                masterPlaylist: saved.masterPlaylist,
+                etag: saved.etag,
+                ...(saved.published === undefined
+                    ? {}
+                    : { published: saved.published }),
+            };
+        }
+        return {};
     }
 
     // -----------------------------------------------------------------------
@@ -1048,9 +1224,22 @@ export class EncodeController {
         const adding = this.addAudioTrackService.job(sessionId);
         const addingAngle = this.addVideoAngleService.job(sessionId);
         return {
-            ...media,
+            ...this.mediaDto(sessionId, media),
             ...(adding ? { adding } : {}),
             ...(addingAngle ? { addingAngle } : {}),
+        };
+    }
+
+    /** A read or a save of the video, as the client is answered: where its master is now, and, after a save, whether the CMS stored it. */
+    private mediaDto(
+        sessionId: string,
+        media: EncodedMedia & { published?: boolean }
+    ): EncodedMediaDto {
+        const { masterKey, ...rest } = media;
+        return {
+            ...rest,
+            hlsUrl: this.sessionService.get(sessionId)?.hlsUrl ?? '',
+            masterPlaylist: masterKey,
         };
     }
 
@@ -1062,9 +1251,10 @@ export class EncodeController {
         summary: "Change the existing video's audio track languages and names",
         description:
             'Only for an edit session. Rewrites LANGUAGE and NAME in every audio ' +
-            'group of the master and nothing else; the first edit keeps the ' +
-            'original at master.m3u8.orig. Refused with 409 once the master has ' +
-            'changed since `ifMatch` was read.',
+            'group and nothing else, as a new master revision. Refused with 409 once ' +
+            'the master has changed since `ifMatch` was read (ETAG_MISMATCH), when the ' +
+            'CMS has not stored the current version (CMS_NOT_ACKNOWLEDGED), or when ' +
+            'another machine saved first (CHANGED_ELSEWHERE).',
     })
     @ApiParam({ name: 'sessionId', description: 'Session ID' })
     @ApiResponse({ status: 200, type: EncodedMediaDto })
@@ -1079,16 +1269,19 @@ export class EncodeController {
         @Param('sessionId') sessionId: string,
         @Body() dto: AudioTracksWriteDto
     ): Promise<EncodedMediaDto> {
-        const { s3, keyHex, masterKey } = this.editedVideo(sessionId);
+        const { s3, keyHex } = this.editedVideo(sessionId);
         this.assertMasterIdle(sessionId);
-        return this.hlsEditService.saveAudioTracks(
-            s3,
-            masterKey,
-            dto.ifMatch,
-            dto.edits,
-            keyHex,
-            dto.remove ?? []
+        const saved = await this.videoRevisions.save(sessionId, (masterKey) =>
+            this.hlsEditService.saveAudioTracks(
+                s3,
+                masterKey,
+                dto.ifMatch,
+                dto.edits,
+                keyHex,
+                dto.remove ?? []
+            )
         );
+        return this.mediaDto(sessionId, saved);
     }
 
     @Post(':sessionId/media/audio-sources')
@@ -1142,7 +1335,12 @@ export class EncodeController {
         @Body() dto: AddAudioTrackDto
     ): Promise<AddAudioTrackJobDto> {
         this.assertEncoderAvailable();
+        // Checked now rather than when the job publishes minutes later; if the
+        // CMS has gone by then, the version is written and waits for it. First,
+        // because it can take seconds: a job started meanwhile is caught below.
+        await this.videoRevisions.assertCmsReady(sessionId);
         this.assertMasterIdle(sessionId);
+        this.assertNoThumbnailsJob(sessionId);
         return this.addAudioTrackService.start(sessionId, {
             ...dto,
             offsetSec: dto.offsetSec ?? 0,
@@ -1178,9 +1376,9 @@ export class EncodeController {
         summary: "Write one language of the existing video's subtitles",
         description:
             'Only for an edit session. Writes the WebVTT under a new name with its media ' +
-            'playlist, then points the master at it, adding the language when it is new. ' +
-            'The first edit keeps the original master at master.m3u8.orig. Refused with 409 ' +
-            'once the master has changed since `ifMatch` was read.',
+            'playlist, then a new master revision naming it, adding the language when it ' +
+            'is new. Refused with 409 once the master has changed since `ifMatch` was read, ' +
+            'or with CMS_NOT_ACKNOWLEDGED / CHANGED_ELSEWHERE.',
     })
     @ApiParam({ name: 'sessionId', description: 'Session ID' })
     @ApiParam({ name: 'language', description: 'LANGUAGE of the subtitles, e.g. fr' })
@@ -1192,15 +1390,18 @@ export class EncodeController {
         @Param('language') language: string,
         @Body() dto: SubtitlesWriteDto
     ): Promise<EncodedMediaDto> {
-        const { s3, keyHex, masterKey } = this.editedVideo(sessionId);
+        const { s3, keyHex } = this.editedVideo(sessionId);
         this.assertMasterIdle(sessionId);
-        return this.hlsEditService.saveSubtitles(
-            s3,
-            masterKey,
-            dto.ifMatch,
-            { language, name: dto.name, vtt: dto.vtt },
-            keyHex
+        const saved = await this.videoRevisions.save(sessionId, (masterKey) =>
+            this.hlsEditService.saveSubtitles(
+                s3,
+                masterKey,
+                dto.ifMatch,
+                { language, name: dto.name, vtt: dto.vtt },
+                keyHex
+            )
         );
+        return this.mediaDto(sessionId, saved);
     }
 
     @Delete(':sessionId/media/subtitles/:language')
@@ -1210,8 +1411,9 @@ export class EncodeController {
     @ApiOperation({
         summary: "Take one language of the existing video's subtitles out",
         description:
-            'Only for an edit session. Removes the rendition from the master, over the ' +
-            'version `ifMatch` names, then its files.',
+            'Only for an edit session. Removes the rendition in a new master revision, ' +
+            'written from the version `ifMatch` names. Its files stay: the revision before ' +
+            'still names them.',
     })
     @ApiParam({ name: 'sessionId', description: 'Session ID' })
     @ApiParam({ name: 'language', description: 'LANGUAGE of the subtitles, e.g. fr' })
@@ -1223,9 +1425,12 @@ export class EncodeController {
         @Query('ifMatch') ifMatch: string
     ): Promise<EncodedMediaDto> {
         if (!ifMatch) throw new BadRequestException('ifMatch is required');
-        const { s3, keyHex, masterKey } = this.editedVideo(sessionId);
+        const { s3, keyHex } = this.editedVideo(sessionId);
         this.assertMasterIdle(sessionId);
-        return this.hlsEditService.removeSubtitles(s3, masterKey, ifMatch, language, keyHex);
+        const saved = await this.videoRevisions.save(sessionId, (masterKey) =>
+            this.hlsEditService.removeSubtitles(s3, masterKey, ifMatch, language, keyHex)
+        );
+        return this.mediaDto(sessionId, saved);
     }
 
     @Put(':sessionId/media/video-angles')
@@ -1236,10 +1441,10 @@ export class EncodeController {
         summary: "Rename the existing video's camera angles, or remove some",
         description:
             'Only for an edit session. Rewrites NAME of the angles renamed and takes ' +
-            'the removed ones (group, variants, I-frame playlists) out of the master; ' +
-            'their files stay in storage. The first edit keeps the original at ' +
-            'master.m3u8.orig. Refused with 409 once the master has changed since ' +
-            '`ifMatch` was read.',
+            'the removed ones (group, variants, I-frame playlists, thumbnail strip) out, ' +
+            'as a new master revision; their files stay in storage. Refused with 409 once ' +
+            'the master has changed since `ifMatch` was read, or with ' +
+            'CMS_NOT_ACKNOWLEDGED / CHANGED_ELSEWHERE.',
     })
     @ApiParam({ name: 'sessionId', description: 'Session ID' })
     @ApiResponse({ status: 200, type: EncodedMediaDto })
@@ -1254,16 +1459,19 @@ export class EncodeController {
         @Param('sessionId') sessionId: string,
         @Body() dto: VideoAnglesWriteDto
     ): Promise<EncodedMediaDto> {
-        const { s3, keyHex, masterKey } = this.editedVideo(sessionId);
+        const { s3, keyHex } = this.editedVideo(sessionId);
         this.assertMasterIdle(sessionId);
-        return this.hlsEditService.saveVideoAngles(
-            s3,
-            masterKey,
-            dto.ifMatch,
-            dto.edits,
-            keyHex,
-            dto.remove ?? []
+        const saved = await this.videoRevisions.save(sessionId, (masterKey) =>
+            this.hlsEditService.saveVideoAngles(
+                s3,
+                masterKey,
+                dto.ifMatch,
+                dto.edits,
+                keyHex,
+                dto.remove ?? []
+            )
         );
+        return this.mediaDto(sessionId, saved);
     }
 
     @Post(':sessionId/media/video-sources')
@@ -1320,11 +1528,28 @@ export class EncodeController {
         @Body() dto: AddVideoAngleDto
     ): Promise<AddVideoAngleJobDto> {
         this.assertEncoderAvailable();
+        // The CMS check first: it can take seconds, and a job started
+        // meanwhile is caught by the checks after it.
+        await this.videoRevisions.assertCmsReady(sessionId);
         this.assertMasterIdle(sessionId);
+        this.assertNoThumbnailsJob(sessionId);
         return this.addVideoAngleService.start(sessionId, {
             ...dto,
             offsetSec: dto.offsetSec ?? 0,
         });
+    }
+
+    /**
+     * A track or an angle is not added while the thumbnails are being made
+     * again: the strip would be published first, as the revision the job was
+     * going to write, and the job would fail when it got there.
+     */
+    private assertNoThumbnailsJob(sessionId: string): void {
+        if (this.existingThumbnailsService.job(sessionId)?.state === 'running') {
+            throw new ConflictException(
+                "This video's thumbnails are being made again; try again once that is done"
+            );
+        }
     }
 
     /** One change to the master at a time: a track or an angle being added holds it. */
@@ -1379,6 +1604,25 @@ export class EncodeController {
      * playlists must not be handed a key here, or its sidecars would start
      * coming back encrypted halfway through its life.
      */
+    /**
+     * The peaks the encode published as `waveform.json` beside the master.
+     * 404 for a video encoded before the sidecar existed: there is nothing to
+     * draw, and the client stops asking.
+     */
+    private async publishedWaveform(
+        sessionId: string
+    ): Promise<{ peaks: number[]; numPeaks: number }> {
+        const { s3, folderPrefix } = this.sessionStorage(sessionId);
+        const sidecar = await this.hlsEditService.readWaveform(
+            s3,
+            folderPrefix
+        );
+        if (!Array.isArray(sidecar?.peaks) || sidecar.peaks.length === 0) {
+            throw new NotFoundException('This video has no published waveform');
+        }
+        return { peaks: sidecar.peaks, numPeaks: sidecar.peaks.length };
+    }
+
     private sessionStorage(sessionId: string): {
         s3: CreateSessionDto['s3'];
         folderPrefix: string;
@@ -1426,7 +1670,8 @@ export class EncodeController {
         summary: 'Get audio waveform peaks',
         description:
             'Returns computed waveform peak data for the uploaded source file. ' +
-            'The session must be in "uploaded" or later status. ' +
+            'The session must be in "uploaded" or later status. An edit session, ' +
+            'which has no source file, gets the waveform.json its video was published with. ' +
             'Peaks are normalized to 0–1 amplitude values sampled at regular intervals.',
     })
     @ApiParam({
@@ -1452,7 +1697,11 @@ export class EncodeController {
         status: 400,
         description: 'Session source file not yet uploaded.',
     })
-    @ApiResponse({ status: 404, description: 'Session not found.' })
+    @ApiResponse({
+        status: 404,
+        description:
+            'Session not found, or an edit session whose video has no published waveform.',
+    })
     async getWaveform(
         @Param('sessionId') sessionId: string,
         @Query('token') token: string
@@ -1465,6 +1714,12 @@ export class EncodeController {
         }
 
         const filePath = session.filePath;
+        // An edit session has no source file. The encode published the
+        // video's peaks next to its master, on the timeline the video plays,
+        // which is the timeline an edit session shows.
+        if (!filePath && session.edit) {
+            return this.publishedWaveform(sessionId);
+        }
         if (!filePath) {
             throw new BadRequestException('Source file not yet uploaded');
         }
@@ -1610,8 +1865,9 @@ export class EncodeController {
             'away and samples the source again, stopping a pass still running; ' +
             'progress arrives as for the first pass, as storyboardThumbCount. ' +
             "In an edit session: makes the existing video's storyboard again from " +
-            'the video itself and replaces it beside the video; GET this route ' +
-            'for how far that has got.',
+            'the video itself, under new names, named by a new master revision; GET ' +
+            'this route for how far that has got. Refused with CMS_NOT_ACKNOWLEDGED ' +
+            'while the CMS has not stored the current version.',
     })
     @ApiParam({ name: 'sessionId', description: 'Session ID' })
     @ApiResponse({ status: 202, description: 'Sampling started.' })
@@ -1635,6 +1891,14 @@ export class EncodeController {
         }
         // The source is gone by now: the frames come from the video itself.
         if (session.edit) {
+            // The new strip ends in a new version of the video, so the CMS has
+            // to be there to store it; checked now, before minutes of work.
+            await this.videoRevisions.assertCmsReady(sessionId);
+            // After the CMS check, which can take seconds. A track or an angle
+            // being added writes the revision after the one it read: a strip
+            // published meanwhile would take that number and fail the job at
+            // its very end.
+            this.assertMasterIdle(sessionId);
             this.existingThumbnailsService.start(
                 sessionId,
                 this.editedVideo(sessionId)

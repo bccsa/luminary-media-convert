@@ -112,6 +112,19 @@ export interface Session {
      * Such a session never takes a source or encodes.
      */
     edit?: { masterKey: string; encrypted: boolean };
+    /**
+     * The `hlsUrl` the CMS last confirmed it has stored. While it differs from
+     * `hlsUrl` the session is pending: the CMS document still names an older
+     * master, and no further edit may be saved until it catches up.
+     */
+    ackedHlsUrl?: string;
+    /**
+     * Chapter files saved during the encode, before a master existed to name
+     * them: language → path relative to the session's folder.
+     */
+    chapterFiles?: Record<string, string>;
+    /** The chapter files the encode wrote into its master, as {@link chapterFiles} stood then. */
+    chapterFilesInjected?: Record<string, string>;
     error?: string;
     /**
      * Something the encode had to do differently from what was asked, on a
@@ -238,6 +251,8 @@ export interface SessionInit {
     /** An edit session's master and thumbnails, relative to the video's folder, as a finished encode's are. */
     masterPlaylist?: string;
     thumbnailsVtt?: string;
+    /** See {@link Session.ackedHlsUrl}: an edit session opened on the URL the CMS holds starts acknowledged. */
+    ackedHlsUrl?: string;
 }
 
 @Injectable()
@@ -592,7 +607,16 @@ export class SessionService implements OnModuleInit {
     }
 
     private emitEvent(session: Session, extra?: Partial<SessionEvent>): void {
-        this.sessionEvents.emit({
+        this.sessionEvents.emit({ ...this.snapshotEvent(session), ...extra });
+    }
+
+    /**
+     * The session's current state as one event: what every event carries, and
+     * what a new subscriber is sent first, so a CMS that reconnects after a
+     * revision was announced catches up without waiting for the next one.
+     */
+    snapshotEvent(session: Session): SessionEvent {
+        return {
             sessionId: session.id,
             status: session.status,
             progress: session.progress || undefined,
@@ -607,8 +631,8 @@ export class SessionService implements OnModuleInit {
             storyboardThumbCount: session.storyboardThumbCount,
             storyboardComplete: session.storyboardComplete,
             hlsUrl: session.hlsUrl,
-            ...extra,
-        });
+            cmsPending: isCmsPending(session) || undefined,
+        };
     }
 
     create(config: CreateSessionDto, init: SessionInit = {}): Session {
@@ -910,6 +934,53 @@ export class SessionService implements OnModuleInit {
         }
     }
 
+    /**
+     * Move the session to a new revision of its video's master: its key, its
+     * public URL (the same folder, so only the file name changes) and the
+     * master's name in whichever form the session already holds it. Announced
+     * like any other change, which is how the CMS learns the new URL.
+     */
+    setMasterRevision(id: string, masterKey: string): void {
+        const session = this.sessions.get(id);
+        if (!session?.edit) return;
+        const name = posix.basename(masterKey);
+        session.edit = { ...session.edit, masterKey };
+        if (session.masterPlaylist) {
+            session.masterPlaylist = withFileName(session.masterPlaylist, name);
+        }
+        if (session.hlsUrl) session.hlsUrl = replaceUrlFileName(session.hlsUrl, name);
+        this.persist(session);
+        this.emitEvent(session);
+    }
+
+    /** The CMS confirmed it has stored `hlsUrl`. */
+    setAckedHlsUrl(id: string, hlsUrl: string): void {
+        const session = this.sessions.get(id);
+        if (session) {
+            session.ackedHlsUrl = hlsUrl;
+            this.persist(session);
+            this.emitEvent(session);
+        }
+    }
+
+    /** Record the chapter files saved during the encode (see {@link Session.chapterFiles}). */
+    setChapterFiles(id: string, chapterFiles: Record<string, string>): void {
+        const session = this.sessions.get(id);
+        if (session) {
+            session.chapterFiles = chapterFiles;
+            this.persist(session);
+        }
+    }
+
+    /** Record the chapter files the encode wrote into its master. */
+    setChapterFilesInjected(id: string, injected: Record<string, string>): void {
+        const session = this.sessions.get(id);
+        if (session) {
+            session.chapterFilesInjected = injected;
+            this.persist(session);
+        }
+    }
+
     /** Point the session at a storyboard made again beside its video. */
     setThumbnailsVtt(id: string, thumbnailsVtt: string): void {
         const session = this.sessions.get(id);
@@ -1119,6 +1190,32 @@ export class SessionService implements OnModuleInit {
 
         return removed;
     }
+}
+
+/**
+ * The CMS has not yet stored the session's current URL. Only a session with a
+ * CMS behind it (one holding a read token) can be pending.
+ */
+export function isCmsPending(session: Session): boolean {
+    return (
+        !!session.readToken &&
+        !!session.hlsUrl &&
+        session.ackedHlsUrl !== session.hlsUrl
+    );
+}
+
+/** `path` (a key or a bare name) with its file name replaced by `name`. */
+function withFileName(path: string, name: string): string {
+    const lastSlash = path.lastIndexOf('/');
+    return lastSlash >= 0 ? `${path.slice(0, lastSlash + 1)}${name}` : name;
+}
+
+/** `url` with the last segment of its path replaced by `name`; query and fragment kept. */
+export function replaceUrlFileName(url: string, name: string): string {
+    const end = url.search(/[?#]/);
+    const path = end >= 0 ? url.slice(0, end) : url;
+    const rest = end >= 0 ? url.slice(end) : '';
+    return withFileName(path, name) + rest;
 }
 
 /**

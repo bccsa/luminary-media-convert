@@ -80,6 +80,29 @@ export function outputAngles(config: EncodeConfigDto): OutputAngle[] {
     });
 }
 
+/**
+ * The `GROUP-ID` the master gives the angle source video track `trackIndex`
+ * belongs to — what the encode's thumbnail strip is labelled with when it was
+ * sampled from that track. The angle is that of a rendition made from the
+ * track, else the one the form recorded for it (a re-encoded angle has
+ * renditions from its best track only). Undefined for an encode without
+ * angles, or a track in none of them.
+ */
+export function angleGroupIdForTrack(
+    config: EncodeConfigDto,
+    trackIndex: number
+): string | undefined {
+    const angles = outputAngles(config);
+    if (angles.length === 0) return undefined;
+    const rendition = (config.videoRenditions ?? []).find(
+        (r) => (r.sourceTrackIndex ?? 0) === trackIndex
+    );
+    const angle = rendition
+        ? angleOf(rendition)
+        : config.videoTrackAngles?.find((t) => t.index === trackIndex)?.angle;
+    return angles.find((a) => a.id === angle)?.groupId;
+}
+
 /** A `GROUP-ID` from a name: letters, digits, `_` and `-` only. */
 export function sanitizeGroupId(value: string): string {
     return (

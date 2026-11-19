@@ -191,6 +191,58 @@ describe('SessionView', () => {
         expect(called).toBe(true);
     });
 
+    describe('a waveform the encoder does not have', () => {
+        /** The /waveform answer, and how many times it was asked. */
+        function waveformAnswers(status: number) {
+            const fetchMock = globalThis.fetch as unknown as ReturnType<
+                typeof vi.fn
+            >;
+            const fallback = fetchMock.getMockImplementation() as (
+                input: unknown
+            ) => unknown;
+            fetchMock.mockImplementation((input: unknown) =>
+                String(input).includes('/waveform')
+                    ? Promise.resolve({
+                          ok: false,
+                          status,
+                          json: async () => ({}),
+                      })
+                    : fallback(input)
+            );
+            return () =>
+                fetchMock.mock.calls.filter((c) =>
+                    String(c[0]).includes('/waveform')
+                ).length;
+        }
+
+        afterEach(() => {
+            vi.useRealTimers();
+        });
+
+        it('stops asking when the video was published without one', async () => {
+            vi.useFakeTimers({ toFake: ['setTimeout'] });
+            const asked = waveformAnswers(404);
+            await mountView();
+            const first = asked();
+
+            await vi.advanceTimersByTimeAsync(10_000);
+
+            expect(first).toBeGreaterThan(0);
+            expect(asked()).toBe(first);
+        });
+
+        it('asks again while it may still be on its way', async () => {
+            vi.useFakeTimers({ toFake: ['setTimeout'] });
+            const asked = waveformAnswers(503);
+            await mountView();
+            const first = asked();
+
+            await vi.advanceTimersByTimeAsync(10_000);
+
+            expect(asked()).toBeGreaterThan(first);
+        });
+    });
+
     it('keeps the encoder storyboard while the encode is running', async () => {
         // The encode's own storyboard reaches S3 only at completion. Gated on
         // the pre-encode state, the timeline dropped all its frames the moment

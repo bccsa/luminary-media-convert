@@ -92,7 +92,11 @@ async function checkFfmpegRelease() {
         `ffmpeg-${ffmpegVersion}.tar.xz`,
         `ffmpeg-${ffmpegVersion}.tar.xz.asc`,
     ]) {
-        const listed = index.includes(file);
+        // The whole name, not followed by more of one: the tarball's name is the
+        // start of its signature's, so a plain substring test would find a missing
+        // tarball "listed" as long as its .asc still is.
+        const escaped = file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const listed = new RegExp(`${escaped}(?![\\w.-])`).test(index);
         console.log(
             `  ${listed ? '✓' : '✗'} ${listed ? 'listed' : 'NOT listed'} in the release index  ${file}`
         );
