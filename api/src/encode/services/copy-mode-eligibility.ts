@@ -1,6 +1,7 @@
 import type { EncodeConfigDto } from '../dto/encode-config.dto.js';
 import type { ProbeResult } from './probe.service.js';
 import { displayDimensionsOf, isAnamorphic } from './aspect.js';
+import { angleOf } from './output-angles.js';
 
 /**
  * How far apart two streams may start before the encode has to pull them
@@ -273,7 +274,8 @@ export function copiedLadderRejection(
     const tracksByAngle = new Map<number, Set<number>>();
     for (const r of encodeConfig.videoRenditions ?? []) {
         if (!r.copyStream) continue;
-        const angle = r.angle ?? r.sourceTrackIndex ?? 0;
+        // The master's rule, so the gate and the playlist group renditions alike.
+        const angle = angleOf(r);
         if (!tracksByAngle.has(angle)) tracksByAngle.set(angle, new Set());
         tracksByAngle.get(angle)!.add(r.sourceTrackIndex ?? 0);
     }
