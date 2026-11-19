@@ -1,7 +1,26 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { ffprobeBin } from './ffbin.js';
+import { ffmpegBin, ffprobeBin } from './ffbin.js';
+import {
+    MIN_INFORMATIVE,
+    SAMPLE_BYTES,
+    SAMPLE_HEIGHT,
+    SAMPLE_WIDTH,
+    VERIFY_BATCH,
+    VERIFY_SAMPLE_COUNT,
+    comparePair,
+    groupPictures,
+    instantAligner,
+    keyframeGrids,
+    keyframesAligned,
+    provenDifferent,
+    recheckInstants,
+    sameAspect,
+    sampleInstants,
+    stillAlike,
+    type PairEvidence,
+} from './picture-groups.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -62,6 +81,41 @@ export interface VideoTrackInfo {
      * Negative or absent when the container does not say.
      */
     level?: number;
+    /**
+     * The camera angle this track is one quality of, when the source carries
+     * the same picture more than once. The id is the lowest track index in the
+     * angle — an identifier, not a ranking. Absent on a track that is its own
+     * angle, and on every track when {@link ProbeResult.anglesDetected} is not
+     * set. See `picture-groups.ts`.
+     */
+    pictureGroup?: number;
+    /**
+     * The fewest sampled instants at which this track was seen to show the
+     * same picture as another member of its `pictureGroup`. Absent without a
+     * group.
+     */
+    pictureMatches?: number;
+    /**
+     * The comparison behind this track's `pictureGroup` ran to the end. False
+     * when the time allowed cut it short: the tracks agreed everywhere they
+     * were compared, but at fewer instants than a grouping is normally trusted
+     * on. Absent without a group.
+     */
+    pictureVerified?: boolean;
+    /**
+     * Tracks this one may show the same picture as, but was kept apart from:
+     * they agreed at enough instants, and a disagreement was still waiting to
+     * be re-checked when the time allowed ran out. Absent when there are none.
+     */
+    pictureUndecided?: number[];
+    /**
+     * The keyframe grid this track is cut on: the lowest index among the video
+     * tracks that cut keyframes at the same instants, sampled through the whole
+     * file, and run as long as it does. Tracks with the same id can be copied as
+     * rungs of one ladder; a track alone on its grid carries its own index.
+     * Absent when the tracks' keyframes were not compared.
+     */
+    keyframeGrid?: number;
 }
 
 export interface AudioTrackInfo {
@@ -91,6 +145,14 @@ export interface ProbeResult {
     };
     videoTracks: VideoTrackInfo[];
     audioTracks: AudioTrackInfo[];
+    /**
+     * The video tracks were compared for which show the same picture, and the
+     * comparison finished. Without it a track with no `pictureGroup` may be a
+     * separate angle or may simply never have been looked at — a session from
+     * before detection existed, or one where it failed — and the form keeps
+     * its old treatment of every track as an angle.
+     */
+    anglesDetected?: boolean;
 }
 
 interface FfprobeStream {
@@ -112,10 +174,12 @@ interface FfprobeStream {
     sample_rate?: string;
     tags?: Record<string, string>;
     disposition?: { attached_pic?: number };
+    duration?: string;
 }
 
 interface FfprobeFormat {
     duration?: string;
+    start_time?: string;
     bit_rate?: string;
     format_name?: string;
 }
@@ -178,6 +242,17 @@ function trackName(tags?: Record<string, string>): string | undefined {
 }
 
 /**
+ * A frame rate exactly as the container states it (`30000/1001`, not 29.97),
+ * or undefined when it states none worth trusting. Exact, because a frame grid
+ * laid out from a rounded rate drifts a frame off within minutes.
+ */
+function exactFrameRate(raw?: string): number | undefined {
+    const [num, den = '1'] = (raw ?? '').split('/');
+    const fps = parseInt(num, 10) / parseInt(den, 10);
+    return Number.isFinite(fps) && fps >= 1 && fps <= 240 ? fps : undefined;
+}
+
+/**
  * A stream's start time in seconds, with `N/A` and an absent tag both reading
  * as the top of the timeline.
  *
@@ -231,6 +306,55 @@ function displayDimensions(
     return num > den
         ? { width: even((codedWidth * num) / den), height: even(codedHeight) }
         : { width: even(codedWidth), height: even((codedHeight * den) / num) };
+}
+
+/**
+ * Keyframes this far apart, in seconds, are one keyframe. Under a frame at any
+ * rate shipped, and the same figure the copy-mode gate aligns streams to.
+ */
+const KEYFRAME_TOLERANCE_SECONDS = 0.02;
+
+/**
+ * How much shorter one rung of a copied ladder may be than another, in
+ * seconds. Half a second, because containers disagree with themselves by a
+ * frame or two at the tail; past that, one rung stops while the others play.
+ */
+const LENGTH_TOLERANCE_SECONDS = 0.5;
+
+/**
+ * How long angle detection may take, all of it: the pictures and the keyframe
+ * grids, which run side by side. Past it, a first look not finished means the
+ * source is treated as never compared; a verifying round not finished leaves
+ * its groups marked unverified. Typical is a second or two per track.
+ */
+const ANGLE_DETECTION_BUDGET_MS = 45_000;
+
+/** The longest one sample frame may take, deadline allowing. */
+const SAMPLE_GRAB_TIMEOUT_MS = 20_000;
+
+/** The longest the keyframe read may take, deadline allowing. */
+const KEYFRAME_READ_TIMEOUT_MS = 60_000;
+
+/**
+ * How far ahead of a sample a track with no known, regular GOP is seeked, in
+ * seconds, and the most a known GOP is trusted for. See `detectAngles`.
+ */
+const SAMPLE_LEAD_UNKNOWN_GOP_SECONDS = 10;
+const SAMPLE_LEAD_MAX_SECONDS = 12;
+
+/** Run `fn` over `items`, at most `limit` at a time. */
+async function runLimited<T>(
+    items: readonly T[],
+    limit: number,
+    fn: (item: T) => Promise<void>
+): Promise<void> {
+    let next = 0;
+    const worker = async () => {
+        while (next < items.length) await fn(items[next++]);
+    };
+    await Promise.all(
+        Array.from({ length: Math.min(limit, items.length) }, worker)
+    );
 }
 
 @Injectable()
@@ -336,12 +460,629 @@ export class ProbeService {
             formatName: data.format.format_name ?? 'unknown',
         };
 
+        // Which tracks are one picture, which are separate angles. Only a file
+        // with a choice to make pays for it; a failure leaves the tracks as
+        // they always were, every one its own angle.
+        let anglesDetected = false;
+        if (videoTracks.length > 1 && format.duration > 0) {
+            try {
+                await this.detectAngles(
+                    filePath,
+                    data,
+                    videoTracks,
+                    format.duration
+                );
+                anglesDetected = true;
+            } catch (err) {
+                for (const track of videoTracks) {
+                    delete track.pictureGroup;
+                    delete track.pictureMatches;
+                    delete track.pictureVerified;
+                    delete track.pictureUndecided;
+                    delete track.keyframeGrid;
+                }
+                this.logger.warn(
+                    `Angle detection failed, treating every video track as its own angle: ${(err as Error).message}`
+                );
+            }
+        }
+
         this.logger.log(
             `Probed: ${videoTracks.length} video track(s), ${audioTracks.length} audio track(s), ` +
                 `duration=${format.duration.toFixed(1)}s`
         );
 
-        return { format, videoTracks, audioTracks };
+        return {
+            format,
+            videoTracks,
+            audioTracks,
+            ...(anglesDetected ? { anglesDetected } : {}),
+        };
+    }
+
+    /**
+     * How long a stream runs, in seconds, or undefined when the container does
+     * not say. MP4 states it on the stream; Matroska in a `DURATION` tag.
+     */
+    private streamLength(stream: FfprobeStream): number | undefined {
+        const stated = parseFloat(stream.duration ?? '');
+        if (Number.isFinite(stated) && stated > 0) return stated;
+        const tag = Object.entries(stream.tags ?? {}).find(
+            ([key]) => key.toUpperCase() === 'DURATION'
+        )?.[1];
+        const tagged = tag ? this.parseDurationTag(tag.trim()) : 0;
+        return tagged > 0 ? tagged : undefined;
+    }
+
+    /**
+     * Mark which video tracks show the same picture (`pictureGroup`, with
+     * `pictureMatches` and `pictureVerified`) and which cut their keyframes
+     * together (`keyframeGrid`).
+     *
+     * Throws when the first look could not be taken, or not in the time
+     * allowed, so the caller can tell "compared, all different" from "never
+     * compared".
+     */
+    private async detectAngles(
+        filePath: string,
+        data: FfprobeOutput,
+        videoTracks: VideoTrackInfo[],
+        duration: number
+    ): Promise<void> {
+        const started = Date.now();
+        // One budget for the whole of it, not only each frame: a long-GOP 4K
+        // source can take seconds per frame, the session is not usable until
+        // this returns, and "not compared" is an answer the form already has a
+        // behaviour for.
+        const deadline = started + ANGLE_DETECTION_BUDGET_MS;
+
+        // Packets, not pictures: the keyframe read does not wait on the
+        // frames, nor they on it. Its own failure is not the comparison's —
+        // without grids no angle of several tracks can be copied, and
+        // everything else still holds.
+        const grids = this.markKeyframeGrids(
+            filePath,
+            data,
+            videoTracks,
+            duration,
+            deadline
+        ).catch((err: Error) => {
+            for (const track of videoTracks) delete track.keyframeGrid;
+            this.logger.warn(
+                `Could not compare the video tracks' keyframes: ${err.message}`
+            );
+        });
+        try {
+            await this.markPictureGroups(
+                filePath,
+                data,
+                videoTracks,
+                duration,
+                started,
+                deadline
+            );
+        } finally {
+            // Not left running behind a failure: the caller clears what
+            // detection marked, and that has to come after the grids land.
+            await grids;
+        }
+    }
+
+    /**
+     * Mark which video tracks show the same picture: see `picture-groups.ts`
+     * for what the frames are taken to mean.
+     *
+     * A first look at {@link SAMPLE_COUNT} instants from every track; each
+     * disagreement looked at again either side; then, for the pairs still
+     * agreeing, {@link VERIFY_SAMPLE_COUNT} more instants, a batch at a time,
+     * until each such pair has disagreed or they run out.
+     */
+    private async markPictureGroups(
+        filePath: string,
+        data: FfprobeOutput,
+        videoTracks: VideoTrackInfo[],
+        duration: number,
+        started: number,
+        deadline: number
+    ): Promise<void> {
+        const formatStart = parseStartTime(data.format.start_time);
+        const rawVideo = data.streams.filter(
+            (s) => s.codec_type === 'video' && s.disposition?.attached_pic !== 1
+        );
+
+        // Inside the span every track covers: a proxy that stops early has
+        // nothing to show at the instant the master is sampled, and an empty
+        // sample says nothing about whether they are one picture.
+        const starts = videoTracks.map((t) => t.startTime ?? formatStart);
+        const ends = rawVideo.map((s, i) => {
+            const own = this.streamLength(s);
+            return own != null ? starts[i] + own : formatStart + duration;
+        });
+        // Whole milliseconds on the source timeline, which is what frames are
+        // filed under: an instant computed twice must find the same frame.
+        const spanStart = Math.round(Math.max(...starts) * 1000);
+        const spanEnd = Math.round(Math.min(...ends) * 1000);
+        const aligner = instantAligner(
+            rawVideo.map((s, i) => {
+                const fps =
+                    exactFrameRate(s.r_frame_rate) ??
+                    exactFrameRate(s.avg_frame_rate);
+                return fps ? { start: starts[i], period: 1 / fps } : undefined;
+            })
+        );
+        const aligned = (
+            instants: readonly number[],
+            taken: ReadonlySet<number> = new Set()
+        ) =>
+            [...new Set(instants.map((at) => aligner.align(at)))].filter(
+                (at) => !taken.has(at)
+            );
+        const firstLook = aligned(sampleInstants(spanStart, spanEnd));
+        if (firstLook.length === 0)
+            throw new Error('the video tracks share no stretch of time');
+
+        // Only the MP4 family seeks every stream to its own keyframe. Anywhere
+        // else the file is positioned by its first video stream, and a second
+        // one starts decoding at whatever keyframe of its own comes next — so a
+        // proxy with a longer GOP than its master gave a frame from seconds
+        // after the instant asked for, or none, and one picture read as two.
+        // Seeking a GOP early and discarding up to the instant makes sure the
+        // track has a keyframe behind it; the length of its GOP is the price.
+        const seeksPerStream = /\b(mov|mp4)\b/.test(
+            data.format.format_name ?? ''
+        );
+        const leadFor = (track: VideoTrackInfo): number => {
+            if (seeksPerStream) return 0;
+            return track.gopRegular === true && (track.gopSeconds ?? 0) > 0
+                ? Math.min(track.gopSeconds! + 0.5, SAMPLE_LEAD_MAX_SECONDS)
+                : SAMPLE_LEAD_UNKNOWN_GOP_SECONDS;
+        };
+
+        // Track index → instant (ms) → frame, null where the track had none.
+        // An instant absent was never asked, or the deadline cut it off.
+        const frames = new Map<number, Map<number, Uint8Array | null>>();
+        for (const track of videoTracks) frames.set(track.index, new Map());
+        let asked = 0;
+        let grabbed = 0;
+
+        /**
+         * Take every frame in `wanted` not yet taken, four at a time. False
+         * when the deadline stopped any of them.
+         */
+        const take = async (
+            wanted: readonly { track: number; at: number }[]
+        ): Promise<boolean> => {
+            const seen = new Set<string>();
+            const jobs = wanted.filter(({ track, at }) => {
+                const key = `${track}@${at}`;
+                if (seen.has(key) || frames.get(track)!.has(at)) return false;
+                seen.add(key);
+                return true;
+            });
+            let cut = false;
+            await runLimited(jobs, 4, async (job) => {
+                const left = deadline - Date.now();
+                if (left <= 0) {
+                    cut = true;
+                    return;
+                }
+                const timeout = Math.min(SAMPLE_GRAB_TIMEOUT_MS, left);
+                asked++;
+                const frame = await this.grabSampleFrame(
+                    filePath,
+                    job.track,
+                    aligner.seekFor(job.at) - formatStart,
+                    leadFor(videoTracks[job.track]),
+                    timeout
+                );
+                // Killed by the deadline is not "no frame there": left unasked,
+                // so it can never be read as evidence either way.
+                if (frame === undefined && timeout < SAMPLE_GRAB_TIMEOUT_MS) {
+                    cut = true;
+                    return;
+                }
+                frames.get(job.track)!.set(job.at, frame ?? null);
+                if (frame) grabbed++;
+            });
+            return !cut;
+        };
+        const everyTrackAt = (
+            instants: readonly number[],
+            tracks: readonly number[]
+        ) => tracks.flatMap((track) => instants.map((at) => ({ track, at })));
+
+        const allTracks = videoTracks.map((t) => t.index);
+        if (!(await take(everyTrackAt(firstLook, allTracks))))
+            throw new Error(
+                `comparing the tracks took longer than ${ANGLE_DETECTION_BUDGET_MS / 1000} s`
+            );
+        if (grabbed === 0) throw new Error('no sample frame could be decoded');
+
+        // Only pairs that could be one picture are compared at all.
+        const pairs: { a: number; b: number; evidence: PairEvidence }[] = [];
+        for (let i = 0; i < videoTracks.length; i++)
+            for (let j = i + 1; j < videoTracks.length; j++)
+                if (sameAspect(videoTracks[i], videoTracks[j]))
+                    pairs.push({
+                        a: videoTracks[i].index,
+                        b: videoTracks[j].index,
+                        evidence: {
+                            informative: 0,
+                            matched: 0,
+                            explained: 0,
+                            confirmed: 0,
+                            needed: [],
+                        },
+                    });
+        const primary = [...firstLook];
+        const neighbours = (at: number) =>
+            aligned(recheckInstants(at, spanStart, spanEnd), new Set([at]));
+        const judge = () => {
+            for (const pair of pairs)
+                pair.evidence = comparePair(
+                    frames.get(pair.a)!,
+                    frames.get(pair.b)!,
+                    primary,
+                    neighbours
+                );
+        };
+        // Judge, take what the disagreements want looked at again, and judge
+        // again, until nothing waits. Every pass takes at least one frame not
+        // taken before, so it ends. False when the deadline stopped it.
+        const settle = async (): Promise<boolean> => {
+            for (;;) {
+                judge();
+                const wanted = pairs
+                    .filter((p) => !provenDifferent(p.evidence))
+                    .flatMap((p) =>
+                        everyTrackAt(p.evidence.needed, [p.a, p.b])
+                    );
+                if (wanted.length === 0) return true;
+                if (!(await take(wanted))) {
+                    judge();
+                    return false;
+                }
+            }
+        };
+
+        // Pairs still agreeing are sampled further, a batch at a time, so a
+        // pair that disagrees early stops costing frames early. A pair with
+        // too few informative instants yet is not settled either way, and is
+        // sampled further too.
+        const verifying = aligned(
+            sampleInstants(spanStart, spanEnd, VERIFY_SAMPLE_COUNT, 0.25),
+            new Set(firstLook)
+        );
+        // A track that gave no frame at the first look is not asked again: no
+        // pair of its can ever agree, and sampling it 40 more times only spends
+        // the budget the pairs that can are verified with.
+        const silent = new Set(
+            allTracks.filter(
+                (track) => ![...frames.get(track)!.values()].some(Boolean)
+            )
+        );
+        let inTime = await settle();
+        let batchesWhole = true;
+        while (inTime && verifying.length > 0) {
+            const open = pairs.filter(
+                (p) =>
+                    !provenDifferent(p.evidence) &&
+                    !silent.has(p.a) &&
+                    !silent.has(p.b)
+            );
+            if (open.length === 0) break;
+            const batch = verifying.splice(0, VERIFY_BATCH);
+            const tracks = [...new Set(open.flatMap((p) => [p.a, p.b]))];
+            primary.push(...batch);
+            if (!(await take(everyTrackAt(batch, tracks)))) {
+                batchesWhole = false;
+                judge();
+                inTime = false;
+                break;
+            }
+            inTime = await settle();
+        }
+        // A pair is verified when it was compared at every instant there is
+        // and every disagreement it showed was re-checked. Short of that the
+        // agreement may be real but was not tested as hard as a grouping
+        // normally is, and the form says so.
+        const sampledAll = verifying.length === 0 && batchesWhole;
+        const verifiedPair = (e: PairEvidence) =>
+            sampledAll && e.needed.length === 0;
+        // Cut short, a pair that agreed everywhere it was compared is grouped,
+        // unverified, and the form flags it. One with a disagreement still
+        // waiting for its re-check is not: a disagreement nobody could excuse
+        // is what a programme feed and its camera look like, and grouping
+        // them would at worst drop a camera. It is kept apart, undecided, and
+        // the form says so — a ladder on a slow disk offered as two angles
+        // costs an encode, not a picture.
+        const alike = (e: PairEvidence) =>
+            stillAlike(e) ||
+            (!verifiedPair(e) &&
+                !provenDifferent(e) &&
+                e.needed.length === 0 &&
+                e.matched >= MIN_INFORMATIVE);
+        const undecided = (e: PairEvidence) =>
+            !verifiedPair(e) &&
+            !provenDifferent(e) &&
+            !alike(e) &&
+            e.matched >= MIN_INFORMATIVE;
+
+        const evidenceOf = (a: number, b: number): PairEvidence | undefined =>
+            pairs.find(
+                (p) => (p.a === a && p.b === b) || (p.a === b && p.b === a)
+            )?.evidence;
+        const groups = groupPictures(videoTracks, (a, b) => {
+            const evidence = evidenceOf(a, b);
+            return evidence != null && alike(evidence);
+        });
+        let unverified = false;
+        for (const [index, id] of groups) {
+            const mates = [...groups]
+                .filter(([other, group]) => group === id && other !== index)
+                .map(([other]) => evidenceOf(index, other)!);
+            const track = videoTracks[index];
+            track.pictureGroup = id;
+            track.pictureMatches = Math.min(...mates.map((e) => e.matched));
+            track.pictureVerified = mates.every(verifiedPair);
+            unverified ||= !track.pictureVerified;
+        }
+        // Undecided pairs the grouping did not join some other way, on both
+        // tracks, so the form can say which tracks it could not tell apart.
+        for (const p of pairs) {
+            if (!undecided(p.evidence)) continue;
+            const ga = groups.get(p.a);
+            if (ga != null && ga === groups.get(p.b)) continue;
+            for (const [self, other] of [
+                [p.a, p.b],
+                [p.b, p.a],
+            ]) {
+                const track = videoTracks[self];
+                track.pictureUndecided = [
+                    ...(track.pictureUndecided ?? []),
+                    other,
+                ];
+            }
+            unverified = true;
+        }
+
+        for (const p of pairs) {
+            const e = p.evidence;
+            this.logger.debug(
+                `#${p.a} vs #${p.b}: ` +
+                    (provenDifferent(e)
+                        ? 'two pictures'
+                        : undecided(e)
+                          ? 'undecided: out of time'
+                          : !alike(e)
+                            ? 'too little to compare'
+                            : verifiedPair(e)
+                              ? 'one picture'
+                              : 'one picture, unverified') +
+                    ` (agreed at ${e.matched} of ${e.informative} instant(s), ` +
+                    `${e.explained} disagreement(s) explained)`
+            );
+        }
+        const angles = new Set(
+            videoTracks.map((t) => t.pictureGroup ?? t.index)
+        ).size;
+        this.logger.log(
+            `Angle detection: ${videoTracks.length} video track(s) are ${angles} angle(s) ` +
+                `(${grabbed}/${asked} frames at ${primary.length} instants` +
+                `${unverified ? ', out of time before all were settled' : ''}, ` +
+                `${Date.now() - started} ms)`
+        );
+    }
+
+    /**
+     * One sample frame, shrunk to 32x18 greyscale; null when the track had no
+     * frame to give at `seek` (seconds from the top of the file); undefined
+     * when `timeout` ran out first.
+     *
+     * An accurate seek, deliberately: a keyframe-only read would compare one
+     * track's frame from two seconds ago with another's from now, and a
+     * disagreement is re-checked half a second either side, which only an
+     * exact instant can answer. `lead` seconds of that are decoded and
+     * discarded — see `markPictureGroups` for when a track needs it. Software
+     * decode, as the storyboard does: one frame does not repay a GPU's setup.
+     */
+    private async grabSampleFrame(
+        filePath: string,
+        videoTrackIndex: number,
+        seek: number,
+        lead = 0,
+        timeout = SAMPLE_GRAB_TIMEOUT_MS
+    ): Promise<Uint8Array | null | undefined> {
+        const at = Math.max(0, seek);
+        // A lead that reaches the top of the file decodes from the top, with
+        // no input seek at all. Seeking to 0 is not the same: in Matroska the
+        // file is still positioned by the first video stream, and a second one
+        // whose only earlier keyframe is the very first waits for its next —
+        // so every instant in a long-GOP proxy's first GOP read as the frame
+        // after it.
+        const from = Math.max(0, at - lead);
+        // Output timestamps count from the input seek, so the frame at `at` is
+        // the one `at - from` into the output.
+        const discard = at - from;
+        try {
+            const { stdout } = await execFileAsync(
+                ffmpegBin(),
+                [
+                    '-v',
+                    'error',
+                    '-nostdin',
+                    ...(from > 0 ? ['-ss', from.toFixed(3)] : []),
+                    '-i',
+                    filePath,
+                    '-map',
+                    `0:v:${videoTrackIndex}`,
+                    ...(discard > 0 ? ['-ss', discard.toFixed(3)] : []),
+                    '-frames:v',
+                    '1',
+                    '-vf',
+                    `scale=${SAMPLE_WIDTH}:${SAMPLE_HEIGHT}:flags=area,format=gray`,
+                    '-f',
+                    'rawvideo',
+                    'pipe:1',
+                ],
+                { timeout, encoding: 'buffer', maxBuffer: 1024 * 1024 }
+            );
+            const frame = new Uint8Array(stdout);
+            return frame.length === SAMPLE_BYTES ? frame : null;
+        } catch (err) {
+            return (err as { killed?: boolean }).killed ? undefined : null;
+        }
+    }
+
+    /**
+     * Give every video track the id of its keyframe grid: tracks sharing one
+     * cut keyframes at the same instants and run the same length.
+     *
+     * Asked of every pair of tracks, not only of those detected as one picture:
+     * the operator can move a track into another angle, and whether that angle
+     * can then be copied as a ladder is this same question.
+     *
+     * Keyframe flags come off packets, which ffprobe reads without decoding, in
+     * the same windows spread through the file that the bitrate sampler uses —
+     * a cadence that holds at the head and drifts by the middle is exactly the
+     * one a head-only check would miss.
+     *
+     * Throws past `deadline` (epoch ms), the angle detection's own.
+     */
+    private async markKeyframeGrids(
+        filePath: string,
+        data: FfprobeOutput,
+        videoTracks: VideoTrackInfo[],
+        duration: number,
+        deadline: number
+    ): Promise<void> {
+        const left = deadline - Date.now();
+        if (left <= 0) throw new Error('no time left to read them');
+        const windowSeconds = Math.min(20, duration);
+        // On the container's own timeline, where packet timestamps and
+        // ffprobe's read-interval starts both live: a recorder's MPEG-TS can
+        // start hours in, and windows counted from zero would be read from the
+        // file's head and match none of its keyframes. A lone window from the
+        // top is still read without a seek, which in MPEG-TS can land a
+        // stream past its first keyframe.
+        const formatStart = parseStartTime(data.format.start_time);
+        const fromZero = this.packetSampleStarts(duration, windowSeconds);
+        const windows = fromZero.map((start) => start + formatStart);
+        const intervals = this.readIntervalsArg(
+            fromZero.length === 1 && fromZero[0] === 0 ? fromZero : windows,
+            windowSeconds
+        );
+        const rawToVideo = new Map<number, number>();
+        let vi = 0;
+        for (const s of data.streams) {
+            if (s.codec_type !== 'video' || s.disposition?.attached_pic === 1)
+                continue;
+            rawToVideo.set(s.index, vi++);
+        }
+
+        const { stdout } = await execFileAsync(
+            ffprobeBin(),
+            [
+                '-v',
+                'quiet',
+                '-select_streams',
+                'v',
+                '-print_format',
+                'compact=p=0',
+                '-read_intervals',
+                intervals,
+                '-show_entries',
+                'packet=stream_index,pts_time,flags',
+                filePath,
+            ],
+            {
+                timeout: Math.min(KEYFRAME_READ_TIMEOUT_MS, left),
+                maxBuffer: 32 * 1024 * 1024,
+            }
+        );
+
+        // keyframes[videoIndex][window] = ascending keyframe times.
+        const keyframes = new Map<number, number[][]>();
+        for (const line of stdout.split('\n')) {
+            if (!line) continue;
+            const fields = new Map<string, string>();
+            for (const pair of line.split('|')) {
+                const eq = pair.indexOf('=');
+                if (eq > 0) fields.set(pair.slice(0, eq), pair.slice(eq + 1));
+            }
+            if (!(fields.get('flags') ?? '').includes('K')) continue;
+            const video = rawToVideo.get(
+                parseInt(fields.get('stream_index') ?? '', 10)
+            );
+            const pts = parseFloat(fields.get('pts_time') ?? '');
+            if (video == null || !Number.isFinite(pts)) continue;
+            if (!keyframes.has(video))
+                keyframes.set(
+                    video,
+                    windows.map(() => [])
+                );
+            // Only inside the window it was read for. ffprobe starts a read at
+            // the keyframe before the window, and in MP4 a keyframe earlier
+            // still for every stream but the first; filed into the window
+            // before, that run-in made two tracks cut alike count unequal.
+            const w = this.sampleIndexFor(pts, windows);
+            if (
+                pts < windows[w] - KEYFRAME_TOLERANCE_SECONDS ||
+                pts > windows[w] + windowSeconds + KEYFRAME_TOLERANCE_SECONDS
+            )
+                continue;
+            keyframes.get(video)![w].push(pts);
+        }
+        // Each keyframe once. On a source under about 80 s the windows overlap
+        // and ffprobe reads the overlap twice; where its seek lands one stream
+        // a keyframe earlier than another, that stream's repeat falls into the
+        // window before, and two tracks cut identically compared unequal.
+        for (const perWindow of keyframes.values())
+            for (let w = 0; w < perWindow.length; w++)
+                perWindow[w] = [...new Set(perWindow[w])].sort((x, y) => x - y);
+
+        // Compared window by window, so the gap between two windows is never
+        // read as a stretch with no keyframes in it. A window too short to hold
+        // two keyframes of either track says nothing and is skipped; a pair
+        // with no window that says anything is not aligned.
+        //
+        // And the same length: a rung that stops early leaves a player that
+        // stepped onto it with nothing to play, however well its keyframes
+        // line up while it lasts. A track whose length the container does not
+        // state is not refused for it — the keyframe windows still have to
+        // agree, and the last one sits near the end of the file.
+        const lengths = new Map<number, number>();
+        for (const s of data.streams) {
+            const video = rawToVideo.get(s.index);
+            const own = this.streamLength(s);
+            if (video != null && own != null) lengths.set(video, own);
+        }
+        const aligned = (a: number, b: number): boolean => {
+            const la = lengths.get(a);
+            const lb = lengths.get(b);
+            if (la != null && lb != null && Math.abs(la - lb) > LENGTH_TOLERANCE_SECONDS)
+                return false;
+            const ka = keyframes.get(a);
+            const kb = keyframes.get(b);
+            if (!ka || !kb) return false;
+            let conclusive = 0;
+            for (let w = 0; w < windows.length; w++) {
+                if (ka[w].length < 2 || kb[w].length < 2) continue;
+                conclusive++;
+                if (
+                    !keyframesAligned(ka[w], kb[w], KEYFRAME_TOLERANCE_SECONDS)
+                )
+                    return false;
+            }
+            return conclusive > 0;
+        };
+
+        const grids = keyframeGrids(
+            videoTracks.map((t) => t.index),
+            aligned
+        );
+        for (const track of videoTracks)
+            track.keyframeGrid = grids.get(track.index);
     }
 
     /**

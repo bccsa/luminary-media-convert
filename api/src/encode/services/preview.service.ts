@@ -18,6 +18,7 @@ import type { ProbeResult, AudioTrackInfo } from './probe.service.js';
 import { FfmpegService } from './ffmpeg.service.js';
 import { ffmpegBin, ffprobeBin } from './ffbin.js';
 import { displayDimensionsOf, isAnamorphic } from './aspect.js';
+import { defaultAngleTracks } from './picture-groups.js';
 
 const MAX_AUDIO_BITRATE_KBPS = 150;
 
@@ -516,7 +517,10 @@ export class PreviewService {
 
     /** Build ABR renditions from available video tracks, capped at MAX_PREVIEW_HEIGHT */
     private buildRenditions(probe: ProbeResult): Rendition[] {
-        const videos = probe.videoTracks;
+        // One camera's tracks: several tracks are only a quality ladder when
+        // they are one picture, and offering two cameras as two qualities made
+        // the preview change picture when it changed size.
+        const videos = defaultAngleTracks(probe);
         if (videos.length === 0) return [];
 
         const codec = videos[0].codec.toLowerCase();
@@ -528,9 +532,18 @@ export class PreviewService {
         const canCopyCodec =
             TS_COPY_CODECS.has(codec) && !videos.some((v) => isAnamorphic(v));
 
-        if (canCopyCodec && videos.length > 1) {
+        // A copied preview is cut on one track's keyframes and lasts as long as
+        // it does: only the tracks on the first track's keyframe grid (the same
+        // keyframes, the same length) can stand in for it.
+        const grid = videos[0].keyframeGrid;
+        const onGrid =
+            grid === undefined
+                ? videos
+                : videos.filter((v) => v.keyframeGrid === grid);
+
+        if (canCopyCodec && onGrid.length > 1) {
             // Multi-stream file with copy-compatible codec — use existing streams as renditions
-            const eligible = videos
+            const eligible = onGrid
                 .filter((v) => v.height <= MAX_PREVIEW_HEIGHT)
                 .sort((a, b) => b.height - a.height); // highest first
 
@@ -545,7 +558,7 @@ export class PreviewService {
             }
 
             // All streams > 480p — use the smallest one
-            const smallest = [...videos].sort((a, b) => a.height - b.height)[0];
+            const smallest = [...onGrid].sort((a, b) => a.height - b.height)[0];
             return [
                 {
                     videoIndex: smallest.index,

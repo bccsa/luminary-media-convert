@@ -87,6 +87,7 @@ import {
 } from './services/existing-thumbnails.service.js';
 import { hasAllowedExtension } from './services/media-extensions.js';
 import {
+    copiedLadderRejection,
     copyModeRejection,
     quickTrimGateRejection,
 } from './services/copy-mode-eligibility.js';
@@ -102,6 +103,7 @@ import {
     selectStoryboardTrack,
     ThumbnailService,
 } from './services/thumbnail.service.js';
+import { defaultAngleTracks } from './services/picture-groups.js';
 import {
     SessionResponseDto,
     EncodeStartResponseDto,
@@ -477,6 +479,16 @@ export class EncodeController {
                             'video tracks, not streams.'
                     );
                 }
+                // An angle id is a track index too — its lowest track's — so the
+                // same bound applies, and an id past it names no picture at all.
+                if (rendition.angle != null && rendition.angle >= videoCount) {
+                    throw new BadRequestException(
+                        `Video rendition names angle ${rendition.angle}, but ` +
+                            `the source has ${videoCount} video ` +
+                            `track${videoCount === 1 ? '' : 's'}; an angle is ` +
+                            'named by one of its track indices.'
+                    );
+                }
             }
         }
 
@@ -518,10 +530,13 @@ export class EncodeController {
         // The quick cut runs the relaxed gate: cadence rules, no alignment
         // rule — a quick cut never seeks streams to a shared offset, so
         // mutually offset start times are not a defect there.
+        // A copied ladder — several tracks under one angle — has to be cut on
+        // one keyframe grid either way, so that rule is common to both.
         const copyProblem =
-            trimmed && copyMode === 'quick'
+            (trimmed && copyMode === 'quick'
                 ? quickTrimGateRejection(session.probeResult, dto)
-                : copyModeRejection(session.probeResult, dto);
+                : copyModeRejection(session.probeResult, dto)) ??
+            copiedLadderRejection(session.probeResult, dto);
         if (copyProblem) {
             throw new BadRequestException(
                 trimmed && copyMode === 'quick'
@@ -1906,7 +1921,7 @@ export class EncodeController {
                 'The source file for this session is no longer on disk'
             );
         }
-        const video = selectStoryboardTrack(session.probeResult.videoTracks);
+        const video = selectStoryboardTrack(defaultAngleTracks(session.probeResult));
         const duration = session.probeResult.format?.duration ?? 0;
         if (!video || duration <= 0) {
             throw new BadRequestException('Source has no usable video track');
@@ -2009,7 +2024,7 @@ export class EncodeController {
         // The same helper the ingest prime uses — the two have to agree, or a
         // request landing after the prime asks for a storyboard of a different
         // track and the cached cue geometry no longer matches the images.
-        const video = selectStoryboardTrack(session.probeResult.videoTracks);
+        const video = selectStoryboardTrack(defaultAngleTracks(session.probeResult));
         const duration = session.probeResult.format?.duration ?? 0;
         if (!video || duration <= 0) {
             // Probed and found wanting: no video track, or no duration. This

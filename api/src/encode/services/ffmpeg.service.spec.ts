@@ -105,6 +105,14 @@ function createMockProcess(): ChildProcess & {
 describe('FfmpegService', () => {
     let service: FfmpegService;
 
+    /**
+     * The variant URI the muxer writes for rendition `i`: its stream
+     * directory, named as the encode names it. Variants are matched to
+     * renditions by that directory.
+     */
+    const variantUri = (renditions: unknown[], i: number) =>
+        `stream_${(service as any).videoStreamNames(renditions).get(renditions[i])}/playlist.m3u8`;
+
     // These assertions expect the binaries to be resolved off PATH — a bare
     // `ffmpeg`. `ffbin.ts` prefers FFMPEG_PATH / FFPROBE_PATH when they are set,
     // and `bootstrap.ts` sets both into `process.env` for the process it is
@@ -2115,19 +2123,7 @@ describe('FfmpegService', () => {
         });
 
         it('should add VIDEO groups and VIDEO attribute for multi-angle streams', async () => {
-            const masterContent = [
-                '#EXTM3U',
-                '#EXT-X-VERSION:6',
-                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_tier_0",NAME="eng",URI="stream_English/playlist.m3u8"',
-                '#EXT-X-STREAM-INF:BANDWIDTH=4177777,AVERAGE-BANDWIDTH=3822202,RESOLUTION=1280x720,CODECS="avc1.640028,mp4a.40.2",AUDIO="group_tier_0"',
-                'stream_main_1280x720/playlist.m3u8',
-                '',
-                '#EXT-X-STREAM-INF:BANDWIDTH=1868063,AVERAGE-BANDWIDTH=1724450,RESOLUTION=854x480,CODECS="avc1.4d401f,mp4a.40.2",AUDIO="group_tier_0"',
-                'stream_pulpit_854x480/playlist.m3u8',
-            ].join('\n');
-            writeFileSync(join(tmpDir, 'master.m3u8'), masterContent, 'utf-8');
-
-            await fixMasterPlaylist(tmpDir, {
+            const config: EncodeConfigDto = {
                 type: 'video',
                 videoRenditions: [
                     {
@@ -2164,7 +2160,23 @@ describe('FfmpegService', () => {
                         language: 'eng',
                     },
                 ],
-            });
+            };
+            // Each variant names its rendition's stream directory, as the muxer writes it.
+            const uri = (i: number) =>
+                `stream_${(service as any).videoStreamNames(config.videoRenditions).get(config.videoRenditions![i])}/playlist.m3u8`;
+            const masterContent = [
+                '#EXTM3U',
+                '#EXT-X-VERSION:6',
+                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_tier_0",NAME="eng",URI="stream_English/playlist.m3u8"',
+                '#EXT-X-STREAM-INF:BANDWIDTH=4177777,AVERAGE-BANDWIDTH=3822202,RESOLUTION=1280x720,CODECS="avc1.640028,mp4a.40.2",AUDIO="group_tier_0"',
+                uri(0),
+                '',
+                '#EXT-X-STREAM-INF:BANDWIDTH=1868063,AVERAGE-BANDWIDTH=1724450,RESOLUTION=854x480,CODECS="avc1.4d401f,mp4a.40.2",AUDIO="group_tier_0"',
+                uri(1),
+            ].join('\n');
+            writeFileSync(join(tmpDir, 'master.m3u8'), masterContent, 'utf-8');
+
+            await fixMasterPlaylist(tmpDir, config);
 
             const result = readFileSync(join(tmpDir, 'master.m3u8'), 'utf-8');
             expect(result).toContain(
@@ -3439,9 +3451,9 @@ describe('FfmpegService', () => {
                 '#EXTM3U',
                 '#EXT-X-VERSION:7',
                 '#EXT-X-STREAM-INF:BANDWIDTH=5000000',
-                'stream_0/playlist.m3u8',
+                variantUri(config.videoRenditions, 0),
                 '#EXT-X-STREAM-INF:BANDWIDTH=5000000',
-                'stream_1/playlist.m3u8',
+                variantUri(config.videoRenditions, 1),
             ].join('\n');
 
             const result = (service as any).fixMasterPlaylistVideoGroups(
@@ -3491,9 +3503,9 @@ describe('FfmpegService', () => {
             const content = [
                 '#EXTM3U',
                 '#EXT-X-STREAM-INF:BANDWIDTH=5000000',
-                'stream_0/playlist.m3u8',
+                variantUri(config.videoRenditions, 0),
                 '#EXT-X-STREAM-INF:BANDWIDTH=5000000',
-                'stream_1/playlist.m3u8',
+                variantUri(config.videoRenditions, 1),
             ].join('\n');
 
             const result = (service as any).fixMasterPlaylistVideoGroups(
@@ -3533,9 +3545,9 @@ describe('FfmpegService', () => {
             const content = [
                 '#EXTM3U',
                 '#EXT-X-STREAM-INF:BANDWIDTH=5000000,AUDIO="hd"',
-                'stream_0/playlist.m3u8',
+                variantUri(config.videoRenditions, 0),
                 '#EXT-X-STREAM-INF:BANDWIDTH=5000000,AUDIO="hd"',
-                'stream_1/playlist.m3u8',
+                variantUri(config.videoRenditions, 1),
             ].join('\n');
 
             const result = (service as any).fixMasterPlaylistVideoGroups(
@@ -4914,7 +4926,9 @@ describe('FfmpegService', () => {
     });
 
     describe('fixMasterPlaylistVideoGroups edge cases', () => {
-        it('should skip duplicate groupIds when multiple renditions map to the same angle', () => {
+        it('keeps two angles with the same name apart, each variant under its own', () => {
+            // Two cameras both called "Main": one group would play either
+            // camera's rungs as one angle's qualities.
             const config = {
                 type: 'video' as const,
                 videoRenditions: [
@@ -4945,32 +4959,39 @@ describe('FfmpegService', () => {
                 ],
                 videoTrackNames: [
                     { index: 0, name: 'Main' },
-                    { index: 1, name: 'Main' }, // Duplicate name → same groupId
+                    { index: 1, name: 'Main' },
                 ],
             };
+            const uri = (i: number) => variantUri(config.videoRenditions, i);
 
             const content = [
                 '#EXTM3U',
                 '#EXT-X-VERSION:7',
                 '#EXT-X-STREAM-INF:BANDWIDTH=5000000,AUDIO="hd"',
-                'stream_0/playlist.m3u8',
+                uri(0),
                 '#EXT-X-STREAM-INF:BANDWIDTH=3000000,AUDIO="hd"',
-                'stream_1/playlist.m3u8',
+                uri(1),
                 '#EXT-X-STREAM-INF:BANDWIDTH=5000000,AUDIO="hd"',
-                'stream_2/playlist.m3u8',
+                uri(2),
             ].join('\n');
 
-            const result = (service as any).fixMasterPlaylistVideoGroups(
-                content,
-                config
-            );
+            const lines: string[] = (service as any)
+                .fixMasterPlaylistVideoGroups(content, config)
+                .split('\n');
 
-            // Should only have one EXT-X-MEDIA:TYPE=VIDEO entry (duplicate groupId skipped)
-            const videoMediaLines = result
-                .split('\n')
-                .filter((l: string) => l.startsWith('#EXT-X-MEDIA:TYPE=VIDEO'));
-            expect(videoMediaLines).toHaveLength(1);
-            expect(videoMediaLines[0]).toContain('GROUP-ID="Main"');
+            expect(
+                lines.filter((l) => l.startsWith('#EXT-X-MEDIA:TYPE=VIDEO'))
+            ).toEqual([
+                '#EXT-X-MEDIA:TYPE=VIDEO,GROUP-ID="Main",NAME="Main",DEFAULT=YES',
+                '#EXT-X-MEDIA:TYPE=VIDEO,GROUP-ID="Main_2",NAME="Main",DEFAULT=NO',
+            ]);
+            const angleOf = (i: number) =>
+                /VIDEO="([^"]+)"/.exec(lines[lines.indexOf(uri(i)) - 1])?.[1];
+            expect([angleOf(0), angleOf(1), angleOf(2)]).toEqual([
+                'Main',
+                'Main',
+                'Main_2',
+            ]);
         });
     });
 });
