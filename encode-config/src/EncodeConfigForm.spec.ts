@@ -2128,6 +2128,64 @@ describe('EncodeConfigForm restoring a failed encode', () => {
         expect(angleOf(1)).not.toBe(angleOf(0));
     });
 
+    it('encodes no audio tier a copied ladder does not play with', async () => {
+        // A 1080p / 720p / 360p source: copied, its rungs all take one tier.
+        const ladder = (
+            index: number,
+            width: number,
+            height: number,
+            kbps: number
+        ) =>
+            videoTrack({
+                index,
+                width,
+                height,
+                bitrateKbps: kbps,
+                pictureGroup: 0,
+                pictureVerified: true,
+                keyframeGrid: 0,
+            });
+        const probe = {
+            format: { duration: 30, bitrateKbps: 9000, formatName: 'mov,mp4' },
+            videoTracks: [
+                ladder(0, 1920, 1080, 8000),
+                ladder(1, 1280, 720, 6000),
+                ladder(2, 640, 360, 1600),
+            ],
+            audioTracks: [
+                {
+                    index: 0,
+                    codec: 'aac',
+                    bitrateKbps: 128,
+                    channels: 2,
+                    sampleRate: 48000,
+                    startTime: 0,
+                },
+            ],
+            anglesDetected: true,
+        } as ProbeResult;
+        const wrapper = mount(EncodeConfigForm, {
+            props: { probeResult: probe, byteRange: true },
+        });
+        const unplayed = () => {
+            const config = (
+                wrapper.vm as any
+            ).buildEncodeConfig() as EncodeConfig;
+            const used = new Set(
+                config.videoRenditions!.map((r) => r.audioGroupId)
+            );
+            return config.audioGroups!.filter((g) => !used.has(g.id));
+        };
+
+        expect(unplayed()).toEqual([]);
+        await wrapper
+            .find('[data-test="ladder-mode-reencode"]')
+            .trigger('click');
+        expect(unplayed()).toEqual([]);
+        await wrapper.find('[data-test="ladder-mode-copy"]').trigger('click');
+        expect(unplayed()).toEqual([]);
+    });
+
     it('keeps the ladder it ran with, and the angle it left out stays out', () => {
         const rendition: VideoRendition = {
             width: 1280,

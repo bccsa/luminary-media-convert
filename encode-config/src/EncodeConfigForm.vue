@@ -903,6 +903,15 @@ function reanalyzeVideo(mode?: SuggestMode) {
     }
     ladderMode.value = suggest === 'legacy' ? null : suggest;
 
+    // A tier suggested for the full ladder that no rendition plays with — a
+    // copied ladder has fewer rungs — would be encoded and uploaded for nothing.
+    if (videoRenditions.length > 0) {
+        const used = new Set(videoRenditions.map((r) => r.audioGroupId));
+        for (let i = audioGroups.length - 1; i >= 0; i--) {
+            if (!used.has(audioGroups[i].id)) audioGroups.splice(i, 1);
+        }
+    }
+
     // Snapshot after whichever branch ran: the dial rescales from what was
     // suggested, and all three `reanalyze()` triggers — setup, the saved-labels
     // re-run, the Re-analyze button — come through here, so the dial resets
