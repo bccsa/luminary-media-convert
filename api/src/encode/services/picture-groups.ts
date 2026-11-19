@@ -84,6 +84,27 @@ export const RECHECK_OFFSET_MS = 500;
 export const MATCH_CORRELATION = 0.95;
 
 /**
+ * How closely two frames' edges must correlate as well. Light and dark in the
+ * same places is not enough on its own: a second camera framed a few percent
+ * tighter keeps the same broad areas and only moves the edges, and on real
+ * footage a 5% zoom still correlated at 0.96 by pixels. By edges it measured
+ * 0.77 to 0.94, while the rungs of one picture, down to 240p at 200 kbps or at
+ * another frame rate, held 0.99 and up.
+ *
+ * Edges also move with the picture, so a fast test pattern sampled a few
+ * milliseconds apart in two tracks at different frame rates can fall below it
+ * and be split. That is the cheaper of the two mistakes (see
+ * {@link MATCH_CORRELATION}), and the operator can put the tracks together.
+ */
+export const EDGE_MATCH_CORRELATION = 0.97;
+
+/**
+ * Edge maps whose standard deviation is below this have no edges to compare: a
+ * smooth gradient, say. Their pixels decide alone.
+ */
+export const FLAT_EDGES = 1;
+
+/**
  * Standard deviation, in grey levels, below which a frame is flat: black, a
  * fade, a title card's background. Every source agrees on what black looks
  * like, so a flat pair proves nothing and is not counted either way.
@@ -166,7 +187,7 @@ export function comparePair(
         const sb = frameStats(fb);
         if (sa.stdDev < FLAT_THRESHOLD && sb.stdDev < FLAT_THRESHOLD) continue;
         evidence.informative++;
-        if (frameCorrelation(fa, sa, fb, sb) >= MATCH_CORRELATION) {
+        if (samePicture(fa, sa, fb, sb)) {
             evidence.matched++;
             continue;
         }
@@ -362,7 +383,50 @@ export function framesAgree(a: Uint8Array, b: Uint8Array): boolean {
     const sa = frameStats(a);
     const sb = frameStats(b);
     if (sa.stdDev < FLAT_THRESHOLD && sb.stdDev < FLAT_THRESHOLD) return true;
-    return frameCorrelation(a, sa, b, sb) >= MATCH_CORRELATION;
+    return samePicture(a, sa, b, sb);
+}
+
+/**
+ * Two frames with contrast show one picture: they correlate at
+ * {@link MATCH_CORRELATION} by pixels and, where they have edges, at
+ * {@link EDGE_MATCH_CORRELATION} by edges.
+ */
+export function samePicture(
+    a: Uint8Array,
+    statsA: FrameStats,
+    b: Uint8Array,
+    statsB: FrameStats
+): boolean {
+    if (frameCorrelation(a, statsA, b, statsB) < MATCH_CORRELATION)
+        return false;
+    const ea = edgeMap(a);
+    const eb = edgeMap(b);
+    const esa = frameStats(ea);
+    const esb = frameStats(eb);
+    if (esa.stdDev < FLAT_EDGES || esb.stdDev < FLAT_EDGES) return true;
+    return frameCorrelation(ea, esa, eb, esb) >= EDGE_MATCH_CORRELATION;
+}
+
+/**
+ * How sharply each pixel of a sampled frame differs from its right and lower
+ * neighbours. A frame that is not {@link SAMPLE_WIDTH} wide has no rows to
+ * read, and gives an empty map.
+ */
+export function edgeMap(frame: Uint8Array): Uint8Array {
+    const width = SAMPLE_WIDTH;
+    const height = Math.floor(frame.length / width);
+    if (height < 2 || frame.length !== width * height) return new Uint8Array();
+    const edges = new Uint8Array(frame.length);
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const i = y * width + x;
+            const dx = x + 1 < width ? Math.abs(frame[i + 1] - frame[i]) : 0;
+            const dy =
+                y + 1 < height ? Math.abs(frame[i + width] - frame[i]) : 0;
+            edges[i] = Math.min(255, dx + dy);
+        }
+    }
+    return edges;
 }
 
 export interface FrameStats {

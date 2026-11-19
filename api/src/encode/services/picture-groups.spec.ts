@@ -1,9 +1,11 @@
 import {
+    MATCH_CORRELATION,
     MIN_INFORMATIVE,
     SAMPLE_BYTES,
     VERIFY_SAMPLE_COUNT,
     comparePair,
     defaultAngleTracks,
+    edgeMap,
     frameCorrelation,
     frameStats,
     framesAgree,
@@ -14,6 +16,7 @@ import {
     provenDifferent,
     recheckInstants,
     sameAspect,
+    samePicture,
     sampleInstants,
     stillAlike,
     type TrackFrames,
@@ -484,5 +487,50 @@ describe('defaultAngleTracks', () => {
         expect(
             defaultAngleTracks({ videoTracks: tracks }).map((t) => t.index)
         ).toEqual([0, 1, 2]);
+    });
+});
+
+/**
+ * 32×18 grey samples of one moment of a real camera clip, as the probe takes
+ * them: the 720p rung, the 240p rung encoded at 200 kbps, and the same shot
+ * framed 5% tighter, as a second camera beside the first would be.
+ */
+const realFrame = (b64: string) => new Uint8Array(Buffer.from(b64, 'base64'));
+const RUNG_720 = realFrame(
+    'Mz9OTk54jo6Slq/i4uLi4h0dHR0dT2lpamyCs7Ozs7NMaIaMjneSgHGWr+Li4uLiHR0dHR1PaWltaYKzs7Ozs0x0z6THsq7GcJav4OLi4uIdHR0dHU9paW5pgrOzs7OzTGF1cmN8c3Rwlq/h4uLi4h0dHR0dT2lpbWmCs7Ozs7NMTk9PT3iNjZGWr+Li4uLiHR0dHR1PaWlsaYKzs7Ozs0xMTExMfZaWlpav4uLi4uIdHR0dHU9paWtqgrOzs7OzTExMTEx9lpaWlq/i4uLi4h0dHR0dT2lpaWqDs7Ozs7NMTExMTH2WlpaWr+Li4uLiHR0dHR1PaWlpaYKzs7Ozs0xMTExMfZaWlpav4uLi4uIdHR0dHU9paWlpgrKzs6OeTExMTEx9lpaWlq/i4uLi4h0dHR0dT2lpaWl5kJKWqrNMTExMTH2WlpaWr+Li4uLiHR0dHR1PaWpkXHGys7Ozs0xMTExMfZaWlpahp6enp6YWFRUYMWx9dXR0iLGzs7OzTExMTEx9lpaWlmFEgUKDMQxIFW0lRHh4eHiLsLOzs7NMTExMTH2WkpKWYJODrIJtMq49aoBDeHl4eIuws7Ozs0xMTExMfZaWl6FqiKKYo10cdDGQckR4eHh4i7Czs7OzTExMTEx1jJOal20zTjJPOBEYCCsORHFxcXGGsrOzs7NMTVBOTXqWlpaWr9/f39/fHR0dHR1QaWlpaYKzs7Ozs1NQTExMfZaWlpav4uLi4uIdHR0dHVBpaWlpgrOzs7Oz'
+);
+const RUNG_240 = realFrame(
+    'Mz9PT093jo6Slq/i4uLi4CAdHR0dT2lpam2Ds7Ozs7NMaYaMjXiSgHGWr+Li4uLgHx0dHR1PaWltaYOzs7Ozs0x1zqXIsqzGcJav4eLi4uAfHR0dHU9paW5pg7Ozs7OzTGJ0cWN8cXRwlq/g4uLi4B8dHR0dT2lpbWmDs7Ozs7NMTk5PT3iMjJGXr+Li4uLgHx0dHR1PaWltaYOzs7Ozs0xMTExMfpaWlpav4uLi4uAfHR0dHU9paWtqg7Ozs7OzTExMTEx+lpaWlq/i4uLi4B8dHR0dT2lpaWuEs7Ozs7NMTExMTH6WlpaWr+Li4uLgHx0dHR1PaWlpaYOzs7Ozs0xMTExMfpaWlpav4uLi4uAfHR0dHU9paWlpg7Ozs6OdTExMTEx+lpaWlq/i4uLi4B8dHR0dT2lpaWl6kJOWq7NMTExMTH6WlpaWr+Li4uLgHx0dHR1PaWpkXXKxs7Ozs0xMTExMfpaWlpahp6ampqUXFRUYMGx9d3R0iLKzs7OzTExMTEx+lpaWlmJEgUGDMAxIFm0lRXl4d3eMsbOzs7NMTExMTH6WkpOWYJKErIlsM689boJEenl3eIuxs7Ozs0xMTExMfpaWl6FpiKOZpVwddDGSckN4eXh4i7Gzs7OzTExMTEx1i5KamGw0TzJQOBIZCSwNRHFwcXGHsrOzs7NMTU9OTXqYl5aXrtzd3d3cHRwcHBxQaWlpaYK0s7Ozs1NRTExMfZeWlpev4uLi4uEeHR0dHlBpaWlpgrSzs7Oz'
+);
+const ZOOMED_5 = realFrame(
+    'SFRUVF14eHiPlsXi4uLi4h0dHR0dOmlpaW5porOzs7NXvb2Jk6KzlISWxeLi4uLiHR0dHR06aWlpbWmis7Ozs1jCw6iwp7SghJbF3+Li4uIdHR0dHTppaWxqaaKzs7OzVlpaWlxkZGWIlsXi4uLi4h0dHR0dOmlpbWlporOzs7NMTExMXZaWlpaWxeLi4uLiHR0dHR06aWlsaWmis7Ozs0xMTExdlpaWlpbF4uLi4uIdHR0dHTppaWpsaaKzs7OzTExMTF2WlpaWlsXi4uLi4h0dHR0dOmlpamlsorOzs7NMTExMXZaWlpaWxeLi4uLiHR0dHR06aWlqaWmis7Ozs0xMTExdlpaWlpbF4uLi4uIdHR0dHTppaWppaaKys7GfTExMTF2WlpaWlsXi4uLi4h0dHR0dOmlpaWlpko6SmK5MTExMXZaWlpaWxeLi4uLiHR0dHR06aWlnX1iPs7Ozs0xMTExdlpaWlpa4w8PDw8MZGRkZKl19eHJycqOys7OzTExMTF2WlpaWlkdBUjpZMAciGTckKXh4eHl4o7Gzs7NMTExMXZaWjpaWQqCpmpxdNbEzmJAkeHh4eXmjsbOzs0xMTExdlpaVlppGoZukglEIYDaIkCV5eHh4eKOxs7OzTExMTF2WkZeeoURhfFKKSyk0G2NFJHZ3d3Z2pLGzs7NMTE1OWYiUlpaWn5qampqaFBQUFBQ1aWlpaWmis7Ozs1JRTkxdlpaWlpbF4uLi4uIdHR0dHTtpaWlpaaKzs7Oz'
+);
+
+describe('samePicture', () => {
+    const same = (a: Uint8Array, b: Uint8Array) =>
+        samePicture(a, frameStats(a), b, frameStats(b));
+
+    it('takes a low rung of the picture for the same picture', () => {
+        expect(same(RUNG_720, RUNG_240)).toBe(true);
+    });
+
+    it('tells apart a camera framed 5% tighter, which matches by pixels alone', () => {
+        expect(
+            frameCorrelation(
+                RUNG_720,
+                frameStats(RUNG_720),
+                ZOOMED_5,
+                frameStats(ZOOMED_5)
+            )
+        ).toBeGreaterThanOrEqual(MATCH_CORRELATION);
+        expect(same(RUNG_720, ZOOMED_5)).toBe(false);
+        expect(framesAgree(RUNG_720, ZOOMED_5)).toBe(false);
+    });
+
+    it('lets pixels decide alone where a frame has no edges', () => {
+        // A smooth ramp: every pixel one level brighter than the last.
+        const ramp = new Uint8Array(SAMPLE_BYTES).map((_, i) => (i % 32) * 4);
+        expect(edgeMap(ramp).length).toBe(SAMPLE_BYTES);
+        expect(same(ramp, ramp)).toBe(true);
     });
 });
