@@ -3086,7 +3086,7 @@ describe('FfmpegService', () => {
             expect(fixAudioOnlyMasterPlaylistSpy).not.toHaveBeenCalled();
         });
 
-        it('should create output subdirectories for video type', async () => {
+        it('creates the stream directories the encode writes, and no others', async () => {
             const mockProc = createMockProcess();
             mockSpawn.mockReturnValue(mockProc);
 
@@ -3097,9 +3097,17 @@ describe('FfmpegService', () => {
             mockProc.emitClose(0);
             await promise;
 
-            // 1 video rendition + 1 audio group = 2 stream dirs
-            expect(existsSync(join(opts.outputDir, 'stream_0'))).toBe(true);
-            expect(existsSync(join(opts.outputDir, 'stream_1'))).toBe(true);
+            // 1 video rendition + 1 audio group = 2 stream dirs, each with a
+            // chunk chain: an unnamed stream_0 would be found by the segment
+            // pipeline with neither.
+            const dirs = Object.keys(
+                service.buildStreamChainMap(opts.encodeConfig)
+            );
+            expect(dirs).toHaveLength(2);
+            for (const dir of dirs) {
+                expect(existsSync(join(opts.outputDir, dir))).toBe(true);
+            }
+            expect(existsSync(join(opts.outputDir, 'stream_0'))).toBe(false);
         });
 
         it('should clear activeProcess after completion', async () => {
