@@ -12,6 +12,7 @@ import { createSegmentId } from './types';
 import { formatDuration, formatTime, parseTime } from './time';
 import { exportChaptersVtt, exportSubtitlesVtt, parseVtt } from './vtt';
 import { stepBetweenFields } from '../../utils/fieldWalk';
+import { waveformGain } from './waveform';
 import {
     findThumbnailCue,
     parseThumbnailVtt,
@@ -1884,9 +1885,10 @@ function drawWaveform(): void {
 
     const peaks = props.waveformPeaks;
     // Every bar stands on the bottom edge of the track and grows upward, so the
-    // waveform reads as one shape sitting under the thumbnails. Amplitude scaling
-    // and colour are unchanged from how the waveform has always drawn.
-    const maxBarHeight = height * WAVEFORM_MAX_HEIGHT_RATIO;
+    // waveform reads as one shape sitting under the thumbnails. Scaled so the
+    // loudest peak reaches the top: a quiet recording keeps its shape readable.
+    const maxBarHeight =
+        height * WAVEFORM_MAX_HEIGHT_RATIO * waveformGain(peaks);
 
     ctx.fillStyle = resolveWaveformColor();
 
@@ -1911,7 +1913,7 @@ function drawWaveform(): void {
         const peak2 = peaks[Math.min(idx1 + 1, lastPeak)] || 0;
         const peak = peak1 * (1 - t) + peak2 * t;
 
-        const barHeight = Math.max(1, peak * maxBarHeight);
+        const barHeight = Math.max(1, Math.min(height, peak * maxBarHeight));
         ctx.rect(x, height - barHeight, 1, barHeight);
     }
     ctx.fill();
