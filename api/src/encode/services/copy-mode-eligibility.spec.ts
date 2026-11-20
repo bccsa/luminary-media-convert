@@ -416,3 +416,30 @@ describe('non-square pixels', () => {
         expect(quickTrimGateRejection(probe, makeConfig())).toBeNull();
     });
 });
+
+/**
+ * A phone stores a portrait video landscape and says to turn it. Only a decode
+ * turns it, and a copy never decodes, so the ladder planned upright would not
+ * match what is copied.
+ */
+describe('a turned picture', () => {
+    const portrait = {
+        width: 1920,
+        height: 1080,
+        displayWidth: 1080,
+        displayHeight: 1920,
+        rotation: 90,
+    };
+
+    it('refuses a copy', () => {
+        expect(
+            copyModeRejection(makeProbeResult(portrait), makeConfig())
+        ).toMatch(/Video track 0 is stored turned \(shown at 90°\)/);
+    });
+
+    it('refuses the quick cut too', () => {
+        expect(
+            quickTrimGateRejection(makeProbeResult(portrait), makeConfig())
+        ).toMatch(/stored turned/);
+    });
+});

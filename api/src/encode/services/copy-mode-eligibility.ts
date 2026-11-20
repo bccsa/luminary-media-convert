@@ -1,6 +1,6 @@
 import type { EncodeConfigDto } from '../dto/encode-config.dto.js';
 import type { ProbeResult } from './probe.service.js';
-import { displayDimensionsOf, isAnamorphic } from './aspect.js';
+import { displayDimensionsOf, isAnamorphic, isRotated } from './aspect.js';
 import { angleOf } from './output-angles.js';
 
 /**
@@ -205,6 +205,15 @@ function copyModeTrackRejection(
             `(${track.width}x${track.height} shown ${display.width}x${display.height}); ` +
             `copy mode hands the source's own bytes to the muxer, which cannot ` +
             `square them — re-encode this rendition instead.`
+        );
+    }
+
+    // A turned picture is turned only by a decode, and a copy never decodes.
+    if (track && isRotated(track)) {
+        return (
+            `Video track ${index} is stored turned (shown at ${track.rotation}°); ` +
+            `copy mode keeps the picture as stored, so the ladder planned upright ` +
+            `would not match it — re-encode this rendition instead.`
         );
     }
 

@@ -37,7 +37,7 @@ const baseState = {
     duration: 60,
 };
 
-async function mountStrip(state: Partial<typeof baseState>) {
+async function mountStrip(state: Partial<typeof baseState>, extra: { portrait?: boolean } = {}) {
     player.state = ref({ ...baseState, ...state });
     const wrapper = mount(SessionPlayerStrip, {
         props: {
@@ -47,6 +47,7 @@ async function mountStrip(state: Partial<typeof baseState>) {
             showAudioSelect: false,
             previewAudioSelectOptions: [],
             selectedAudioTrack: 0,
+            ...extra,
         },
     });
     await flushPromises();
@@ -80,5 +81,18 @@ describe('SessionPlayerStrip subtitles', () => {
         expect(player.controller.setSubtitleTrack).toHaveBeenLastCalledWith('m:subs:Français:fr');
         select(wrapper).vm.$emit('update:modelValue', '');
         expect(player.controller.setSubtitleTrack).toHaveBeenLastCalledWith(null);
+    });
+});
+
+describe('SessionPlayerStrip picture fit', () => {
+    const fitOf = (wrapper: Awaited<ReturnType<typeof mountStrip>>) =>
+        wrapper.findComponent({ name: 'LuminaryPlayer' }).attributes('windowed-fit');
+
+    it('fills the frame with a landscape picture', async () => {
+        expect(fitOf(await mountStrip({}))).toBe('cover');
+    });
+
+    it('letterboxes a portrait picture rather than cropping most of it away', async () => {
+        expect(fitOf(await mountStrip({}, { portrait: true }))).toBe('contain');
     });
 });

@@ -1356,6 +1356,94 @@ describe('ProbeService', () => {
             });
         });
 
+        it.each([
+            ['90', 90, 270],
+            ['-90', -90, 90],
+            ['270', 270, 90],
+        ])(
+            'turns a phone video whose display matrix says %s',
+            async (_label, matrix, clockwise) => {
+                mockExecFileResult(
+                    makeFfprobeOutput({
+                        streams: [
+                            {
+                                index: 0,
+                                codec_type: 'video',
+                                codec_name: 'hevc',
+                                width: 1920,
+                                height: 1080,
+                                avg_frame_rate: '30/1',
+                                side_data_list: [
+                                    {
+                                        side_data_type: 'Display Matrix',
+                                        rotation: matrix,
+                                    },
+                                ],
+                            },
+                        ],
+                    })
+                );
+                const track = (await service.probe('/tmp/phone.mov'))
+                    .videoTracks[0];
+                // Stored landscape, shown portrait: the ladder plans the turn.
+                expect(track).toMatchObject({
+                    width: 1920,
+                    height: 1080,
+                    displayWidth: 1080,
+                    displayHeight: 1920,
+                    rotation: clockwise,
+                });
+            }
+        );
+
+        it('keeps the size of a picture turned upside down', async () => {
+            mockExecFileResult(
+                makeFfprobeOutput({
+                    streams: [
+                        {
+                            index: 0,
+                            codec_type: 'video',
+                            codec_name: 'h264',
+                            width: 1920,
+                            height: 1080,
+                            avg_frame_rate: '30/1',
+                            side_data_list: [
+                                {
+                                    side_data_type: 'Display Matrix',
+                                    rotation: 180,
+                                },
+                            ],
+                        },
+                    ],
+                })
+            );
+            const track = (await service.probe('/tmp/flip.mov')).videoTracks[0];
+            expect(track).toMatchObject({
+                displayWidth: 1920,
+                displayHeight: 1080,
+                rotation: 180,
+            });
+        });
+
+        it('leaves rotation out when the picture is shown as stored', async () => {
+            mockExecFileResult(
+                makeFfprobeOutput({
+                    streams: [
+                        {
+                            index: 0,
+                            codec_type: 'video',
+                            codec_name: 'h264',
+                            width: 1920,
+                            height: 1080,
+                            avg_frame_rate: '30/1',
+                        },
+                    ],
+                })
+            );
+            const track = (await service.probe('/tmp/test.mp4')).videoTracks[0];
+            expect(track).not.toHaveProperty('rotation');
+        });
+
         it('survives a video stream that reports no dimensions at all', async () => {
             // Nothing to correct and nothing to divide by. The track still has
             // to come back — `selectStoryboardTrack` and the ladder both filter

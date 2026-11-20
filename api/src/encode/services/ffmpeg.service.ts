@@ -91,6 +91,12 @@ export interface EncodeOptions {
     };
     /** Told when a wave of a ladder run in waves has finished. */
     onWaveDone?: (index: number) => Promise<void> | void;
+    /**
+     * Decode on the CPU and still encode on the hardware. For a source shown
+     * turned: FFmpeg turns the picture in the decode, and a hardware decode
+     * that keeps its frames on the device skips the turn.
+     */
+    softwareDecode?: boolean;
 }
 
 /**
@@ -900,7 +906,13 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
 
         const hasReencode = renditions.some((r) => !r.copyStream);
 
-        args.push(...decodeArgs(this.accelMode, 'ladder', hasReencode));
+        args.push(
+            ...decodeArgs(
+                this.accelMode,
+                'ladder',
+                hasReencode && !opts.softwareDecode
+            )
+        );
 
         if (trimming) {
             const concatPath = await this.buildConcatFile(
@@ -1046,7 +1058,9 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                     // overwrite an earlier one.
                     filterParts.push(
                         `[reencode${e.globalIndex}]${scalerExpr(
-                            this.accelMode,
+                            // Frames decoded on the CPU need its scaler: the
+                            // hardware ones take only frames on the device.
+                            opts.softwareDecode ? 'cpu' : this.accelMode,
                             e.rendition.width,
                             e.rendition.height
                         )},setsar=1[vout${e.globalIndex}]`

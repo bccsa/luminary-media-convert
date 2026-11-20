@@ -27,6 +27,11 @@ const props = defineProps<{
      */
     showAudioSelect: boolean;
     previewAudioSelectOptions: { value: number; label: string }[];
+    /**
+     * The picture is taller than wide. The frame is 16:9, so filling it would
+     * crop most of a portrait picture away: it is letterboxed instead.
+     */
+    portrait?: boolean;
 }>();
 
 const selectedAudioTrack = defineModel<number>('selectedAudioTrack', {
@@ -391,7 +396,7 @@ defineExpose({
                         ref="luminaryPlayerRef"
                         :source="source"
                         :controls="playerControls"
-                        windowed-fit="cover"
+                        :windowed-fit="portrait ? 'contain' : 'cover'"
                     />
                 </div>
                 <!--

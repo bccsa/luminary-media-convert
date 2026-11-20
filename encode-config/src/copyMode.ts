@@ -1,4 +1,4 @@
-import { displayDimensionsOf, isAnamorphic } from './aspect';
+import { displayDimensionsOf, isAnamorphic, isRotated } from './aspect';
 import type { ProbeResult, VideoTrackInfo } from './types';
 
 /**
@@ -64,7 +64,9 @@ export function copyModeBlockedReason(
     segmentDuration: number
 ): string | null {
     const bytes =
-        forbiddenCodecBlockedReason(track) ?? anamorphicBlockedReason(track);
+        forbiddenCodecBlockedReason(track) ??
+        anamorphicBlockedReason(track) ??
+        rotatedBlockedReason(track);
     if (bytes) return bytes;
 
     if (latestStart > 0 && track.startTime != null) {
@@ -98,6 +100,7 @@ export function quickTrimBlockedReason(
     return (
         forbiddenCodecBlockedReason(track) ??
         anamorphicBlockedReason(track) ??
+        rotatedBlockedReason(track) ??
         cadenceBlockedReason(track, segmentDuration)
     );
 }
@@ -123,6 +126,20 @@ function anamorphicBlockedReason(track: VideoTrackInfo): string | null {
         `This track stores non-square pixels (${track.width}x${track.height} shown ` +
         `${display.width}x${display.height}); copy mode hands the source's own bytes ` +
         `to the muxer, which cannot square them — re-encode this rendition instead.`
+    );
+}
+
+/**
+ * Why a turned track cannot be copied: its picture is turned only by a decode,
+ * and a copy never decodes. Mirrors the rotation rule in the API's
+ * `copyModeTrackRejection`, which follows the shape rule there too.
+ */
+function rotatedBlockedReason(track: VideoTrackInfo): string | null {
+    if (!isRotated(track)) return null;
+    return (
+        `This track is stored turned (shown at ${track.rotation}°); copy mode keeps ` +
+        `the picture as stored, so the ladder planned upright would not match it — ` +
+        `re-encode this rendition instead.`
     );
 }
 

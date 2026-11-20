@@ -1,4 +1,4 @@
-import { displayDimensionsOf, isAnamorphic } from './aspect.js';
+import { displayDimensionsOf, isAnamorphic, isRotated } from './aspect.js';
 
 /**
  * The two questions everything downstream asks about a track's shape. Both
@@ -88,5 +88,36 @@ describe('isAnamorphic', () => {
     it('is false for a track with no dimensions to compare', () => {
         expect(isAnamorphic({ width: 0, height: 0 })).toBe(false);
         expect(isAnamorphic(undefined)).toBe(false);
+    });
+});
+
+describe('a turned track', () => {
+    // An iPhone portrait video: stored 1920x1080, shown turned a quarter.
+    const portrait = {
+        width: 1920,
+        height: 1080,
+        displayWidth: 1080,
+        displayHeight: 1920,
+        rotation: 90,
+    };
+
+    it('is not anamorphic for being turned', () => {
+        expect(isAnamorphic(portrait)).toBe(false);
+    });
+
+    it('is still anamorphic when its samples are not square', () => {
+        expect(
+            isAnamorphic({
+                ...portrait,
+                displayWidth: 1080,
+                displayHeight: 2560,
+            })
+        ).toBe(true);
+    });
+
+    it('is rotated at any turn, and not without one', () => {
+        expect(isRotated(portrait)).toBe(true);
+        expect(isRotated({ ...portrait, rotation: 180 })).toBe(true);
+        expect(isRotated({ width: 1920, height: 1080 })).toBe(false);
     });
 });
