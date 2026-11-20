@@ -274,11 +274,45 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         this.cancelDeferredSeek();
         this.retireAudioTracks();
         this.engineGeneration++;
+        const reloading = this.nextLoadStart();
         this.setElementSource(src.url);
+        // The element batches a source change and reloads a microtask later, so until its
+        // `loadstart` it still holds the media about to be discarded: a seek set now landed there
+        // and was lost, and a play was aborted by the reload, leaving the picture paused at 0 with
+        // the controller still reporting playback. Past it the element has nothing loaded, the seek
+        // waits for the new metadata, and the play for the new media.
+        await reloading;
+        // A new source handed over meanwhile is the one to play; this restore belongs to the last.
+        if (this.destroyed || this.lastSource !== src) return;
 
         if (seekTo > 0) this.seek(seekTo);
         // A refused resume is swallowed: the picture is back either way, and the viewer can press play.
-        if (wasPlaying) await this.el.play().catch(() => undefined);
+        // But the reload paused the element without a `pause` event, so a refusal is announced as
+        // one: otherwise the controller keeps reporting playback and its toggle pauses a paused
+        // picture. An interruption by a newer load is not a refusal, and that load decides.
+        if (wasPlaying) {
+            await this.el.play().catch((error: unknown) => {
+                const refused = (error as { name?: string } | null)?.name === 'NotAllowedError';
+                if (refused && this.el.paused) this.emit('pause', undefined);
+            });
+        }
+    }
+
+    /**
+     * Resolves at the element's next `loadstart`: the moment a reload it was asked for begins. The
+     * element announces one a microtask after a source change, ahead of any timer, so the fallback
+     * timer only lets an element that never announces a reload go unwaited for rather than hang.
+     */
+    private nextLoadStart(): Promise<void> {
+        return new Promise((resolve) => {
+            const done = (): void => {
+                clearTimeout(fallback);
+                this.el.removeEventListener('loadstart', done);
+                resolve();
+            };
+            const fallback = setTimeout(done, 0);
+            this.el.addEventListener('loadstart', done);
+        });
     }
 
     /**
