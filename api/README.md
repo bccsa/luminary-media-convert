@@ -407,7 +407,7 @@ S3 credentials arrive per session and must survive a restart without ever sittin
 
 Keys are generated locally (`randomBytes(16)`) and never leave the machine, so there is nothing to serve them over HTTP. With no explicit `keyUrl`, `#EXT-X-KEY` carries the sentinel `luminary://key` (`LUMINARY_KEY_PLACEHOLDER_URI`, exported from `@luminary-media-converter/hls-core`). A player is expected to recognise it and answer it with the key it holds — fetched masked from `GET /api/sessions/:id/key` — without the key leaving memory. `player-web/src/adapter/hlsLoaders.ts` is the reference implementation: its hls.js loader answers `luminary://key` itself, with no blob URL.
 
-Multi-angle output is a single spec-correct master: each angle is an `#EXT-X-MEDIA:TYPE=VIDEO` group and every `#EXT-X-STREAM-INF` carries `VIDEO="<group>"`. Players that want to pin one angle, or drop video entirely, narrow the playlist client-side with `listVideoAngles` / `extractAnglePlaylist` / `extractAudioOnlyPlaylist` from the same package.
+Multi-angle output is a single spec-correct master: each angle is an `#EXT-X-MEDIA:TYPE=VIDEO` group and every `#EXT-X-STREAM-INF` carries `VIDEO="<group>"`. Players that want to pin one angle, or drop video entirely, narrow the playlist client-side with `listVideoAngles` / `extractAnglePlaylist` / `extractAudioOnlyPlaylist` from the same package. An angle's group can also carry `LANGUAGE` (the audio language its picture belongs to) and `CHARACTERISTICS` (a hearing-impaired kind of view, from `ANGLE_ACCESSIBILITY`), set per angle through `videoTrackNames` at encode time or on a published video; a player follows the audio language to the matching angle of the same kind.
 
 ---
 

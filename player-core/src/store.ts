@@ -22,6 +22,7 @@ export function createInitialState(): PlayerState {
 
         angles: [],
         activeAngleId: null,
+        videoAngleId: null,
 
         qualities: [],
         activeQualityId: 'auto',

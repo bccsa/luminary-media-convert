@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AUDIO_ONLY_ANGLE_ID } from '@luminary-media-converter/player-core';
+import { AUDIO_ONLY_ANGLE_ID, findPreferredTrack } from '@luminary-media-converter/player-core';
 /**
  * Dev-only harness for the player (Video.js).
  *
@@ -17,7 +17,7 @@ import { AUDIO_ONLY_ANGLE_ID } from '@luminary-media-converter/player-core';
  *
  * Not shipped anywhere: served only by `npm -w player-web run demo`.
  */
-import { computed, onMounted, reactive, ref, shallowRef, watchEffect } from 'vue';
+import { computed, onMounted, reactive, ref, shallowRef, watch, watchEffect } from 'vue';
 import type { PlayerSource } from '@luminary-media-converter/player-core';
 import { isYouTubeUrl } from '../src/youtube';
 import LuminaryPlayer from '../src/components/LuminaryPlayer.vue';
@@ -161,6 +161,9 @@ function load() {
     source.value = {
         masterUrl: url,
         ...(afs ? { startAngleId: AUDIO_ONLY_ANGLE_ID } : {}),
+        // Read here, on Load, like every other field: the source is a snapshot,
+        // so typing in the field reloads nothing until the next Load.
+        ...(preferredLanguage.value ? { preferredAudioLanguages: [preferredLanguage.value] } : {}),
         ...(keyHex ? { keyHex } : {}),
         ...(form.thumbs || form.chapters
             ? {
@@ -186,6 +189,19 @@ watchEffect(() => {
     qualityModel.value = state.value?.activeQualityId ?? 'auto';
     audioModel.value = state.value?.activeAudioTrackId ?? '';
 });
+
+// As a host does: the preference only predicts the start angle, and the host
+// selects the audio itself — whenever the track list changes, which is once for
+// the master's list and once more when the engine lists its own. A repeat of the
+// language the picture already follows must leave the angle alone, so this is
+// also what shows a hand-picked angle holding.
+watch(
+    () => state.value?.audioTracks,
+    (tracks) => {
+        const id = findPreferredTrack(tracks ?? [], preferredLanguage.value);
+        if (id) player.value?.controller?.setAudioTrack(id);
+    },
+);
 
 function onAngle() {
     void player.value?.controller?.setAngle(angleModel.value);
@@ -333,6 +349,10 @@ const fmt = (n: number | undefined) => (n ?? 0).toFixed(1);
                 <div>
                     <dt>audio only</dt>
                     <dd>{{ state.isAudioOnly }}</dd>
+                </div>
+                <div>
+                    <dt>video angle</dt>
+                    <dd>{{ state.videoAngleId ?? '—' }}</dd>
                 </div>
                 <div v-if="state.error">
                     <dt>error</dt>

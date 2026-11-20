@@ -158,9 +158,34 @@ export interface PlayerSource {
      * `AUDIO_ONLY_ANGLE_ID` the load fetches no video at all, which is what a
      * host offering "start as audio" needs: starting on video and switching
      * away would already have downloaded some. An id the master does not have
-     * falls back to the default.
+     * falls back to the default — or, when the master tags its angles with a
+     * language, to the plain angle for the audio the load starts with (see
+     * {@link preferredAudioLanguages}).
      */
     startAngleId?: string;
+    /**
+     * The languages the host will choose the audio by, most preferred first
+     * (two- or three-letter codes, as `matchesPreferredLanguage` reads them).
+     *
+     * Used ONLY to choose the picture a load starts on — the host still
+     * selects the audio track, through `setAudioTrack`, as it does today. The
+     * controller cannot select it: the ids a host selects by are the engine's,
+     * and the engine has not listed its tracks when the start angle has to be
+     * chosen. What it can do is predict the language the host is about to
+     * choose — the first entry the master has audio for — and start on the
+     * angle tagged with it, so a viewer who prefers French starts on the
+     * French titles rather than seeing the picture switch just after start.
+     *
+     * Read once per load, at load time: a host passes a snapshot, not a
+     * reactive value, or every audio pick would reload the stream. Ignored on
+     * a reload of the same `masterUrl` once the earlier load has read its
+     * master: the reload keeps the language the picture was following. A
+     * reload of one that never got that far (still waiting for its master,
+     * or failed before reading it) uses it, as a new video does. Absent or
+     * matched by nothing: the language of the stream's default audio
+     * (`DEFAULT=YES`, else the first audio track).
+     */
+    preferredAudioLanguages?: readonly string[];
     /** Carry the previous source's position into this load. */
     preservePosition?: boolean;
     sidecars?: {
@@ -222,6 +247,26 @@ export interface Angle {
     id: string;
     name: string;
     isDefault: boolean;
+    /**
+     * The group's `LANGUAGE`: the audio language this picture belongs to
+     * (burnt-in titles, lip sync). When the viewer chooses audio in another
+     * language, the controller follows it to the angle tagged with that
+     * language, of the same kind as the one playing (see `setAudioTrack`).
+     * Omitted when the master states none; never set on the synthesized
+     * Default and Audio-only angles.
+     */
+    lang?: string;
+    /**
+     * The group's `CHARACTERISTICS`, split into identifiers: the kind of view
+     * this is for a hearing-impaired viewer — captions
+     * (`public.accessibility.transcribes-spoken-dialog`), sign language
+     * (`org.bccsa.luminary.sign-language`) or lip reading
+     * (`org.bccsa.luminary.lip-reading`); see `ANGLE_ACCESSIBILITY` in
+     * `hls-core`. Following the audio only ever moves to an angle with the
+     * same set, so a viewer on their kind of view stays on it. Omitted when the
+     * master states none, never `[]`; never set on the synthesized angles.
+     */
+    characteristics?: string[];
 }
 
 /**
@@ -338,6 +383,18 @@ export interface PlayerState {
 
     angles: Angle[];
     activeAngleId: string | null;
+    /**
+     * The camera angle that is playing, or the one the picture returns to from
+     * Audio only: what a host's "Video" toggle selects. It follows the audio
+     * language as the playing angle does — choosing French audio while Audio
+     * only plays moves it to the French titles, with no video fetched — so a
+     * host keeps no return-to-video bookkeeping of its own. Moves when an
+     * angle switch is asked for, not when it lands: while one is under way it
+     * names the angle on its way in, ahead of {@link activeAngleId}, and a
+     * switch that fails puts it back to the camera angle still loaded. Null
+     * when the master has no video.
+     */
+    videoAngleId: string | null;
 
     /** Post-cap rendition set. */
     qualities: Quality[];
@@ -391,9 +448,19 @@ export interface PlayerState {
 export interface PlayerEventMap {
     /** Fired when coming-soon polling finds the master. */
     'master-available': void;
+    /**
+     * An angle switch reached the engine and the state describes it. Fired
+     * once the attach carrying it lands, never for one superseded on the way:
+     * of a burst of switches, only the last angle is announced, and a re-munge
+     * or quality cap that supersedes a switch announces it when it lands.
+     */
     'angle-changed': { angleId: string };
     error: PlayerError;
-    /** A recovery attempt (in-place or reload) restored playback. */
+    /**
+     * A recovery re-munge (`reload-requested`) restored playback: fired only
+     * when the re-munge's own attach landed. One superseded by another attach
+     * — an angle switch, a quality cap, a further re-munge — reports nothing.
+     */
     recovered: { attempt: number };
     destroyed: void;
 }
@@ -832,7 +899,23 @@ export interface PlayerControllerApi {
      */
     setSleepTimer(option: SleepTimerOption | null): void;
 
-    /** Re-munges and reloads, preserving position and play state. */
+    /**
+     * Re-munges and reloads, preserving position and play state as they stand
+     * when the engine is handed the new source: a seek or a pause made while
+     * its playlists were fetched is kept.
+     *
+     * A switch asked for while another attach is in flight supersedes it: the
+     * one replaced never plays or announces, and the new one starts from the
+     * position and play state that one was carrying — or, while the engine
+     * still plays the angle that one was switching away from, from the
+     * engine's own, so a seek or a pause made while a switch fetched is kept.
+     * So a burst of switches lands on, and announces, the last angle alone.
+     * Asking for the angle on its way in does nothing; asking for the one last
+     * landed while another is on its way attaches it again, over the one in
+     * flight. Resolves once the engine holds the angle that stays. A switch
+     * that fails is a fatal error, and puts {@link PlayerState.videoAngleId}
+     * back to the camera angle still loaded.
+     */
     setAngle(id: string): Promise<void>;
     /**
      * Chooses a rendition within the capped set; `'auto'` re-enables ABR.
@@ -857,6 +940,22 @@ export interface PlayerControllerApi {
      * An angle switch, the audio toggle and a recovery re-attach each rebuild
      * the engine's track list with the stream's default in it; the choice is
      * handed back every time.
+     *
+     * The picture follows the audio language. When the track's language
+     * differs from the one the picture last followed, the controller moves to
+     * the angle tagged with the new language ({@link Angle.lang}) and of the
+     * same kind ({@link Angle.characteristics}) as the one playing — the
+     * playing angle itself when it qualifies, else the default among those
+     * that do, else the first. With none, the angle stays and only the audio
+     * changes. The switch is one re-attach: the track is not selected on the
+     * outgoing engine, which is about to be replaced, but handed to the new
+     * one once it lists its tracks. (Should the outgoing engine rebuild its
+     * list while the new angle is fetched, it is handed the choice early; the
+     * new one is still handed it.) Choosing the same language
+     * again does nothing to the angle, which is what lets a hand-picked angle
+     * hold until the language next changes; while Audio only plays, only
+     * {@link PlayerState.videoAngleId} moves. A master whose angles carry no
+     * language behaves as it always has.
      */
     setAudioTrack(id: string): void;
     /** null = subtitles off. */

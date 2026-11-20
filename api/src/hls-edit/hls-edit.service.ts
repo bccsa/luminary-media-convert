@@ -488,12 +488,13 @@ export class HlsEditService {
     }
 
     /**
-     * Renames camera angles in an existing video's master and takes the
-     * `removed` ones out of it, as {@link saveAudioTracks} does for tracks: a
-     * new master revision, written only from the version `ifMatch` names,
-     * encrypted when it was read encrypted. A removed angle's files stay in
-     * storage; the master stops naming its thumbnail strip too, unless it is
-     * the video's only one.
+     * Renames camera angles in an existing video's master, sets or clears
+     * their language and hearing-impaired kind (only what each edit sends),
+     * and takes the `removed` ones out of it, as {@link saveAudioTracks} does
+     * for tracks: a new master revision, written only from the version
+     * `ifMatch` names, encrypted when it was read encrypted. A removed angle's
+     * files stay in storage; the master stops naming its thumbnail strip too,
+     * unless it is the video's only one.
      */
     async saveVideoAngles(
         s3: S3ConfigDto,

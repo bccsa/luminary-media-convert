@@ -12,8 +12,8 @@ import type { HlsParsedMaster } from '@luminary-media-converter/hls-core';
 import {
     MEDIA_TAG,
     assertTrackLabel,
-    attributePattern,
     readAttribute,
+    removeAttribute,
     writeAttribute,
 } from './audio-tracks.js';
 
@@ -127,7 +127,7 @@ export function removeSubtitleLines(
               if (!line.startsWith(STREAM_INF)) return line;
               const list = line.slice(STREAM_INF.length);
               if (readAttribute(list, 'SUBTITLES') !== group) return line;
-              return STREAM_INF + list.replace(attributePattern('SUBTITLES'), '').replace(/^,/, '');
+              return STREAM_INF + removeAttribute(list, 'SUBTITLES');
           });
     return { text: out.join(eol), uri };
 }

@@ -1,7 +1,13 @@
+import {
+    ANGLE_ACCESSIBILITY,
+    type AngleAccessibility,
+} from '@luminary-media-converter/hls-core';
 import type {
     EncodeConfigDto,
     VideoRenditionDto,
+    VideoTrackNameDto,
 } from '../dto/encode-config.dto.js';
+import { assertAngleLanguage } from '../../hls-edit/video-angles.js';
 
 /**
  * The camera angles an encode writes, as the master playlist names them.
@@ -31,6 +37,13 @@ export interface OutputAngle {
     name: string;
     /** `GROUP-ID`: the name made safe, and unique among the angles. */
     groupId: string;
+    /**
+     * `LANGUAGE`: the audio language the picture belongs to (burnt-in titles,
+     * lip sync), which a player follows the audio to. Absent when it has none.
+     */
+    language?: string;
+    /** The hearing-impaired kind of view, written as `CHARACTERISTICS`. Absent for none. */
+    accessibility?: AngleAccessibility;
 }
 
 /**
@@ -47,6 +60,19 @@ export interface OutputAngle {
  * Group ids are made unique, because they are derived from names and names
  * repeat: two cameras whose tracks are both titled `Camera` would otherwise
  * collapse into one group carrying both pictures' variants.
+ *
+ * An angle's language and kind of view come from its `videoTrackNames` entry
+ * too, the language spelled as the published-video editor writes it
+ * ({@link assertAngleLanguage}): the two write one master between them, and a
+ * player reads both. Empty means none, and none is left off the angle rather
+ * than set empty. An index listed twice takes its name, language and kind all
+ * from one entry, the last that has a name (else the last), so no angle is
+ * given one entry's name and another's language.
+ *
+ * This never throws. It runs when the master is fixed up at the end of an
+ * encode, where a throw would lose the finished encode; a language or kind
+ * that is not one (the request was checked when the encode started) is left
+ * off the angle instead.
  */
 export function outputAngles(config: EncodeConfigDto): OutputAngle[] {
     const used: number[] = [];
@@ -56,12 +82,13 @@ export function outputAngles(config: EncodeConfigDto): OutputAngle[] {
     }
     if (used.length <= 1) return [];
 
-    const names = new Map<number, string>();
+    const entries = new Map<number, VideoTrackNameDto>();
     const listed: number[] = [];
     for (const tn of config.videoTrackNames ?? []) {
         if (!listed.includes(tn.index)) listed.push(tn.index);
-        const name = tn.name?.trim();
-        if (name) names.set(tn.index, name);
+        if (tn.name?.trim() || !entries.get(tn.index)?.name?.trim()) {
+            entries.set(tn.index, tn);
+        }
     }
     const rank = (id: number) => {
         const at = listed.indexOf(id);
@@ -71,13 +98,39 @@ export function outputAngles(config: EncodeConfigDto): OutputAngle[] {
 
     const taken = new Set<string>();
     return order.map((id) => {
-        const name = names.get(id) ?? `Angle ${id}`;
+        const entry = entries.get(id);
+        const name = entry?.name?.trim() || `Angle ${id}`;
         const base = sanitizeGroupId(name);
         let groupId = base;
         for (let n = 2; taken.has(groupId); n++) groupId = `${base}_${n}`;
         taken.add(groupId);
-        return { id, name, groupId };
+        const language = angleLanguage(entry?.language);
+        const accessibility = isAccessibility(entry?.accessibility)
+            ? entry.accessibility
+            : undefined;
+        return {
+            id,
+            name,
+            groupId,
+            ...(language ? { language } : {}),
+            ...(accessibility ? { accessibility } : {}),
+        };
     });
+}
+
+/** `language` as an angle's `LANGUAGE` is written, or empty when it is not a language code. */
+function angleLanguage(language: unknown): string {
+    if (typeof language !== 'string') return '';
+    try {
+        return assertAngleLanguage(language);
+    } catch {
+        return '';
+    }
+}
+
+/** One of the kinds {@link ANGLE_ACCESSIBILITY} knows how to write. */
+function isAccessibility(kind: unknown): kind is AngleAccessibility {
+    return typeof kind === 'string' && Object.hasOwn(ANGLE_ACCESSIBILITY, kind);
 }
 
 /**
@@ -113,10 +166,23 @@ export function sanitizeGroupId(value: string): string {
     );
 }
 
-/** The `#EXT-X-MEDIA:TYPE=VIDEO` line for one angle. */
+/**
+ * The `#EXT-X-MEDIA:TYPE=VIDEO` line for one angle, its attributes in the
+ * order the published-video editor writes a new angle's line in: `TYPE`,
+ * `GROUP-ID`, `NAME`, `LANGUAGE`, `CHARACTERISTICS`, `DEFAULT`, leaving out
+ * what the angle does not have, and a kind it does not know. An untagged
+ * angle's line is the one this has always written. A line break in the name
+ * becomes a space: it would end the line, stranding what follows it.
+ */
 export function videoMediaLine(angle: OutputAngle, isDefault: boolean): string {
+    const name = angle.name.replace(/"/g, "'").replace(/[\r\n]+/g, ' ');
     return (
         `#EXT-X-MEDIA:TYPE=VIDEO,GROUP-ID="${angle.groupId}",` +
-        `NAME="${angle.name.replace(/"/g, "'")}",DEFAULT=${isDefault ? 'YES' : 'NO'}`
+        `NAME="${name}"` +
+        (angle.language ? `,LANGUAGE="${angle.language}"` : '') +
+        (isAccessibility(angle.accessibility)
+            ? `,CHARACTERISTICS="${ANGLE_ACCESSIBILITY[angle.accessibility]}"`
+            : '') +
+        `,DEFAULT=${isDefault ? 'YES' : 'NO'}`
     );
 }

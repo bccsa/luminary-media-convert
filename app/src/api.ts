@@ -8,6 +8,8 @@ import type {
     AddAudioTrackJob,
     AudioSource,
     AddVideoAngleJob,
+    AngleAccessibility,
+    VideoAngleEdit,
     VideoSource,
     ThumbnailsRegenerateJob,
     EncodedMedia,
@@ -452,14 +454,15 @@ export async function addAudioTrack(
 }
 
 /**
- * Rename camera angles, or take some out. Refused (409) once the video has
- * changed since `ifMatch` was read; the error says so.
+ * Rename camera angles, set or clear their language and accessibility, or
+ * take some out. Each edit sends only what changed. Refused (409) once the
+ * video has changed since `ifMatch` was read; the error says so.
  */
 export async function putVideoAngles(
     sessionId: string,
     sessionToken: string,
     ifMatch: string,
-    edits: { id: string; name: string }[],
+    edits: VideoAngleEdit[],
     remove: string[] = []
 ): Promise<EncodedMedia> {
     return requestJson(
@@ -555,6 +558,12 @@ export async function addVideoAngle(
         sourceTrackIndex: number;
         name: string;
         mainName?: string;
+        /** The new angle's language; left out for none. */
+        language?: string;
+        /** The new angle's hearing-impaired kind of view; left out for none. */
+        accessibility?: AngleAccessibility;
+        /** The language of the video's own picture, when it has no angles yet. */
+        mainLanguage?: string;
         offsetSec: number;
         ifMatch: string;
     }

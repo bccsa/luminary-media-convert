@@ -3,6 +3,7 @@ import { Expose, Type } from 'class-transformer';
 import {
     ArrayMaxSize,
     IsArray,
+    IsIn,
     IsInt,
     IsNotEmpty,
     IsNumber,
@@ -12,6 +13,15 @@ import {
     Min,
     ValidateNested,
 } from 'class-validator';
+import {
+    ANGLE_ACCESSIBILITY,
+    type AngleAccessibility,
+} from '@luminary-media-converter/hls-core';
+
+/** The hearing-impaired kinds of view an angle can be, as the API names them. */
+const ACCESSIBILITY_KINDS = Object.keys(
+    ANGLE_ACCESSIBILITY
+) as AngleAccessibility[];
 
 /** An audio track named by its language and name, the pair the players fold groups on. */
 export class AudioTrackIdentityDto {
@@ -203,6 +213,22 @@ export class VideoAngleDto {
     @Expose()
     name: string;
 
+    @ApiProperty({
+        example: 'fra',
+        description:
+            'LANGUAGE: the audio language the picture belongs to, which a player follows the audio to. Empty when it has none.',
+    })
+    @Expose()
+    language: string;
+
+    @ApiPropertyOptional({
+        enum: ACCESSIBILITY_KINDS,
+        description:
+            'The hearing-impaired kind of view CHARACTERISTICS marks. Absent when it marks none.',
+    })
+    @Expose()
+    accessibility?: AngleAccessibility;
+
     @ApiProperty({ description: 'The angle a player starts on.' })
     @Expose()
     default: boolean;
@@ -220,11 +246,36 @@ export class VideoAngleEditDto {
     @Expose()
     id: string;
 
-    @ApiProperty({ example: 'Pulpit camera', description: 'Its new name.' })
+    @ApiPropertyOptional({
+        example: 'Pulpit camera',
+        description: 'Its new name. Left out, the name stays.',
+    })
+    @IsOptional()
     @IsString()
     @MaxLength(256)
     @Expose()
-    name: string;
+    name?: string;
+
+    @ApiPropertyOptional({
+        example: 'fra',
+        description:
+            'Its LANGUAGE (ISO 639): the audio language the picture belongs to. Empty takes it off; left out, it stays.',
+    })
+    @IsOptional()
+    @IsString()
+    @MaxLength(16)
+    @Expose()
+    language?: string;
+
+    @ApiPropertyOptional({
+        enum: [...ACCESSIBILITY_KINDS, 'none'],
+        description:
+            'Its hearing-impaired kind of view, written as CHARACTERISTICS. none takes it off when it marks one of these kinds, and leaves a value that marks none of them as it is; left out, it stays.',
+    })
+    @IsOptional()
+    @IsIn([...ACCESSIBILITY_KINDS, 'none'])
+    @Expose()
+    accessibility?: AngleAccessibility | 'none';
 }
 
 export class VideoAnglesWriteDto {
@@ -286,6 +337,38 @@ export class AddVideoAngleDto extends AudioSourceRequestDto {
     @MaxLength(256)
     @Expose()
     mainName?: string;
+
+    @ApiPropertyOptional({
+        example: 'fra',
+        description:
+            "The new angle's LANGUAGE (ISO 639): the audio language its picture belongs to. Empty or left out for none.",
+    })
+    @IsOptional()
+    @IsString()
+    @MaxLength(16)
+    @Expose()
+    language?: string;
+
+    @ApiPropertyOptional({
+        enum: ACCESSIBILITY_KINDS,
+        description:
+            "The new angle's hearing-impaired kind of view, written as CHARACTERISTICS. Left out for none.",
+    })
+    @IsOptional()
+    @IsIn(ACCESSIBILITY_KINDS)
+    @Expose()
+    accessibility?: AngleAccessibility;
+
+    @ApiPropertyOptional({
+        example: 'eng',
+        description:
+            "The LANGUAGE of the video's own picture when it has no angles yet, as it becomes the main one. Empty or left out for none.",
+    })
+    @IsOptional()
+    @IsString()
+    @MaxLength(16)
+    @Expose()
+    mainLanguage?: string;
 
     @ApiPropertyOptional({
         description:

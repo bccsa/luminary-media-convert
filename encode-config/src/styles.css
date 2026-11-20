@@ -43,6 +43,9 @@
     border: none;
     margin: 0;
     padding: 0;
+    /* A fieldset is min-content wide by default: a wide table would stretch it
+       past its panel, clipped there, instead of scrolling in its own wrap. */
+    min-width: 0;
 }
 
 .ecf-section-header {
@@ -514,6 +517,15 @@ html.dark .ecf-input-invalid:focus {
     font-size: 0.8125rem;
 }
 
+/* The angle picker keeps its width whatever the angles are called: grown to a
+   long name, it pushed the table and the angle's name, language and kind past
+   the panel. A long name is cut short here, and in the open list once it is
+   wider than the room beside the picker; hovering the picker shows the full
+   name of the angle it is set to. */
+.ecf-select-angle {
+    max-width: 7rem;
+}
+
 .ecf-select-ch {
     width: 5.5rem;
     padding: 0.1875rem 2rem 0.1875rem 0.375rem;
@@ -568,6 +580,11 @@ html.dark .ecf-input-invalid:focus {
     font-size: 0.75rem;
     line-height: 1.45;
     color: #71717a;
+}
+
+/* A note on what a table holds, set under it rather than above. */
+.ecf-table-wrap + .ecf-hint {
+    margin: 0.5rem 0 0;
 }
 
 .ecf-em {
@@ -1353,6 +1370,31 @@ html.dark .ecf-root--session .ecf-btn-primary-disabled:hover {
 /* A further quality of the angle above: indented under the track naming it. */
 .ecf-tr--member > .ecf-td:nth-child(2) {
     padding-left: 1.25rem;
+}
+
+/* An angle's language and kind of view: a line under the row naming it, read
+   as part of that row. */
+.ecf-tr--tagged {
+    border-bottom: none;
+}
+.ecf-tr--tags > .ecf-td {
+    padding-top: 0;
+    padding-bottom: 0.375rem;
+}
+.ecf-angle-tags {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem 1rem;
+}
+.ecf-angle-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+}
+.ecf-angle-tag-label {
+    font-size: 0.75rem;
+    color: #71717a; /* text-zinc-500 */
 }
 
 .ecf-root--session .ecf-seg {

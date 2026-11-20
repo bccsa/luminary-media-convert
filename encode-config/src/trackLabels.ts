@@ -1,8 +1,43 @@
-import type { AudioTrackInfo, VideoTrackInfo } from './types';
+import type {
+    AngleAccessibility,
+    AudioTrackInfo,
+    VideoTrackInfo,
+    VideoTrackName,
+} from './types';
 
 export interface SavedTrackLabels {
-    videoTrackNames?: { index: number; name: string }[];
+    videoTrackNames?: VideoTrackName[];
     audioTrackMetadata?: { index: number; name?: string; language?: string }[];
+}
+
+/**
+ * An angle's language and kind of view, filed by track, as its name is kept on
+ * a track. Only what is set: no empty language, no `none`.
+ */
+export type AngleTags = Pick<VideoTrackName, 'language' | 'accessibility'>;
+
+const ACCESSIBILITY_KINDS: readonly string[] = [
+    'captions',
+    'sign-language',
+    'lip-reading',
+] satisfies AngleAccessibility[];
+
+/**
+ * The language and kind of view a saved entry really has. Storage is not
+ * trusted: an entry written by an older or other build, or edited by hand, may
+ * carry a kind this one does not know or a language that is not text, and
+ * either would go on to the encode as it is.
+ */
+function savedTags(entry: VideoTrackName): AngleTags {
+    const language =
+        typeof entry.language === 'string' ? entry.language.trim() : '';
+    const kind = entry.accessibility;
+    return {
+        ...(language ? { language } : {}),
+        ...(typeof kind === 'string' && ACCESSIBILITY_KINDS.includes(kind)
+            ? { accessibility: kind }
+            : {}),
+    };
 }
 
 /**
@@ -19,19 +54,45 @@ export interface SavedTrackLabels {
  *   collapsed names left every downstream suggestion with nothing to work from.
  * - **true**, when the user presses "Load saved track labels". That is an
  *   explicit request for the saved set, so it replaces what is there.
+ *
+ * An angle's language and kind of view travel with its name into `angleTags`
+ * when the caller keeps them, as a pair: with `overwrite` the saved two replace
+ * the angle's (one the entry does not have is cleared, so no mix of the
+ * operator's and the saved set appears that nobody saved); without it they
+ * only fill what is blank.
  */
 export function applySavedTrackLabels(
     saved: SavedTrackLabels,
     videoTracks: VideoTrackInfo[],
     audioTracks: AudioTrackInfo[],
-    overwrite: boolean
+    overwrite: boolean,
+    angleTags?: Map<number, AngleTags>
 ): void {
     if (saved.videoTrackNames) {
-        const names = new Map(saved.videoTrackNames.map((t) => [t.index, t.name]));
+        const entries = new Map(saved.videoTrackNames.map((t) => [t.index, t]));
         for (const track of videoTracks) {
-            const label = names.get(track.index);
-            if (label == null) continue;
-            if (overwrite || !track.name) track.name = label;
+            const entry = entries.get(track.index);
+            if (entry == null) continue;
+            if (entry.name != null && (overwrite || !track.name)) {
+                track.name = entry.name;
+            }
+            if (!angleTags) continue;
+            const stored = savedTags(entry);
+            const current = angleTags.get(track.index) ?? {};
+            const language = overwrite
+                ? stored.language
+                : current.language || stored.language;
+            const accessibility = overwrite
+                ? stored.accessibility
+                : current.accessibility || stored.accessibility;
+            if (language || accessibility) {
+                angleTags.set(track.index, {
+                    ...(language ? { language } : {}),
+                    ...(accessibility ? { accessibility } : {}),
+                });
+            } else {
+                angleTags.delete(track.index);
+            }
         }
     }
 
