@@ -162,20 +162,30 @@ describe('EncodeController preview segment', () => {
     let session: Session;
     /** The file the stub service opens for each request, as the service does. */
     let segment: { path: string; size: number } | null;
+    let failure: string | undefined;
+    /** A failure the service only learns while making the segment asked for. */
+    let failsWhileMaking: string | undefined;
     let app: express.Express;
 
     beforeEach(() => {
+        failure = undefined;
+        failsWhileMaking = undefined;
         workDir = mkdtempSync(join(tmpdir(), 'luminary-segment-'));
         sessionService = new SessionService({ emit: () => {} } as any);
         session = sessionService.create({} as any);
         segment = null;
         const previewService = {
             ensureReady: async () => {},
-            getSegmentStream: async () =>
-                segment && {
-                    stream: createReadStream(segment.path),
-                    size: segment.size,
-                },
+            previewFailure: () => failure,
+            getSegmentStream: async () => {
+                if (failsWhileMaking) failure = failsWhileMaking;
+                return (
+                    segment && {
+                        stream: createReadStream(segment.path),
+                        size: segment.size,
+                    }
+                );
+            },
         };
         const stubs = Array.from({ length: 11 }, () => ({})) as any[];
         stubs[3] = previewService;
@@ -197,13 +207,11 @@ describe('EncodeController preview segment', () => {
                         res
                     )
                     .catch((err) =>
-                        res
-                            .status(
-                                err instanceof HttpException
-                                    ? err.getStatus()
-                                    : 500
-                            )
-                            .end()
+                        err instanceof HttpException
+                            ? res
+                                  .status(err.getStatus())
+                                  .json(err.getResponse())
+                            : res.status(500).end()
                     );
             }
         );
@@ -223,6 +231,21 @@ describe('EncodeController preview segment', () => {
         const res = await request(app).get(url()).buffer(true);
         expect(res.status).toBe(200);
         expect(res.headers['content-length']).toBe('188');
+    });
+
+    it('says why when the preview cannot be made', async () => {
+        failure = 'FFmpeg could not convert this file for the preview.';
+        const res = await request(app).get(url());
+        expect(res.status).toBe(422);
+        expect(res.body.message).toBe(failure);
+    });
+
+    it('says why on the request that found the preview cannot be made', async () => {
+        failsWhileMaking =
+            'FFmpeg could not convert this file for the preview.';
+        const res = await request(app).get(url());
+        expect(res.status).toBe(422);
+        expect(res.body.message).toBe(failsWhileMaking);
     });
 
     it('ends the response, without taking the process down, when the read fails', async () => {

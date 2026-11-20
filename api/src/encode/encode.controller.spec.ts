@@ -163,6 +163,7 @@ describe('EncodeController', () => {
             ensureReady: vi.fn().mockResolvedValue(true),
             getPlaylist: vi.fn().mockReturnValue(null),
             getSegmentStream: vi.fn().mockResolvedValue(null),
+            previewFailure: vi.fn().mockReturnValue(undefined),
             destroy: vi.fn().mockResolvedValue(undefined),
         } as any;
 

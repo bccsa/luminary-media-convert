@@ -651,6 +651,9 @@ const previewIsDirect = computed(
 const previewNote = computed<string | null>(() => {
     if (isCompleted.value || !previewPlaybackUrl.value) return null;
     if (previewMode.value === 'direct') return null;
+    if (previewFailure.value) {
+        return `Preview not available · ${previewFailure.value}`;
+    }
     const reason = directPlaybackFailed.value
         ? "the file didn't play directly"
         : sourcePlayability.value.reason;
@@ -888,6 +891,32 @@ let convertedPreviewRetriedAt = 0;
 /** No sooner than this after the last: a preview that cannot play must not loop. */
 const CONVERTED_PREVIEW_RETRY_MS = 60_000;
 
+/** Why the encoder cannot make this session's converted preview, once it has said so. */
+const previewFailure = ref<string | null>(null);
+watch(sessionId, () => {
+    previewFailure.value = null;
+    convertedPreviewRetriedAt = 0;
+});
+
+/**
+ * The encoder's reason for not making the converted preview at `url`, or null
+ * when it still makes it or could not be asked.
+ */
+async function convertedPreviewRefusal(url: string): Promise<string | null> {
+    try {
+        const res = await fetch(url);
+        if (res.status !== 422) return null;
+        const body = (await res.json().catch(() => null)) as {
+            message?: unknown;
+        } | null;
+        return typeof body?.message === 'string'
+            ? body.message
+            : 'The encoder could not make it.';
+    } catch {
+        return null;
+    }
+}
+
 /**
  * What a preview that failed to play is replaced with.
  *
@@ -897,7 +926,8 @@ const CONVERTED_PREVIEW_RETRY_MS = 60_000;
  * preview's playlist out afresh when the source turns out not to keep the
  * keyframe interval its opening seconds showed, and the playlist the player
  * holds is then one whose segments no longer exist. The fresh load waits for
- * the new playlist and carries the position across.
+ * the new playlist and carries the position across. One the encoder says it
+ * cannot make is not loaded again: the reason is shown instead.
  */
 watch(
     () => playerRef.value?.lifecycle,
@@ -911,13 +941,21 @@ watch(
             directPlaybackFailed.value = true;
             return;
         }
-        if (isCompleted.value || !previewPlaybackUrl.value) return;
+        const url = previewPlaybackUrl.value;
+        if (isCompleted.value || !url || previewFailure.value) return;
         const now = Date.now();
         if (now - convertedPreviewRetriedAt < CONVERTED_PREVIEW_RETRY_MS) {
             return;
         }
         convertedPreviewRetriedAt = now;
-        playerRef.value?.reload?.();
+        void convertedPreviewRefusal(url).then((refusal) => {
+            if (url !== previewPlaybackUrl.value) return;
+            if (refusal) {
+                previewFailure.value = refusal;
+                return;
+            }
+            playerRef.value?.reload?.();
+        });
     }
 );
 

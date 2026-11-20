@@ -18,6 +18,7 @@ import {
     Sse,
     StreamableFile,
     UnauthorizedException,
+    UnprocessableEntityException,
     UseGuards,
     BadRequestException,
     Logger,
@@ -1558,6 +1559,7 @@ export class EncodeController {
     ): Promise<void> {
         this.validatePreviewToken(sessionId, token);
         await this.previewService.ensureReady(sessionId);
+        this.refuseFailedPreview(sessionId);
 
         const audioTrackIndex =
             audio !== undefined ? parseInt(audio, 10) : undefined;
@@ -1587,6 +1589,7 @@ export class EncodeController {
     ): Promise<void> {
         this.validatePreviewToken(sessionId, token);
         await this.previewService.ensureReady(sessionId);
+        this.refuseFailedPreview(sessionId);
 
         const renditionIndex = parseInt(rendition, 10);
         const audioTrackIndex =
@@ -1626,6 +1629,7 @@ export class EncodeController {
         const audioTrackIndex =
             audio !== undefined ? parseInt(audio, 10) : undefined;
         await this.previewService.ensureReady(sessionId);
+        this.refuseFailedPreview(sessionId);
         const result = await this.previewService.getSegmentStream(
             sessionId,
             renditionIndex,
@@ -1633,7 +1637,11 @@ export class EncodeController {
             audioTrackIndex
         );
 
-        if (!result) throw new NotFoundException('Segment not available');
+        if (!result) {
+            // This may have been the request that found the preview cannot be made.
+            this.refuseFailedPreview(sessionId);
+            throw new NotFoundException('Segment not available');
+        }
 
         res.set({
             'Content-Type': 'video/mp2t',
@@ -1932,6 +1940,15 @@ export class EncodeController {
             'Cross-Origin-Resource-Policy': 'cross-origin',
         });
         createReadStream(path).pipe(res);
+    }
+
+    /**
+     * A preview FFmpeg cannot make is answered with why, rather than a miss
+     * the player would keep asking again.
+     */
+    private refuseFailedPreview(sessionId: string): void {
+        const failure = this.previewService.previewFailure(sessionId);
+        if (failure) throw new UnprocessableEntityException(failure);
     }
 
     private validatePreviewToken(sessionId: string, token: string): void {

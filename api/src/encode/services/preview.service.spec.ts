@@ -974,6 +974,55 @@ describe('PreviewService', () => {
             expect(ffmpegArgs).toContain('28');
         });
 
+        /** What `execFile` rejects with when FFmpeg ran and exited with an error. */
+        const ffmpegExit = () =>
+            Object.assign(new Error('Conversion failed!'), {
+                code: 1,
+                killed: false,
+            });
+
+        it('gives the preview up when the first segment cannot be made', async () => {
+            mockExistsSync.mockReturnValue(false);
+            setupExecFile(() => ffmpegExit());
+
+            expect(await service.getSegmentStream('s1', 0, 0)).toBeNull();
+            expect(service.previewFailure('s1')).toMatch(/could not/i);
+
+            // FFmpeg is not run again for a preview that cannot be made.
+            mockExecFile.mockClear();
+            expect(await service.getSegmentStream('s1', 0, 1)).toBeNull();
+            expect(mockExecFile).not.toHaveBeenCalled();
+        });
+
+        it('keeps trying after a segment was stopped rather than failed', async () => {
+            // A timeout or a cancel kills FFmpeg; the next try can succeed.
+            mockExistsSync.mockReturnValue(false);
+            setupExecFile(() =>
+                Object.assign(new Error('killed'), {
+                    killed: true,
+                    signal: 'SIGTERM',
+                })
+            );
+
+            expect(await service.getSegmentStream('s1', 0, 0)).toBeNull();
+            expect(service.previewFailure('s1')).toBeUndefined();
+        });
+
+        it('keeps trying after a failure once a segment has been made', async () => {
+            // The file converts; one bad stretch is not the whole preview.
+            mockExistsSync.mockReturnValueOnce(false).mockReturnValue(true);
+            mockStat.mockResolvedValue({ size: 2048 });
+            setupExecFile(() => ({ stdout: '', stderr: '' }));
+            mockCreateReadStream.mockReturnValue({ pipe: vi.fn() });
+            expect(await service.getSegmentStream('s1', 0, 0)).not.toBeNull();
+
+            mockExistsSync.mockReset();
+            mockExistsSync.mockReturnValue(false);
+            setupExecFile(() => ffmpegExit());
+            expect(await service.getSegmentStream('s1', 0, 2)).toBeNull();
+            expect(service.previewFailure('s1')).toBeUndefined();
+        });
+
         it('should use -c:v copy for copy-mode renditions', async () => {
             // Reinitialize with H.264 copy-mode
             const probe = makeProbe({
@@ -2006,6 +2055,40 @@ describe('PreviewService', () => {
             const vfIdx = args.indexOf('-vf');
             expect(vfIdx).toBeGreaterThan(-1);
             expect(args[vfIdx + 1]).toMatch(/^scale_vt=/);
+        });
+
+        it('decodes in software on apple when VideoToolbox cannot decode the source', async () => {
+            const svc = await initHevcService('apple');
+
+            mockExistsSync.mockReturnValueOnce(false).mockReturnValue(true);
+            mockStat.mockResolvedValue({ size: 2048 });
+            // As with MPEG-2: the hardware decode path fails outright, and
+            // a software decode into the same encoder works.
+            setupExecFile((_bin: string, args: string[]) =>
+                args.includes('-hwaccel')
+                    ? Object.assign(new Error('Function not implemented'), {
+                          code: 1,
+                          killed: false,
+                      })
+                    : { stdout: '', stderr: '' }
+            );
+            mockCreateReadStream.mockReturnValue({ pipe: vi.fn() });
+
+            expect(await svc.getSegmentStream('s1', 0, 0)).not.toBeNull();
+            expect(svc.previewFailure('s1')).toBeUndefined();
+
+            const retry = mockExecFile.mock.calls[1][1] as string[];
+            expect(retry).not.toContain('-hwaccel');
+            expect(retry).toContain('h264_videotoolbox');
+            expect(retry[retry.indexOf('-vf') + 1]).toMatch(/^scale=/);
+
+            // The rest of the preview goes straight to software decode.
+            mockExecFile.mockClear();
+            mockExistsSync.mockReset();
+            mockExistsSync.mockReturnValueOnce(false).mockReturnValue(true);
+            expect(await svc.getSegmentStream('s1', 0, 1)).not.toBeNull();
+            expect(mockExecFile).toHaveBeenCalledTimes(1);
+            expect(mockExecFile.mock.calls[0][1]).not.toContain('-hwaccel');
         });
 
         /**

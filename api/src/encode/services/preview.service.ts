@@ -108,6 +108,9 @@ const CACHE_VERSION = 'v2';
 /** How many segments past the one asked for are made ahead of the player. */
 const PREFETCH_SEGMENTS = 3;
 
+/** What the player is told when FFmpeg cannot make this file's preview. */
+const PREVIEW_FAILED = 'FFmpeg could not convert this file for the preview.';
+
 /**
  * How much of a copied rendition is kept on disk: about the last minute made,
  * and no more than this many bytes of it.
@@ -241,6 +244,18 @@ interface PreviewState {
     indexBase: number;
     /** A rebuild from a keyframe scan in progress; playlist requests wait for it. */
     rebuild?: Promise<void>;
+    /** A segment of this build has been made, so the file does convert. */
+    madeSegment?: boolean;
+    /**
+     * Why no segment of this build can be made: FFmpeg failed the first one
+     * outright. Every later request would fail the same way, so none is tried.
+     */
+    failure?: string;
+    /**
+     * VideoToolbox could not decode this source (MPEG-2, for one), so its
+     * segments decode in software and still encode on VideoToolbox.
+     */
+    softwareDecode?: boolean;
     /** Median keyframe spacing of the stream's grid, seconds. */
     keyframeStep?: number;
     /** Where the container's own clock starts; see {@link CopyLayout.containerStart}. */
@@ -566,6 +581,8 @@ export class PreviewService {
             return null;
         }
 
+        if (state.failure) return null;
+
         const ai = audioTrackIndex ?? 0;
         // Cache segments per (rendition, audioTrack) pair when multi-audio
         const cacheDir =
@@ -578,7 +595,10 @@ export class PreviewService {
         // A segment evicted from the copy window is made again like any
         // other miss.
         const cached = await this.openSegment(segPath);
-        if (cached) return cached;
+        if (cached) {
+            state.madeSegment = true;
+            return cached;
+        }
 
         // Extract on demand (deduplicate concurrent requests).
         // .catch on the stored promise prevents unhandled rejections
@@ -606,10 +626,19 @@ export class PreviewService {
             this.logger.warn(
                 `Segment ${cacheDir}/s${segmentIndex} extraction error: ${e.message}`
             );
+            // FFmpeg that ran and refused before any segment was made would
+            // refuse every one; one stopped (a timeout, a cancel) might not.
+            if (e?.ffmpegFailed && !state.madeSegment && !state.failure) {
+                state.failure = PREVIEW_FAILED;
+                this.logger.error(
+                    `Preview for session ${sessionId} given up: FFmpeg could not make its first segment`
+                );
+            }
             return null;
         }
 
         const made = await this.openSegment(segPath);
+        if (made) state.madeSegment = true;
         if (!made) {
             this.logger.warn(
                 `Segment r${renditionIndex}/s${segmentIndex} missing or empty after extraction`
@@ -626,6 +655,11 @@ export class PreviewService {
             ai
         );
         return made;
+    }
+
+    /** Why this session's preview cannot be made, once that is known. */
+    previewFailure(sessionId: string): string | undefined {
+        return this.states.get(sessionId)?.failure;
     }
 
     /**
@@ -1130,7 +1164,9 @@ export class PreviewService {
         /** The file the segment is written to. */
         output: string,
         /** {@link CopyLayout.containerStart}: taken off every seek on the copy path. */
-        containerStart = 0
+        containerStart = 0,
+        /** Decode in software; see {@link PreviewState.softwareDecode}. */
+        softwareDecode = false
     ): string[] {
         const args: string[] = [];
 
@@ -1177,7 +1213,9 @@ export class PreviewService {
         // auto_scale_0"), so every segment failed over to CPU. Copy-mode
         // renditions never reach the filter, which is why this only showed on
         // sources that have to be transcoded — HEVC and the like.
-        args.push(...decodeArgs(accelMode, 'preview', useGpu));
+        args.push(
+            ...decodeArgs(accelMode, 'preview', useGpu && !softwareDecode)
+        );
 
         if (rendition.canCopy) {
             // The demuxer lands on the largest keyframe at or before the seek
@@ -1233,7 +1271,12 @@ export class PreviewService {
         else if (audioMap) args.push('-map', audioMap);
 
         args.push(
-            ...previewVideoArgs(accelMode, useGpu, rendition.scaleFilter)
+            ...previewVideoArgs(
+                accelMode,
+                useGpu,
+                rendition.scaleFilter,
+                softwareDecode
+            )
         );
 
         if (audioMap) args.push(...aacArgs(), '-b:a', '128k');
@@ -1288,7 +1331,8 @@ export class PreviewService {
                 copySeekStart,
                 audioTrack ?? undefined,
                 partPath,
-                state.containerStart
+                state.containerStart,
+                state.softwareDecode
             );
             const timeout = rendition.canCopy ? 30_000 : 120_000;
 
@@ -1306,7 +1350,9 @@ export class PreviewService {
             }).catch(async (err: any) => {
                 await rm(partPath, { force: true }).catch(() => {});
                 const via = useGpu
-                    ? accelMode
+                    ? state.softwareDecode
+                        ? `${accelMode} (software decode)`
+                        : accelMode
                     : rendition.canCopy
                       ? 'stream copy'
                       : 'cpu';
@@ -1316,9 +1362,16 @@ export class PreviewService {
                 const hint = rendition.canCopy
                     ? ''
                     : `\n\n${USE_YOUR_OWN_FFMPEG}`;
-                throw new Error(
-                    `Preview segment r${renditionIndex}/s${segmentIndex} failed on ` +
-                        `${via}: ${err.message}${hint}`
+                throw Object.assign(
+                    new Error(
+                        `Preview segment r${renditionIndex}/s${segmentIndex} failed on ` +
+                            `${via}: ${err.message}${hint}`
+                    ),
+                    // It ran to an exit code: not killed by a timeout or a cancel.
+                    {
+                        ffmpegFailed:
+                            !err.killed && typeof err.code === 'number',
+                    }
                 );
             });
 
@@ -1366,7 +1419,27 @@ export class PreviewService {
             }
 
             if (!rendition.canCopy || !state.keyframeStep) {
-                await runOnce(start);
+                try {
+                    await runOnce(start);
+                } catch (e: any) {
+                    // VideoToolbox does not decode every codec. FFmpeg then
+                    // hands over software frames, which `scale_vt` refuses,
+                    // while the VideoToolbox encoder takes them: so the source
+                    // decodes in software from here on, and only the decode
+                    // moves off the GPU.
+                    if (
+                        !useGpu ||
+                        accelMode !== 'apple' ||
+                        state.softwareDecode ||
+                        !e?.ffmpegFailed
+                    )
+                        throw e;
+                    this.logger.warn(
+                        `Preview for session ${state.sessionId}: VideoToolbox could not decode the source, decoding in software`
+                    );
+                    state.softwareDecode = true;
+                    await runOnce(start);
+                }
                 return outputPath;
             }
 
