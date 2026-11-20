@@ -73,6 +73,7 @@ import type {
     VideoRenditionDto,
 } from '../dto/encode-config.dto.js';
 import { ffprobeBin } from './ffbin.js';
+import { angleOf, outputAngles, videoMediaLine } from './output-angles.js';
 import {
     neutralizeEditList,
     readTrackTimescale,
@@ -677,15 +678,6 @@ export async function writeQuickTrimConcatFile(
     return concatPath;
 }
 
-function sanitizeGroupId(value: string): string {
-    return (
-        value
-            .replace(/[^a-zA-Z0-9_-]/g, '_')
-            .replace(/_+/g, '_')
-            .replace(/^_|_$/g, '') || 'angle'
-    );
-}
-
 function audioDisplayName(
     group: AudioGroupDto,
     singleLanguage: boolean
@@ -751,28 +743,15 @@ export function buildQuickTrimMasterContent(
 
     // Angles become VIDEO rendition groups, exactly as the muxer-written master
     // is rewritten to carry them — one master, narrowed client-side.
-    const angleTracks = new Set(videoTargets.map((t) => t.sourceTrackIndex));
-    const multiAngle = angleTracks.size > 1;
-    const angleNames = new Map<number, string>();
-    for (const named of encodeConfig.videoTrackNames ?? []) {
-        angleNames.set(named.index, named.name ?? `Angle ${named.index}`);
-    }
-    for (const index of angleTracks) {
-        if (!angleNames.has(index)) angleNames.set(index, `Angle ${index}`);
-    }
-
-    if (multiAngle) {
-        const emitted = new Set<string>();
-        for (const [, name] of angleNames) {
-            const groupId = sanitizeGroupId(name);
-            if (emitted.has(groupId)) continue;
-            emitted.add(groupId);
-            lines.push(
-                `#EXT-X-MEDIA:TYPE=VIDEO,GROUP-ID="${groupId}",` +
-                    `NAME="${name}",DEFAULT=${emitted.size === 1 ? 'YES' : 'NO'}`
-            );
-        }
-    }
+    // Grouped by angle, not by source track: a copied ladder is several tracks
+    // and one angle. Only angles a target uses, with unique group ids — see
+    // `outputAngles`.
+    const angles = outputAngles({
+        ...encodeConfig,
+        videoRenditions: videoTargets.map((t) => t.rendition!),
+    });
+    const groupByAngle = new Map(angles.map((a) => [a.id, a.groupId]));
+    angles.forEach((angle, n) => lines.push(videoMediaLine(angle, n === 0)));
 
     const audioBitrateByGroup = new Map<string, number>();
     for (const target of audioTargets) {
@@ -792,11 +771,8 @@ export function buildQuickTrimMasterContent(
         const bandwidth =
             rendition.videoBitrateKbps * 1000 +
             (audioBitrateByGroup.get(rendition.audioGroupId) ?? 0) * 1000;
-        const video = multiAngle
-            ? `,VIDEO="${sanitizeGroupId(
-                  angleNames.get(target.sourceTrackIndex) ?? 'angle'
-              )}"`
-            : '';
+        const groupId = groupByAngle.get(angleOf(rendition));
+        const video = groupId ? `,VIDEO="${groupId}"` : '';
         const audio = audioTargets.length
             ? `,AUDIO="${rendition.audioGroupId}"`
             : '';

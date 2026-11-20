@@ -35,5 +35,5 @@ export {
  * Square-pixel geometry, for hosts that need to lay out a picture the same way
  * the ladder does — a coded frame size does not say what shape it is.
  */
-export { displayDimensionsOf, isAnamorphic } from './aspect';
+export { displayDimensionsOf, isAnamorphic, isRotated } from './aspect';
 export type { AspectTrack } from './aspect';

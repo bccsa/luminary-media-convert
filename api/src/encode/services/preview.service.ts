@@ -27,6 +27,7 @@ import { selectStoryboardTrack } from './thumbnail.service.js';
 import { FfmpegService } from './ffmpeg.service.js';
 import { ffmpegBin, ffprobeBin } from './ffbin.js';
 import { displayDimensionsOf, isAnamorphic } from './aspect.js';
+import { defaultAngleTracks } from './picture-groups.js';
 
 export interface PreviewAudioTrack {
     index: number;
@@ -779,7 +780,17 @@ export class PreviewService {
      */
     private selectVideoTrack(probe: ProbeResult): VideoTrackInfo | undefined {
         const tracks = probe.videoTracks;
-        const picked = selectStoryboardTrack(tracks);
+        // The storyboard is drawn from the default angle's tracks. Of those,
+        // only the ones on the first track's keyframe grid (the same keyframes,
+        // the same length) can stand in for the video: a shorter one would end
+        // the preview early.
+        const angle = defaultAngleTracks(probe);
+        const grid = angle[0]?.keyframeGrid;
+        const picked = selectStoryboardTrack(
+            grid === undefined
+                ? angle
+                : angle.filter((t) => t.keyframeGrid === grid)
+        );
         return (
             (picked && tracks.find((t) => t.index === picked.index)) ??
             tracks[0]

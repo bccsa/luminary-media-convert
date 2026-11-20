@@ -34,6 +34,7 @@ import {
 import { SidecarLoader, pickDefaultChapterTrack } from './sidecars.js';
 import {
     findThumbnailCue,
+    resolveThumbnails,
     thumbnailsCoverDuration,
     type ThumbnailSpriteCue,
 } from '@luminary-media-converter/hls-core';
@@ -119,6 +120,12 @@ export class PlayerController implements PlayerControllerApi {
     private sidecarLoader: SidecarLoader | null = null;
     /** Parsed scrub-preview cues for the current source; empty when there are none. */
     private thumbnailCues: ThumbnailSpriteCue[] = [];
+    /**
+     * The strip {@link thumbnailCues} come from, or are being read from. An
+     * angle switch only reads a strip when this changes, and a read that
+     * finishes after another angle has asked for a different strip is dropped.
+     */
+    private thumbnailStripUrl: string | undefined;
 
     /** The sleep timer; a minutes timer outlives a source, so it is not torn down with one. */
     private readonly sleep = new SleepTimer(
@@ -225,6 +232,7 @@ export class PlayerController implements PlayerControllerApi {
         // before its sidecars would otherwise leave the previous video's frames
         // available to `thumbnailAt`.
         this.thumbnailCues = [];
+        this.thumbnailStripUrl = undefined;
 
         this.store.reset({
             ...createInitialState(),
@@ -339,7 +347,7 @@ export class PlayerController implements PlayerControllerApi {
             // a host waiting for "off" before applying the viewer's choice would never apply it.
             activeSubtitleTrackId: null,
             isAudioOnly: info.nativelyAudioOnly,
-            chapterTracks: this.prepareChapterTracks(),
+            chapterTracks: this.prepareChapterTracks(info),
         });
 
         await this.attachAngle(generation, angleId, {
@@ -569,15 +577,42 @@ export class PlayerController implements PlayerControllerApi {
      * sidecar, an audio-only encode, `thumbnails: false`, a 404 — is normal
      * rather than an error worth surfacing. `loadThumbnails` already collapses
      * those to an empty list.
+     *
+     * Asked again on every angle switch, because a master can name a strip per
+     * angle. One strip for every angle is the common case, and then a switch
+     * resolves to the URL already shown and reads nothing — unless reading it
+     * gave no frames, which the next switch tries again.
      */
     private async attachThumbnails(generation: number): Promise<void> {
+        const url = this.thumbnailStripFor(this.state.activeAngleId);
+        if (url === this.thumbnailStripUrl) return;
+        this.thumbnailStripUrl = url;
+        // The last angle's frames would preview the wrong picture: none until
+        // this angle's strip is in.
+        if (this.thumbnailCues.length > 0) {
+            this.thumbnailCues = [];
+            this.updateThumbnailsReady();
+        }
         const cues =
             (await this.sidecarLoader?.loadThumbnails(
-                this.source?.sidecars?.thumbnails,
+                url ? { url } : undefined,
             )) ?? [];
-        if (generation !== this.generation) return;
+        if (generation !== this.generation || this.thumbnailStripUrl !== url)
+            return;
+        if (cues.length === 0) this.thumbnailStripUrl = undefined;
         this.thumbnailCues = cues;
         this.updateThumbnailsReady();
+    }
+
+    /**
+     * The strip to show on `angleId`: the one the master names for it, else
+     * the host's. The host's is the fixed name, which a regeneration no longer
+     * rewrites, so it only stands in for a master that names no strip at all.
+     */
+    private thumbnailStripFor(angleId: string | null): string | undefined {
+        const declared = this.master?.thumbnails ?? [];
+        if (declared.length === 0) return this.source?.sidecars?.thumbnails?.url;
+        return resolveThumbnails(declared, angleId)?.uri;
     }
 
     /** Ready once there are cues that span the video; re-asked when the duration becomes known. */
@@ -681,6 +716,9 @@ export class PlayerController implements PlayerControllerApi {
         }
         if (generation !== this.generation) return;
         this.emitter.emit('angle-changed', { angleId: id });
+        // Not awaited: the switch is done once the engine has the angle, and a
+        // scrub preview arriving a moment later is all a slow strip costs.
+        void this.attachThumbnails(generation);
     }
 
     get canCapInPlace(): boolean {
@@ -928,8 +966,39 @@ export class PlayerController implements PlayerControllerApi {
         this.subtitleCues.clear();
     }
 
-    private prepareChapterTracks() {
-        this.sidecarLoader?.setChapters(this.source?.sidecars?.chapters);
+    /**
+     * The chapter files the master names win over the host's, language by
+     * language. Each chapter save writes a new name and records it in the
+     * master, so a host-built `chapters/<lang>.vtt` is the legacy copy — kept
+     * for every language the master does not name, which on a video from
+     * before the index is each one not saved since. The host still knows what
+     * to call a language, so its label carries over to the master's file.
+     * A file source has no master, so only the host's are offered.
+     */
+    private prepareChapterTracks(info?: MasterInfo) {
+        const hosted = this.source?.sidecars?.chapters ?? [];
+        const declared = info?.chapters ?? [];
+        const named = new Set(declared.map((sidecar) => sidecar.lang));
+        this.sidecarLoader?.setChapters(
+            hosted
+                .map((entry) => {
+                    if (!named.has(entry.lang)) return entry;
+                    const sidecar = declared.find(
+                        (d) => d.lang === entry.lang,
+                    )!;
+                    return entry.label === undefined
+                        ? sidecar
+                        : { ...sidecar, label: entry.label };
+                })
+                .concat(
+                    declared.filter(
+                        (sidecar) =>
+                            !hosted.some(
+                                (entry) => entry.lang === sidecar.lang,
+                            ),
+                    ),
+                ),
+        );
         return this.sidecarLoader?.chapterTracks() ?? [];
     }
 

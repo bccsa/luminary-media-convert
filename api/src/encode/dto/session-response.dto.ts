@@ -400,6 +400,14 @@ export class SessionStatusDto {
     })
     @Expose()
     mode?: 'edit';
+
+    @ApiPropertyOptional({
+        description:
+            'True while the CMS has not confirmed it stored hlsUrl: the post still names an ' +
+            'older master, and edits are refused (CMS_NOT_ACKNOWLEDGED) until it does.',
+    })
+    @Expose()
+    cmsPending?: boolean;
 }
 
 /**

@@ -14,12 +14,17 @@ import {
     extractAnglePlaylist,
     isEncryptedPayload,
     listAngles,
+    listChapterEntries,
+    listThumbnailEntries,
+    stripLuminarySessionData,
+    type SessionDataEntry,
 } from '@luminary-media-converter/hls-core';
 import {
     AUDIO_ONLY_ANGLE_ID,
     type AdapterSource,
     type Angle,
     type AudioTrack,
+    type ChapterSidecar,
     type Quality,
     type ServeStrategy,
     type SubtitleTrack,
@@ -116,6 +121,20 @@ export interface MasterInfo {
     subtitleTracks: SubtitleTrack[];
     /** The master carries no video at all. */
     nativelyAudioOnly: boolean;
+    /**
+     * The chapter files the master names (`com.luminary.chapters`, one per
+     * language), URLs absolute. An edit saves chapters under a new name, so
+     * this — not a name a host builds — is what is current for this revision.
+     * Empty for a master from before the index; absent on one described by hand.
+     */
+    chapters?: ChapterSidecar[];
+    /**
+     * The thumbnail strips the master names (`com.luminary.thumbnails[.<group>]`),
+     * `uri` resolved to an absolute URL, `video` naming the angle a strip
+     * belongs to. Pick one with `resolveThumbnails`. Empty and absent as for
+     * {@link chapters}.
+     */
+    thumbnails?: SessionDataEntry[];
 }
 
 export interface MungeOptions {
@@ -195,11 +214,11 @@ export async function loadMaster(
         keyHex: ctx.keyHex,
         expect: 'playlist',
         signal: ctx.signal,
-        // Checked with the server on every load: a master is rewritten in
-        // place when angles or tracks change, and one stored without a
-        // Cache-Control header would otherwise be served stale from the HTTP
-        // cache for as long as the browser guesses it fresh. It is small, and
-        // an unchanged one costs a 304.
+        // Checked with the server on every load: a master can be replaced
+        // under the same name (an encoder that edits in place), and one stored
+        // without a Cache-Control header would otherwise be served stale from
+        // the HTTP cache for as long as the browser guesses it fresh. It is
+        // small, and an unchanged one costs a 304.
         httpCache: 'no-cache',
         subtle: ctx.subtle,
     });
@@ -283,6 +302,20 @@ export function describeMaster(
         }
     }
 
+    // Read off the text as served: the index lines are relative to the master's
+    // own URL, which is the last place they can be resolved against — the
+    // master the engine is handed is served from somewhere else.
+    const chapters = listChapterEntries(served).map<ChapterSidecar>(
+        (entry) => ({
+            lang: entry.language!,
+            url: absolutize(entry.uri!, url),
+        }),
+    );
+    const thumbnails = listThumbnailEntries(served).map((entry) => ({
+        ...entry,
+        uri: absolutize(entry.uri!, url),
+    }));
+
     return {
         url,
         text,
@@ -292,6 +325,8 @@ export function describeMaster(
         audioTracks: dedupeByName(dedupeById(audioTracks)),
         subtitleTracks: dedupeById(subtitleTracks),
         nativelyAudioOnly,
+        chapters,
+        thumbnails,
     };
 }
 
@@ -469,7 +504,12 @@ export async function mungeSource(
             ctx.served?.playlists.set(absolute, { url: served, scan });
             replacements.set(ref.uri, served);
         }
-        servedMasterText = substituteMasterRefs(capped, replacements);
+        // The `com.luminary.*` index lines are the controller's (read off the
+        // master in `describeMaster`), not the engine's, and their relative
+        // URIs would resolve against the URL this text is served at.
+        servedMasterText = stripLuminarySessionData(
+            substituteMasterRefs(capped, replacements),
+        );
         url = ctx.serveStrategy.serve(servedMasterText, PLAYLIST_CONTENT_TYPE);
     }
 

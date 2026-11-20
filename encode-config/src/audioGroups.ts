@@ -22,6 +22,20 @@ export function getAudioTierForHeight(height: number): AudioGroupTier {
     return AUDIO_GROUP_TIERS[AUDIO_GROUP_TIERS.length - 1];
 }
 
+/** The language a track is filed under: its tag, or `und` for none. */
+export function audioLanguageOf(track: AudioTrackInfo): string {
+    return track.language || 'und';
+}
+
+/**
+ * Best first: the most bits, then the lower index. Bitrate is all a probe says
+ * about how much of the original a track kept, and it is what an already-ABR
+ * source's tiers differ by.
+ */
+export function rankAudioTracks(a: AudioTrackInfo, b: AudioTrackInfo): number {
+    return (b.bitrateKbps || 0) - (a.bitrateKbps || 0) || a.index - b.index;
+}
+
 /**
  * Suggest audio groups from the source's audio tracks.
  *
@@ -37,22 +51,28 @@ export function getAudioTierForHeight(height: number): AudioGroupTier {
  * whose tracks carry no language metadata all land in one bucket, so the index
  * walked across unrelated tracks and a listener who changed quality changed
  * language — hd→ENG, mid→FRA, low→NYA from one real session.
+ *
+ * `fromBest` says what to do with an already-ABR source whose ladder is being
+ * re-encoded rather than copied: each tier is then made from its language's
+ * best track, at the tier's own bitrate, instead of copied from the source's
+ * matching one. The source's lower tiers are the same audio with less left in
+ * it, and re-encoding one of those is the one way to make a tier worse than
+ * the source already had it. It changes nothing for any other source.
  */
 export function buildSuggestedAudioGroups(
     audioTracks: AudioTrackInfo[],
-    videoTrackCount: number
+    videoTrackCount: number,
+    fromBest = false
 ): AudioGroup[] {
     if (audioTracks.length === 0) return [];
 
     const langMap = new Map<string, AudioTrackInfo[]>();
     for (const track of audioTracks) {
-        const lang = track.language || 'und';
+        const lang = audioLanguageOf(track);
         if (!langMap.has(lang)) langMap.set(lang, []);
         langMap.get(lang)!.push(track);
     }
-    for (const tracks of langMap.values()) {
-        tracks.sort((a, b) => (b.bitrateKbps || 0) - (a.bitrateKbps || 0));
-    }
+    for (const tracks of langMap.values()) tracks.sort(rankAudioTracks);
 
     const languages = Array.from(langMap.keys());
     const isMultiSource =
@@ -64,6 +84,16 @@ export function buildSuggestedAudioGroups(
     // Several video renditions *and* several tracks per language is the
     // signature of a source that already carries its own ladder.
     const isAlreadyABR = videoTrackCount > 1 && hasMultiAudioPerLang;
+
+    // One track per language is a source with nothing to choose between, which
+    // is exactly what is left once the best of each is taken: the tiers, their
+    // bitrates and their labels then come out as they do for any such source.
+    if (isAlreadyABR && fromBest) {
+        return buildSuggestedAudioGroups(
+            languages.map((lang) => langMap.get(lang)![0]),
+            videoTrackCount
+        );
+    }
 
     const maxSourceBitrate = Math.max(
         ...audioTracks.map((t) => t.bitrateKbps || 0)

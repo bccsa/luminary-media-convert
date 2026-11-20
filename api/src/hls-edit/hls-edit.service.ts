@@ -13,12 +13,25 @@ import {
 } from '@aws-sdk/client-s3';
 import {
     parseMasterPlaylist,
-    buildMasterPlaylist,
     normalizeS3Key,
     deriveAngleName,
+    chaptersEntry,
+    listChapterEntries,
+    listThumbnailEntries,
+    masterRevisionName,
+    parseMasterRevision,
+    removeSessionData,
+    resolveThumbnails,
+    thumbnailsDataId,
+    upsertSessionData,
     type HlsParsedMaster,
+    thumbnailsEntry,
 } from '@luminary-media-converter/hls-core';
-import { S3EtagService, type PutOptions } from './s3-etag.service.js';
+import { S3EtagService } from './s3-etag.service.js';
+import {
+    IMMUTABLE_CACHE_CONTROL,
+    MasterRevisionService,
+} from './master-revision.service.js';
 import {
     encryptTextAsset,
     isLmcencPayload,
@@ -27,9 +40,7 @@ import {
 } from '../encode/services/lmcenc.js';
 import type { S3ConfigDto } from '../encode/dto/s3-config.dto.js';
 import type { HlsReadRequestDto } from './dto/read.dto.js';
-import type { HlsMutateRequestDto } from './dto/mutate.dto.js';
 import type { HlsDiscoverRequestDto } from './dto/discover.dto.js';
-import { applyOperation, type OperationContext } from './operations/index.js';
 import {
     listAudioTracks,
     rewriteAudioTracks,
@@ -60,17 +71,11 @@ export interface HlsReadResult {
     masterPlaylistKey: string;
 }
 
-export interface HlsMutateResult {
-    master: HlsParsedMaster;
-    etag: string;
-    writtenKeys: string[];
-}
-
 export interface HlsDiscoverResult {
     masterPlaylistKey: string;
     folderPrefix: string;
     anglePlaylists?: Array<{ name: string; key: string }>;
-    /** BCP-47 language codes detected as chapters/<lang>.vtt sidecar files. */
+    /** BCP-47 language codes with a chapter file: named in the master, or at chapters/<lang>.vtt. */
     chaptersLanguages?: string[];
 }
 
@@ -81,7 +86,7 @@ export interface EncodedMedia {
     angles: VideoAngle[];
     /** The subtitles in the master, one language each. */
     subtitles: SubtitleTrack[];
-    /** Languages with a chapters/<lang>.vtt beside the master. */
+    /** Languages with a chapter file: named in the master, or at chapters/<lang>.vtt beside it. */
     chapterLanguages: string[];
     /** The master's ETag: a save is refused once the master has changed since. */
     etag: string;
@@ -89,12 +94,16 @@ export interface EncodedMedia {
     encrypted: boolean;
     /** The scrub thumbnails' VTT beside the master, relative to its folder, when there is one. */
     thumbnailsVtt?: string;
+    /** The master revision this was read from — after a save, the one the save wrote. */
+    masterKey: string;
 }
 
 /**
- * For the text files an edit rewrites. A CDN may otherwise keep serving the
- * copy from before the edit for as long as it likes, since the encode sets no
- * caching of its own; `no-cache` lets it keep a copy but check it first.
+ * For the one text file an edit still rewrites in place: the legacy
+ * `chapters/<lang>.vtt` copy older viewers read. A CDN may otherwise keep
+ * serving the copy from before the edit for as long as it likes; `no-cache`
+ * lets it keep a copy but check it first. Everything else an edit writes has
+ * a name of its own and carries {@link IMMUTABLE_CACHE_CONTROL}.
  */
 export const EDITED_CACHE_CONTROL = 'no-cache';
 
@@ -112,7 +121,10 @@ const VTT_CONTENT_TYPE = 'text/vtt';
 export class HlsEditService {
     private readonly logger = new Logger(HlsEditService.name);
 
-    constructor(private readonly s3EtagService: S3EtagService) {}
+    constructor(
+        private readonly s3EtagService: S3EtagService,
+        private readonly masterRevisions: MasterRevisionService
+    ) {}
 
     async read(dto: HlsReadRequestDto): Promise<HlsReadResult> {
         const masterPlaylistKey = normalizeS3Key(
@@ -128,59 +140,6 @@ export class HlsEditService {
         const master = parseMasterPlaylist(this.decode(body, dto.keyHex));
 
         return { master, etag, folderPrefix, masterPlaylistKey };
-    }
-
-    async mutate(dto: HlsMutateRequestDto): Promise<HlsMutateResult> {
-        const masterPlaylistKey = normalizeS3Key(
-            dto.masterPlaylistKey,
-            dto.s3.bucket
-        );
-
-        // Read with an independent round-trip so we can both parse and carry the ETag.
-        // Caller supplies `ifMatch` — we do NOT require it to match what we read here,
-        // the conditional write enforces the real invariant.
-        const { body } = await this.s3EtagService.getObjectWithEtag(
-            dto.s3,
-            masterPlaylistKey
-        );
-        const master = parseMasterPlaylist(this.decode(body, dto.keyHex));
-
-        const ctx: OperationContext = {
-            s3: dto.s3,
-            masterKey: masterPlaylistKey,
-            master,
-            s3EtagService: this.s3EtagService,
-            writtenKeys: [],
-            keyHex: dto.keyHex,
-        };
-
-        for (const op of dto.operations) {
-            await applyOperation(op, ctx);
-        }
-
-        // Always rewrite master.m3u8 — even on a no-op — so the ETag rotates
-        // and the caller can observe plumbing. Conditional on the client's
-        // `ifMatch` so stale writes fail with 409.
-        //
-        // An encrypted session goes back encrypted, with a new IV, and the
-        // plaintext only ever exists in this process's memory: writing the
-        // rebuilt master in the clear — even for the instant before a second
-        // request re-encrypted it — would publish the whole stream layout.
-        const rebuilt = buildMasterPlaylist(master);
-        const put = await this.s3EtagService.putObjectIfMatch(
-            dto.s3,
-            masterPlaylistKey,
-            this.encode(rebuilt, dto.keyHex),
-            dto.ifMatch,
-            dto.keyHex ? OCTET_STREAM : M3U8_CONTENT_TYPE
-        );
-        ctx.writtenKeys.push(masterPlaylistKey);
-
-        return {
-            master: parseMasterPlaylist(rebuilt),
-            etag: put.etag,
-            writtenKeys: ctx.writtenKeys,
-        };
     }
 
     async discover(dto: HlsDiscoverRequestDto): Promise<HlsDiscoverResult> {
@@ -202,7 +161,11 @@ export class HlsEditService {
         }
 
         const keys = await this.listObjects(dto.s3, folderPrefix);
-        const m3u8Keys = keys.filter((k) => k.endsWith('.m3u8')).sort();
+        // A master's older revisions are history, not angles: only the newest
+        // revision of each master counts.
+        const m3u8Keys = newestRevisions(
+            keys.filter((k) => k.endsWith('.m3u8'))
+        ).sort();
         if (m3u8Keys.length === 0) {
             throw new BadRequestException(
                 'No HLS playlist found under the given prefix'
@@ -227,7 +190,7 @@ export class HlsEditService {
         }
 
         const primaryIdx = playlists.findIndex(
-            (k) => k === 'master.m3u8' || k.endsWith('/master.m3u8')
+            (k) => parseMasterRevision(k.slice(folderPrefix.length))?.stem === 'master'
         );
         if (primaryIdx > 0) {
             const [primary] = playlists.splice(primaryIdx, 1);
@@ -245,7 +208,15 @@ export class HlsEditService {
             }));
         }
 
-        const chaptersLanguages = collectChaptersLanguages(keys, folderPrefix);
+        const { body: primary } = await this.s3EtagService.getObjectWithEtag(
+            dto.s3,
+            playlists[0]
+        );
+        const chaptersLanguages = chapterLanguagesOf(
+            this.decode(primary, dto.keyHex),
+            keys,
+            folderPrefix
+        );
         if (chaptersLanguages.length > 0) {
             result.chaptersLanguages = chaptersLanguages;
         }
@@ -266,17 +237,26 @@ export class HlsEditService {
             s3,
             masterKey
         );
-        const master = parseMasterPlaylist(this.decode(body, keyHex));
+        const text = this.decode(body, keyHex);
+        const master = parseMasterPlaylist(text);
         const folderPrefix = folderOf(masterKey);
         const keys = await this.listObjects(s3, folderPrefix);
-        const thumbnailsVtt = THUMBNAIL_VTTS.find((name) =>
-            keys.includes(folderPrefix + name)
+        const angles = listVideoAngles(master);
+        // The strip the master names for the first angle — the one the app's
+        // timeline shows — else whichever the encode left at a fixed name.
+        const named = resolveThumbnails(
+            listThumbnailEntries(text),
+            angles[0]?.id || undefined
         );
+        const thumbnailsVtt = named?.uri
+            ? resolveKey(masterKey, named.uri).slice(folderPrefix.length)
+            : THUMBNAIL_VTTS.find((name) => keys.includes(folderPrefix + name));
         return {
+            masterKey,
             tracks: listAudioTracks(master),
-            angles: listVideoAngles(master),
+            angles,
             subtitles: listSubtitleTracks(master),
-            chapterLanguages: collectChaptersLanguages(keys, folderPrefix),
+            chapterLanguages: chapterLanguagesOf(text, keys, folderPrefix),
             etag,
             encrypted: isLmcencPayload(body),
             ...(thumbnailsVtt ? { thumbnailsVtt } : {}),
@@ -289,10 +269,9 @@ export class HlsEditService {
      *
      * Nothing else changes, byte for byte: segments, folders and the key stay
      * as they are, and so does the rest of the master; a removed track's files
-     * stay in storage. The master goes back encrypted exactly when it was
-     * read encrypted, and only if it is still the version `ifMatch` names, so
-     * an edit never lands on top of one it has not seen. The first edit keeps
-     * the master as the encode wrote it at `master.m3u8.orig`, to undo by hand.
+     * stay in storage. The edit is a new master revision, encrypted exactly
+     * when the master was read encrypted, and written only from the version
+     * `ifMatch` names, so an edit never builds on one it has not seen.
      */
     async saveAudioTracks(
         s3: S3ConfigDto,
@@ -324,23 +303,13 @@ export class HlsEditService {
             edits,
             removed
         );
-
-        const contentType = encrypted ? OCTET_STREAM : M3U8_CONTENT_TYPE;
-        await this.s3EtagService.putObjectIfAbsent(
-            s3,
-            `${masterKey}.orig`,
-            body,
-            contentType
-        );
-        await this.s3EtagService.putObjectIfMatch(
+        const next = await this.writeEditedMaster(
             s3,
             masterKey,
-            this.encode(rewritten, encrypted ? keyHex : undefined),
-            ifMatch,
-            contentType,
-            { cacheControl: EDITED_CACHE_CONTROL }
+            rewritten,
+            encrypted ? keyHex : undefined
         );
-        return this.readEncodedMedia(s3, masterKey, keyHex);
+        return this.readEncodedMedia(s3, next, keyHex);
     }
 
     /** A language's subtitles as WebVTT text, decrypted; a 404-worthy error when the video has none in it. */
@@ -378,10 +347,10 @@ export class HlsEditService {
      * language when the video has none in it yet.
      *
      * Every save writes new file names, so no cache hands out the words from
-     * before it, and the master moves to them only over the version `ifMatch`
-     * names, encrypted when it was read encrypted, the first edit keeping the
-     * original at `master.m3u8.orig`. The files a save replaces go once the
-     * master no longer names them.
+     * before it, and a new master revision names them, written only from the
+     * version `ifMatch` names, encrypted when it was read encrypted. The files
+     * a save replaces stay: the revision before still names them, and a viewer
+     * whose CMS document has not caught up still plays it.
      */
     async saveSubtitles(
         s3: S3ConfigDto,
@@ -410,9 +379,6 @@ export class HlsEditService {
 
         const text = this.decode(body, keyHex);
         const master = parseMasterPlaylist(text);
-        const before = listSubtitleTracks(master).find(
-            (t) => t.language === subtitles.language
-        );
         const names = subtitleFileNames(subtitles.language, randomBytes(4).toString('hex'));
         // Checked before anything is written: a bad language or name leaves storage as it was.
         const rewritten = upsertSubtitleLines(text, {
@@ -428,20 +394,24 @@ export class HlsEditService {
             s3,
             resolveKey(playlistKey, names.vtt),
             this.encode(vtt, key),
-            key ? OCTET_STREAM : VTT_CONTENT_TYPE
+            key ? OCTET_STREAM : VTT_CONTENT_TYPE,
+            { cacheControl: IMMUTABLE_CACHE_CONTROL }
         );
         await this.s3EtagService.putObject(
             s3,
             playlistKey,
             this.encode(subtitlePlaylist(names.vtt, duration), key),
-            key ? OCTET_STREAM : M3U8_CONTENT_TYPE
+            key ? OCTET_STREAM : M3U8_CONTENT_TYPE,
+            { cacheControl: IMMUTABLE_CACHE_CONTROL }
         );
-        await this.writeEditedMaster(s3, masterKey, body, rewritten, ifMatch, key);
-        if (before) await this.dropSubtitleFiles(s3, masterKey, before.uri, keyHex);
-        return this.readEncodedMedia(s3, masterKey, keyHex);
+        const next = await this.writeEditedMaster(s3, masterKey, rewritten, key);
+        return this.readEncodedMedia(s3, next, keyHex);
     }
 
-    /** Takes a language's subtitles out of the master, as {@link saveSubtitles} writes it; then their files. */
+    /**
+     * Takes a language's subtitles out of the master, as {@link saveSubtitles}
+     * writes it. Its files stay: the revision before still names them.
+     */
     async removeSubtitles(
         s3: S3ConfigDto,
         masterKey: string,
@@ -457,10 +427,14 @@ export class HlsEditService {
                 'This video is encrypted: its key is needed to edit it'
             );
         }
-        const { text, uri } = removeSubtitleLines(this.decode(body, keyHex), language);
-        await this.writeEditedMaster(s3, masterKey, body, text, ifMatch, encrypted ? keyHex : undefined);
-        await this.dropSubtitleFiles(s3, masterKey, uri, keyHex);
-        return this.readEncodedMedia(s3, masterKey, keyHex);
+        const { text } = removeSubtitleLines(this.decode(body, keyHex), language);
+        const next = await this.writeEditedMaster(
+            s3,
+            masterKey,
+            text,
+            encrypted ? keyHex : undefined
+        );
+        return this.readEncodedMedia(s3, next, keyHex);
     }
 
     private assertSameVersion(etag: string, ifMatch: string): void {
@@ -473,53 +447,25 @@ export class HlsEditService {
         }
     }
 
-    /** The master as edited, over the version read; the first edit keeps the original at `.orig`. */
+    /**
+     * The master as edited, as the revision after `masterKey`, encrypted when
+     * `keyHex` is given. Returns the new revision's key. The revision read is
+     * never written again, so there is no `.orig` copy: older revisions are
+     * the history.
+     */
     private async writeEditedMaster(
         s3: S3ConfigDto,
         masterKey: string,
-        original: Buffer,
         text: string,
-        ifMatch: string,
         keyHex?: string
-    ): Promise<void> {
-        const contentType = keyHex ? OCTET_STREAM : M3U8_CONTENT_TYPE;
-        await this.s3EtagService.putObjectIfAbsent(s3, `${masterKey}.orig`, original, contentType);
-        await this.s3EtagService.putObjectIfMatch(
+    ): Promise<string> {
+        const { masterKey: next } = await this.masterRevisions.writeNext(
             s3,
             masterKey,
             this.encode(text, keyHex),
-            ifMatch,
-            contentType,
-            { cacheControl: EDITED_CACHE_CONTROL }
+            keyHex ? OCTET_STREAM : M3U8_CONTENT_TYPE
         );
-    }
-
-    /**
-     * A language's files the master no longer names. Only ones under
-     * `subtitles/` go: a rendition the encoder did not write is left where it
-     * is. Best effort: a file left behind is only space.
-     */
-    private async dropSubtitleFiles(
-        s3: S3ConfigDto,
-        masterKey: string,
-        playlistUri: string,
-        keyHex?: string
-    ): Promise<void> {
-        if (!playlistUri.startsWith('subtitles/')) return;
-        const playlistKey = resolveKey(masterKey, playlistUri);
-        try {
-            const playlist = this.decode(
-                (await this.s3EtagService.getObjectWithEtag(s3, playlistKey)).body,
-                keyHex
-            );
-            const segment = segmentUriOf(playlist);
-            await this.s3EtagService.deleteObjects(s3, [
-                playlistKey,
-                ...(segment ? [resolveKey(playlistKey, segment)] : []),
-            ]);
-        } catch (err) {
-            this.logger.warn(`Left ${playlistKey} behind: ${(err as Error).message}`);
-        }
+        return next;
     }
 
     /** The video's length: its first variant's segments added up. */
@@ -543,10 +489,11 @@ export class HlsEditService {
 
     /**
      * Renames camera angles in an existing video's master and takes the
-     * `removed` ones out of it, as {@link saveAudioTracks} does for tracks: only
-     * over the version `ifMatch` names, encrypted when it was read encrypted,
-     * the first edit keeping the original at `master.m3u8.orig`. A removed
-     * angle's files stay in storage.
+     * `removed` ones out of it, as {@link saveAudioTracks} does for tracks: a
+     * new master revision, written only from the version `ifMatch` names,
+     * encrypted when it was read encrypted. A removed angle's files stay in
+     * storage; the master stops naming its thumbnail strip too, unless it is
+     * the video's only one.
      */
     async saveVideoAngles(
         s3: S3ConfigDto,
@@ -573,46 +520,77 @@ export class HlsEditService {
                 'This video is encrypted: its key is needed to edit it'
             );
         }
-        const rewritten = rewriteVideoAngles(
+        let rewritten = rewriteVideoAngles(
             this.decode(body, keyHex),
             edits,
             removed
         );
-
-        const contentType = encrypted ? OCTET_STREAM : M3U8_CONTENT_TYPE;
-        await this.s3EtagService.putObjectIfAbsent(
-            s3,
-            `${masterKey}.orig`,
-            body,
-            contentType
-        );
-        await this.s3EtagService.putObjectIfMatch(
+        // A rename keeps the GROUP-ID, so only a removed angle's strip goes —
+        // unless it is the video's only strip, shown on every angle: that one
+        // stays, for every angle, rather than the video losing its thumbnails.
+        for (const id of removed) {
+            const strips = listThumbnailEntries(rewritten);
+            const own = strips.find((e) => e.dataId === thumbnailsDataId(id));
+            if (!own) continue;
+            rewritten = removeSessionData(rewritten, own.dataId);
+            if (strips.length === 1 && own.uri) {
+                rewritten = upsertSessionData(
+                    rewritten,
+                    thumbnailsEntry(own.uri)
+                );
+            }
+        }
+        const next = await this.writeEditedMaster(
             s3,
             masterKey,
-            this.encode(rewritten, encrypted ? keyHex : undefined),
-            ifMatch,
-            contentType,
-            { cacheControl: EDITED_CACHE_CONTROL }
+            rewritten,
+            encrypted ? keyHex : undefined
         );
-        return this.readEncodedMedia(s3, masterKey, keyHex);
+        return this.readEncodedMedia(s3, next, keyHex);
     }
 
     /**
-     * Read the chapter sidecar at `{folderPrefix}chapters/{lang}.vtt`.
-     * Returns null when the object does not exist.
+     * A language's chapters, as WebVTT text, decrypted. Found, in order:
+     *
+     * 1. in the file the master at `opts.masterKey` names for the language;
+     * 2. in `opts.draftUri`, a file saved during the encode, before any master
+     *    existed to name it (relative to `folderPrefix`);
+     * 3. at the fixed `chapters/<lang>.vtt`, where videos from before named
+     *    chapter files kept them.
+     *
+     * Null when there are none. A master that is not there yet is no error:
+     * it is simply step 1 finding nothing.
      */
     async readChapters(
         s3: S3ConfigDto,
         folderPrefix: string,
         lang: string,
-        keyHex?: string
+        keyHex?: string,
+        opts: { masterKey?: string; draftUri?: string } = {}
     ): Promise<{ vtt: string } | null> {
         if (!LANG_PATTERN.test(lang)) {
             throw new BadRequestException(
                 'lang must be a BCP-47 language code'
             );
         }
-        const key = chaptersKey(folderPrefix, lang);
+        let key: string | undefined;
+        if (opts.masterKey) {
+            try {
+                const { body } = await this.s3EtagService.getObjectWithEtag(
+                    s3,
+                    opts.masterKey
+                );
+                const named = listChapterEntries(this.decode(body, keyHex)).find(
+                    (e) => e.language === lang
+                );
+                if (named?.uri) key = resolveKey(opts.masterKey, named.uri);
+            } catch (err) {
+                if (!isNoSuchKey(err)) throw err;
+            }
+        }
+        key ??= opts.draftUri
+            ? `${withSlash(folderPrefix)}${opts.draftUri}`
+            : chaptersKey(folderPrefix, lang);
         try {
             const { body } = await this.s3EtagService.getObjectWithEtag(
                 s3,
@@ -655,23 +633,25 @@ export class HlsEditService {
     }
 
     /**
-     * Write a WebVTT chapter sidecar to `{folderPrefix}chapters/{lang}.vtt`.
-     * Validates language code, body size, and `WEBVTT` magic before uploading.
+     * Writes a language's chapters as a file of their own,
+     * `chapters/<lang>_<8hex>.vtt` under `folderPrefix`, and returns its path
+     * relative to the folder. Nothing points at it until a master names it —
+     * see {@link publishChapters}. The legacy copy older viewers read is a
+     * separate write, {@link writeLegacyChapters}, for the caller to make once
+     * the save has landed.
      *
      * `keyHex` is the caller stating that this session's text assets are
      * encrypted — the body is wrapped in LMCENC01 with a fresh IV on the way
-     * out. There is nothing in the bucket to mirror on a first write, and
-     * chapter titles left in the clear beside an encrypted playlist would give
-     * away exactly what the encryption was for.
+     * out. Chapter titles left in the clear beside an encrypted playlist would
+     * give away exactly what the encryption was for.
      */
-    async writeChapters(
+    async writeChapterFile(
         s3: S3ConfigDto,
         folderPrefix: string,
         lang: string,
         vtt: string,
-        keyHex?: string,
-        options: PutOptions = {}
-    ): Promise<void> {
+        keyHex?: string
+    ): Promise<{ lang: string; uri: string }> {
         lang = lang.toLowerCase();
         if (!LANG_PATTERN.test(lang)) {
             throw new BadRequestException(
@@ -690,14 +670,152 @@ export class HlsEditService {
                 `Chapter VTT body exceeds ${MAX_VTT_BYTES} bytes`
             );
         }
-        const key = chaptersKey(folderPrefix, lang);
+        const uri = `chapters/${lang}_${randomBytes(4).toString('hex')}.vtt`;
+        const contentType = keyHex ? OCTET_STREAM : VTT_CONTENT_TYPE;
         await this.s3EtagService.putObject(
             s3,
-            key,
+            `${withSlash(folderPrefix)}${uri}`,
             this.encode(vtt, keyHex),
-            keyHex ? OCTET_STREAM : VTT_CONTENT_TYPE,
-            options
+            contentType,
+            { cacheControl: IMMUTABLE_CACHE_CONTROL }
         );
+        return { lang, uri };
+    }
+
+    /**
+     * LEGACY-CHAPTERS: overwrites `chapters/<lang>.vtt`, the one name viewers
+     * from before named chapter files can find, with `no-cache` because it is
+     * the one file still rewritten in place. Drop this write a month after the
+     * Luminary viewer that reads the master's chapter lines has shipped
+     * (tracked in #414).
+     *
+     * Written only once a save has landed, so a save that is refused leaves
+     * older viewers on the chapters they had. Best effort: the save itself is
+     * done by then, and newer viewers already have it.
+     */
+    async writeLegacyChapters(
+        s3: S3ConfigDto,
+        folderPrefix: string,
+        lang: string,
+        vtt: string,
+        keyHex?: string
+    ): Promise<void> {
+        try {
+            await this.s3EtagService.putObject(
+                s3,
+                chaptersKey(folderPrefix, lang),
+                this.encode(vtt, keyHex),
+                keyHex ? OCTET_STREAM : VTT_CONTENT_TYPE,
+                { cacheControl: EDITED_CACHE_CONTROL }
+            );
+        } catch (err) {
+            this.logger.warn(
+                `The legacy chapters/${lang}.vtt was not updated: ${(err as Error).message}`
+            );
+        }
+    }
+
+    /**
+     * Names `files` (language → path relative to the master's folder) in a new
+     * revision of the master at `masterKey`. The revision is encrypted when the
+     * master was read encrypted. Returns the new revision's key and ETag.
+     */
+    async publishChapters(
+        s3: S3ConfigDto,
+        masterKey: string,
+        files: Record<string, string>,
+        keyHex?: string
+    ): Promise<{ masterKey: string; etag: string }> {
+        return this.rewriteIndex(
+            s3,
+            masterKey,
+            (text) =>
+                Object.entries(files).reduce(
+                    (out, [lang, uri]) =>
+                        upsertSessionData(out, chaptersEntry(lang, uri)),
+                    text
+                ),
+            keyHex
+        );
+    }
+
+    /**
+     * Names a newly made thumbnail strip (`uri`, relative to the master's
+     * folder) in a new revision of the master, as the video's only strip,
+     * labelled with the angle it was sampled from when the video has angles.
+     *
+     * Every strip the master named before goes: there is one strip per video
+     * for now, shown on every angle, and leaving an older line in place would
+     * keep the old strip on the angles the new one is not labelled for.
+     */
+    async publishThumbnails(
+        s3: S3ConfigDto,
+        masterKey: string,
+        uri: string,
+        angleId: string | undefined,
+        keyHex?: string
+    ): Promise<{ masterKey: string; etag: string }> {
+        return this.rewriteIndex(
+            s3,
+            masterKey,
+            (text) => {
+                for (const entry of listThumbnailEntries(text)) {
+                    text = removeSessionData(text, entry.dataId);
+                }
+                return upsertSessionData(text, thumbnailsEntry(uri, angleId));
+            },
+            keyHex
+        );
+    }
+
+    /**
+     * Writes the master at `masterKey`, its sidecar index rewritten by
+     * `rewrite`, as a new revision — encrypted when the master was read
+     * encrypted. Returns the new revision's key and ETag.
+     */
+    private async rewriteIndex(
+        s3: S3ConfigDto,
+        masterKey: string,
+        rewrite: (text: string) => string,
+        keyHex?: string
+    ): Promise<{ masterKey: string; etag: string }> {
+        const { body } = await this.s3EtagService.getObjectWithEtag(
+            s3,
+            masterKey
+        );
+        const encrypted = isLmcencPayload(body);
+        if (encrypted && !keyHex) {
+            throw new BadRequestException(
+                'This video is encrypted: its key is needed to edit it'
+            );
+        }
+        const text = rewrite(this.decode(body, keyHex));
+        return this.masterRevisions.writeNext(
+            s3,
+            masterKey,
+            this.encode(text, encrypted ? keyHex : undefined),
+            encrypted ? OCTET_STREAM : M3U8_CONTENT_TYPE
+        );
+    }
+
+    /**
+     * Removes a chapter file nothing can have fetched: one saved during the
+     * encode and replaced before any master named it. Best effort.
+     */
+    async deleteChapterDraft(
+        s3: S3ConfigDto,
+        folderPrefix: string,
+        uri: string
+    ): Promise<void> {
+        try {
+            await this.s3EtagService.deleteObjects(s3, [
+                `${withSlash(folderPrefix)}${uri}`,
+            ]);
+        } catch (err) {
+            this.logger.warn(
+                `Left the chapter draft ${uri} behind: ${(err as Error).message}`
+            );
+        }
     }
 
     /**
@@ -778,10 +896,49 @@ function chaptersKey(folderPrefix: string, lang: string): string {
 }
 
 function waveformKey(folderPrefix: string): string {
-    const prefix = folderPrefix.endsWith('/')
+    return `${withSlash(folderPrefix)}waveform.json`;
+}
+
+function withSlash(folderPrefix: string): string {
+    return !folderPrefix || folderPrefix.endsWith('/')
         ? folderPrefix
         : folderPrefix + '/';
-    return `${prefix}waveform.json`;
+}
+
+/** Languages with chapters: named in the master's text, or at the legacy chapters/<lang>.vtt. */
+function chapterLanguagesOf(
+    masterText: string,
+    keys: string[],
+    folderPrefix: string
+): string[] {
+    const langs = new Set(collectChaptersLanguages(keys, folderPrefix));
+    for (const entry of listChapterEntries(masterText)) {
+        if (entry.language) langs.add(entry.language);
+    }
+    return Array.from(langs).sort();
+}
+
+/**
+ * Of a folder's playlists, each master's newest revision only, with every
+ * other playlist kept as it is. A media playlist (`stream_0/playlist.m3u8`)
+ * parses as a revision 0 of its own, so it survives.
+ */
+function newestRevisions(keys: string[]): string[] {
+    const newest = new Map<string, { key: string; n: number }>();
+    for (const key of keys) {
+        const lastSlash = key.lastIndexOf('/');
+        const folder = key.slice(0, lastSlash + 1);
+        const name = key.slice(lastSlash + 1);
+        const revision = parseMasterRevision(name);
+        if (!revision || name !== masterRevisionName(revision.stem, revision.n)) {
+            newest.set(key, { key, n: 0 });
+            continue;
+        }
+        const video = folder + revision.stem;
+        const seen = newest.get(video);
+        if (!seen || revision.n > seen.n) newest.set(video, { key, n: revision.n });
+    }
+    return [...newest.values()].map((v) => v.key);
 }
 
 function collectChaptersLanguages(

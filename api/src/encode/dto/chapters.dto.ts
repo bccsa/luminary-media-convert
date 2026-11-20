@@ -1,12 +1,11 @@
 import { IsString } from 'class-validator';
 import { Expose } from 'class-transformer';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
- * A chapter sidecar for a session, written next to its output in S3.
- *
- * The session already knows the bucket and the prefix, so unlike the stateless
- * `/api/hls/chapters/write` route this carries only the document itself.
+ * A chapter document for a session, written next to its output in S3 under a
+ * name of its own. The session already knows the bucket and the prefix, so
+ * this carries only the document itself.
  */
 export class ChaptersWriteDto {
     @ApiProperty({
@@ -17,4 +16,33 @@ export class ChaptersWriteDto {
     @IsString()
     @Expose()
     vtt: string;
+}
+
+/**
+ * Where a chapter save left the video. Empty while the encode has not
+ * published a master yet: the chapters wait for it, and the encode names them
+ * in the master it writes.
+ */
+export class ChaptersSaveResultDto {
+    @ApiPropertyOptional({
+        description: 'Public URL of the master revision that now names the chapters.',
+    })
+    @Expose()
+    hlsUrl?: string;
+
+    @ApiPropertyOptional({ description: "That revision's object key." })
+    @Expose()
+    masterPlaylist?: string;
+
+    @ApiPropertyOptional({ description: "That revision's ETag." })
+    @Expose()
+    etag?: string;
+
+    @ApiPropertyOptional({
+        description:
+            'The CMS confirmed it stored the new version. False when it has not yet; absent ' +
+            'for a session with no CMS behind it.',
+    })
+    @Expose()
+    published?: boolean;
 }

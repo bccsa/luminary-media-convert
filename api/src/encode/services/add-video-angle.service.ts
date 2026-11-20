@@ -17,7 +17,8 @@ import {
     type HlsVariant,
 } from '@luminary-media-converter/hls-core';
 import { S3EtagService } from '../../hls-edit/s3-etag.service.js';
-import { EDITED_CACHE_CONTROL } from '../../hls-edit/hls-edit.service.js';
+import { MasterRevisionService } from '../../hls-edit/master-revision.service.js';
+import { VideoRevisionService } from './video-revision.service.js';
 import {
     addVideoAngleLines,
     assertAngleName,
@@ -125,9 +126,8 @@ const FFMPEG_MASTER = 'angle-master.m3u8';
  * segment grid of the video's main angle — byte ranges and encryption too —
  * uploaded beside it in folders of its own, and named in the master, sharing
  * the video's audio. A video with a single picture gains angles: its picture
- * becomes the main one. The video's own files are never written; the master
- * only changes over the version the editor read, its original kept at
- * `master.m3u8.orig`.
+ * becomes the main one. The video's own files are never written; a new master
+ * revision names the angle, written from the version the editor read.
  */
 @Injectable()
 export class AddVideoAngleService {
@@ -139,7 +139,9 @@ export class AddVideoAngleService {
         private readonly s3EtagService: S3EtagService,
         private readonly segmentPipelineService: SegmentPipelineService,
         private readonly encryptionService: EncryptionService,
-        private readonly ffmpegService: FfmpegService
+        private readonly ffmpegService: FfmpegService,
+        private readonly masterRevisions: MasterRevisionService,
+        private readonly videoRevisions: VideoRevisionService
     ) {}
 
     /** The job on this session, while it runs and after it ended. */
@@ -433,19 +435,19 @@ export class AddVideoAngleService {
             const contentType = encrypted
                 ? 'application/octet-stream'
                 : 'application/vnd.apple.mpegurl';
-            await this.s3EtagService.putObjectIfAbsent(
-                s3,
-                `${masterKey}.orig`,
-                master.body,
-                contentType
-            );
-            await this.s3EtagService.putObjectIfMatch(
-                s3,
-                masterKey,
-                encrypted ? encryptTextAsset(updated, key!) : updated,
-                master.etag,
-                contentType,
-                { cacheControl: EDITED_CACHE_CONTROL }
+            // As for an added audio track: the revision after the one this job
+            // read, so a version saved meanwhile is never overwritten, and not
+            // gated on the CMS, which was checked when the job started.
+            await this.videoRevisions.save(
+                session.id,
+                () =>
+                    this.masterRevisions.writeNext(
+                        s3,
+                        masterKey,
+                        encrypted ? encryptTextAsset(updated, key!) : updated,
+                        contentType
+                    ),
+                { gate: false, awaitAck: false }
             );
             job.state = 'done';
             job.phase = 'done';

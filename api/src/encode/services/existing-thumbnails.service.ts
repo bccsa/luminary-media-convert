@@ -9,7 +9,9 @@ import {
     type HlsVariant,
 } from '@luminary-media-converter/hls-core';
 import { S3EtagService } from '../../hls-edit/s3-etag.service.js';
-import { EDITED_CACHE_CONTROL } from '../../hls-edit/hls-edit.service.js';
+import { HlsEditService } from '../../hls-edit/hls-edit.service.js';
+import { IMMUTABLE_CACHE_CONTROL } from '../../hls-edit/master-revision.service.js';
+import { VideoRevisionService } from './video-revision.service.js';
 import type { S3ConfigDto } from '../dto/s3-config.dto.js';
 import {
     encryptTextAsset,
@@ -45,7 +47,9 @@ const IMAGE_TYPES: Record<string, string> = {
  * Makes the storyboard of a post's existing video again, in an edit session,
  * where the source is long gone: the video's smallest rendition wide enough
  * for the frames is fetched, decrypted and sampled, and the new sprites and VTT
- * replace the old ones beside the video. The video itself is never written.
+ * go beside the video under names of their own, named by a new revision of
+ * its master. The video itself is never written, and the strip it replaces
+ * stays: the revision before still names it.
  */
 @Injectable()
 export class ExistingThumbnailsService {
@@ -55,7 +59,9 @@ export class ExistingThumbnailsService {
     constructor(
         private readonly sessionService: SessionService,
         private readonly s3EtagService: S3EtagService,
-        private readonly thumbnailService: ThumbnailService
+        private readonly thumbnailService: ThumbnailService,
+        private readonly hlsEditService: HlsEditService,
+        private readonly videoRevisions: VideoRevisionService
     ) {}
 
     /** The job on this session, while it runs and after it ended. */
@@ -166,15 +172,38 @@ export class ExistingThumbnailsService {
                 throw new Error('No thumbnails could be made from this video');
             }
 
-            await this.publish(
+            const vttPath = await this.publish(
                 s3,
                 folder,
                 join(outputDir, 'thumbnails'),
                 key && isLmcencPayload(masterBody) ? key : undefined
             );
+            // The video's one strip, labelled with the angle it was sampled
+            // from; a video without angles has one strip for all of it. Written
+            // onto the master as it is now, not as the job read it, so a save
+            // made while the job ran is kept. Not gated on the CMS: the job was
+            // checked when it started, and if the CMS has gone since, the
+            // version waits for it.
+            await this.videoRevisions.save(
+                sessionId,
+                (currentKey) =>
+                    this.hlsEditService.publishThumbnails(
+                        s3,
+                        currentKey,
+                        vttPath,
+                        variant.videoGroup,
+                        keyHex
+                    ),
+                { gate: false, awaitAck: false }
+            );
+            const session = this.sessionService.get(sessionId);
+            // In the form the session already holds its master's name: a key for
+            // a finished encode, relative to the folder for an edit session.
             this.sessionService.setThumbnailsVtt(
                 sessionId,
-                'thumbnails/thumbnails.vtt'
+                session?.masterPlaylist?.includes('/')
+                    ? posix.join(folder, vttPath)
+                    : vttPath
             );
         } finally {
             await this.thumbnailService.removePreview(sessionId);
@@ -248,17 +277,17 @@ export class ExistingThumbnailsService {
     }
 
     /**
-     * Upload the new storyboard, then delete the sprites it replaces. The sprites
-     * take names of their own, so nothing caching the old ones under their names
-     * can show them in the new storyboard's place; the VTT, the one name players
-     * look for, is sent uncached.
+     * Upload the new storyboard, sprites and VTT alike under names of their own,
+     * and return the VTT's path relative to the video's folder. Nothing points
+     * at it until a master revision names it, and the sprites it replaces stay:
+     * the revision before names them.
      */
     private async publish(
         s3: S3ConfigDto,
         folder: string,
         thumbnailDir: string,
         textKey: Buffer | undefined
-    ): Promise<void> {
+    ): Promise<string> {
         const tag = Date.now().toString(36);
         const sprites = (await readdir(thumbnailDir)).filter((f) =>
             SPRITE_RE.test(f)
@@ -274,7 +303,8 @@ export class ExistingThumbnailsService {
                 s3,
                 posix.join(prefix, to),
                 await readFile(join(thumbnailDir, from)),
-                IMAGE_TYPES[ext] ?? 'application/octet-stream'
+                IMAGE_TYPES[ext] ?? 'application/octet-stream',
+                { cacheControl: IMMUTABLE_CACHE_CONTROL }
             );
         }
 
@@ -283,30 +313,15 @@ export class ExistingThumbnailsService {
             /^(sprite_\d+\.\w+)(?=#|$)/gm,
             (name) => renamed.get(name) ?? name
         );
+        const vttPath = `thumbnails/thumbnails_${randomBytes(4).toString('hex')}.vtt`;
         await this.s3EtagService.putObject(
             s3,
-            posix.join(prefix, 'thumbnails.vtt'),
+            posix.join(folder, vttPath),
             textKey ? encryptTextAsset(vtt, textKey) : vtt,
-            'text/vtt',
-            { cacheControl: EDITED_CACHE_CONTROL }
+            textKey ? 'application/octet-stream' : 'text/vtt',
+            { cacheControl: IMMUTABLE_CACHE_CONTROL }
         );
-
-        const kept = new Set(
-            [...renamed.values()].map((f) => posix.join(prefix, f))
-        );
-        const stale = (
-            await this.s3EtagService.listKeys(s3, `${prefix}/`)
-        ).filter((k) => /\/sprite_[^/]+$/.test(k) && !kept.has(k));
-        if (stale.length > 0) {
-            try {
-                await this.s3EtagService.deleteObjects(s3, stale);
-            } catch (err) {
-                // The new storyboard is in place and names none of these.
-                this.logger.warn(
-                    `Could not delete ${stale.length} old sprite(s) under ${prefix}: ${(err as Error).message}`
-                );
-            }
-        }
+        return vttPath;
     }
 }
 

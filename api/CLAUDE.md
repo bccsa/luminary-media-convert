@@ -2,7 +2,7 @@
 
 ## Overview
 
-- **`api/`** — NestJS REST API service (the "Encoding API") that encodes media files into HLS/ABR format using FFmpeg (with optional NVIDIA or Apple Silicon GPU acceleration), uploads output to S3-compatible storage, and delivers status updates via SSE or polling. Also provides the pre-encode preview — the source file itself, served with byte ranges, or an on-demand HLS conversion when the browser cannot play it — a source storyboard and waveform for the trim timeline, a CMS handshake API, and a stateless HLS-edit API for mutating master playlists and reading/writing chapter and waveform sidecars in S3. Exposed as a library (`createServer()` in `api/src/bootstrap.ts`) so the desktop shell can host it in-process; `api/src/main.ts` is the same code path run standalone from the environment.
+- **`api/`** — NestJS REST API service (the "Encoding API") that encodes media files into HLS/ABR format using FFmpeg (with optional NVIDIA or Apple Silicon GPU acceleration), uploads output to S3-compatible storage, and delivers status updates via SSE or polling. Also provides the pre-encode preview — the source file itself, served with byte ranges, or an on-demand HLS conversion when the browser cannot play it — a source storyboard and waveform for the trim timeline, a CMS handshake API, editing of published videos (each save writes a new master revision, `master_rN.m3u8`, that the CMS must acknowledge storing), and stateless HLS-edit reads (master, discovery, chapter and waveform sidecars) in S3. Exposed as a library (`createServer()` in `api/src/bootstrap.ts`) so the desktop shell can host it in-process; `api/src/main.ts` is the same code path run standalone from the environment.
 
 ### API (`api/`)
 

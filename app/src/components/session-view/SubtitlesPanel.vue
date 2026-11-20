@@ -15,6 +15,7 @@ import type { Segment } from '../segment-editor';
 import SubtitleCompare from './SubtitleCompare.vue';
 import SubtitleLines from './SubtitleLines.vue';
 import { copyTimings, languageName, readSubtitleFile, subtitlesToSrt, subtitlesToVtt } from './subtitles';
+import { isChangedElsewhere, saveErrorMessage } from '../../utils/errors';
 
 const props = defineProps<{
     sessionId: string;
@@ -26,8 +27,12 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-    /** The master changed: whatever holds the old one should load it again. */
-    saved: [];
+    /**
+     * The master changed — saved here, or moved on to a version another
+     * machine wrote: whatever holds the old one should load it again. A save
+     * passes on its `published`, whether Luminary CMS has stored it yet.
+     */
+    saved: [published?: boolean];
 }>();
 
 /** One language as edited here, against what was last read or saved. */
@@ -334,15 +339,29 @@ async function save(): Promise<void> {
     notice.value = null;
     try {
         const vtt = subtitlesToVtt(d.segments);
-        media.value = await putSubtitles(props.sessionId, token, language, media.value.etag, d.name.trim(), vtt);
+        const next = await putSubtitles(props.sessionId, token, language, media.value.etag, d.name.trim(), vtt);
+        media.value = next;
         Object.assign(d, { savedVtt: vtt, savedName: d.name.trim(), isNew: false });
         notice.value = `Saved: every player offers ${labelOf(language)} now`;
-        emit('saved');
+        emit('saved', next.published);
     } catch (err) {
-        error.value = (err as Error).message;
+        error.value = saveErrorMessage(err);
+        if (isChangedElsewhere(err)) void followNewerVersion(error.value);
     } finally {
         saving.value = false;
     }
+}
+
+/**
+ * Another machine saved the video first, and the session has moved on to its
+ * version. Reading it again keeps every unsaved language as it is here, so the
+ * edit can be saved again over the newer version, and the page follows the new
+ * master. The read clears the error, so the conflict is put back after it.
+ */
+async function followNewerVersion(message: string): Promise<void> {
+    emit('saved');
+    await load();
+    error.value ??= message;
 }
 
 function discard(): void {
@@ -371,13 +390,15 @@ async function remove(): Promise<void> {
     saving.value = true;
     error.value = null;
     try {
-        media.value = await deleteSubtitles(props.sessionId, token, language, media.value.etag);
+        const next = await deleteSubtitles(props.sessionId, token, language, media.value.etag);
+        media.value = next;
         delete drafts[language];
         selected.value = languages.value[0] ?? null;
         if (selected.value) await ensureLoaded(selected.value);
-        emit('saved');
+        emit('saved', next.published);
     } catch (err) {
-        error.value = (err as Error).message;
+        error.value = saveErrorMessage(err);
+        if (isChangedElsewhere(err)) void followNewerVersion(error.value);
     } finally {
         saving.value = false;
     }
@@ -394,36 +415,37 @@ defineExpose({
 
 watch(() => [props.sessionId, props.sessionToken] as const, load, { immediate: true });
 
+// The fields, tabs and labels of the other edit panels and their dialogs, so the four read as one editor.
 const input =
-    'rounded-lg border border-sky-200 bg-white px-2.5 text-sm text-zinc-900 outline-none focus:border-sky-600 dark:border-sky-400/12 dark:bg-[#0c1222] dark:text-slate-200 dark:focus:border-sky-400';
+    'rounded-md border border-sky-200 bg-white px-2.5 py-1.5 text-sm text-zinc-900 outline-none transition-[border-color] focus:border-sky-600 dark:border-sky-400/12 dark:bg-[#0c1222] dark:text-slate-200 dark:focus:border-sky-400';
 const viewTab =
-    'flex h-10 items-center justify-center gap-2 rounded-lg text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50';
-const onTab = 'bg-white font-semibold text-zinc-900 shadow-sm dark:bg-slate-700 dark:text-slate-100';
-const offTab = 'font-medium text-slate-600 hover:text-zinc-900 dark:text-slate-400 dark:hover:text-slate-200';
+    'flex items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50';
+const onTab = 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100';
+const offTab = 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200';
+const fieldLabel = 'flex flex-col gap-1 text-xs font-medium text-slate-500 dark:text-slate-400';
 </script>
 
 <template>
     <section
-        class="relative mt-3.5 flex min-h-0 flex-auto flex-col overflow-hidden rounded-[14px] border border-sky-200 bg-white shadow-[0_1px_2px_rgb(9_9_11/0.04)] dark:border-sky-400/12 dark:bg-[rgba(30,41,55,0.82)]"
+        class="relative mt-3.5 flex min-h-0 flex-auto flex-col overflow-hidden rounded-[10px] border border-sky-200 bg-white/96 px-5 pt-2 pb-4 shadow-[0_1px_2px_rgb(9_9_11/0.04),0_0_0_1px_rgb(9_9_11/0.06)] dark:border-sky-400/12 dark:bg-[rgba(30,41,55,0.82)] dark:shadow-[0_0_0_1px_rgb(255_255_255/0.06),0_8px_30px_rgb(0_0_0/0.25)]"
         aria-label="Subtitles"
         data-test="subtitlesPanel"
         @dragover.prevent="dropping = true"
         @dragleave.self="dropping = false"
         @drop.prevent="onDrop"
     >
-        <div class="flex shrink-0 items-center gap-2.5 border-b border-sky-100 px-5 py-4 dark:border-sky-400/10">
-            <h3 class="m-0 text-base font-semibold text-zinc-900 dark:text-slate-100">Subtitles</h3>
-            <span class="text-[13px] text-slate-500 dark:text-slate-400">
-                <template v-if="languages.length === 0">None yet</template>
-                <template v-else>{{ languages.length }} language{{ languages.length !== 1 ? 's' : '' }}</template>
-            </span>
-            <template v-if="draft">
-                <span
-                    v-if="isDirty(draft)"
-                    class="ml-auto rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800 dark:bg-amber-400/15 dark:text-amber-300"
-                    title="Changes stay here until you save them."
-                    >Unsaved</span
-                >
+        <div
+            class="m-0 mb-2.5 flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-sky-200 pt-0.5 pb-2 dark:border-sky-400/12"
+        >
+            <div class="flex min-w-0 flex-wrap items-baseline gap-2">
+                <h3 class="m-0 text-[0.9375rem] font-semibold tracking-[-0.02em] text-zinc-900 dark:text-slate-200">Subtitles</h3>
+                <span class="text-xs text-slate-500 dark:text-slate-400">
+                    <template v-if="languages.length === 0">None yet</template>
+                    <template v-else>{{ languages.length }} language{{ languages.length !== 1 ? 's' : '' }}</template>
+                </span>
+            </div>
+            <div v-if="draft" class="ml-auto flex items-center gap-1.5">
+                <span v-if="isDirty(draft)" class="chapter-unsaved-pill" title="Changes stay here until you save them.">Unsaved</span>
                 <button
                     v-if="isDirty(draft)"
                     type="button"
@@ -437,7 +459,6 @@ const offTab = 'font-medium text-slate-600 hover:text-zinc-900 dark:text-slate-4
                 <button
                     type="button"
                     class="chapter-save-btn"
-                    :class="{ 'ml-auto': !isDirty(draft) }"
                     :disabled="!isDirty(draft) || saving || busy || !draft.name.trim()"
                     :title="busy ? 'Something is being added to this video' : undefined"
                     data-test="saveSubtitles"
@@ -445,7 +466,7 @@ const offTab = 'font-medium text-slate-600 hover:text-zinc-900 dark:text-slate-4
                 >
                     {{ saving ? 'Saving…' : `Save ${labelOf(selected!)}` }}
                 </button>
-            </template>
+            </div>
         </div>
 
         <!-- As on Chapters, Audio tracks and Angles: the header stays, everything under it scrolls. -->
@@ -454,7 +475,7 @@ const offTab = 'font-medium text-slate-600 hover:text-zinc-900 dark:text-slate-4
                 <div
                     role="tablist"
                     aria-label="Subtitles view"
-                    class="mx-5 mt-3.5 grid shrink-0 grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1 dark:bg-slate-800/60"
+                    class="grid shrink-0 grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-800/60"
                 >
                     <button
                         type="button"
@@ -464,7 +485,7 @@ const offTab = 'font-medium text-slate-600 hover:text-zinc-900 dark:text-slate-4
                         data-test="subtitleViewLines"
                         @click="view = 'lines'"
                     >
-                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
                             <path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" />
                         </svg>
                         Lines
@@ -477,14 +498,14 @@ const offTab = 'font-medium text-slate-600 hover:text-zinc-900 dark:text-slate-4
                         data-test="subtitleViewTranslate"
                         @click="view = 'translate'"
                     >
-                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
                             <path d="M3 5h12M9 3v2M5 9c1.5 4 4 6.5 8 8M13 5c-1 5-4 9-9 12M14 21l4-9 4 9M15.5 18h5" />
                         </svg>
                         Translate
                     </button>
                 </div>
 
-                <div class="relative flex shrink-0 items-center gap-2 border-b border-sky-100 px-5 py-3 dark:border-sky-400/10">
+                <div class="relative flex shrink-0 items-center gap-2 border-b border-sky-200 py-2.5 dark:border-sky-400/12">
                     <div role="tablist" aria-label="Languages" class="flex flex-wrap gap-1.5">
                         <button
                             v-for="language in languages"
@@ -492,7 +513,7 @@ const offTab = 'font-medium text-slate-600 hover:text-zinc-900 dark:text-slate-4
                             type="button"
                             role="tab"
                             :aria-selected="language === selected"
-                            class="flex h-8 items-center gap-1.5 rounded-full border px-3 text-[13px] transition-colors"
+                            class="flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs transition-colors"
                             :class="
                                 language === selected
                                     ? 'border-sky-700 bg-sky-50 font-semibold text-sky-800 dark:border-sky-400 dark:bg-sky-400/15 dark:text-sky-200'
@@ -507,7 +528,7 @@ const offTab = 'font-medium text-slate-600 hover:text-zinc-900 dark:text-slate-4
                         </button>
                         <button
                             type="button"
-                            class="h-8 rounded-full border border-dashed border-sky-300 bg-white px-3 text-[13px] font-semibold text-sky-700 hover:bg-sky-50 dark:border-sky-400/30 dark:bg-transparent dark:text-sky-300"
+                            class="h-7 rounded-full border border-dashed border-sky-300 bg-white px-2.5 text-xs font-semibold text-sky-700 hover:bg-sky-50 dark:border-sky-400/30 dark:bg-transparent dark:text-sky-300"
                             :disabled="!media || loading"
                             data-test="showAddSubtitles"
                             @click="openAdd()"
@@ -541,12 +562,12 @@ const offTab = 'font-medium text-slate-600 hover:text-zinc-900 dark:text-slate-4
                         <div
                             v-if="optionsOpen"
                             role="menu"
-                            class="absolute top-full right-5 z-20 mt-1 flex w-64 flex-col gap-1 rounded-xl border border-slate-200 bg-white p-2 shadow-lg dark:border-slate-700 dark:bg-slate-800"
+                            class="absolute top-full right-0 z-20 mt-1 flex w-64 flex-col gap-1 rounded-xl border border-slate-200 bg-white p-2 shadow-lg dark:border-slate-700 dark:bg-slate-800"
                             data-test="subtitleOptionsMenu"
                         >
                             <label class="flex flex-col gap-1 px-2 pt-1 pb-2 text-xs font-medium text-slate-500 dark:text-slate-400">
                                 Name players show
-                                <input v-model="draft.name" type="text" maxlength="100" :class="[input, 'h-8']" data-test="subtitleName" />
+                                <input v-model="draft.name" type="text" maxlength="100" :class="input" data-test="subtitleName" />
                             </label>
                             <button type="button" role="menuitem" class="rounded-md px-2 py-1.5 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-700" data-test="importSubtitles" @click="importInput?.click()">
                                 Import .srt or .vtt…
@@ -572,16 +593,16 @@ const offTab = 'font-medium text-slate-600 hover:text-zinc-900 dark:text-slate-4
                     </div>
                 </div>
 
-                <p v-if="error" class="m-0 shrink-0 px-5 pt-2.5 text-sm text-red-700 dark:text-red-400" data-test="subtitlesError">
+                <p v-if="error" class="m-0 shrink-0 pt-2 text-xs text-red-600 dark:text-red-400" data-test="subtitlesError">
                     {{ error }}
                     <button v-if="isConflict" type="button" class="chapter-toolbar-muted ml-1" @click="load">Read it again</button>
                 </p>
-                <p v-else-if="notice" class="m-0 shrink-0 px-5 pt-2.5 text-xs text-slate-500 dark:text-slate-400" data-test="subtitlesNotice">
+                <p v-else-if="notice" class="m-0 shrink-0 pt-2 text-xs text-slate-500 dark:text-slate-400" data-test="subtitlesNotice">
                     {{ notice }}
                 </p>
 
                 <!-- Takes its full height: the body around it scrolls, not the list inside it. -->
-                <div class="flex flex-none flex-col px-5 pt-3 pb-4">
+                <div class="flex flex-none flex-col pt-3">
                     <SubtitleLines
                         v-if="view === 'lines'"
                         v-model="draft.segments"
@@ -591,11 +612,11 @@ const offTab = 'font-medium text-slate-600 hover:text-zinc-900 dark:text-slate-4
                         :on-seek="onSeek"
                     />
                     <template v-else-if="original && drafts[original]">
-                        <p class="m-0 flex shrink-0 flex-wrap items-center gap-2 pb-3 text-sm text-slate-700 dark:text-slate-300">
+                        <p class="m-0 flex shrink-0 flex-wrap items-center gap-2 pb-3 text-xs text-slate-700 dark:text-slate-300">
                             Translating <strong class="text-zinc-900 dark:text-slate-100">{{ labelOf(selected!) }}</strong> from
                             <label class="flex items-center">
                                 <span class="sr-only">Original language</span>
-                                <select v-model="original" :class="[input, 'h-8.5 font-semibold']" data-test="subtitleOriginal">
+                                <select v-model="original" :class="[input, 'font-semibold']" data-test="subtitleOriginal">
                                     <option v-for="language in originals" :key="language" :value="language">{{ labelOf(language) }}</option>
                                 </select>
                             </label>
@@ -608,12 +629,12 @@ const offTab = 'font-medium text-slate-600 hover:text-zinc-900 dark:text-slate-4
                             :on-seek="onSeek"
                         />
                     </template>
-                    <div v-else class="flex flex-1 flex-col items-center justify-center gap-3.5 py-8 text-center" data-test="translateNeedsTwo">
-                        <h4 class="m-0 text-lg font-semibold text-zinc-900 dark:text-slate-100">Add a second language to translate</h4>
-                        <p class="m-0 max-w-sm text-sm leading-relaxed text-slate-500 dark:text-slate-400">
+                    <div v-else class="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-8 text-center" data-test="translateNeedsTwo">
+                        <p class="m-0 text-[0.8125rem] font-semibold text-zinc-900 dark:text-slate-200">Add a second language to translate</p>
+                        <p class="m-0 max-w-sm text-xs leading-[1.45] text-slate-500 dark:text-slate-400">
                             {{ labelOf(selected!) }} is the only language so far. Start a translation: its lines take the timings of {{ labelOf(selected!) }}, side by side, ready for the words.
                         </p>
-                        <button type="button" class="chapter-save-btn" @click="openAdd({ copyFrom: selected! })">
+                        <button type="button" class="chapter-save-btn mt-1" @click="openAdd({ copyFrom: selected! })">
                             Translate {{ labelOf(selected!) }} into…
                         </button>
                     </div>
@@ -622,17 +643,22 @@ const offTab = 'font-medium text-slate-600 hover:text-zinc-900 dark:text-slate-4
 
             <div
                 v-else-if="!loading && media"
-                class="flex flex-1 flex-col items-center justify-center gap-3.5 p-8 text-center"
+                class="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-8 text-center"
                 data-test="subtitlesEmpty"
             >
-                <h4 class="m-0 text-lg font-semibold text-zinc-900 dark:text-slate-100">This video has no subtitles yet</h4>
-                <p class="m-0 max-w-sm text-sm leading-relaxed text-slate-500 dark:text-slate-400">
+                <div class="flex h-11 w-11 items-center justify-center rounded-full border border-neutral-200 bg-neutral-50 text-slate-500 dark:border-slate-600/55 dark:bg-slate-900/45 dark:text-slate-400" aria-hidden="true">
+                    <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="3" y="5" width="18" height="14" rx="2" /><path d="M7 13h4M13 13h4M7 16h10" />
+                    </svg>
+                </div>
+                <p class="m-0 text-[0.8125rem] font-semibold text-zinc-900 dark:text-slate-200">No subtitles yet</p>
+                <p class="m-0 max-w-sm text-xs leading-[1.45] text-slate-500 dark:text-slate-400">
                     Add a language from an .srt or .vtt file, or write the lines against the video. Once saved, every player offers it, in the app and on the web.
                 </p>
-                <button type="button" class="chapter-save-btn" data-test="addFirstSubtitles" @click="openAdd()">+ Add a language</button>
-                <p class="m-0 text-[13px] text-slate-500 dark:text-slate-400">Or drop an .srt or .vtt file here</p>
+                <button type="button" class="chapter-save-btn mt-1" data-test="addFirstSubtitles" @click="openAdd()">+ Add a language</button>
+                <p class="m-0 text-xs text-slate-500 dark:text-slate-400">Or drop an .srt or .vtt file here</p>
             </div>
-            <p v-if="!draft && error" class="m-0 px-5 pb-4 text-sm text-red-700 dark:text-red-400">{{ error }}</p>
+            <p v-if="!draft && error" class="mt-2 mb-0 text-xs text-red-600 dark:text-red-400">{{ error }}</p>
 
             <div
                 v-if="dropping"
@@ -643,58 +669,64 @@ const offTab = 'font-medium text-slate-600 hover:text-zinc-900 dark:text-slate-4
 
             <div
                 v-if="adding"
-                class="fixed inset-0 z-100 flex items-center justify-center bg-slate-900/45 p-4 dark:bg-black/60"
+                class="fixed inset-0 z-100 flex items-center justify-center p-4"
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="add-subtitles-title"
-                @click.self="adding = false"
+                @keydown.escape="adding = false"
             >
+                <button
+                    type="button"
+                    class="absolute inset-0 bg-slate-900/50 backdrop-blur-[1px] dark:bg-black/60"
+                    aria-label="Close"
+                    @click="adding = false"
+                />
                 <form
-                    class="flex w-full max-w-[32.5rem] flex-col gap-5 rounded-2xl bg-white p-7 shadow-xl dark:bg-slate-800"
+                    class="relative flex max-h-full w-full max-w-lg flex-col gap-4 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-xl ring-1 ring-slate-900/5 dark:border-slate-700 dark:bg-slate-800 dark:ring-white/10"
                     data-test="addSubtitlesForm"
                     @submit.prevent="addLanguage"
                 >
-                    <div class="flex flex-col gap-1.5">
-                        <h2 id="add-subtitles-title" class="m-0 text-[1.1875rem] font-semibold text-zinc-900 dark:text-slate-100">
+                    <div>
+                        <h2 id="add-subtitles-title" class="m-0 text-lg font-semibold text-slate-900 dark:text-slate-100">
                             Add subtitles in a language
                         </h2>
-                        <p class="m-0 text-sm text-slate-500 dark:text-slate-400">It goes into the video when you save it. Every player then offers it.</p>
+                        <p class="mt-1 mb-0 text-sm text-slate-600 dark:text-slate-400">It goes into the video when you save it. Every player then offers it.</p>
                     </div>
-                    <div class="grid grid-cols-2 gap-3.5">
-                        <label class="flex flex-col gap-1.5 text-[13px] font-semibold text-slate-700 dark:text-slate-300">
+                    <div class="grid grid-cols-2 gap-3">
+                        <label :class="fieldLabel">
                             Language code
-                            <input v-model="newCode" type="text" list="subtitle-language-codes" placeholder="fr" :class="[input, 'h-10']" data-test="newSubtitleCode" />
+                            <input v-model="newCode" type="text" list="subtitle-language-codes" placeholder="fr" :class="input" data-test="newSubtitleCode" />
                             <datalist id="subtitle-language-codes">
                                 <option v-for="code in SUGGESTED" :key="code" :value="code">{{ languageName(code) }}</option>
                             </datalist>
                         </label>
-                        <label class="flex flex-col gap-1.5 text-[13px] font-semibold text-slate-700 dark:text-slate-300">
+                        <label :class="fieldLabel">
                             Name players show
-                            <input v-model="newName" type="text" maxlength="100" placeholder="Français" :class="[input, 'h-10']" data-test="newSubtitleName" />
+                            <input v-model="newName" type="text" maxlength="100" placeholder="Français" :class="input" data-test="newSubtitleName" />
                         </label>
                     </div>
-                    <p v-if="newError" class="-mt-3 mb-0 text-xs text-red-700 dark:text-red-400">{{ newError }}</p>
-                    <fieldset class="m-0 flex flex-col gap-2.5 border-0 p-0">
-                        <legend class="mb-2.5 p-0 text-[13px] font-semibold text-slate-700 dark:text-slate-300">Start from</legend>
+                    <p v-if="newError" class="-mt-2 mb-0 text-xs text-red-600 dark:text-red-400">{{ newError }}</p>
+                    <fieldset class="m-0 flex flex-col gap-2 border-0 p-0">
+                        <legend class="mb-1 p-0 text-xs font-medium text-slate-500 dark:text-slate-400">Start from</legend>
                         <label
-                            class="flex cursor-pointer items-start gap-3 rounded-xl border p-3.5"
+                            class="flex cursor-pointer items-start gap-3 rounded-lg border p-3"
                             :class="newStart === 'empty' ? 'border-sky-700 bg-sky-50 dark:border-sky-400 dark:bg-sky-400/10' : 'border-sky-200 dark:border-sky-400/12'"
                         >
                             <input v-model="newStart" type="radio" value="empty" class="mt-0.5 h-4 w-4" />
                             <span class="flex flex-col gap-0.5">
                                 <span class="text-sm font-semibold">Nothing</span>
-                                <span class="text-[13px] text-slate-500 dark:text-slate-400">Write each line against the video</span>
+                                <span class="text-xs text-slate-500 dark:text-slate-400">Write each line against the video</span>
                             </span>
                         </label>
                         <label
-                            class="flex cursor-pointer items-start gap-3 rounded-xl border p-3.5"
+                            class="flex cursor-pointer items-start gap-3 rounded-lg border p-3"
                             :class="newStart === 'file' ? 'border-sky-700 bg-sky-50 dark:border-sky-400 dark:bg-sky-400/10' : 'border-sky-200 dark:border-sky-400/12'"
                         >
                             <input v-model="newStart" type="radio" value="file" class="mt-0.5 h-4 w-4" data-test="newSubtitleFromFile" />
                             <span class="flex flex-1 flex-col gap-2">
                                 <span class="flex flex-col gap-0.5">
                                     <span class="text-sm font-semibold">An .srt or .vtt file</span>
-                                    <span class="text-[13px] text-slate-500 dark:text-slate-400">
+                                    <span class="text-xs text-slate-500 dark:text-slate-400">
                                         <template v-if="newFile">{{ newFile.segments.length }} line{{ newFile.segments.length === 1 ? '' : 's' }} in {{ newFile.fileName }}</template>
                                         <template v-else>Its lines and timings, ready to check</template>
                                     </span>
@@ -702,7 +734,7 @@ const offTab = 'font-medium text-slate-600 hover:text-zinc-900 dark:text-slate-4
                                 <span class="flex flex-wrap items-center gap-2">
                                     <button
                                         type="button"
-                                        class="flex h-8 items-center gap-1.5 rounded-lg border border-sky-600 bg-white px-3 text-[13px] font-semibold text-sky-700 hover:bg-sky-50 dark:border-sky-400 dark:bg-transparent dark:text-sky-300"
+                                        class="chapter-toolbar-muted flex items-center gap-1.5"
                                         data-test="chooseNewSubtitleFile"
                                         @click.prevent="chooseNewFile"
                                     >
@@ -725,16 +757,16 @@ const offTab = 'font-medium text-slate-600 hover:text-zinc-900 dark:text-slate-4
                         </label>
                         <label
                             v-if="languages.length > 0"
-                            class="flex cursor-pointer items-start gap-3 rounded-xl border p-3.5"
+                            class="flex cursor-pointer items-start gap-3 rounded-lg border p-3"
                             :class="newStart === 'copy' ? 'border-sky-700 bg-sky-50 dark:border-sky-400 dark:bg-sky-400/10' : 'border-sky-200 dark:border-sky-400/12'"
                         >
                             <input v-model="newStart" type="radio" value="copy" class="mt-0.5 h-4 w-4" data-test="newSubtitleFromCopy" />
                             <span class="flex flex-1 flex-col gap-2">
                                 <span class="flex flex-col gap-0.5">
                                     <span class="text-sm font-semibold">A translation of another language</span>
-                                    <span class="text-[13px] text-slate-500 dark:text-slate-400">Its timings, with the words to translate side by side</span>
+                                    <span class="text-xs text-slate-500 dark:text-slate-400">Its timings, with the words to translate side by side</span>
                                 </span>
-                                <select v-model="newCopyFrom" :class="[input, 'h-8.5 self-start']" @focus="newStart = 'copy'">
+                                <select v-model="newCopyFrom" :class="[input, 'self-start']" @focus="newStart = 'copy'">
                                     <option v-for="language in languages" :key="language" :value="language">
                                         {{ labelOf(language) }} · {{ drafts[language]?.loaded ? `${drafts[language]!.segments.length} lines` : language }}
                                     </option>
@@ -742,17 +774,17 @@ const offTab = 'font-medium text-slate-600 hover:text-zinc-900 dark:text-slate-4
                             </span>
                         </label>
                     </fieldset>
-                    <div class="flex justify-end gap-2.5">
+                    <div class="flex flex-wrap justify-end gap-2">
                         <button
                             type="button"
-                            class="h-10 rounded-lg border border-slate-300 px-4 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
+                            class="cursor-pointer rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
                             @click="adding = false"
                         >
                             Cancel
                         </button>
                         <button
                             type="submit"
-                            class="h-10 rounded-lg bg-sky-700 px-4.5 text-sm font-semibold text-white hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-50"
+                            class="cursor-pointer rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-sky-500 dark:hover:bg-sky-400"
                             :disabled="!canAdd"
                             data-test="addSubtitles"
                         >

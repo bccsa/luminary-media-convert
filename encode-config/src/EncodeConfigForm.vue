@@ -16,12 +16,25 @@ import {
     saveContentPreset,
 } from './layoutStorage';
 import { CONTENT_PRESETS, sourceCapKbps, suggestLadder } from './ladder';
-import { displayDimensionsOf } from './aspect';
+import { displayDimensionsOf, isRotated } from './aspect';
 import {
+    audioLanguageOf,
     buildSuggestedAudioGroups,
     getAudioTierForHeight,
+    rankAudioTracks,
 } from './audioGroups';
 import { applySavedTrackLabels } from './trackLabels';
+import {
+    angleDoubt,
+    anglesOf,
+    angleNames,
+    initialAssignment,
+    moveTrack,
+    normalize,
+    rankTracks,
+    undecidedPairs,
+    type AngleAssignment,
+} from './angles';
 import LanguageSelect from './LanguageSelect.vue';
 import SelectMenu, { type SelectMenuOption } from './SelectMenu.vue';
 import {
@@ -289,9 +302,13 @@ watch(
     () => props.trimActive,
     (active, wasActive) => {
         if (active || !wasActive) return;
+        // A ladder that was copied whole falls back whole, to a full ladder
+        // per angle, rather than rung by rung into a mix nobody chose.
+        if (fallBackFromCopy()) return;
         for (const [i, rendition] of videoRenditions.entries()) {
             if (rendition.copyStream && copyBlockedReason(rendition) != null) {
                 rendition.copyStream = false;
+                sourceFromBestTrack(rendition);
                 rejoinLadder(i);
                 continue;
             }
@@ -349,7 +366,476 @@ function angleBudgetKbps(track: VideoTrackInfo, copied: boolean): number {
     return Math.max(1, Math.round(measured * Math.min(contentFactor.value, 1)));
 }
 
-function reanalyzeVideo() {
+// ---- Camera angles and the ladder mode -------------------------------------
+
+/**
+ * The probe compared the video tracks' pictures. Without it a multi-track
+ * source keeps the treatment it always had — every track its own angle — since
+ * "no `pictureGroup`" then means "never compared", not "a separate picture".
+ */
+const anglesDetected = props.probeResult.anglesDetected === true;
+
+/**
+ * Which tracks make which angle is known: the probe compared them, or the
+ * operator has moved a track and so said it themselves. Until then every track
+ * is its own angle and the form suggests what it always did.
+ */
+const anglesKnown = ref(anglesDetected);
+
+/** Track index → angle id. Seeded from the probe; the operator can move tracks. */
+const angleAssignment = ref<AngleAssignment>(
+    initialAssignment(props.probeResult.videoTracks)
+);
+
+/** The source has more than one video track, so renditions name their angle. */
+const multiTrack = computed(() => editableVideoTracks.length > 1);
+
+/** The angles the encode would write: those with a track still included. */
+const currentAngles = computed(() =>
+    anglesOf(editableVideoTracks, angleAssignment.value, excludedVideo)
+);
+
+/** Every angle, including ones whose tracks are all left out — for the picker. */
+const allAngles = computed(() =>
+    anglesOf(editableVideoTracks, angleAssignment.value, excludedVideo, false)
+);
+
+const angleNameById = computed(() => angleNames(allAngles.value));
+
+/**
+ * The angles of the encode whose grouping by detection should be checked by
+ * eye, with why. See {@link angleDoubt}.
+ */
+const angleDoubts = computed(() =>
+    currentAngles.value.flatMap((angle) => {
+        const doubt = angleDoubt(angle);
+        return doubt ? [{ id: angle.id, doubt }] : [];
+    })
+);
+
+/**
+ * Tracks detection kept apart without deciding: they may be qualities of one
+ * picture. See {@link undecidedPairs}.
+ */
+const angleUndecided = computed(() => undecidedPairs(currentAngles.value));
+
+/** The angle a row belongs to: the one it says, else its source track's. */
+function rowAngle(r: VideoRendition): number {
+    return (
+        r.angle ??
+        angleAssignment.value.get(r.sourceTrackIndex ?? 0) ??
+        r.sourceTrackIndex ??
+        0
+    );
+}
+
+type LadderMode = 'copy' | 'reencode';
+type SuggestMode = LadderMode | 'legacy';
+
+/**
+ * The mode the last suggestion was made in: every included track copied as a
+ * rung of its angle, or a full ladder per angle re-encoded from its best
+ * track. It is what a suggestion is repeated in when the rows no longer say —
+ * see {@link shownLadderMode} for what the control shows.
+ */
+const ladderMode = ref<LadderMode | null>(null);
+
+/**
+ * The mode the rows are in now, which is what the control lights: Copy when
+ * every row copies, Re-encode when none does, neither for a mix — made by hand
+ * or restored — since a mix is not one of the two things the control builds.
+ * Read off the rows rather than remembered, so ticking a row's Copy box cannot
+ * leave the control claiming a mode the ladder is no longer in.
+ */
+const shownLadderMode = computed<LadderMode | null>(() => {
+    if (videoRenditions.length === 0) return null;
+    if (videoRenditions.every((r) => r.copyStream)) return 'copy';
+    if (videoRenditions.every((r) => !r.copyStream)) return 'reencode';
+    return null;
+});
+
+/** The operator has picked a mode at least once this session. */
+let ladderModeChosen = false;
+
+/** Why Copy fell back to Re-encode on its own, shown until the next choice. */
+const ladderModeNotice = ref<string | null>(null);
+
+function trackLabel(t: VideoTrackInfo): string {
+    const d = displayDimensionsOf(t);
+    return `#${t.index} ${d.width}×${d.height}`;
+}
+
+/**
+ * Why the whole ladder cannot be copied, or null when it can.
+ *
+ * Every included track has to qualify on its own — the same rule each row's
+ * Copy box follows, so the API's gate agrees — and where an angle has more
+ * than one, they have to cut keyframes together: a player stepping between two
+ * copied rungs expects segment N of each to start at the same instant, and a
+ * copied stream is cut at its own keyframes. The probe measured that through
+ * the whole file and gave tracks that agree the same `keyframeGrid`.
+ */
+const copyLadderBlockedReason = computed<string | null>(() => {
+    for (const angle of currentAngles.value) {
+        for (const track of angle.included) {
+            const reason = props.trimActive
+                ? quickTrimBlockedReason(track, effectiveSegmentDuration.value)
+                : copyModeBlockedReason(
+                      track,
+                      alignmentStart.value,
+                      effectiveSegmentDuration.value
+                  );
+            if (reason) return `${trackLabel(track)}: ${reason}`;
+        }
+        if (angle.included.length < 2) continue;
+        const unknown = angle.included.find((t) => t.keyframeGrid == null);
+        if (unknown)
+            return (
+                `${trackLabel(unknown)}: its keyframes were not compared with ` +
+                `the other tracks of its angle, so they cannot be copied as one ladder.`
+            );
+        // The odd one out is named against the grid most of the angle is on,
+        // so unticking the track named is what makes Copy available.
+        const counts = new Map<number, number>();
+        for (const t of angle.included)
+            counts.set(t.keyframeGrid!, (counts.get(t.keyframeGrid!) ?? 0) + 1);
+        const common = [...counts].sort((a, b) => b[1] - a[1])[0][0];
+        const stray = angle.included.find((t) => t.keyframeGrid !== common);
+        if (stray)
+            return (
+                `${trackLabel(stray)}: it does not line up with the other ` +
+                `tracks of its angle (keyframes or length), so they cannot be ` +
+                `copied as one ladder.`
+            );
+    }
+    return null;
+});
+
+/**
+ * The mode a fresh suggestion opens in.
+ *
+ * Copy when the source carries a ladder (some angle has several tracks) good
+ * enough to copy as it is — the cheapest encode there is, and the source's own
+ * ladder was already built for streaming. Otherwise every angle is re-encoded
+ * from its best track, which for a one-track source is the ladder it has
+ * always had.
+ *
+ * Not Copy while an angle's grouping is in doubt, though: copied, two cameras
+ * taken for one picture publish a ladder that changes camera when it changes
+ * quality. Re-encoded, the angle is made from one track, and the notice asks
+ * the operator to check the grouping before choosing Copy themselves.
+ */
+function defaultSuggestMode(): SuggestMode {
+    if (!anglesKnown.value && includedVideoTracks.value.length > 1)
+        return 'legacy';
+    const carriesLadder = currentAngles.value.some((a) => a.included.length > 1);
+    return carriesLadder &&
+        copyLadderBlockedReason.value == null &&
+        angleDoubts.value.length === 0
+        ? 'copy'
+        : 'reencode';
+}
+
+/**
+ * The mode a suggestion made now would be in: the one the ladder is in — what
+ * its rows show, or for a hand-made mix the one it was last suggested in —
+ * else the source's default. Before the angles are known the mode is only a
+ * reading of the rows, not a choice, and does not steer unless the operator
+ * made it one. A repeat never asks for a copy that is no longer possible.
+ */
+function currentSuggestMode(): SuggestMode {
+    let steering: LadderMode | null =
+        anglesKnown.value || ladderModeChosen
+            ? (shownLadderMode.value ?? ladderMode.value)
+            : null;
+    if (steering === 'copy' && copyLadderBlockedReason.value != null)
+        steering = 'reencode';
+    return steering ?? defaultSuggestMode();
+}
+
+/**
+ * The source carries a ladder of its own: some picture is in it at more than
+ * one quality. Read off the angles where they are known — and off every track
+ * of them, ticked or not, since leaving a proxy out of the encode does not
+ * change what the file is. Before the angles are known, several included
+ * video tracks is all there is to go by, as it always was.
+ */
+const sourceCarriesLadder = computed(() =>
+    anglesKnown.value
+        ? allAngles.value.some((a) => a.members.length > 1)
+        : includedVideoTracks.value.length > 1
+);
+
+/**
+ * The audio suggestion that goes with a video ladder made in `mode`.
+ *
+ * A source with its own ladder usually carries its audio the same way, one
+ * track per tier. Copied, each tier takes the matching track, as it always
+ * has. Re-encoded, every tier is made from its language's best track — the
+ * same rule the video rungs follow, and what makes the whole encode a
+ * re-encode, so a trim cuts every stream the same way.
+ *
+ * In Re-encode mode the ladder is judged by the angles: two cameras with one
+ * track each are not one picture twice, so two audio tracks beside them are
+ * not taken for one sound twice either, and both go in every tier.
+ */
+function suggestAudioGroups(mode: SuggestMode): AudioGroup[] {
+    if (mode !== 'reencode')
+        return buildSuggestedAudioGroups(
+            includedAudioTracks.value,
+            includedVideoTracks.value.length
+        );
+    // The count is only ever read as "more than one", the mark of a source
+    // with its own ladder — so that is what it is given.
+    return buildSuggestedAudioGroups(
+        includedAudioTracks.value,
+        sourceCarriesLadder.value ? 2 : 1,
+        true
+    );
+}
+
+/**
+ * The fields every row of a multi-track source carries to say where it comes
+ * from. A one-track source keeps the config it always had: no angle, and no
+ * source track when that is track 0.
+ */
+function sourceFields(
+    trackIndex: number,
+    angle: number
+): Pick<VideoRendition, 'sourceTrackIndex' | 'angle'> {
+    if (!multiTrack.value)
+        return trackIndex !== 0 ? { sourceTrackIndex: trackIndex } : {};
+    return { sourceTrackIndex: trackIndex, angle };
+}
+
+/** Copy mode: every included track, a copied rung of its angle, largest first. */
+function copiedLadderRows(tierIds: string[]): VideoRendition[] {
+    return currentAngles.value.flatMap((angle) =>
+        angle.included.map((track) => {
+            const display = displayDimensionsOf(track);
+            const tier = getAudioTierForHeight(
+                Math.min(display.width, display.height)
+            );
+            return {
+                // Coded size: a copy publishes the source's own bytes, and an
+                // anamorphic track never qualifies for one.
+                width: track.width,
+                height: track.height,
+                videoBitrateKbps: angleBudgetKbps(track, true),
+                copyStream: true,
+                ...sourceFields(track.index, angle.id),
+                // A copy has to say which track it copies, whatever the source.
+                sourceTrackIndex: track.index,
+                audioGroupId: mapTierToGroupId(tier.groupId, tierIds),
+                vbr: false,
+            };
+        })
+    );
+}
+
+/**
+ * Re-encode mode: per angle, the full suggested ladder, every rung made from
+ * the angle's best included track — so the 360p rung is scaled down from the
+ * 1080p master, not re-encoded from the source's own 360p proxy.
+ */
+function reencodedLadderRows(tierIds: string[]): VideoRendition[] {
+    return currentAngles.value.flatMap((angle) =>
+        suggestLadder(angle.best, contentFactor.value).map((rung) => {
+            // By the rung's short side, as it was chosen and priced: a
+            // portrait 480x854 rung is a 480p rung, and by height it took the
+            // HD audio group where its landscape twin takes the standard one.
+            const tier = getAudioTierForHeight(
+                Math.min(rung.width, rung.height)
+            );
+            // No `label` on a ladder rung: the API derives each stream's S3
+            // directory from `label ?? `${height}p``, so naming them here
+            // would move the output for nothing.
+            return {
+                width: rung.width,
+                height: rung.height,
+                videoBitrateKbps: rung.bitrateKbps,
+                copyStream: false,
+                ...sourceFields(angle.best.index, angle.id),
+                audioGroupId: mapTierToGroupId(tier.groupId, tierIds),
+                vbr: true,
+            };
+        })
+    );
+}
+
+/** The operator chose a mode: rebuild the rows in it. */
+function setLadderMode(mode: LadderMode) {
+    if (mode === 'copy' && copyLadderBlockedReason.value != null) return;
+    ladderModeNotice.value = null;
+    ladderModeChosen = true;
+    reanalyzeVideo(mode);
+}
+
+/**
+ * A ladder that was copied whole can no longer be — the segment length or the
+ * trim changed under it, or a track that does not line up was ticked. Rebuild
+ * it re-encoded and say why, rather than leave a ladder the API would refuse
+ * with every Copy box greyed out and ticked. Returns whether it did.
+ *
+ * Only a ladder still wholly copied: rows the operator has already switched by
+ * hand are theirs, and rebuilding would discard them over a Copy box they no
+ * longer have ticked. And only where the angles are known — a session from
+ * before detection keeps what it always did, row by row.
+ */
+function fallBackFromCopy(): boolean {
+    const reason = copyLadderBlockedReason.value;
+    if (reason == null || shownLadderMode.value !== 'copy') return false;
+    if (encodingType.value !== 'video' || !anglesKnown.value) return false;
+    ladderModeNotice.value = `Switched to re-encoding: ${reason}`;
+    reanalyzeVideo('reencode');
+    return true;
+}
+
+watch(copyLadderBlockedReason, () => {
+    fallBackFromCopy();
+});
+
+/**
+ * A rung that stops copying is made from its angle's best track from then on,
+ * not from the track it was a copy of: re-encoding a 360p proxy to get a 360p
+ * rung throws away everything the master beside it has.
+ */
+function sourceFromBestTrack(rendition: VideoRendition): void {
+    if (!anglesKnown.value || !multiTrack.value) return;
+    const angle = currentAngles.value.find((a) => a.id === rowAngle(rendition));
+    if (angle) rendition.sourceTrackIndex = angle.best.index;
+}
+
+/**
+ * Rebuild only angle `id`'s rows, in the current mode, keeping every other
+ * row, the audio groups and the dials as the operator left them.
+ */
+function rebuildAngle(id: number) {
+    const snapshot = () =>
+        videoRenditions.map((r, i) => ({ row: { ...r }, base: ladderBaseKbps[i] }));
+    const keep = snapshot()
+        .filter(({ row }) => rowAngle(row) !== id)
+        .map((m) => ({ ...m, fresh: false }));
+    const groups = audioGroups.map((g) => ({ ...g }));
+    const dial = {
+        num: ladderScaleNum,
+        den: ladderScaleDen,
+        min: ladderMin.value,
+        lastMin: lastGoodLadderMin,
+    };
+    // In the ladder's mode; a hand-mixed ladder takes the mode it was last
+    // suggested in. A session from before detection that nobody has switched
+    // takes the old suggestion.
+    reanalyzeVideo(
+        anglesKnown.value || ladderModeChosen
+            ? (shownLadderMode.value ?? ladderMode.value ?? 'reencode')
+            : undefined
+    );
+    const fresh = snapshot()
+        .filter(({ row }) => rowAngle(row) === id)
+        .map((m) => ({ ...m, fresh: true }));
+    // Back in angle order, so each angle's rows stay together.
+    const order = (row: VideoRendition) =>
+        allAngles.value.findIndex((a) => a.id === rowAngle(row));
+    const merged = [...keep, ...fresh].sort(
+        (a, b) => order(a.row) - order(b.row)
+    );
+    videoRenditions.splice(0, videoRenditions.length, ...merged.map((m) => m.row));
+    ladderBaseKbps.splice(
+        0,
+        ladderBaseKbps.length,
+        ...merged.map((m) => m.base ?? m.row.videoBitrateKbps)
+    );
+    audioGroups.splice(0, audioGroups.length, ...groups);
+    repairAudioGroupRefs();
+    // The suggestion reset the dials; the rows kept were priced at the setting
+    // they had, so that setting is put back and the new rows join at it.
+    ladderScaleNum = dial.num;
+    ladderScaleDen = dial.den;
+    ladderMin.value = dial.min;
+    lastGoodLadderMin = dial.lastMin;
+    syncLadderDials();
+    merged.forEach((m, i) => {
+        if (m.fresh && !videoRenditions[i].copyStream)
+            videoRenditions[i].videoBitrateKbps = priceRow(ladderBaseKbps[i]);
+    });
+}
+
+/**
+ * Move a source track to another angle, or to one of its own. Detection can
+ * be wrong — two cameras framed alike look like one picture — and this is the
+ * way to say so. The whole video suggestion is made again, in the current
+ * mode: angle ids are re-keyed by their lowest member, so the angle the track
+ * left can change id, and rows filed under the old one would point nowhere.
+ */
+function setTrackAngle(track: number, target: number | 'new') {
+    const current = angleAssignment.value.get(track) ?? track;
+    if (target === current) return;
+    const alone =
+        [...angleAssignment.value.values()].filter((id) => id === current)
+            .length === 1;
+    // Already an angle of its own: nothing to move, and nothing to rebuild.
+    if (target === 'new' && alone) return;
+    const copying = (shownLadderMode.value ?? ladderMode.value) === 'copy';
+    angleAssignment.value = moveTrack(angleAssignment.value, track, target);
+    anglesKnown.value = true;
+    ladderModeNotice.value = null;
+    // Copy may stop being possible (the moved track does not line up with its
+    // new angle); the mode falls to Re-encode rather than to a refused ladder.
+    const reason = copyLadderBlockedReason.value;
+    if (copying && reason != null) {
+        ladderModeNotice.value = `Switched to re-encoding: ${reason}`;
+        reanalyzeVideo('reencode');
+    } else {
+        reanalyzeVideo();
+    }
+}
+
+const angleSelectOptions = computed<SelectMenuOption[]>(() => [
+    ...allAngles.value.map((a) => ({
+        value: a.id,
+        label: angleNameById.value.get(a.id) ?? `Angle ${a.id}`,
+    })),
+    { value: 'new', label: 'New angle' },
+]);
+
+/** The track an angle is keyed by, whose name is the angle's name. */
+function angleIdTrack(angle: { id: number; members: VideoTrackInfo[] }) {
+    return angle.members.find((t) => t.index === angle.id) ?? angle.members[0];
+}
+
+/** `t` is the track its angle is keyed by. */
+function namesAngle(t: VideoTrackInfo): boolean {
+    return (angleAssignment.value.get(t.index) ?? t.index) === t.index;
+}
+
+/**
+ * Detected Media's rows: tracks angle by angle, each angle's best first. The
+ * first row of an angle carries its name; the rest say whose picture they are.
+ */
+const videoTrackRows = computed(() =>
+    allAngles.value.flatMap((angle) =>
+        angle.members.map((track, n) => ({
+            track,
+            angle,
+            first: n === 0,
+            idTrack: angleIdTrack(angle),
+        }))
+    )
+);
+
+/**
+ * Make the video suggestion again, in `mode` — by default the mode the ladder
+ * is already in, or the source's default when it is in none.
+ *
+ * `legacy` is the suggestion every multi-track source got before angles were
+ * detected — every track its own angle, copied where it qualifies — and is
+ * only ever the default for a probe that did not detect angles, so a session
+ * from before detection, or one where it failed, opens exactly as it did.
+ */
+function reanalyzeVideo(mode?: SuggestMode) {
+    // Unasked, a suggestion repeats the mode the ladder is in.
+    const suggest = mode ?? currentSuggestMode();
     // By display area, not coded area: two angles of the same picture size
     // should sort together whatever shape their samples are.
     const displayArea = (t: VideoTrackInfo) => {
@@ -360,14 +846,11 @@ function reanalyzeVideo() {
         (a, b) => displayArea(b) - displayArea(a)
     );
 
-    const newGroups = buildSuggestedAudioGroups(
-        includedAudioTracks.value,
-        sortedVideoTracks.length
-    );
+    const newGroups = suggestAudioGroups(suggest);
     const tierIds = [...new Set(newGroups.map((g) => g.id))];
     audioGroups.splice(0, audioGroups.length, ...newGroups);
 
-    if (sortedVideoTracks.length > 1) {
+    if (suggest === 'legacy' && sortedVideoTracks.length > 1) {
         const newRenditions: VideoRendition[] = sortedVideoTracks.map(
             (track) => {
                 const display = displayDimensionsOf(track);
@@ -405,35 +888,28 @@ function reanalyzeVideo() {
             }
         );
         videoRenditions.splice(0, videoRenditions.length, ...newRenditions);
-    } else if (sortedVideoTracks.length === 1) {
-        const track = sortedVideoTracks[0];
-        const newRenditions: VideoRendition[] = suggestLadder(
-            track,
-            contentFactor.value
-        ).map((rung) => {
-            // By the rung's short side, as it was chosen and priced: a
-            // portrait 480x854 rung is a 480p rung, and by height it took the
-            // HD audio group where its landscape twin takes the standard one.
-            const tier = getAudioTierForHeight(
-                Math.min(rung.width, rung.height)
-            );
-            const audioGroupId = mapTierToGroupId(tier.groupId, tierIds);
-            // No `label` on a ladder rung: the API derives each stream's S3
-            // directory from `label ?? `${height}p``, so naming them here
-            // would move the output for nothing.
-            return {
-                width: rung.width,
-                height: rung.height,
-                videoBitrateKbps: rung.bitrateKbps,
-                copyStream: false,
-                // Only when another angle is left out: track 0 is the default,
-                // and naming it would change nothing but the config.
-                ...(track.index !== 0 ? { sourceTrackIndex: track.index } : {}),
-                audioGroupId,
-                vbr: true,
-            };
-        });
-        videoRenditions.splice(0, videoRenditions.length, ...newRenditions);
+    } else if (suggest === 'copy') {
+        videoRenditions.splice(
+            0,
+            videoRenditions.length,
+            ...copiedLadderRows(tierIds)
+        );
+    } else if (sortedVideoTracks.length > 0) {
+        videoRenditions.splice(
+            0,
+            videoRenditions.length,
+            ...reencodedLadderRows(tierIds)
+        );
+    }
+    ladderMode.value = suggest === 'legacy' ? null : suggest;
+
+    // A tier suggested for the full ladder that no rendition plays with — a
+    // copied ladder has fewer rungs — would be encoded and uploaded for nothing.
+    if (videoRenditions.length > 0) {
+        const used = new Set(videoRenditions.map((r) => r.audioGroupId));
+        for (let i = audioGroups.length - 1; i >= 0; i--) {
+            if (!used.has(audioGroups[i].id)) audioGroups.splice(i, 1);
+        }
     }
 
     // Snapshot after whichever branch ran: the dial rescales from what was
@@ -501,59 +977,105 @@ function repairAudioGroupRefs() {
 }
 
 /**
- * Takes a source track in or out of the output. Only that track's rows change,
- * so edits to the others stay. An angle is the exception when it changes
- * between one angle and several: that turns copied angles into a ladder or
- * back, so the video suggestion is made again.
+ * Takes a source track in or out of the output. Only its angle's rows change,
+ * so edits to the others stay. The exception is a change between one included
+ * track and several, which changes the audio suggestion, so the video
+ * suggestion is made again.
  */
 function setTrackIncluded(kind: 'video' | 'audio', index: number, included: boolean) {
     if (!included && !canExclude(kind, index)) return;
     if (kind === 'audio') {
+        const suggest = () =>
+            encodingType.value === 'video'
+                ? suggestAudioGroups(currentSuggestMode())
+                : buildSuggestedAudioGroups(includedAudioTracks.value, 0);
+        const sourcesOf = (groups: AudioGroup[]) =>
+            new Set(groups.map((g) => g.sourceTrackIndex));
+        const before = sourcesOf(suggest());
         if (included) excludedAudio.delete(index);
         else excludedAudio.add(index);
-        if (!included) {
-            for (let i = audioGroups.length - 1; i >= 0; i--) {
-                if (audioGroups[i].sourceTrackIndex === index) audioGroups.splice(i, 1);
-            }
-        } else {
-            const angles = encodingType.value === 'video' ? includedVideoTracks.value.length : 0;
-            const suggested = buildSuggestedAudioGroups(includedAudioTracks.value, angles);
-            for (const g of suggested.filter((x) => x.sourceTrackIndex === index)) {
-                // After the last group of its tier, so each tier stays together.
-                let at = -1;
-                audioGroups.forEach((x, i) => {
-                    if (x.id === g.id) at = i;
-                });
-                if (at < 0) audioGroups.push(g);
-                else audioGroups.splice(at + 1, 0, g);
-            }
+        const suggested = suggest();
+        const after = sourcesOf(suggested);
+        // The groups that go are the unticked track's; the ones that come are
+        // the ticked track's. No other track's groups move, so what the
+        // operator set on them stays.
+        const leaving = new Set<number>(included ? [] : [index]);
+        const joining = new Set<number>(included ? [index] : []);
+        // Where every tier is made from its language's best track, the tick
+        // can change which track that is: unticking the best hands its tiers
+        // to the next best, and ticking a better one takes them over.
+        if (
+            encodingType.value === 'video' &&
+            currentSuggestMode() === 'reencode'
+        ) {
+            const has = sourcesOf(audioGroups);
+            for (const t of before) if (!after.has(t)) leaving.add(t);
+            for (const t of after)
+                if (!before.has(t) && !has.has(t)) joining.add(t);
         }
+        const incoming = suggested.filter((g) => joining.has(g.sourceTrackIndex));
+        const kept: AudioGroup[] = [];
+        for (const g of audioGroups) {
+            if (!leaving.has(g.sourceTrackIndex)) {
+                kept.push(g);
+                continue;
+            }
+            // A track taking a tier over takes its place in it, so the order
+            // of a tier's languages does not turn on which track is ticked.
+            const at = incoming.findIndex((x) => x.id === g.id);
+            if (at >= 0) kept.push(...incoming.splice(at, 1));
+        }
+        for (const g of incoming) {
+            // After the last group of its tier, so each tier stays together.
+            const at = kept.map((x) => x.id).lastIndexOf(g.id);
+            if (at < 0) kept.push(g);
+            else kept.splice(at + 1, 0, g);
+        }
+        audioGroups.splice(0, audioGroups.length, ...kept);
         repairAudioGroupRefs();
         return;
     }
-    const angleCountBefore = includedVideoTracks.value.length;
+    // Counted in included tracks, as the audio suggestion counts them: one
+    // track against several is what decides an already-ABR source's audio.
+    const countBefore = includedVideoTracks.value.length;
+    const angle = angleAssignment.value.get(index) ?? index;
+    const bestOf = () =>
+        currentAngles.value.find((a) => a.id === angle)?.best.index;
+    const bestBefore = bestOf();
     if (included) excludedVideo.delete(index);
     else excludedVideo.add(index);
-    const angleCountAfter = includedVideoTracks.value.length;
-    if (angleCountBefore <= 1 || angleCountAfter <= 1) {
-        reanalyzeVideo();
+    const countAfter = includedVideoTracks.value.length;
+    if (countBefore <= 1 || countAfter <= 1) {
+        // Before the angles were known, one track against several also chose
+        // between a ladder and copied angles, and still does there.
+        reanalyzeVideo(anglesKnown.value ? undefined : defaultSuggestMode());
         return;
     }
-    if (!included) {
-        for (let i = videoRenditions.length - 1; i >= 0; i--) {
-            if ((videoRenditions[i].sourceTrackIndex ?? 0) === index) videoRenditions.splice(i, 1);
+    // A re-encoded angle is made from its best track alone. Ticking or
+    // unticking another of its tracks changes nothing the encode does, so the
+    // rows — and whatever the operator has set on them — are left as they are,
+    // bar any row pointed by hand at the track just left out.
+    const angleRows = videoRenditions.filter((r) => rowAngle(r) === angle);
+    if (
+        angleRows.length > 0 &&
+        angleRows.every((r) => !r.copyStream) &&
+        bestBefore != null &&
+        bestBefore === bestOf()
+    ) {
+        if (!included) {
+            for (let i = videoRenditions.length - 1; i >= 0; i--) {
+                if ((videoRenditions[i].sourceTrackIndex ?? 0) !== index) continue;
+                videoRenditions.splice(i, 1);
+                ladderBaseKbps.splice(i, 1);
+            }
+            syncLadderDials();
         }
-    } else {
-        // The suggestion is made for its rows only: the other renditions and
-        // the audio groups are put back as they were.
-        const renditions = videoRenditions.map((r) => ({ ...r }));
-        const groups = audioGroups.map((g) => ({ ...g }));
-        reanalyzeVideo();
-        const back = videoRenditions.filter((r) => (r.sourceTrackIndex ?? 0) === index);
-        videoRenditions.splice(0, videoRenditions.length, ...renditions, ...back);
-        audioGroups.splice(0, audioGroups.length, ...groups);
-        repairAudioGroupRefs();
+        return;
     }
+    // Otherwise only the angle the track belongs to is made again: in Copy
+    // mode its rungs gain or lose this track's; in Re-encode its ladder
+    // follows its best track, which has just changed. Every other row stays.
+    rebuildAngle(angle);
 }
 
 function reanalyze() {
@@ -628,18 +1150,97 @@ if (props.restoreConfig) restore(props.restoreConfig);
  * suggestion for that mode runs first, so whatever `config` leaves out keeps
  * its default; the ladder dials then measure from the restored rows.
  */
+/**
+ * Untick the tracks restored rows have no use for — and only those.
+ *
+ * Unticking every track no row names would be wrong for a re-encoded angle:
+ * its rungs all name the best track, its other tracks are simply not the
+ * source, and leaving them unticked would lose those rungs the moment the
+ * operator switched to Copy. So a track is left out when its angle has no
+ * rows at all; when its angle's rows are all copies and none is its own; or
+ * when the angle re-encodes from a track it outranks, since ticked it would
+ * become the source and the restored ladder would describe something else.
+ */
+function excludeTracksRowsDoNotNeed(rows: VideoRendition[]): void {
+    const rowsByAngle = new Map<number, VideoRendition[]>();
+    for (const r of rows) {
+        const id = rowAngle(r);
+        if (!rowsByAngle.has(id)) rowsByAngle.set(id, []);
+        rowsByAngle.get(id)!.push(r);
+    }
+    for (const t of editableVideoTracks) {
+        const own = rowsByAngle.get(angleAssignment.value.get(t.index) ?? t.index);
+        const used = own?.some((r) => (r.sourceTrackIndex ?? 0) === t.index);
+        if (used) continue;
+        const reencoded = own?.find((r) => !r.copyStream);
+        const source = reencoded
+            ? editableVideoTracks[reencoded.sourceTrackIndex ?? 0]
+            : undefined;
+        if (!own || !reencoded || (source && rankTracks(t, source) < 0))
+            excludedVideo.add(t.index);
+    }
+}
+
+/**
+ * Untick the audio tracks restored groups have no use for — and only those.
+ *
+ * The same care {@link excludeTracksRowsDoNotNeed} takes with video: where a
+ * source's ladder was re-encoded, each language's tiers all name its best
+ * track, the others are simply not the source, and unticking them would leave
+ * Copy mode nothing to copy. So in such a source a track nothing names stays
+ * ticked when a re-encoded group is made from a track of its language that it
+ * does not outrank — outranking it, it would become the source once ticked.
+ * Anywhere else — an audio-only encode included, where every track is its own
+ * content — an unused track is one the operator left out.
+ */
+function excludeAudioTracksGroupsDoNotNeed(groups: AudioGroup[]): void {
+    const used = new Set(groups.map((g) => g.sourceTrackIndex));
+    const sources =
+        encodingType.value === 'video' && sourceCarriesLadder.value
+            ? groups
+                  .filter((g) => !g.copyStream)
+                  .map((g) =>
+                      editableAudioTracks.find(
+                          (t) => t.index === g.sourceTrackIndex
+                      )
+                  )
+                  .filter((t): t is AudioTrackInfo => t != null)
+            : [];
+    for (const t of editableAudioTracks) {
+        if (used.has(t.index)) continue;
+        const source = sources.find(
+            (s) => audioLanguageOf(s) === audioLanguageOf(t)
+        );
+        if (!source || rankAudioTracks(t, source) < 0)
+            excludedAudio.add(t.index);
+    }
+}
+
 function restore(config: EncodeConfig): void {
     encodingType.value = config.type;
     reanalyze();
     if (config.segmentDuration) segmentDuration.value = config.segmentDuration;
     if (config.type === 'video' && config.videoRenditions?.length) {
-        videoRenditions.splice(
-            0,
-            videoRenditions.length,
-            ...config.videoRenditions.map((r) => ({ ...r }))
-        );
-        const used = new Set(config.videoRenditions.map((r) => r.sourceTrackIndex ?? 0));
-        for (const t of editableVideoTracks) if (!used.has(t.index)) excludedVideo.add(t.index);
+        const rows = config.videoRenditions.map((r) => ({ ...r }));
+        if (multiTrack.value) {
+            // The angles the earlier encode wrote win over detection: a row
+            // names its angle, or — written before rows did — its source track
+            // was its angle. Re-keyed afterwards, so ids stay lowest members.
+            const assignment = new Map(angleAssignment.value);
+            // Every kept track's angle, rowless ones included, as written.
+            for (const { index, angle } of config.videoTrackAngles ?? []) {
+                assignment.set(index, angle);
+            }
+            for (const r of rows) {
+                const track = r.sourceTrackIndex ?? 0;
+                assignment.set(track, r.angle ?? track);
+            }
+            angleAssignment.value = normalize(assignment);
+            for (const r of rows)
+                r.angle = angleAssignment.value.get(r.sourceTrackIndex ?? 0);
+        }
+        videoRenditions.splice(0, videoRenditions.length, ...rows);
+        excludeTracksRowsDoNotNeed(rows);
         ladderBaseKbps.splice(
             0,
             ladderBaseKbps.length,
@@ -649,6 +1250,7 @@ function restore(config: EncodeConfig): void {
         ladderScaleDen = 1;
         ladderMax.value = suggestedLadderMax.value;
         lastGoodLadderMax = ladderMax.value;
+        ladderMode.value = shownLadderMode.value;
     }
     if (config.audioGroups?.length) {
         audioGroups.splice(
@@ -656,8 +1258,7 @@ function restore(config: EncodeConfig): void {
             audioGroups.length,
             ...config.audioGroups.map((g) => ({ ...g }))
         );
-        const used = new Set(config.audioGroups.map((g) => g.sourceTrackIndex));
-        for (const t of editableAudioTracks) if (!used.has(t.index)) excludedAudio.add(t.index);
+        excludeAudioTracksGroupsDoNotNeed(config.audioGroups);
     }
     applySavedTrackLabels(config, editableVideoTracks, editableAudioTracks, true);
 }
@@ -707,7 +1308,10 @@ function addVideoRendition() {
     // The 480p rung where the ladder reaches it, the smallest rung otherwise —
     // a source below 480p has no 480p to offer. Found by short side, so a
     // portrait source's 480x854 counts.
-    const track = editableVideoTracks[0];
+    // From the first angle's best track: track 0 may be a proxy, and a row
+    // priced and sourced from it would be the one rung not made from the master.
+    const firstAngle = currentAngles.value[0];
+    const track = firstAngle?.best ?? editableVideoTracks[0];
     const rungs = track ? suggestLadder(track, contentFactor.value) : [];
     const rung =
         rungs.find((r) => Math.min(r.width, r.height) === 480) ??
@@ -718,6 +1322,7 @@ function addVideoRendition() {
         height: rung?.height ?? 480,
         videoBitrateKbps: base,
         copyStream: false,
+        ...(track && firstAngle ? sourceFields(track.index, firstAngle.id) : {}),
         audioGroupId: defaultGroupId,
         // Named for the size it actually is. The API falls back to
         // `${height}p` when there is no label, so this is the same directory
@@ -805,12 +1410,23 @@ function syncLadderDials(): void {
 function reencodeBaseKbps(row: VideoRendition): number {
     const track = editableVideoTracks[row.sourceTrackIndex ?? 0];
     if (!track) return row.videoBitrateKbps;
-    if (editableVideoTracks.length > 1) return angleBudgetKbps(track, false);
-    return (
-        suggestLadder(track, contentFactor.value).find(
-            (r) => r.height === row.height
-        )?.bitrateKbps ?? angleBudgetKbps(track, false)
-    );
+    // Before the angles were known every track of a multi-track source was an
+    // angle at its own size; now a copied rung that stops copying is a rung of
+    // its angle's ladder, and is priced as the suggestion would have priced it.
+    if (editableVideoTracks.length > 1 && !anglesKnown.value)
+        return angleBudgetKbps(track, false);
+    const rungs = suggestLadder(track, contentFactor.value);
+    const exact = rungs.find((r) => r.height === row.height);
+    if (exact) return exact.bitrateKbps;
+    if (editableVideoTracks.length <= 1 || rungs.length === 0)
+        return angleBudgetKbps(track, false);
+    // A rung at a size the ladder has no rung for — a proxy at 640x352, say —
+    // takes the price of the nearest one, not the whole source's budget.
+    return rungs.reduce((near, r) =>
+        Math.abs(r.height - row.height) < Math.abs(near.height - row.height)
+            ? r
+            : near
+    ).bitrateKbps;
 }
 
 /**
@@ -975,8 +1591,10 @@ const showLadderMax = computed(
 
 /** `1920×1080 · 24 fps · 1805 kbps` — what the dial is being judged against. */
 const ladderSourceSummary = computed(() => {
-    if (editableVideoTracks.length !== 1) return '';
-    const track = editableVideoTracks[0];
+    // One angle: the track its ladder is made from. Several have several
+    // sources, and one line could only describe one of them.
+    if (currentAngles.value.length !== 1) return '';
+    const track = currentAngles.value[0].best;
     const d = displayDimensionsOf(track);
     const bitrate =
         track.bitrateKbps != null && track.bitrateKbps > 0
@@ -1028,6 +1646,33 @@ function removeAudioGroup(index: number) {
     if (audioGroups.length > 1) audioGroups.splice(index, 1);
 }
 
+/** The best included audio track in `track`'s language — itself, if it is alone. */
+function bestAudioTrackLike(track: AudioTrackInfo): AudioTrackInfo {
+    const language = audioLanguageOf(track);
+    return (
+        includedAudioTracks.value
+            .filter((t) => audioLanguageOf(t) === language)
+            .sort(rankAudioTracks)[0] ?? track
+    );
+}
+
+/**
+ * A tier that stops copying is made from its language's best track from then
+ * on, not from the track it was a copy of — as a video rung is
+ * ({@link sourceFromBestTrack}), and under the same conditions: the angles are
+ * known, and the source carries a ladder, which is what makes several tracks
+ * in one language the same sound at several bitrates.
+ */
+function onAudioCopyToggle(g: AudioGroup) {
+    if (g.copyStream) {
+        g.vbr = false;
+        return;
+    }
+    if (!anglesKnown.value || !sourceCarriesLadder.value) return;
+    const track = editableAudioTracks.find((t) => t.index === g.sourceTrackIndex);
+    if (track) g.sourceTrackIndex = bestAudioTrackLike(track).index;
+}
+
 function onVbrToggle(g: AudioGroup) {
     if (g.vbr) {
         g.copyStream = false;
@@ -1061,11 +1706,18 @@ function onCopyToggle(rendition: VideoRendition, index: number) {
         }
         syncLadderDials();
     } else {
+        sourceFromBestTrack(rendition);
         rejoinLadder(index);
     }
 }
 
 function onCopySourceChange(rendition: VideoRendition, index: number) {
+    // A row follows its source track into that track's angle: pointed at the
+    // other camera, it is a rendition of the other camera.
+    if (multiTrack.value)
+        rendition.angle = angleAssignment.value.get(
+            rendition.sourceTrackIndex ?? 0
+        );
     // Pointing a copy rendition at a track that does not qualify would leave
     // the tick box greyed out and still ticked, with no way back. Drop to
     // re-encode instead; the reason is on the tooltip. From here on it is a
@@ -1149,11 +1801,30 @@ function onTrackInputKeydown(e: KeyboardEvent) {
     if (nextRow === row && nextCol === col) return;
 
     e.preventDefault();
-    const next = inputs.find(
-        (el) =>
-            parseInt(el.getAttribute('data-row') ?? '-1', 10) === nextRow &&
-            parseInt(el.getAttribute('data-col') ?? '-1', 10) === nextCol
-    );
+    const rowOf = (el: HTMLElement) =>
+        parseInt(el.getAttribute('data-row') ?? '-1', 10);
+    const colOf = (el: HTMLElement) =>
+        parseInt(el.getAttribute('data-col') ?? '-1', 10);
+    // Up and down go to the nearest row that has a field in this column: a
+    // track that is one more quality of an angle has no name field of its own.
+    const vertical = e.key === 'ArrowDown' || e.key === 'ArrowUp';
+    const next = vertical
+        ? inputs
+              .filter(
+                  (el) =>
+                      colOf(el) === nextCol &&
+                      (e.key === 'ArrowDown'
+                          ? rowOf(el) > row
+                          : rowOf(el) < row)
+              )
+              .sort((a, b) =>
+                  e.key === 'ArrowDown'
+                      ? rowOf(a) - rowOf(b)
+                      : rowOf(b) - rowOf(a)
+              )[0]
+        : inputs.find(
+              (el) => rowOf(el) === nextRow && colOf(el) === nextCol
+          );
     if (next) {
         next.focus();
         if (next instanceof HTMLInputElement) next.select();
@@ -1281,13 +1952,40 @@ function buildEncodeConfig(): EncodeConfig | null {
     if (encodingType.value === 'video') {
         config.videoRenditions = videoRenditions
             .filter((r) => !excludedVideo.has(r.sourceTrackIndex ?? 0))
-            .map((r) => ({ ...r }));
+            .map((r) =>
+                // Every row of a multi-track source says its angle, however it
+                // was made: the API would otherwise take its source track as
+                // its angle, and a copied ladder would split into one per rung.
+                multiTrack.value ? { ...r, angle: rowAngle(r) } : { ...r }
+            );
         config.audioGroups = keptGroups.map((g) => ({ ...g }));
-        config.videoTrackNames = editableVideoTracks.map((t) => ({
-            index: t.index,
-            name: ((t.name || `Angle ${t.index}`).trim() ||
-                `Angle ${t.index}`) as string,
-        }));
+        // The track an angle is keyed by carries the angle's name, made unique
+        // across angles — the name the encoder publishes. Where every track is
+        // its own angle that is one entry per track, as it always was. A track
+        // that is one more quality of an angle is listed only if it has a name
+        // of its own to remember: a made-up `Angle <n>` for it would come back
+        // as a real name the next time these labels are loaded.
+        if (multiTrack.value) {
+            config.videoTrackAngles = editableVideoTracks
+                .filter((t) => !excludedVideo.has(t.index))
+                .map((t) => ({
+                    index: t.index,
+                    angle: angleAssignment.value.get(t.index) ?? t.index,
+                }));
+        }
+        config.videoTrackNames = editableVideoTracks.flatMap((t) => {
+            if (namesAngle(t))
+                return [
+                    {
+                        index: t.index,
+                        name:
+                            angleNameById.value.get(t.index) ??
+                            `Angle ${t.index}`,
+                    },
+                ];
+            const own = t.name?.trim();
+            return own ? [{ index: t.index, name: own }] : [];
+        });
         config.audioTrackMetadata = editableAudioTracks.map((t) => ({
             index: t.index,
             name: t.name,
@@ -1455,7 +2153,35 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                 <div v-if="editableVideoTracks.length > 0">
                     <p class="ecf-detect-sub">Angle</p>
                     <p v-if="choosableVideo" class="ecf-hint" data-test="include-hint-video">
-                        Untick an angle to leave it out of the encode. The others keep their settings.
+                        Untick a track to leave it out of the encode. The others keep their settings.
+                    </p>
+                    <p
+                        v-if="choosableVideo && anglesDetected"
+                        class="ecf-hint"
+                        data-test="angle-hint"
+                    >
+                        Tracks showing the same picture were grouped into one
+                        angle. Move a track to another angle if it was grouped
+                        wrongly. Re-encoding makes every rendition of an angle
+                        from its best ticked track.
+                    </p>
+                    <p
+                        v-for="d in choosableVideo ? angleDoubts : []"
+                        :key="d.id"
+                        class="ecf-hint ecf-hint--warn"
+                        data-test="angle-doubt"
+                    >
+                        Check {{ angleNameById.get(d.id) }}: {{ d.doubt }} If they
+                        show different cameras, move one to New angle.
+                    </p>
+                    <p
+                        v-for="note in choosableVideo ? angleUndecided : []"
+                        :key="note"
+                        class="ecf-hint ecf-hint--warn"
+                        data-test="angle-undecided"
+                    >
+                        {{ note }} If they are qualities of one camera, move one
+                        into the other's angle.
                     </p>
                     <div class="ecf-table-wrap">
                         <table class="ecf-table">
@@ -1469,15 +2195,19 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                                     <th class="ecf-th">Resolution</th>
                                     <th class="ecf-th">Bitrate</th>
                                     <th class="ecf-th">FPS</th>
-                                    <th class="ecf-th">Angle</th>
+                                    <th v-if="choosableVideo" class="ecf-th">Angle</th>
+                                    <th class="ecf-th">Angle name</th>
                                 </tr>
                             </thead>
                             <tbody class="ecf-tbody">
                                 <tr
-                                    v-for="t in editableVideoTracks"
-                                    :key="t.index"
+                                    v-for="(row, rowIdx) in videoTrackRows"
+                                    :key="row.track.index"
                                     class="ecf-tr"
-                                    :class="{ 'ecf-tr--excluded': choosableVideo && excludedVideo.has(t.index) }"
+                                    :class="{
+                                        'ecf-tr--excluded': choosableVideo && excludedVideo.has(row.track.index),
+                                        'ecf-tr--member': choosableVideo && !row.first,
+                                    }"
                                 >
                                     <td v-if="choosableVideo" class="ecf-td ecf-td-include">
                                         <input
@@ -1485,44 +2215,78 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                                             class="ecf-checkbox"
                                             data-test="track-include"
                                             data-kind="video"
-                                            :data-track-index="t.index"
-                                            :checked="!excludedVideo.has(t.index)"
-                                            :disabled="!canExclude('video', t.index)"
-                                            :title="includeTitle('video', t.index)"
-                                            :aria-label="`Include angle ${t.index}`"
-                                            @change="setTrackIncluded('video', t.index, ($event.target as HTMLInputElement).checked)"
+                                            :data-track-index="row.track.index"
+                                            :checked="!excludedVideo.has(row.track.index)"
+                                            :disabled="!canExclude('video', row.track.index)"
+                                            :title="includeTitle('video', row.track.index)"
+                                            :aria-label="`Include angle ${row.track.index}`"
+                                            @change="setTrackIncluded('video', row.track.index, ($event.target as HTMLInputElement).checked)"
                                         />
                                     </td>
-                                    <td class="ecf-td">{{ t.index }}</td>
+                                    <td class="ecf-td">{{ row.track.index }}</td>
                                     <td class="ecf-td">
-                                        {{ t.codec
+                                        {{ row.track.codec
                                         }}{{
-                                            t.profile ? ` (${t.profile})` : ''
+                                            row.track.profile ? ` (${row.track.profile})` : ''
                                         }}
                                     </td>
                                     <td class="ecf-td">
-                                        {{ t.width }}&times;{{ t.height }}
+                                        <template v-if="isRotated(row.track)">
+                                            {{ displayDimensionsOf(row.track).width }}&times;{{
+                                                displayDimensionsOf(row.track).height
+                                            }}
+                                            <span class="ecf-cell-dim"
+                                                >(stored {{ row.track.width }}&times;{{
+                                                    row.track.height
+                                                }})</span
+                                            >
+                                        </template>
+                                        <template v-else>
+                                            {{ row.track.width }}&times;{{ row.track.height }}
+                                        </template>
                                     </td>
                                     <td class="ecf-td">
                                         {{
-                                            t.bitrateKbps
-                                                ? `${t.bitrateKbps} kbps`
+                                            row.track.bitrateKbps
+                                                ? `${row.track.bitrateKbps} kbps`
                                                 : '—'
                                         }}
                                     </td>
-                                    <td class="ecf-td">{{ t.frameRate }}</td>
+                                    <td class="ecf-td">{{ row.track.frameRate }}</td>
+                                    <td v-if="choosableVideo" class="ecf-td">
+                                        <SelectMenu
+                                            :model-value="row.angle.id"
+                                            :options="angleSelectOptions"
+                                            class="ecf-select-inline"
+                                            data-test="track-angle"
+                                            :data-track-index="row.track.index"
+                                            :aria-label="`Angle of track ${row.track.index}`"
+                                            @update:model-value="setTrackAngle(row.track.index, $event as number | 'new')"
+                                        />
+                                    </td>
                                     <td class="ecf-td">
+                                        <!-- An angle is named once, on its first row; the
+                                             name is kept on the track the angle is keyed by. -->
                                         <input
-                                            v-model="t.name"
+                                            v-if="!choosableVideo || row.first"
+                                            :value="(choosableVideo ? row.idTrack : row.track).name ?? ''"
                                             type="text"
                                             class="ecf-input ecf-input-sm"
-                                            placeholder="e.g. Main angle"
+                                            :placeholder="
+                                                choosableVideo
+                                                    ? angleNameById.get(row.angle.id)
+                                                    : 'e.g. Main angle'
+                                            "
                                             data-track-field="video-name"
-                                            :data-track-index="t.index"
-                                            :data-row="t.index"
+                                            :data-track-index="(choosableVideo ? row.idTrack : row.track).index"
+                                            :data-row="rowIdx"
                                             data-col="0"
+                                            @input="(choosableVideo ? row.idTrack : row.track).name = ($event.target as HTMLInputElement).value"
                                             @keydown="onTrackInputKeydown"
                                         />
+                                        <span v-else class="ecf-cell-dim">
+                                            same picture as #{{ row.angle.members[0].index }}
+                                        </span>
                                     </td>
                                 </tr>
                             </tbody>
@@ -1672,6 +2436,77 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                 </summary>
                 <div class="ecf-panel-body">
                     <p class="ecf-box-hint">One row per HLS variant stream</p>
+                    <div class="ecf-form-row" data-test="ladder-mode">
+                        <div class="ecf-form-field">
+                            <span class="ecf-field-label">Ladder</span>
+                            <div
+                                class="ecf-seg"
+                                role="radiogroup"
+                                aria-label="How the video ladder is made"
+                            >
+                                <button
+                                    type="button"
+                                    role="radio"
+                                    data-test="ladder-mode-copy"
+                                    :aria-checked="shownLadderMode === 'copy'"
+                                    :class="[
+                                        'ecf-seg-btn',
+                                        shownLadderMode === 'copy' && 'ecf-seg-btn--on',
+                                    ]"
+                                    :disabled="copyLadderBlockedReason != null"
+                                    :title="
+                                        copyLadderBlockedReason ??
+                                        'Copy every track as it is — the source\'s own ladder, no re-encoding'
+                                    "
+                                    @click="setLadderMode('copy')"
+                                >
+                                    {{ multiTrack ? 'Copy source ladder' : 'Copy source' }}
+                                </button>
+                                <button
+                                    type="button"
+                                    role="radio"
+                                    data-test="ladder-mode-reencode"
+                                    :aria-checked="shownLadderMode === 'reencode'"
+                                    :class="[
+                                        'ecf-seg-btn',
+                                        shownLadderMode === 'reencode' &&
+                                            'ecf-seg-btn--on',
+                                    ]"
+                                    title="Encode a full ladder per angle, every rendition made from the angle's best track, and the audio from each language's best track"
+                                    @click="setLadderMode('reencode')"
+                                >
+                                    {{ multiTrack ? 'Re-encode from best track' : 'Re-encode a ladder' }}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <p
+                        v-if="ladderModeNotice"
+                        class="ecf-box-hint ecf-box-hint--warn"
+                        data-test="ladder-mode-notice"
+                    >
+                        {{ ladderModeNotice }}
+                    </p>
+                    <p
+                        v-else-if="
+                            angleDoubts.length > 0 &&
+                            copyLadderBlockedReason == null &&
+                            shownLadderMode !== 'copy'
+                        "
+                        class="ecf-box-hint ecf-box-hint--warn"
+                        data-test="ladder-angle-doubt"
+                    >
+                        Copy was not suggested: check the grouping of
+                        {{ angleDoubts.map((d) => angleNameById.get(d.id)).join(', ') }}
+                        under Detected Media first.
+                    </p>
+                    <p
+                        v-else-if="copyLadderBlockedReason && editableVideoTracks.length > 1"
+                        class="ecf-box-hint"
+                        data-test="ladder-copy-blocked"
+                    >
+                        Copy is unavailable — {{ copyLadderBlockedReason }}
+                    </p>
                     <div v-if="showLadderMax" class="ecf-form-row">
                         <div class="ecf-form-field">
                             <span class="ecf-field-label">Content</span>
@@ -1761,7 +2596,7 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                                     <th class="ecf-lt-th">Resolution</th>
                                     <th class="ecf-lt-th ecf-lt-th--r">kbps</th>
                                     <th class="ecf-lt-th">Audio group</th>
-                                    <th class="ecf-lt-th">Angle</th>
+                                    <th class="ecf-lt-th">Label</th>
                                     <th class="ecf-lt-th">Options</th>
                                     <th class="ecf-lt-th ecf-lt-th--del"></th>
                                 </tr>
@@ -2080,10 +2915,8 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                                                     type="checkbox"
                                                     v-model="g.copyStream"
                                                     class="ecf-checkbox"
-                                                    @change="
-                                                        g.copyStream &&
-                                                        (g.vbr = false)
-                                                    "
+                                                    data-test="audio-group-copy"
+                                                    @change="onAudioCopyToggle(g)"
                                                 />
                                                 Copy
                                             </label>

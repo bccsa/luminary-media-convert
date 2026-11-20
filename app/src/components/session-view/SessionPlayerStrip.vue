@@ -35,6 +35,11 @@ const props = defineProps<{
     nativePreviewAudio?: boolean;
     /** Said quietly beside the selectors: why the preview is a conversion. */
     previewNote?: string | null;
+    /**
+     * The picture is taller than wide. The frame is 16:9, so filling it would
+     * crop most of a portrait picture away: it is letterboxed instead.
+     */
+    portrait?: boolean;
 }>();
 
 const selectedAudioTrack = defineModel<number>('selectedAudioTrack', {
@@ -425,7 +430,7 @@ defineExpose({
                         ref="luminaryPlayerRef"
                         :source="source"
                         :controls="playerControls"
-                        windowed-fit="cover"
+                        :windowed-fit="portrait ? 'contain' : 'cover'"
                     />
                 </div>
                 <!--

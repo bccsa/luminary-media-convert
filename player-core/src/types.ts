@@ -26,7 +26,16 @@ export type { ChunkBoundary, LivePlaylistSpec };
 // Source description
 // ---------------------------------------------------------------------------
 
-/** A chapter sidecar for one language (`chapters/<lang>.vtt` convention). */
+/**
+ * A chapter file for one language.
+ *
+ * The master names the current one in a `com.luminary.chapters` session-data
+ * line, and the controller reads it from there: each save writes a new name.
+ * One a host passes in {@link PlayerSource.sidecars} is the fallback for a
+ * master that names none — from before the index, so the fixed
+ * `chapters/<lang>.vtt` beside it — and lends its `label` to the master's file
+ * for the same language.
+ */
 export interface ChapterSidecar {
     /** BCP-47 / ISO-639 language tag, e.g. `'en'`. */
     lang: string;
@@ -83,7 +92,14 @@ export function resolveRecoveryPolicy(
 
 /** Everything the wrapper needs to present one piece of content. */
 /**
- * A `thumbnails.vtt` and, through it, the sprite sheets it references.
+ * A thumbnail VTT and, through it, the sprite sheets it references.
+ *
+ * The master names the current strip in `com.luminary.thumbnails` session-data
+ * lines — one for every angle, or one per angle — and the controller reads it
+ * from there, picking again on every angle switch: a regeneration writes a new
+ * name. One a host passes in {@link PlayerSource.sidecars} is the fallback for
+ * a master that names none, from before the index, so the fixed
+ * `thumbnails/thumbnails.vtt` beside it.
  *
  * LMCENC-wrapped on an encrypted session, like every other `.vtt` the encoder
  * writes, so it goes through the same decrypt path as chapters. The sprite
@@ -174,22 +190,26 @@ export interface PlayerSource {
     preservePosition?: boolean;
     sidecars?: {
         /**
-         * Multi-lingual chapter sidecars. The wrapper supports many; an
-         * implementing app is free to pass a single language.
+         * Multi-lingual chapter sidecars, for a master that names no chapter
+         * files of its own (see {@link ChapterSidecar}). When it names any,
+         * they replace this list for the load; a label given here still names
+         * the master's file for the same language. The wrapper supports many
+         * languages; an implementing app is free to pass a single one.
          */
         chapters?: ChapterSidecar[];
         subtitles?: SubtitleSidecar[];
         /**
-         * Sprite sheets for the scrub preview, as `thumbnails.vtt` beside the
-         * master.
+         * Sprite sheets for the scrub preview, as `thumbnails/thumbnails.vtt`
+         * beside the master, for a master that names no strip of its own (see
+         * {@link ThumbnailSidecar}).
          *
          * Passed explicitly rather than derived from the master's prefix,
-         * because a sidecar is a convention and not something the playlist
-         * points at: an audio-only encode and a session created with
-         * `thumbnails: false` have none, and a player that guessed the URL would
-         * be requesting a 404 on every load to find that out. Supplied the same
-         * way {@link PlayerSource.keyHex} is — the host knows, the player does
-         * not.
+         * because before the index a strip was a convention and not something
+         * the playlist pointed at: an audio-only encode and a session created
+         * with `thumbnails: false` have none, and a player that guessed the URL
+         * would be requesting a 404 on every load to find that out. Supplied
+         * the same way {@link PlayerSource.keyHex} is — the host knows, the
+         * player does not.
          */
         thumbnails?: ThumbnailSidecar;
     };
