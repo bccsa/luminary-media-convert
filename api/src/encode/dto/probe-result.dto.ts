@@ -127,6 +127,17 @@ export class VideoTrackInfoDto {
     level?: number;
 
     @ApiPropertyOptional({
+        example: 90,
+        description:
+            'Clockwise quarter turns the picture is shown at, in degrees (90, ' +
+            '180 or 270), from the display matrix. A phone stores a portrait ' +
+            'video landscape and says to turn it. Absent when the picture is ' +
+            'shown as stored. `displayWidth`/`displayHeight` already count it.',
+    })
+    @Expose()
+    rotation?: number;
+
+    @ApiPropertyOptional({
         example: 0,
         description:
             'The camera angle this track is one quality of, when the source ' +

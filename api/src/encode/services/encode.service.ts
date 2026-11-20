@@ -88,6 +88,7 @@ import {
 } from './encode-resume.js';
 import { parseMediaPlaylist } from '@luminary-media-converter/hls-core';
 import { readTrackTimescale, sampleDescription } from './fmp4-timeline.js';
+import { isRotated } from './aspect.js';
 
 /** One run of an encode: its attempt, its IV, and whether it continues an earlier one. */
 interface PreparedRun {
@@ -635,6 +636,11 @@ export class EncodeService implements OnModuleInit {
                     outputDir,
                     encodeConfig,
                     onProgress: onEncodeProgress,
+                    ...(session.probeResult?.videoTracks?.some((t) =>
+                        isRotated(t)
+                    )
+                        ? { softwareDecode: true }
+                        : {}),
                     ...(thisRun.ffmpegResume
                         ? { resume: thisRun.ffmpegResume }
                         : {}),

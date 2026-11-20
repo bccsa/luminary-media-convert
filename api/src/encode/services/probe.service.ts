@@ -82,6 +82,13 @@ export interface VideoTrackInfo {
      */
     level?: number;
     /**
+     * Clockwise quarter turns the picture is shown at, in degrees (90, 180 or
+     * 270), from the stream's display matrix. A phone stores a portrait video
+     * landscape and says to turn it. Absent when the picture is shown as
+     * stored. The display size already counts the turn.
+     */
+    rotation?: number;
+    /**
      * The camera angle this track is one quality of, when the source carries
      * the same picture more than once. The id is the lowest track index in the
      * angle — an identifier, not a ranking. Absent on a track that is its own
@@ -175,6 +182,7 @@ interface FfprobeStream {
     tags?: Record<string, string>;
     disposition?: { attached_pic?: number };
     duration?: string;
+    side_data_list?: { side_data_type?: string; rotation?: number }[];
 }
 
 interface FfprobeFormat {
@@ -309,6 +317,38 @@ function displayDimensions(
 }
 
 /**
+ * The clockwise turn a stream is shown at: 0, 90, 180 or 270.
+ *
+ * ffprobe reports the display matrix's angle counter-clockwise and signed (an
+ * iPhone portrait video says 90 or -90 depending on how it was held), while
+ * the older `rotate` tag counts clockwise; both are folded onto a clockwise
+ * quarter turn. Only the turn's size matters downstream: FFmpeg's autorotate
+ * reads the matrix itself.
+ */
+function rotationOf(s: FfprobeStream): number {
+    const matrix = s.side_data_list?.find(
+        (d) => d.side_data_type === 'Display Matrix'
+    );
+    const clockwise =
+        matrix?.rotation != null
+            ? -Number(matrix.rotation)
+            : Number(s.tags?.rotate ?? 0);
+    if (!Number.isFinite(clockwise)) return 0;
+    const quarter = Math.round(clockwise / 90) * 90;
+    return ((quarter % 360) + 360) % 360;
+}
+
+/** A size turned by a quarter turn trades its width and height. */
+function turned(
+    size: { width: number; height: number },
+    rotation: number
+): { width: number; height: number } {
+    return rotation === 90 || rotation === 270
+        ? { width: size.height, height: size.width }
+        : size;
+}
+
+/**
  * Keyframes this far apart, in seconds, are one keyframe. Under a frame at any
  * rate shipped, and the same figure the copy-mode gate aligns streams to.
  */
@@ -373,10 +413,14 @@ export class ProbeService {
         for (const s of data.streams) {
             if (s.codec_type === 'video') {
                 if (s.disposition?.attached_pic === 1) continue;
-                const display = displayDimensions(
-                    s.width ?? 0,
-                    s.height ?? 0,
-                    s.sample_aspect_ratio
+                const rotation = rotationOf(s);
+                const display = turned(
+                    displayDimensions(
+                        s.width ?? 0,
+                        s.height ?? 0,
+                        s.sample_aspect_ratio
+                    ),
+                    rotation
                 );
                 videoTracks.push({
                     index: videoStreamIndex++,
@@ -396,6 +440,7 @@ export class ProbeService {
                     hasBFrames: s.has_b_frames,
                     pixFmt: s.pix_fmt,
                     level: s.level,
+                    ...(rotation ? { rotation } : {}),
                 });
             } else if (s.codec_type === 'audio') {
                 audioTracks.push({

@@ -57,6 +57,13 @@ export interface VideoTrackInfo {
      */
     level?: number;
     /**
+     * Clockwise quarter turns the picture is shown at, in degrees (90, 180 or
+     * 270), from the stream's display matrix. A phone stores a portrait video
+     * landscape and says to turn it. Absent when the picture is shown as
+     * stored. The display size already counts the turn.
+     */
+    rotation?: number;
+    /**
      * The camera angle this track is one quality of, when the source carries
      * the same picture more than once: the lowest track index in that angle.
      * An identifier, not a ranking. Absent on a track that is its own angle,

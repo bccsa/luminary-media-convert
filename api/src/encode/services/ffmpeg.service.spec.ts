@@ -1103,6 +1103,64 @@ describe('FfmpegService', () => {
             expect(args).toContain('-allow_sw:v:1');
         });
 
+        it('decodes a turned source on the CPU and still encodes on VideoToolbox', async () => {
+            (service as any).accelMode = 'apple';
+
+            const encodeConfig: EncodeConfigDto = {
+                type: 'video',
+                segmentDuration: 6,
+                videoRenditions: [
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 2500,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: '720p',
+                    },
+                    {
+                        width: 854,
+                        height: 480,
+                        videoBitrateKbps: 1000,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: '480p',
+                    },
+                ],
+                audioGroups: [
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
+                ],
+            };
+
+            const args = await buildVideoArgs({
+                inputPath: '/tmp/input.mp4',
+                outputDir: '/tmp/output',
+                encodeConfig,
+                softwareDecode: true,
+            });
+
+            // The decode turns the picture; one kept on the device would not.
+            expect(args).not.toContain('-hwaccel');
+            expect(args).toContain('h264_videotoolbox');
+
+            const filterIdx = args.indexOf('-filter_complex');
+            const filterVal = args[filterIdx + 1];
+            expect(filterVal).toContain('split=2');
+            expect(filterVal).toContain('scale=1280:720');
+            expect(filterVal).toContain('scale=854:480');
+            expect(filterVal).not.toContain('scale_vt');
+
+            expect(args).toContain('h264_videotoolbox');
+            expect(args).toContain('-allow_sw:v:0');
+            expect(args).toContain('-allow_sw:v:1');
+        });
+
         it('should use wider bufsize/maxrate multipliers for Apple VBR', async () => {
             (service as any).accelMode = 'apple';
 
