@@ -113,7 +113,8 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
     /** Where forward progress is measured from: the furthest played position since the last seek. */
     private lastProgressTime = 0;
     private onVisibilityChange: (() => void) | null = null;
-    private deferredSeek: (() => void) | null = null;
+    /** A seek waiting for the new source's metadata: where it will land, and the listener that lands it. */
+    private deferredSeek: { seconds: number; handler: () => void } | null = null;
     private elementListeners: [string, () => void][] = [];
     private listListeners: (() => void)[] = [];
     private engine: HlsEngine | null = null;
@@ -130,11 +131,15 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
      */
     private engineKeyHex: string | undefined;
     /**
-     * The element's audio tracks still belong to the source being replaced: a track selected there
-     * is loaded by an engine about to be torn down, so the list reads as empty and selections are
-     * refused until the element has rebuilt it.
+     * The element's audio tracks that still belong to the source being replaced, or null when there
+     * are none: a track selected there is loaded by an engine about to be torn down, so the list
+     * reads as empty and selections are refused until the element has rebuilt it.
+     *
+     * Kept as the tracks themselves, not a flag cleared when the list empties, because on an angle
+     * switch the list never does: the element keeps its hls.js engine, which drops the old tracks and
+     * adds the new ones in one turn, and the list announces both only afterwards.
      */
-    private audioTracksOutgoing = false;
+    private outgoingAudioTracks: ReadonlySet<unknown> | null = null;
     private listeners = new Map<
         AdapterEventName,
         Set<(payload: never) => void>
@@ -308,7 +313,11 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
                 this.el.removeEventListener('loadedmetadata', handler);
                 this.seekNow(seconds);
             };
-            this.deferredSeek = handler;
+            this.deferredSeek = { seconds, handler };
+            // Until it lands, the position reads as the target (see getCurrentTime), so the progress and stall
+            // baselines move to it now, as they will when it lands: a fresh source's clock is not progress.
+            this.lastProgressTime = seconds;
+            this.stallSignals.resetBaseline(seconds);
             this.el.addEventListener('loadedmetadata', handler);
             return;
         }
@@ -327,11 +336,17 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
 
     private cancelDeferredSeek(): void {
         if (!this.deferredSeek) return;
-        this.el.removeEventListener('loadedmetadata', this.deferredSeek);
+        this.el.removeEventListener('loadedmetadata', this.deferredSeek.handler);
         this.deferredSeek = null;
     }
 
+    /**
+     * Between a new source and its metadata, where a deferred seek is about to put the playhead: the
+     * element reads 0 then, and a caller restoring the position across a second attach (or a re-attach
+     * of this one) would carry the 0 forward.
+     */
     getCurrentTime(): number {
+        if (this.deferredSeek) return this.deferredSeek.seconds;
         const currentTime = this.el.currentTime;
         return typeof currentTime === 'number' && Number.isFinite(currentTime)
             ? currentTime
@@ -449,13 +464,25 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
     private retireAudioTracks(): void {
         const tracks = this.el.audioTracks;
         if (!tracks || tracks.length === 0) return;
-        this.audioTracksOutgoing = true;
+        this.outgoingAudioTracks = new Set(tracks);
         this.emit('audiotracks-updated', undefined);
+    }
+
+    /**
+     * Whether the list is still the replaced source's: it holds one of the tracks retired with it.
+     * Once none is left the list is the new source's, empty or not, and the retired tracks are let go.
+     */
+    private audioTracksOutgoing(): boolean {
+        const outgoing = this.outgoingAudioTracks;
+        if (!outgoing) return false;
+        for (const track of this.el.audioTracks ?? []) if (outgoing.has(track)) return true;
+        this.outgoingAudioTracks = null;
+        return false;
     }
 
     getAudioTracks(): AdapterAudioTrack[] {
         const tracks = this.el.audioTracks;
-        if (!tracks || this.audioTracksOutgoing) return [];
+        if (!tracks || this.audioTracksOutgoing()) return [];
         const result: AdapterAudioTrack[] = [];
         let i = 0;
         for (const track of tracks) {
@@ -474,7 +501,7 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         const engine = this.el.engine;
         const tracks = this.el.audioTracks;
         // The wrapper hands its choice to the new list once that arrives.
-        if (!engine || !tracks || this.audioTracksOutgoing) return;
+        if (!engine || !tracks || this.audioTracksOutgoing()) return;
         let i = 0;
         for (const track of tracks) {
             if ((track.id || `a${i}`) === id) {
@@ -709,6 +736,8 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         this.engine?.off(Hls.Events.MANIFEST_PARSED, this.onLevels);
         this.stopPersistingBandwidth?.();
         this.stopPersistingBandwidth = null;
+        // A new engine brings a list of its own, so nothing in it is outgoing; the old one's tracks went with it.
+        this.outgoingAudioTracks = null;
         this.engine = engine;
         this.stallSignals.attach(engine);
         this.attachListListeners();
@@ -819,8 +848,9 @@ export class HlsJsVideoAdapter implements PlayerAdapter {
         const tracks = this.el.audioTracks;
         if (tracks) {
             const onAudioTracks = (): void => {
-                // Torn down: whatever the element adds next is the new source's.
-                if (tracks.length === 0) this.audioTracksOutgoing = false;
+                // Rebuilt, or torn down: whatever the list holds now is the new source's. Settled here, before
+                // the wrapper reads it, so the first event after a rebuild already serves the new tracks.
+                this.audioTracksOutgoing();
                 this.emit('audiotracks-updated', undefined);
             };
             for (const type of ['addtrack', 'removetrack', 'change'] as const) {
