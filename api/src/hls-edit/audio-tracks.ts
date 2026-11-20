@@ -32,6 +32,21 @@ const NAME_FORBIDDEN = /["\r\n]/;
 const NAME_MAX = 100;
 
 /**
+ * A language code, trimmed, or a 400 saying it is not one. Shared with the
+ * camera angles, whose `LANGUAGE` names the audio they go with: one rule, so a
+ * code an audio track takes is one an angle takes too.
+ */
+export function assertLanguage(language: string): string {
+    const lang = language.trim();
+    if (!LANGUAGE.test(lang)) {
+        throw new BadRequestException(
+            `"${language}" is not a language code (ISO 639, e.g. "en" or "fra")`
+        );
+    }
+    return lang;
+}
+
+/**
  * A track's language and name, trimmed, or a 400 saying what is wrong with
  * them: an ISO 639 code, and a name an attribute list can carry.
  */
@@ -39,13 +54,8 @@ export function assertTrackLabel(
     language: string,
     name: string
 ): { language: string; name: string } {
-    const lang = language.trim();
+    const lang = assertLanguage(language);
     const label = name.trim();
-    if (!LANGUAGE.test(lang)) {
-        throw new BadRequestException(
-            `"${language}" is not a language code (ISO 639, e.g. "en" or "fra")`
-        );
-    }
     if (!label || label.length > NAME_MAX || NAME_FORBIDDEN.test(label)) {
         throw new BadRequestException(
             `A track name needs 1 to ${NAME_MAX} characters, without quotes or line breaks`

@@ -1,12 +1,17 @@
 import { BadRequestException } from '@nestjs/common';
 import {
+    ANGLE_ACCESSIBILITY,
+    angleAccessibilityOf,
     parseMasterPlaylist,
+    type AngleAccessibility,
     type HlsParsedMaster,
 } from '@luminary-media-converter/hls-core';
 import {
     MEDIA_TAG,
+    assertLanguage,
     attributePattern,
     readAttribute,
+    removeAttribute,
     writeAttribute,
     writeBareAttribute,
 } from './audio-tracks.js';
@@ -22,15 +27,40 @@ export interface VideoAngle {
     id: string;
     /** `NAME`; empty for that single picture. */
     name: string;
+    /**
+     * `LANGUAGE`: the audio language the picture belongs to (burnt-in titles,
+     * lip sync), which a player follows the audio to. Empty when it has none,
+     * as an audio track without one reads; always empty for a single picture.
+     */
+    language: string;
+    /**
+     * The hearing-impaired kind of view its `CHARACTERISTICS` mark. Absent
+     * when they mark none of the kinds in `ANGLE_ACCESSIBILITY`.
+     */
+    accessibility?: AngleAccessibility;
     default: boolean;
     /** How many variants (sizes) the angle has. */
     renditions: number;
 }
 
-/** A new name for an angle. */
+/**
+ * A change to one angle. A field left out (or null) stays as it is, so an
+ * editor sends only what it changed: an empty `language` takes `LANGUAGE`
+ * off, and `accessibility: 'none'` takes `CHARACTERISTICS` off when they mark
+ * one of our kinds; a value that is none of ours stays as it is.
+ */
 export interface VideoAngleEdit {
     id: string;
-    name: string;
+    name?: string;
+    language?: string;
+    accessibility?: AngleAccessibility | 'none';
+}
+
+/** An edit, checked: what each line it names is rewritten to. */
+interface AngleChange {
+    name?: string;
+    language?: string;
+    accessibility?: AngleAccessibility | 'none';
 }
 
 /** A variant of a new angle, and the existing one it stands beside. */
@@ -63,6 +93,33 @@ export function assertAngleName(name: string): string {
     return label;
 }
 
+/**
+ * An angle's `LANGUAGE` as it is written: empty for none, else an ISO 639
+ * code by the audio tracks' rule, which the angle's language has to match for
+ * a player to follow the audio to it. The language part is lower-cased, as
+ * that rule spells it; anything else is a 400.
+ */
+export function assertAngleLanguage(language: string): string {
+    const lang = language.trim();
+    return lang === ''
+        ? ''
+        : assertLanguage(lang.replace(/^[A-Za-z]+/, (p) => p.toLowerCase()));
+}
+
+const ACCESSIBILITY_KINDS = Object.keys(
+    ANGLE_ACCESSIBILITY
+) as AngleAccessibility[];
+
+/** One of the hearing-impaired kinds, or `none`; anything else is a 400. */
+function angleAccessibility(value: string): AngleAccessibility | 'none' {
+    if (value === 'none' || (ACCESSIBILITY_KINDS as string[]).includes(value)) {
+        return value as AngleAccessibility | 'none';
+    }
+    throw new BadRequestException(
+        `"${value}" is not a kind of view: use ${ACCESSIBILITY_KINDS.join(', ')} or none`
+    );
+}
+
 /** The master's camera angles, in the order their groups appear. */
 export function listVideoAngles(master: HlsParsedMaster): VideoAngle[] {
     const groups = master.media.filter((m) => m.type === 'VIDEO');
@@ -73,6 +130,7 @@ export function listVideoAngles(master: HlsParsedMaster): VideoAngle[] {
                   {
                       id: '',
                       name: '',
+                      language: '',
                       default: true,
                       renditions: pictured.length,
                   },
@@ -84,9 +142,14 @@ export function listVideoAngles(master: HlsParsedMaster): VideoAngle[] {
     for (const group of groups) {
         if (seen.has(group.groupId)) continue;
         seen.add(group.groupId);
+        const accessibility = angleAccessibilityOf(
+            group.characteristics?.split(',').map((c) => c.trim())
+        );
         angles.push({
             id: group.groupId,
             name: group.name,
+            language: group.language ?? '',
+            ...(accessibility ? { accessibility } : {}),
             default: group.default === true,
             renditions: master.variants.filter(
                 (v) => v.videoGroup === group.groupId
@@ -128,21 +191,41 @@ const sameName = (a: string, b: string): boolean =>
  * `text`, a master playlist, with a camera angle added: its `TYPE=VIDEO` group
  * and one variant per entry of `variants`, each taking every other attribute
  * (audio, subtitles, captions) from the existing variant it stands beside. The
- * new angle is never the default.
+ * new angle is never the default. Its group line carries its `language` and
+ * `accessibility` when it has them.
  *
  * A video with a single picture gains angles here: that picture becomes the
- * default angle, named `mainName`, and every existing variant and I-frame
- * playlist names it. Every other byte is left as it was.
+ * default angle, named `mainName` and given `mainLanguage`, and every existing
+ * variant and I-frame playlist names it. Every other byte is left as it was.
  *
- * Throws, rewriting nothing, when a name is invalid or already an angle's, the
- * video has no picture, or a reference variant is not in the master.
+ * The group lines it writes keep one order, `TYPE`, `GROUP-ID`, `NAME`,
+ * `LANGUAGE`, `CHARACTERISTICS`, `DEFAULT`: the order the playlist builder
+ * writes, with an attribute the angle does not have left out.
+ *
+ * Throws, rewriting nothing, when a name or language is invalid, a name is
+ * already an angle's, the video has no picture, or a reference variant is not
+ * in the master.
  */
 export function addVideoAngleLines(
     text: string,
-    names: { name: string; mainName?: string },
+    names: {
+        name: string;
+        mainName?: string;
+        /** The new angle's `LANGUAGE`; empty or absent for none. */
+        language?: string;
+        /** The new angle's hearing-impaired kind of view, if it is one. */
+        accessibility?: AngleAccessibility;
+        /** The single picture's `LANGUAGE`, as it becomes the main angle. */
+        mainLanguage?: string;
+    },
     variants: AddedAngleVariant[]
 ): string {
     const name = assertAngleName(names.name);
+    const language = assertAngleLanguage(names.language ?? '');
+    const kind =
+        names.accessibility != null
+            ? angleAccessibility(names.accessibility)
+            : 'none';
     const master = parseMasterPlaylist(text);
     const angles = listVideoAngles(master);
     if (angles.length === 0) {
@@ -152,6 +235,9 @@ export function addVideoAngleLines(
     }
     const single = angles[0].id === '';
     const mainName = single ? assertAngleName(names.mainName ?? 'Main') : '';
+    const mainLanguage = single
+        ? assertAngleLanguage(names.mainLanguage ?? '')
+        : '';
     if (
         single
             ? sameName(mainName, name)
@@ -226,11 +312,9 @@ export function addVideoAngleLines(
 
     const mediaLines = [
         ...(single
-            ? [
-                  `${MEDIA_TAG}TYPE=VIDEO,GROUP-ID="${mainId}",NAME="${mainName}",DEFAULT=YES`,
-              ]
+            ? [videoGroupLine(mainId, mainName, mainLanguage, 'none', true)]
             : []),
-        `${MEDIA_TAG}TYPE=VIDEO,GROUP-ID="${newId}",NAME="${name}",DEFAULT=NO`,
+        videoGroupLine(newId, name, language, kind, false),
     ];
 
     // The variants go after the last one, the group after the last of its kind.
@@ -256,14 +340,42 @@ export function addVideoAngleLines(
     return lines.join(eol);
 }
 
+/** A new angle's `TYPE=VIDEO` line, in the order {@link addVideoAngleLines} keeps. */
+function videoGroupLine(
+    id: string,
+    name: string,
+    language: string,
+    kind: AngleAccessibility | 'none',
+    isDefault: boolean
+): string {
+    return (
+        `${MEDIA_TAG}TYPE=VIDEO,GROUP-ID="${id}",NAME="${name}"` +
+        (language ? `,LANGUAGE="${language}"` : '') +
+        (kind !== 'none'
+            ? `,CHARACTERISTICS="${ANGLE_ACCESSIBILITY[kind]}"`
+            : '') +
+        `,DEFAULT=${isDefault ? 'YES' : 'NO'}`
+    );
+}
+
 /**
- * Renames camera angles and takes the `removed` ones out of the master: their
- * group, their variants and their I-frame playlists. Their files stay in
- * storage. When the default angle goes, the first one left becomes it.
+ * Renames camera angles, sets or clears their language and hearing-impaired
+ * kind, and takes the `removed` ones out of the master: their group, their
+ * variants and their I-frame playlists. Their files stay in storage. When the
+ * default angle goes, the first one left becomes it.
  *
- * Checked first, so nothing is rewritten when an angle is unknown, both
- * renamed and removed, would be the last one taken out, or a name is invalid
- * or would be two angles'.
+ * Only what an edit names is touched, and a value already as asked is not
+ * rewritten (a language differing only in the case of its letters, or
+ * `CHARACTERISTICS` that already mark the kind asked for, count as asked), so
+ * an edit that changes nothing leaves every line as it was. The line ends are
+ * the exception: a master that mixes CRLF and LF comes back with CRLF
+ * throughout. `CHARACTERISTICS` is written as the one identifier of the kind
+ * asked for, replacing whatever the line had; a value that is none of ours
+ * stays until an edit sets a kind, or clears one the line has.
+ *
+ * Checked first, so nothing is rewritten when an angle is unknown or edited
+ * twice, both edited and removed, would be the last one taken out, a name or
+ * language is invalid, or a name would be two angles'.
  */
 export function rewriteVideoAngles(
     text: string,
@@ -278,6 +390,15 @@ export function rewriteVideoAngles(
             throw new BadRequestException(`No angle "${id}"`);
         }
     }
+    // One edit per angle: a second would silently replace the first.
+    const edited = new Set<string>();
+    for (const { id } of edits) {
+        if (edited.has(id)) {
+            const name = angles.find((a) => a.id === id)?.name || id;
+            throw new BadRequestException(`Angle "${name}" is edited twice`);
+        }
+        edited.add(id);
+    }
     const gone = new Set(removed);
     if (edits.some((e) => gone.has(e.id))) {
         throw new BadRequestException(
@@ -288,10 +409,23 @@ export function rewriteVideoAngles(
     if (kept.length === 0) {
         throw new BadRequestException('A video keeps at least one angle');
     }
-    const names = new Map(
-        edits.map((e) => [e.id, assertAngleName(e.name)] as const)
+    const changes = new Map<string, AngleChange>(
+        edits.map((e) => [
+            e.id,
+            {
+                ...(e.name != null ? { name: assertAngleName(e.name) } : {}),
+                ...(e.language != null
+                    ? { language: assertAngleLanguage(e.language) }
+                    : {}),
+                ...(e.accessibility != null
+                    ? { accessibility: angleAccessibility(e.accessibility) }
+                    : {}),
+            },
+        ])
     );
-    const finalNames = kept.map((a) => names.get(a.id) ?? a.name);
+    // As the names will be once the edit is made: an angle may take the name
+    // of one removed, or of one renamed, in the same save.
+    const finalNames = kept.map((a) => changes.get(a.id)?.name ?? a.name);
     if (
         finalNames.some((n, i) =>
             finalNames.some((m, j) => j < i && sameName(n, m))
@@ -314,9 +448,9 @@ export function rewriteVideoAngles(
                     lostDefault ||= readAttribute(attrs, 'DEFAULT') === 'YES';
                     continue;
                 }
-                const to = names.get(id);
-                if (to) {
-                    out.push(MEDIA_TAG + writeAttribute(attrs, 'NAME', to));
+                const change = changes.get(id);
+                if (change) {
+                    out.push(MEDIA_TAG + applyAngleChange(attrs, change));
                     continue;
                 }
             }
@@ -355,6 +489,71 @@ export function rewriteVideoAngles(
     return out.join(eol);
 }
 
+/**
+ * A `TYPE=VIDEO` line's attributes with `change` made. A value already as
+ * asked is left as written (an unquoted `NAME` stays unquoted), and clearing
+ * one the line does not have changes nothing.
+ */
+function applyAngleChange(attrs: string, change: AngleChange): string {
+    let out = attrs;
+    if (
+        change.name !== undefined &&
+        readAttribute(out, 'NAME') !== change.name
+    ) {
+        out = writeAttribute(out, 'NAME', change.name);
+    }
+    if (change.language !== undefined) {
+        // `FRA` is the `fra` the lister showed, sent back as it was read.
+        out = setOrRemove(
+            out,
+            'LANGUAGE',
+            change.language || undefined,
+            (current) =>
+                change.language !== '' &&
+                current.replace(/^[A-Za-z]+/, (p) => p.toLowerCase()) ===
+                    change.language
+        );
+    }
+    if (change.accessibility !== undefined) {
+        // The kind the lister read, sent back, leaves the line alone: written,
+        // it would drop any identifier of someone else's beside ours.
+        const kind = change.accessibility;
+        out = setOrRemove(
+            out,
+            'CHARACTERISTICS',
+            kind === 'none' ? undefined : ANGLE_ACCESSIBILITY[kind],
+            (current) =>
+                (angleAccessibilityOf(
+                    current.split(',').map((c) => c.trim())
+                ) ?? 'none') === kind
+        );
+    }
+    return out;
+}
+
+/**
+ * `name` written as quoted `value`, or taken off when `value` is undefined;
+ * untouched when the line already has it so: quoted and equal, or quoted and
+ * `same` as asked. An unquoted value is rewritten even when equal, since the
+ * playlist parser reads only a quoted one and would go on showing none.
+ */
+function setOrRemove(
+    list: string,
+    name: string,
+    value: string | undefined,
+    same: (current: string) => boolean = (current) => current === value
+): string {
+    const match = attributePattern(name).exec(list);
+    if (!match) {
+        return value === undefined ? list : writeAttribute(list, name, value);
+    }
+    const quoted = match[2];
+    if (quoted !== undefined && same(quoted)) return list;
+    return value === undefined
+        ? removeAttribute(list, name)
+        : writeAttribute(list, name, value);
+}
+
 /** The line of the `EXT-X-STREAM-INF` whose URI is `uri`, or -1. */
 function streamInfIndexOf(lines: string[], uri: string): number {
     for (let i = 0; i < lines.length; i++) {
@@ -372,8 +571,4 @@ const isTagOrBlank = (line: string): boolean =>
 function lastIndex(lines: string[], test: (line: string) => boolean): number {
     for (let i = lines.length - 1; i >= 0; i--) if (test(lines[i])) return i;
     return -1;
-}
-
-function removeAttribute(list: string, name: string): string {
-    return list.replace(attributePattern(name), '').replace(/^,/, '');
 }

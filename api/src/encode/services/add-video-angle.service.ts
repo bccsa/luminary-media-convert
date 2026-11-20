@@ -12,6 +12,7 @@ import {
     parseMasterPlaylist,
     parseMediaPlaylist,
     LUMINARY_KEY_PLACEHOLDER_URI,
+    type AngleAccessibility,
     type HlsParsedMaster,
     type HlsParsedMediaPlaylist,
     type HlsVariant,
@@ -21,6 +22,7 @@ import { MasterRevisionService } from '../../hls-edit/master-revision.service.js
 import { VideoRevisionService } from './video-revision.service.js';
 import {
     addVideoAngleLines,
+    assertAngleLanguage,
     assertAngleName,
     listVideoAngles,
 } from '../../hls-edit/video-angles.js';
@@ -76,6 +78,12 @@ export interface AddVideoAngleRequest {
     name: string;
     /** What to call the video's own picture when it has no angles yet. */
     mainName?: string;
+    /** The new angle's `LANGUAGE`: the audio its picture belongs to. Empty for none. */
+    language?: string;
+    /** The new angle's hearing-impaired kind of view, if it is one. */
+    accessibility?: AngleAccessibility;
+    /** The `LANGUAGE` of the video's own picture, as it becomes the main angle. */
+    mainLanguage?: string;
     offsetSec: number;
     /** The master's ETag the editor read: a video changed since is not added to. */
     ifMatch: string;
@@ -179,6 +187,15 @@ export class AddVideoAngleService {
             req.mainName !== undefined
                 ? assertAngleName(req.mainName)
                 : undefined;
+        // What the master's group lines will say, checked as the name is:
+        // the same values go to the check below and to the real write.
+        const labels = {
+            name,
+            mainName,
+            language: assertAngleLanguage(req.language ?? ''),
+            accessibility: req.accessibility,
+            mainLanguage: assertAngleLanguage(req.mainLanguage ?? ''),
+        };
         if (
             !Number.isFinite(req.offsetSec) ||
             Math.abs(req.offsetSec) > 24 * 3600
@@ -215,7 +232,7 @@ export class AddVideoAngleService {
         const parsed = parseMasterPlaylist(text);
         this.assertAudioGroups(parsed);
         const reference = this.referenceVariants(parsed)[0];
-        addVideoAngleLines(text, { name, mainName }, [
+        addVideoAngleLines(text, labels, [
             {
                 referenceUri: reference.uri,
                 uri: 'check/playlist.m3u8',
@@ -234,7 +251,7 @@ export class AddVideoAngleService {
         this.jobs.set(sessionId, job);
         void this.run(
             session,
-            { ...req, name, mainName },
+            { ...req, ...labels },
             source.input,
             source.videoTracks.find((t) => t.index === req.sourceTrackIndex)!,
             job
