@@ -16,7 +16,7 @@ import {
     saveContentPreset,
 } from './layoutStorage';
 import { CONTENT_PRESETS, sourceCapKbps, suggestLadder } from './ladder';
-import { displayDimensionsOf } from './aspect';
+import { displayDimensionsOf, isRotated } from './aspect';
 import {
     audioLanguageOf,
     buildSuggestedAudioGroups,
@@ -2231,7 +2231,19 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                                         }}
                                     </td>
                                     <td class="ecf-td">
-                                        {{ row.track.width }}&times;{{ row.track.height }}
+                                        <template v-if="isRotated(row.track)">
+                                            {{ displayDimensionsOf(row.track).width }}&times;{{
+                                                displayDimensionsOf(row.track).height
+                                            }}
+                                            <span class="ecf-cell-dim"
+                                                >(stored {{ row.track.width }}&times;{{
+                                                    row.track.height
+                                                }})</span
+                                            >
+                                        </template>
+                                        <template v-else>
+                                            {{ row.track.width }}&times;{{ row.track.height }}
+                                        </template>
                                     </td>
                                     <td class="ecf-td">
                                         {{

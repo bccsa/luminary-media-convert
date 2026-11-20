@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
     computeLayoutKey,
+    displayDimensionsOf,
     saveConfig,
 } from '@luminary-media-converter/encode-config';
 import type {
@@ -177,6 +178,12 @@ const chaptersSidePanelDuration = computed(() => {
     const sp = session.value?.probeResult?.format?.duration;
     if (typeof sp === 'number' && sp > 0) return sp;
     return 0;
+});
+
+/** Whether the source is shown taller than wide, as a phone's portrait video is. */
+const portraitSource = computed(() => {
+    const d = displayDimensionsOf(probeResult.value?.videoTracks?.[0]);
+    return d.height > d.width;
 });
 
 /** Probe video FPS for SegmentEditor comma/period frame steps (same source as EncodeConfigForm). */
@@ -2381,6 +2388,7 @@ onUnmounted(() => {
                             ref="sessionPlayerStripRef"
                             class="flex-1 min-h-0"
                             :source="playerSource"
+                            :portrait="portraitSource"
                             :show-aside="showAside"
                             :active-tab="activeTab"
                             :show-audio-select="
