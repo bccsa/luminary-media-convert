@@ -391,9 +391,19 @@ export interface PlayerState {
 export interface PlayerEventMap {
     /** Fired when coming-soon polling finds the master. */
     'master-available': void;
+    /**
+     * An angle switch reached the engine and the state describes it. Fired
+     * once the attach carrying it lands, never for one superseded on the way:
+     * of a burst of switches, only the last angle is announced, and a re-munge
+     * or quality cap that supersedes a switch announces it when it lands.
+     */
     'angle-changed': { angleId: string };
     error: PlayerError;
-    /** A recovery attempt (in-place or reload) restored playback. */
+    /**
+     * A recovery re-munge (`reload-requested`) restored playback: fired only
+     * when the re-munge's own attach landed. One superseded by another attach
+     * — an angle switch, a quality cap, a further re-munge — reports nothing.
+     */
     recovered: { attempt: number };
     destroyed: void;
 }
@@ -832,7 +842,21 @@ export interface PlayerControllerApi {
      */
     setSleepTimer(option: SleepTimerOption | null): void;
 
-    /** Re-munges and reloads, preserving position and play state. */
+    /**
+     * Re-munges and reloads, preserving position and play state as they stand
+     * when the engine is handed the new source: a seek or a pause made while
+     * its playlists were fetched is kept.
+     *
+     * A switch asked for while another attach is in flight supersedes it: the
+     * one replaced never plays or announces, and the new one starts from the
+     * position and play state that one was carrying — or, while the engine
+     * still plays the angle that one was switching away from, from the
+     * engine's own, so a seek or a pause made while a switch fetched is kept.
+     * So a burst of switches lands on, and announces, the last angle alone.
+     * Asking for the angle on its way in does nothing; asking for the one last
+     * landed while another is on its way attaches it again, over the one in
+     * flight. Resolves once the engine holds the angle that stays.
+     */
     setAngle(id: string): Promise<void>;
     /**
      * Chooses a rendition within the capped set; `'auto'` re-enables ABR.

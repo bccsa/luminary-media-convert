@@ -106,6 +106,38 @@ export interface PlayerControllerOptions {
     };
 }
 
+/** An attach under way; see `PlayerController.attaching`. */
+interface InFlightAttach {
+    angleId: string | null;
+    /** The position the engine is to be put back at once it has this source. */
+    seekTo: number;
+    /** Whether it plays on once it has. */
+    resume: boolean;
+    /**
+     * The engine holds this source and has been put at `seekTo`: its own clock
+     * is the truth again. Set before `play()` is awaited, which can take as
+     * long as the new source takes to buffer — a seek made in that time is the
+     * viewer's, and an attach starting then has to carry it, not `seekTo`.
+     */
+    placed: boolean;
+    /**
+     * `seekTo` and `resume` were read off the engine, while it held a source
+     * of this video it had been put in place in — not handed down by a load,
+     * nor by an attach the engine had not finished taking. Until a source is
+     * handed over after this attach began (`handovers` still equals
+     * {@link readAt}), the engine plays on what it played then, and its own
+     * clock and play state are fresher than this record: they carry a seek or
+     * a pause the viewer made while this attach fetched its playlists.
+     */
+    fromEngine: boolean;
+    /** `handovers` when this attach began. */
+    readAt: number;
+    /** It carries an angle change nobody has been told of yet. */
+    announce: boolean;
+    /** Settles when this attach is over, and only after any that superseded it are; never rejects. */
+    done: Promise<void>;
+}
+
 export class PlayerController implements PlayerControllerApi {
     private readonly store = new StateStore();
     private readonly emitter = new Emitter<PlayerEventMap>();
@@ -134,6 +166,30 @@ export class PlayerController implements PlayerControllerApi {
 
     /** Bumped by every load(); stale async work checks it and bails. */
     private generation = 0;
+    /**
+     * The attach in flight, if any. Within one source an attach is superseded
+     * by the next one: an angle switch, a quality cap or a re-munge that starts
+     * while another is still munging or loading replaces it, and the one
+     * replaced neither plays nor announces. It does not reach the engine
+     * either, unless the engine was already taking its source when it was
+     * replaced; then, if nothing has been handed over since (see
+     * {@link handovers}), the state describes it until the replacement lands,
+     * since that is what the engine holds. Checked by identity beside the
+     * generation, which only a new source moves.
+     *
+     * It also carries what an attach started mid-attach has to start from: the
+     * angle on its way in, which `state.activeAngleId` does not show until it
+     * lands, and the position and play state, which the engine cannot tell
+     * while it is loading a new source. Cleared by `load()`, and by the attach
+     * itself when it finishes.
+     */
+    private attaching: InFlightAttach | null = null;
+    /**
+     * Counts the sources handed to the engine, so an attach superseded while
+     * the engine was taking its source can tell whether that source is still
+     * the one the engine holds — whether anything has been handed over since.
+     */
+    private handovers = 0;
     private source: PlayerSource | null = null;
     private master: MasterInfo | null = null;
     /** Each subtitle track's lines, read once per master. */
@@ -202,12 +258,14 @@ export class PlayerController implements PlayerControllerApi {
         if (this.state.lifecycle === 'destroyed') return;
 
         const generation = ++this.generation;
-        const preserved = source.preservePosition
-            ? this.adapter.getCurrentTime()
-            : source.startPosition ?? 0;
-        const resume = source.preservePosition ? this.state.playing : false;
+        // Read before `attaching` is cleared below: a reload asked for
+        // mid-attach keeps the position that attach was carrying.
+        const carried = source.preservePosition ? this.carriedPlayback() : null;
+        const preserved = carried ? carried.seekTo : source.startPosition ?? 0;
+        const resume = carried?.resume ?? false;
 
         this.teardownSource();
+        this.attaching = null;
         this.sleep.onNewSource();
         // A new video starts under the cap its source asks for; the same one loaded again keeps the cap moved since.
         const sameVideo = this.source?.masterUrl === source.masterUrl;
@@ -353,15 +411,75 @@ export class PlayerController implements PlayerControllerApi {
         await this.attachSidecars(generation, info);
     }
 
-    /** Steps 3–6 of the pipeline, plus engine attach. Used by load/setAngle/reload. */
+    /**
+     * Steps 3–6 of the pipeline, plus engine attach. Used by load/setAngle/reload.
+     *
+     * Resolves true when this attach landed: the engine was handed its source
+     * and the state describes it. False when it did not — a new source
+     * started, or another attach superseded it (see {@link attaching}; one
+     * superseded after the engine took its source may still have been
+     * described). A superseded attach swallows its own failure, since the one
+     * replacing it decides what the viewer sees, and resolves only once that
+     * one has finished, so whoever awaits it does not carry on before the
+     * engine holds a source.
+     *
+     * `announce` marks an attach that carries an angle change somebody has yet
+     * to be told of; an attach that supersedes it without changing the angle (a
+     * re-munge, a quality cap) takes the duty over. See {@link announceAngle}.
+     */
     private async attachAngle(
         generation: number,
         angleId: string | null,
-        options: { seekTo: number; resume: boolean },
-    ): Promise<void> {
+        options: {
+            seekTo: number;
+            resume: boolean;
+            fromEngine?: boolean;
+            announce?: boolean;
+        },
+    ): Promise<boolean> {
         const info = this.master;
-        if (!info) return;
+        if (!info) return false;
 
+        let finished!: () => void;
+        const attach: InFlightAttach = {
+            angleId,
+            seekTo: options.seekTo,
+            resume: options.resume,
+            placed: false,
+            fromEngine: options.fromEngine ?? false,
+            readAt: this.handovers,
+            announce: options.announce ?? false,
+            done: new Promise<void>((resolve) => (finished = resolve)),
+        };
+        this.attaching = attach;
+        try {
+            return await this.performAttach(generation, info, attach);
+        } catch (error) {
+            if (generation !== this.generation || this.attaching === attach)
+                throw error;
+            return await this.yieldToReplacement();
+        } finally {
+            if (this.attaching === attach) this.attaching = null;
+            finished();
+        }
+    }
+
+    /**
+     * Waits for the attach that superseded the caller's, and for any that
+     * superseded that one in turn: each one's `done` settles only after those
+     * replacing it have.
+     */
+    private async yieldToReplacement(): Promise<false> {
+        await this.attaching?.done;
+        return false;
+    }
+
+    private async performAttach(
+        generation: number,
+        info: MasterInfo,
+        attach: InFlightAttach,
+    ): Promise<boolean> {
+        const { angleId } = attach;
         const source = this.adapter.capabilities.nativeHls
             ? {
                   url: info.url,
@@ -387,7 +505,21 @@ export class PlayerController implements PlayerControllerApi {
                   },
                   this.context(),
               );
-        if (generation !== this.generation) return;
+        if (generation !== this.generation) return false;
+        // Superseded while munging: the engine never hears of this one.
+        if (this.attaching !== attach) return this.yieldToReplacement();
+        // Read off the engine when it began, and nothing handed over since:
+        // the engine has played on the source it played then while the
+        // playlists were fetched, so a seek or a pause the viewer made
+        // meanwhile is on the engine, not on the record, and the seconds
+        // played are not played again — the rule `carriedPlayback` applies to
+        // an attach started over this one. A load's first attach is never read
+        // off the engine: a new video still starts where it was asked to.
+        if (attach.fromEngine && attach.readAt === this.handovers) {
+            attach.seekTo = this.adapter.getCurrentTime();
+            attach.resume = this.state.playing;
+        }
+        const { seekTo, resume } = attach;
 
         // The policy is completed here rather than in the pipeline: it is the
         // controller that resolves a source's overrides, and the adapter that
@@ -405,6 +537,7 @@ export class PlayerController implements PlayerControllerApi {
             : usable;
         // An in-place cap outlives the load; the engine is told it again for what it now holds.
         if (this.liveCap !== null) this.adapter.setMaxHeight?.(this.liveCap);
+        const handover = ++this.handovers;
         await this.adapter.loadSource({
             ...(source ?? munged!.source),
             ...(bandwidth !== undefined
@@ -413,7 +546,15 @@ export class PlayerController implements PlayerControllerApi {
             ...(dataSaver ? { dataSaver } : {}),
             recovery: this.policy,
         });
-        if (generation !== this.generation) return;
+        if (generation !== this.generation) return false;
+        // Superseded while the engine took the source, and a later source has
+        // gone in since: the state is left to describe that one. Superseded
+        // with nothing handed over since, this source is what the engine holds
+        // until the replacement hands over its own — which it may never do (its
+        // munge can fail) — so it is described and placed below, and only then
+        // does it step aside.
+        if (this.attaching !== attach && handover !== this.handovers)
+            return this.yieldToReplacement();
 
         // A subtitle chosen while this source was being prepared reached the
         // engine before the source did, and an engine starts a source with
@@ -453,10 +594,21 @@ export class PlayerController implements PlayerControllerApi {
 
         // Each load of a live source starts a new timeline, so a carried-over position lands at or past
         // the new live edge and playback waits for segments not yet published; the engine's own live start is right.
-        if (options.seekTo > 0 && !munged?.isLive) this.adapter.seek(options.seekTo);
-        if (options.resume) {
+        if (seekTo > 0 && !munged?.isLive) this.adapter.seek(seekTo);
+        attach.placed = true;
+        // Superseded, but the engine holds this source until the one replacing
+        // it hands over its own: it is described and put where it was, in case
+        // that one never lands. It neither plays nor announces.
+        if (this.attaching !== attach) return this.yieldToReplacement();
+        if (resume) {
             await this.adapter.play().catch(() => undefined);
+            if (generation !== this.generation) return false;
+            // Superseded while it was starting to play (a new source aborts the
+            // play under way): it reached the engine, but the one replacing it
+            // reports for both, so announcements end on the angle that stays.
+            if (this.attaching !== attach) return this.yieldToReplacement();
         }
+        return true;
     }
 
     private async attachSidecars(
@@ -624,25 +776,94 @@ export class PlayerController implements PlayerControllerApi {
 
     async setAngle(id: string): Promise<void> {
         if (!this.master || this.state.lifecycle === 'destroyed') return;
-        if (id === this.state.activeAngleId) return;
+        // Against the angle on its way in: the one last attached is stale while
+        // another attaches. Asking for that one again is not a cancel; it is
+        // attached again, over the one in flight.
+        if (id === this.targetAngleId) return;
         if (!this.state.angles.some((angle) => angle.id === id)) return;
 
         const generation = this.generation;
-        const seekTo = this.adapter.getCurrentTime();
-        const resume = this.state.playing;
-
+        let landed: boolean;
         try {
-            await this.attachAngle(generation, id, { seekTo, resume });
+            landed = await this.attachAngle(generation, id, {
+                ...this.carriedPlayback(),
+                announce: true,
+            });
         } catch (error) {
             if (generation !== this.generation) return;
             this.fail(toPlayerError(error));
             return;
         }
-        if (generation !== this.generation) return;
-        this.emitter.emit('angle-changed', { angleId: id });
+        if (!landed || generation !== this.generation) return;
+        this.announceAngle(generation, id);
+    }
+
+    /**
+     * Tells hosts the angle changed, once the attach carrying the change has
+     * landed, and reads that angle's scrub strip. Only a landed attach
+     * announces, so a burst of switches announces the last one alone.
+     */
+    private announceAngle(generation: number, angleId: string): void {
+        this.emitter.emit('angle-changed', { angleId });
         // Not awaited: the switch is done once the engine has the angle, and a
         // scrub preview arriving a moment later is all a slow strip costs.
         void this.attachThumbnails(generation);
+    }
+
+    /**
+     * The angle the engine is being given, else the one it has. An attach in
+     * flight is what the next attach builds on: re-munging or re-capping the
+     * angle last landed would undo a switch still under way.
+     */
+    private get targetAngleId(): string | null {
+        return this.attaching
+            ? this.attaching.angleId
+            : this.state.activeAngleId;
+    }
+
+    /**
+     * Where a new attach picks up from, and whether that was read off the
+     * engine (see `InFlightAttach.fromEngine`).
+     *
+     * With nothing in flight, the engine's own clock and play state are the
+     * truth. They still are while the attach in flight was itself started from
+     * them and has handed nothing over since: the engine plays on the source
+     * it played then, and a seek or a pause the viewer made while that attach
+     * fetched its playlists is on the engine, not on the record. A switch made
+     * over a switch keeps it.
+     *
+     * Otherwise the engine holds a source it has not loaded yet, or the one a
+     * load is replacing (a load's first attach), so its position and play
+     * state describe nothing; the attach in flight carries what it was
+     * handed. Once that attach has put the engine at its position (`placed`),
+     * the engine's clock counts again: the record lives on until `play()`
+     * settles, and a seek the viewer made while the new source buffered would
+     * otherwise be undone by the next attach. Whether it plays on still comes
+     * from the record, since the play it asked for has not started yet.
+     */
+    private carriedPlayback(): {
+        seekTo: number;
+        resume: boolean;
+        fromEngine: boolean;
+    } {
+        const inFlight = this.attaching;
+        if (
+            !inFlight ||
+            (inFlight.fromEngine && inFlight.readAt === this.handovers)
+        ) {
+            return {
+                seekTo: this.adapter.getCurrentTime(),
+                resume: this.state.playing,
+                fromEngine: true,
+            };
+        }
+        return {
+            seekTo: inFlight.placed
+                ? this.adapter.getCurrentTime()
+                : inFlight.seekTo,
+            resume: inFlight.resume,
+            fromEngine: false,
+        };
     }
 
     get canCapInPlace(): boolean {
@@ -689,8 +910,9 @@ export class PlayerController implements PlayerControllerApi {
 
     /**
      * A quality choice for an engine that cannot pin a rendition (AVPlayer):
-     * re-munge the current angle with the chosen height as a cap, keeping
-     * position and play state, so the engine's own ABR stays at or below it.
+     * re-munge the current angle (or the one on its way in) with the chosen
+     * height as a cap, keeping position and play state, so the engine's own
+     * ABR stays at or below it.
      * `'auto'` lifts the cap back to the source's own `maxHeight`.
      *
      * A resolution-less quality has no height to cap at, so choosing one does
@@ -711,18 +933,33 @@ export class PlayerController implements PlayerControllerApi {
         this.qualityChoice = choice;
         this.store.setState({ activeQualityId: id });
 
-        const generation = this.generation;
-        const seekTo = this.adapter.getCurrentTime();
-        const resume = this.state.playing;
+        await this.reattachSelection(this.generation);
+    }
+
+    /**
+     * Attaches again what is on its way to the engine, else what it has: a
+     * re-munge and a quality cap rebuild the selection, they do not change it.
+     * An angle switch they supersede becomes theirs to announce once they land.
+     *
+     * Resolves whether this attach landed. A failure is terminal, as it is for
+     * any attach, and resolves false.
+     */
+    private async reattachSelection(generation: number): Promise<boolean> {
+        const angleId = this.targetAngleId;
+        const announce = this.attaching?.announce ?? false;
+        let landed: boolean;
         try {
-            await this.attachAngle(generation, this.state.activeAngleId, {
-                seekTo,
-                resume,
+            landed = await this.attachAngle(generation, angleId, {
+                ...this.carriedPlayback(),
+                announce,
             });
         } catch (error) {
-            if (generation !== this.generation) return;
-            this.fail(toPlayerError(error));
+            if (generation === this.generation) this.fail(toPlayerError(error));
+            return false;
         }
+        if (!landed || generation !== this.generation) return false;
+        if (announce && angleId !== null) this.announceAngle(generation, angleId);
+        return true;
     }
 
     setAudioTrack(id: string): void {
@@ -803,6 +1040,7 @@ export class PlayerController implements PlayerControllerApi {
         if (this.state.lifecycle === 'destroyed') return;
         this.generation += 1;
         this.teardownSource();
+        this.attaching = null;
         this.sleep.clear();
         for (const unsubscribe of this.adapterSubscriptions) unsubscribe();
         this.adapterSubscriptions.length = 0;
@@ -1126,20 +1364,9 @@ export class PlayerController implements PlayerControllerApi {
      */
     private async remunge(attempt: number): Promise<void> {
         if (this.state.lifecycle === 'destroyed') return;
-        const generation = this.generation;
-        const seekTo = this.adapter.getCurrentTime();
-        const resume = this.state.playing;
-        try {
-            await this.attachAngle(generation, this.state.activeAngleId, {
-                seekTo,
-                resume,
-            });
-        } catch (error) {
-            if (generation !== this.generation) return;
-            this.fail(toPlayerError(error));
-            return;
-        }
-        if (generation !== this.generation) return;
+        // Superseded, it reports nothing: the attach that replaced it handed
+        // the engine a freshly munged source of its own.
+        if (!(await this.reattachSelection(this.generation))) return;
         this.emitter.emit('recovered', { attempt });
     }
 
