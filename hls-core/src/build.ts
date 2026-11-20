@@ -22,8 +22,10 @@ import {
  *
  * Round-trip invariant: `buildMasterPlaylist(parseMasterPlaylist(text))`
  * reproduces `text`, including tags and attributes the model does not
- * interpret — modulo blank lines, leading/trailing whitespace on a line, and
- * a `LANGUAGE` case fold. Entries the parser did not produce (anything a
+ * interpret — modulo blank lines, leading/trailing whitespace on a line, a
+ * `LANGUAGE` case fold, an unquoted `CHARACTERISTICS` value (written back
+ * quoted) and a bare `CHARACTERISTICS` token (dropped: the model holds a
+ * value, and there is none). Entries the parser did not produce (anything a
  * caller built by hand, or copied with a spread) are serialized canonically.
  *
  * Canonical layout, used when the master carries no recorded line order:
@@ -109,6 +111,7 @@ function formatMedia(m: HlsMedia): string {
         attr('GROUP-ID', m.groupId, true),
         attr('NAME', m.name, true),
         attr('LANGUAGE', m.language?.toLowerCase(), true),
+        attr('CHARACTERISTICS', m.characteristics, true),
         yesNo('DEFAULT', m.default),
         yesNo('AUTOSELECT', m.autoselect),
         yesNo('FORCED', m.forced),

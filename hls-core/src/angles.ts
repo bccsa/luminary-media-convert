@@ -41,6 +41,63 @@ export interface VideoAngle {
     name: string;
     /** `DEFAULT=YES` — the angle a player should start on. */
     isDefault: boolean;
+    /**
+     * `LANGUAGE` — the audio language this picture belongs to (burnt-in
+     * titles, lip sync), so a player can follow the audio to it. Omitted when
+     * the master states none.
+     */
+    language?: string;
+    /**
+     * `CHARACTERISTICS`, split on `,` with each part trimmed and empty parts
+     * dropped; {@link angleAccessibilityOf} reads the hearing-impaired kind
+     * from it. Omitted when the master states none, never `[]`.
+     */
+    characteristics?: string[];
+}
+
+/**
+ * The hearing-impaired kinds of view an angle can be, and the
+ * `CHARACTERISTICS` identifier each is written as on its `TYPE=VIDEO` line.
+ *
+ * A hearing-impaired viewer stays on their kind of view when the audio
+ * language changes: the player only follows the audio to an angle of the same
+ * kind as the one playing. Captions reuse the standard UTI RFC 8216 defines
+ * for subtitles, which on a video rendition means captions burnt into the
+ * picture. Sign language and lip reading have no standard HLS identifier;
+ * RFC 8216 allows private UTIs, so they are ours.
+ *
+ * The one map both the API (writing the lines) and the player (reading them)
+ * use, so the two cannot drift apart.
+ */
+export const ANGLE_ACCESSIBILITY = {
+    captions: 'public.accessibility.transcribes-spoken-dialog',
+    'sign-language': 'org.bccsa.luminary.sign-language',
+    'lip-reading': 'org.bccsa.luminary.lip-reading',
+} as const;
+
+/** A key of {@link ANGLE_ACCESSIBILITY}: `captions`, `sign-language` or `lip-reading`. */
+export type AngleAccessibility = keyof typeof ANGLE_ACCESSIBILITY;
+
+const ACCESSIBILITY_BY_IDENTIFIER = new Map<string, AngleAccessibility>(
+    (Object.keys(ANGLE_ACCESSIBILITY) as AngleAccessibility[]).map((kind) => [
+        ANGLE_ACCESSIBILITY[kind],
+        kind,
+    ])
+);
+
+/**
+ * The kind a list of characteristics marks, or undefined when it names none of
+ * the three. Identifiers match exactly, as written; when a list names more than
+ * one kind, the first in the list wins.
+ */
+export function angleAccessibilityOf(
+    characteristics: readonly string[] | undefined
+): AngleAccessibility | undefined {
+    for (const identifier of characteristics ?? []) {
+        const kind = ACCESSIBILITY_BY_IDENTIFIER.get(identifier);
+        if (kind) return kind;
+    }
+    return undefined;
 }
 
 const DEFAULT_AUDIO_BANDWIDTH = 128_000;
@@ -66,14 +123,28 @@ export function listAngles(master: HlsParsedMaster): VideoAngle[] {
     for (const group of master.videoGroups) {
         if (!group.groupId || seen.has(group.groupId)) continue;
         seen.add(group.groupId);
+        // Both are left off rather than set empty, so an untagged angle keeps
+        // its long-standing three-field shape.
+        const characteristics = splitCharacteristics(group.characteristics);
         angles.push({
             id: group.groupId,
             name: group.name || group.groupId,
             isDefault: group.default === true,
+            ...(group.language ? { language: group.language } : {}),
+            ...(characteristics.length > 0 ? { characteristics } : {}),
         });
     }
 
     return angles;
+}
+
+/** `"a, b,"` → `['a', 'b']`; the model keeps the raw text, this is the read. */
+function splitCharacteristics(raw: string | undefined): string[] {
+    if (!raw) return [];
+    return raw
+        .split(',')
+        .map((c) => c.trim())
+        .filter((c) => c !== '');
 }
 
 /**
