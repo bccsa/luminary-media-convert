@@ -16,6 +16,7 @@ import {
     decodeArgs,
     USE_YOUR_OWN_FFMPEG,
     ladderVideoArgs,
+    previewVideoArgs,
     scalerExpr,
     type AccelMode,
     AAC_LC_CODEC_ATTRIBUTE,
@@ -1502,6 +1503,20 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                   0,
                   (await this.probeDuration(opts.inputPath)) - alignmentOffset
               );
+        // A source the hardware cannot decode (MPEG-2 on VideoToolbox) hands
+        // the hardware scaler frames in system memory, which it refuses, so
+        // every rung would fail. Such a source decodes on the CPU instead.
+        if (
+            type === 'video' &&
+            !opts.softwareDecode &&
+            !(await this.decodesOnDevice(opts.inputPath, encodeConfig))
+        ) {
+            this.logger.warn(
+                `${this.accelMode} cannot decode ${opts.inputPath}: decoding in software, encoding on the hardware`
+            );
+            opts = { ...opts, softwareDecode: true };
+        }
+
         // A ladder that would open more encoder sessions than the driver allows
         // is encoded in waves instead. One that already fits stays a single
         // invocation writing master.m3u8 directly, with no merge step.
@@ -1556,6 +1571,60 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         } finally {
             release();
         }
+    }
+
+    /**
+     * Whether the hardware path decodes every re-encoded track of this source
+     * and scales it on the device: one frame of each, decoded, scaled and
+     * encoded as the ladder would. A codec the decoder does not take comes
+     * back as frames in system memory, and the device scaler refuses them.
+     *
+     * True when nothing decodes on the device: the CPU path, the paths that
+     * scale with plain `scale`, and a ladder that only copies.
+     */
+    async decodesOnDevice(
+        inputPath: string,
+        encodeConfig: EncodeConfigDto
+    ): Promise<boolean> {
+        const tracks = new Set(
+            (encodeConfig.videoRenditions ?? [])
+                .filter((r) => !r.copyStream)
+                .map((r) => r.sourceTrackIndex ?? 0)
+        );
+        const decode = decodeArgs(this.accelMode, 'preview', tracks.size > 0);
+        if (decode.length === 0) return true;
+
+        for (const track of tracks) {
+            try {
+                await execFileAsync(
+                    ffmpegBin(),
+                    [
+                        '-hide_banner',
+                        '-loglevel',
+                        'error',
+                        '-nostdin',
+                        ...decode,
+                        '-i',
+                        inputPath,
+                        '-map',
+                        `0:v:${track}`,
+                        '-frames:v',
+                        '1',
+                        '-vf',
+                        scalerExpr(this.accelMode, 64, 64),
+                        ...previewVideoArgs(this.accelMode, true),
+                        '-an',
+                        '-f',
+                        'null',
+                        '-',
+                    ],
+                    { timeout: 30_000 }
+                );
+            } catch {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
