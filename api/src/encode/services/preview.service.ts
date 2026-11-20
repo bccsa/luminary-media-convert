@@ -26,7 +26,7 @@ import {
 import { selectStoryboardTrack } from './thumbnail.service.js';
 import { FfmpegService } from './ffmpeg.service.js';
 import { ffmpegBin, ffprobeBin } from './ffbin.js';
-import { displayDimensionsOf, isAnamorphic } from './aspect.js';
+import { displayDimensionsOf, isAnamorphic, isRotated } from './aspect.js';
 import { defaultAngleTracks } from './picture-groups.js';
 
 export interface PreviewAudioTrack {
@@ -87,7 +87,8 @@ function canCopyToTs(track: VideoTrackInfo): boolean {
     if (track.pixFmt && !['yuv420p', 'yuvj420p'].includes(track.pixFmt)) {
         return false;
     }
-    return !isAnamorphic(track);
+    // A turned picture is turned only by a decode, and a copy never decodes.
+    return !isAnamorphic(track) && !isRotated(track);
 }
 
 const SEGMENT_DURATION = 4;
@@ -253,8 +254,9 @@ interface PreviewState {
      */
     failure?: string;
     /**
-     * VideoToolbox could not decode this source (MPEG-2, for one), so its
-     * segments decode in software and still encode on VideoToolbox.
+     * Segments decode in software and still encode on the hardware: the
+     * picture is turned (only a software decode turns it), or VideoToolbox
+     * could not decode this source (MPEG-2, for one).
      */
     softwareDecode?: boolean;
     /** Median keyframe spacing of the stream's grid, seconds. */
@@ -456,6 +458,9 @@ export class PreviewService {
             seekAimEpsilon: layout.seekAimEpsilon,
             seekHops: new Map(),
             seekHopLearners: new Map(),
+            // FFmpeg turns the picture in a software decode; a hardware decode
+            // that keeps its frames on the device skips the turn.
+            ...(isRotated(videoTrack) ? { softwareDecode: true } : {}),
         });
         if (renditions.some((r) => !r.canCopy && !r.audioOnly)) {
             notePreviewNeedsSession(sessionId);

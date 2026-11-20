@@ -203,6 +203,16 @@ describe('previewVideoArgs', () => {
         expect(filterOf('apple')).toBe('scale_vt=w=640:h=360,setsar=1');
     });
 
+    it('scales software frames with plain scale on every hardware path', () => {
+        // The hardware scalers take only frames still on the device.
+        for (const mode of ['nvidia', 'intel', 'apple'] as AccelMode[]) {
+            const args = previewVideoArgs(mode, true, '640:360', true);
+            expect(args[args.indexOf('-vf') + 1]).toBe(
+                'scale=640:360,setsar=1'
+            );
+        }
+    });
+
     it('scales software frames with plain scale on apple', () => {
         // scale_vt takes only frames still on the device.
         const args = previewVideoArgs('apple', true, '640:360', true);

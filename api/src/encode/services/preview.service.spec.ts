@@ -2054,6 +2054,52 @@ describe('PreviewService', () => {
             return svc;
         }
 
+        it('decodes a rotated source in software and never copies it', async () => {
+            // An iPhone portrait H.264 video: copyable but for the turn.
+            const probe = makeProbe({
+                duration: 12,
+                videoTracks: [
+                    {
+                        index: 0,
+                        codec: 'h264',
+                        pixFmt: 'yuv420p',
+                        width: 1280,
+                        height: 720,
+                        displayWidth: 720,
+                        displayHeight: 1280,
+                        rotation: 90,
+                        bitrateKbps: 5000,
+                        frameRate: 30,
+                    },
+                ],
+            });
+            const svc = new PreviewService(
+                makeSessionService({
+                    filePath: '/tmp/phone.mov',
+                    probeResult: probe,
+                }),
+                makeFfmpegService('nvidia')
+            );
+            await svc.init('s1');
+            const state = (svc as any).states.get('s1');
+            expect(state.renditions[0].canCopy).toBe(false);
+            expect(state.softwareDecode).toBe(true);
+
+            mockExecFile.mockReset();
+            mockExistsSync.mockReset();
+            mockExistsSync.mockReturnValueOnce(false).mockReturnValue(true);
+            mockStat.mockResolvedValue({ size: 2048 });
+            setupExecFile(() => ({ stdout: '', stderr: '' }));
+            mockCreateReadStream.mockReturnValue({ pipe: vi.fn() });
+            await svc.getSegmentStream('s1', 0, 0);
+
+            const args = mockExecFile.mock.calls[0][1] as string[];
+            // The decode turns the picture; one kept on the device would not.
+            expect(args).not.toContain('-hwaccel');
+            expect(args).toContain('h264_nvenc');
+            expect(args[args.indexOf('-vf') + 1]).toMatch(/^scale=/);
+        });
+
         it('should use h264_nvenc and scale_cuda for nvidia mode', async () => {
             const svc = await initHevcService('nvidia');
 
