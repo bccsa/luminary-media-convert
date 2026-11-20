@@ -1,13 +1,22 @@
 <script setup lang="ts">
 /**
  * The camera angles of a post's existing video, opened by an edit session: one
- * row per angle, renamed and removed together on save, and a new angle to add
- * from a file. A video with a single picture shows it as one unnamed row; the
- * first angle added names it.
+ * row per angle, renamed, given a language and a hearing-impaired kind, and
+ * removed, together on save, and a new angle to add from a file. A video with
+ * a single picture shows it as one unnamed row; the first angle added names
+ * it, and only then are there angles to give a language or a kind.
  */
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { LanguageSelect } from '@luminary-media-converter/encode-config';
 import { getEncodedMedia, putVideoAngles } from '../../api';
-import type { AddVideoAngleJob, EncodedMedia, VideoAngle } from '../../types';
+import type {
+    AddVideoAngleJob,
+    AngleAccessibility,
+    EncodedMedia,
+    VideoAngle,
+    VideoAngleEdit,
+} from '../../types';
+import FormSelect, { type SelectOption } from '../FormSelect.vue';
 import AddVideoAngleModal from './AddVideoAngleModal.vue';
 import { isChangedElsewhere, saveErrorMessage } from '../../utils/errors';
 
@@ -25,13 +34,26 @@ const emit = defineEmits<{
     saved: [published?: boolean];
 }>();
 
-/** One editable row per angle: the angle as read, and what it is being renamed to. */
+type AngleKind = AngleAccessibility | 'none';
+
+/** One editable row per angle: the angle as read, and what it is being changed to. */
 interface AngleRow {
     angle: VideoAngle;
     name: string;
+    /** The audio language its picture belongs to; empty for none. */
+    language: string;
+    accessibility: AngleKind;
     /** Taken out on the next save. */
     removed: boolean;
 }
+
+/** The hearing-impaired kinds of view, as the editor names them. */
+const ACCESSIBILITY_OPTIONS: SelectOption[] = [
+    { value: 'none', label: 'None' },
+    { value: 'captions', label: 'Captions' },
+    { value: 'sign-language', label: 'Sign language' },
+    { value: 'lip-reading', label: 'Lip reading' },
+];
 
 const media = ref<EncodedMedia | null>(null);
 const rows = ref<AngleRow[]>([]);
@@ -45,6 +67,8 @@ function setRows(next: EncodedMedia): void {
     rows.value = (next.angles ?? []).map((angle) => ({
         angle,
         name: angle.name,
+        language: angle.language ?? '',
+        accessibility: angle.accessibility ?? 'none',
         removed: false,
     }));
 }
@@ -56,10 +80,27 @@ const singlePicture = computed(
     () => rows.value.length === 1 && rows.value[0].angle.id === ''
 );
 
-const edits = computed(() =>
+/**
+ * One edit per angle changed, carrying only what changed: a field left out
+ * stays as it is in the master, so a rename does not rewrite the language a
+ * save elsewhere gave it.
+ */
+const edits = computed<VideoAngleEdit[]>(() =>
     shown.value
-        .filter((row) => row.angle.id && row.name.trim() !== row.angle.name)
-        .map((row) => ({ id: row.angle.id, name: row.name.trim() }))
+        .filter((row) => row.angle.id)
+        .map((row) => {
+            const edit: VideoAngleEdit = { id: row.angle.id };
+            const name = row.name.trim();
+            if (name !== row.angle.name) edit.name = name;
+            if (row.language !== (row.angle.language ?? '')) {
+                edit.language = row.language;
+            }
+            if (row.accessibility !== (row.angle.accessibility ?? 'none')) {
+                edit.accessibility = row.accessibility;
+            }
+            return edit;
+        })
+        .filter((edit) => Object.keys(edit).length > 1)
 );
 
 const removed = computed(() =>
@@ -67,6 +108,27 @@ const removed = computed(() =>
 );
 
 const changeCount = computed(() => edits.value.length + removed.value.length);
+
+/**
+ * The angle a viewer starts on, as it will be once saved: the one marked so,
+ * or, when that one is being removed, the first left, as the save makes it.
+ */
+const playsFirst = computed(
+    () => shown.value.find((row) => row.angle.default) ?? shown.value[0]
+);
+
+/**
+ * Some angles have a language and the one that plays first has none: a viewer
+ * who moves to another language's picture cannot get back to it by choosing
+ * its audio again, since nothing says which audio it goes with.
+ */
+const playsFirstNeedsLanguage = computed(
+    () =>
+        !singlePicture.value &&
+        !!playsFirst.value &&
+        !playsFirst.value.language &&
+        shown.value.some((row) => !!row.language)
+);
 
 /** The video changed since it was read: saving over it is refused until it is read again. */
 const isConflict = computed(() => /changed since/i.test(error.value ?? ''));
@@ -295,72 +357,119 @@ watch(() => [props.sessionId, props.sessionToken] as const, load, {
             v-else-if="shown.length > 0 || adding"
             class="flex min-h-0 flex-1 flex-col overflow-y-auto"
         >
+            <!--
+                A row wraps when the panel is narrow (the splitter goes down to
+                a few hundred pixels): the name keeps a readable width, the two
+                selects drop under it, and the "Plays first" pill, sizes and
+                remove stay on the name's line, moving to a line of their own
+                only when the name and selects have no room beside them.
+            -->
             <div
                 v-for="(row, i) in shown"
                 :key="row.angle.id || 'single'"
-                class="flex text-xs gap-2 px-2 py-2.5 m-0 rounded-md items-center border-b border-sky-200 dark:border-sky-400/12 last:border-b-0"
+                class="flex flex-wrap text-xs gap-2 px-2 py-2.5 m-0 rounded-md items-start border-b border-sky-200 dark:border-sky-400/12 last:border-b-0"
                 data-test="videoAngleRow"
             >
                 <span
-                    class="shrink-0 rounded-full text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 w-6 h-6 p-0 inline-flex items-center justify-center text-[0.625rem] font-semibold"
+                    class="shrink-0 mt-0.5 rounded-full text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 w-6 h-6 p-0 inline-flex items-center justify-center text-[0.625rem] font-semibold"
                     >{{ i + 1 }}</span
                 >
                 <span
                     v-if="singlePicture"
-                    class="min-w-0 flex-auto text-slate-600 dark:text-slate-300"
+                    class="min-w-36 grow basis-0 self-center text-slate-600 dark:text-slate-300"
                 >
                     This video's picture
                     <span class="text-slate-500 dark:text-slate-400"
                         >· named when an angle is added</span
                     >
                 </span>
-                <input
+                <!-- Never narrower than the two selects side by side (4.75rem + gap + 9rem). -->
+                <div
                     v-else
-                    v-model="row.name"
-                    type="text"
-                    maxlength="100"
-                    class="min-w-0 flex-auto font-[inherit] text-xs text-zinc-900 dark:text-slate-200 bg-white dark:bg-[#0c1222] border border-sky-200 dark:border-sky-400/12 rounded-md outline-none px-2.5 py-1.5 min-h-7 h-7 transition-[border-color] duration-[120ms] focus:border-sky-600 dark:focus:border-sky-400"
-                    :aria-label="`Name of ${row.angle.name}`"
-                />
-                <span
-                    v-if="row.angle.default"
-                    class="shrink-0 rounded-full text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-400/10 border border-sky-200 dark:border-sky-400/25 px-2 py-[0.2rem] text-[0.6875rem] font-medium"
-                    title="The angle a viewer sees first"
-                    >Plays first</span
+                    class="flex min-w-57 grow basis-0 flex-wrap items-center gap-2"
                 >
-                <span
-                    class="shrink-0 text-[0.6875rem] text-slate-500 dark:text-slate-400"
-                    >{{ row.angle.renditions }} size{{
-                        row.angle.renditions === 1 ? '' : 's'
-                    }}</span
-                >
-                <!-- A video keeps one angle at least. -->
-                <button
-                    v-if="!singlePicture"
-                    type="button"
-                    class="appearance-none inline-flex items-center justify-center min-w-7 min-h-7 shrink-0 rounded-md border-0 bg-transparent p-0 text-slate-500 dark:text-slate-400 cursor-pointer transition-colors duration-[120ms] hover:text-red-600 hover:bg-red-500/10 dark:hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-500"
-                    :disabled="shown.length <= 1 || saving || busy"
-                    :title="
-                        shown.length <= 1
-                            ? 'A video keeps at least one angle'
-                            : `Remove ${row.angle.name}`
-                    "
-                    :aria-label="`Remove ${row.angle.name}`"
-                    data-test="removeVideoAngle"
-                    @click="row.removed = true"
-                >
-                    <svg
-                        class="h-4 w-4"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        aria-hidden="true"
+                    <input
+                        v-model="row.name"
+                        type="text"
+                        maxlength="100"
+                        class="min-w-36 grow basis-36 font-[inherit] text-xs text-zinc-900 dark:text-slate-200 bg-white dark:bg-[#0c1222] border border-sky-200 dark:border-sky-400/12 rounded-md outline-none px-2.5 py-1.5 min-h-7 h-7 transition-[border-color] duration-[120ms] focus:border-sky-600 dark:focus:border-sky-400"
+                        :aria-label="`Name of ${row.angle.name}`"
+                    />
+                    <!-- A single picture is not an angle yet: nothing for a player to follow. -->
+                    <div class="flex flex-wrap items-center gap-2">
+                        <div
+                            class="shrink-0"
+                            title="The audio language this picture belongs to, such as burnt-in titles. A viewer who picks that audio is shown it."
+                        >
+                            <LanguageSelect
+                                v-model="row.language"
+                                placeholder="none"
+                                :aria-label="`Language of ${row.angle.name}`"
+                                data-test="videoAngleLanguage"
+                            />
+                        </div>
+                        <!-- As tall as the name beside it. -->
+                        <div
+                            class="w-36 shrink-0"
+                            title="A view for deaf or hard-of-hearing viewers. They stay on this kind of view when they change the audio language."
+                        >
+                            <FormSelect
+                                :model-value="row.accessibility"
+                                :options="ACCESSIBILITY_OPTIONS"
+                                variant="field"
+                                size="sm"
+                                presentation="custom"
+                                select-class="min-h-7! py-[0.3125rem]!"
+                                :aria-label="`Accessibility of ${row.angle.name}`"
+                                data-test="videoAngleAccessibility"
+                                @update:model-value="
+                                    row.accessibility = $event as AngleKind
+                                "
+                            />
+                        </div>
+                    </div>
+                </div>
+                <div class="ml-auto flex h-7 shrink-0 items-center gap-2">
+                    <span
+                        v-if="row.angle.default"
+                        class="shrink-0 rounded-full text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-400/10 border border-sky-200 dark:border-sky-400/25 px-2 py-[0.2rem] text-[0.6875rem] font-medium"
+                        title="The angle a viewer sees first"
+                        >Plays first</span
                     >
-                        <path d="M8 8l8 8M16 8l-8 8" />
-                    </svg>
-                </button>
+                    <span
+                        class="shrink-0 text-[0.6875rem] text-slate-500 dark:text-slate-400"
+                        >{{ row.angle.renditions }} size{{
+                            row.angle.renditions === 1 ? '' : 's'
+                        }}</span
+                    >
+                    <!-- A video keeps one angle at least. -->
+                    <button
+                        v-if="!singlePicture"
+                        type="button"
+                        class="appearance-none inline-flex items-center justify-center min-w-7 min-h-7 shrink-0 rounded-md border-0 bg-transparent p-0 text-slate-500 dark:text-slate-400 cursor-pointer transition-colors duration-[120ms] hover:text-red-600 hover:bg-red-500/10 dark:hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-500"
+                        :disabled="shown.length <= 1 || saving || busy"
+                        :title="
+                            shown.length <= 1
+                                ? 'A video keeps at least one angle'
+                                : `Remove ${row.angle.name}`
+                        "
+                        :aria-label="`Remove ${row.angle.name}`"
+                        data-test="removeVideoAngle"
+                        @click="row.removed = true"
+                    >
+                        <svg
+                            class="h-4 w-4"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            aria-hidden="true"
+                        >
+                            <path d="M8 8l8 8M16 8l-8 8" />
+                        </svg>
+                    </button>
+                </div>
             </div>
             <!-- The angle being added, in its place in the list, until it is in. -->
             <div
@@ -429,6 +538,14 @@ watch(() => [props.sessionId, props.sessionToken] as const, load, {
             </p>
         </div>
 
+        <p
+            v-if="!loading && playsFirstNeedsLanguage"
+            class="mt-2 text-xs text-amber-700 dark:text-amber-400"
+            data-test="videoAngleLanguageHint"
+        >
+            Give the angle that plays first a language too. Otherwise choosing
+            its audio again will not bring its picture back.
+        </p>
         <p
             v-if="!adding && lastAdd?.state === 'failed'"
             class="mt-2 text-xs text-red-600 dark:text-red-400"
