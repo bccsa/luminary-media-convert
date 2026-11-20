@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { displayDimensionsOf, isAnamorphic } from './aspect';
+import { displayDimensionsOf, isAnamorphic, isRotated } from './aspect';
 
 /**
  * The form's half of the square-pixel question, and a deliberate twin of
@@ -113,5 +113,36 @@ describe('isAnamorphic', () => {
         expect(isAnamorphic({ width: 1920, height: 0 })).toBe(false);
         expect(isAnamorphic({ width: 0, height: 1080 })).toBe(false);
         expect(isAnamorphic(undefined)).toBe(false);
+    });
+});
+
+describe('a turned track', () => {
+    // An iPhone portrait video: stored 1920x1080, shown turned a quarter.
+    const portrait = {
+        width: 1920,
+        height: 1080,
+        displayWidth: 1080,
+        displayHeight: 1920,
+        rotation: 90,
+    };
+
+    it('is not anamorphic for being turned', () => {
+        expect(isAnamorphic(portrait)).toBe(false);
+    });
+
+    it('is still anamorphic when its samples are not square', () => {
+        expect(
+            isAnamorphic({
+                ...portrait,
+                displayWidth: 1080,
+                displayHeight: 2560,
+            })
+        ).toBe(true);
+    });
+
+    it('is rotated at any turn, and not without one', () => {
+        expect(isRotated(portrait)).toBe(true);
+        expect(isRotated({ ...portrait, rotation: 180 })).toBe(true);
+        expect(isRotated({ width: 1920, height: 1080 })).toBe(false);
     });
 });

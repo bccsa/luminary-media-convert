@@ -2,11 +2,15 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
     BadRequestException,
     ConflictException,
-    NotImplementedException,
     PayloadTooLargeException,
 } from '@nestjs/common';
 import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
-import { HlsEditService } from './hls-edit.service.js';
+import { listChapterEntries } from '@luminary-media-converter/hls-core';
+import { EDITED_CACHE_CONTROL, HlsEditService } from './hls-edit.service.js';
+import {
+    IMMUTABLE_CACHE_CONTROL,
+    MasterRevisionService,
+} from './master-revision.service.js';
 import type { S3ConfigDto } from '../encode/dto/s3-config.dto.js';
 
 const MASTER = [
@@ -24,13 +28,24 @@ const s3: S3ConfigDto = {
     secretKey: 's',
 };
 
+/** A chapter file's path as writeChapterFile names it. */
+const CHAPTER_FILE = /^chapters\/en_[0-9a-f]{8}\.vtt$/;
+
 function makeEtagMock() {
     return {
         getObjectWithEtag: vi.fn(),
-        putObjectIfMatch: vi.fn(),
+        putObjectIfAbsent: vi.fn(),
+        objectExists: vi.fn().mockResolvedValue(false),
         putObject: vi.fn(),
         createClient: vi.fn(),
     };
+}
+
+function makeService(etag: ReturnType<typeof makeEtagMock>): HlsEditService {
+    return new HlsEditService(
+        etag as any,
+        new MasterRevisionService(etag as any)
+    );
 }
 
 describe('HlsEditService', () => {
@@ -39,7 +54,7 @@ describe('HlsEditService', () => {
 
     beforeEach(() => {
         etag = makeEtagMock();
-        service = new HlsEditService(etag as any);
+        service = makeService(etag);
     });
 
     describe('read', () => {
@@ -65,83 +80,91 @@ describe('HlsEditService', () => {
         });
     });
 
-    describe('mutate', () => {
-        it('rewrites master.m3u8 conditionally on empty operations (no-op plumbing)', async () => {
+    describe('publishChapters', () => {
+        it('names the chapter files in the next master revision, written only where nothing is yet', async () => {
             etag.getObjectWithEtag.mockResolvedValue({
                 body: Buffer.from(MASTER),
                 etag: 'old',
             });
-            etag.putObjectIfMatch.mockResolvedValue({ etag: 'new' });
+            etag.putObjectIfAbsent.mockResolvedValue('new');
 
-            const result = await service.mutate({
+            const result = await service.publishChapters(
                 s3,
-                masterPlaylistKey: 'output/master.m3u8',
-                ifMatch: 'old',
-                operations: [],
-            });
-
-            expect(etag.putObjectIfMatch).toHaveBeenCalledTimes(1);
-            const putArgs = etag.putObjectIfMatch.mock.calls[0];
-            expect(putArgs[0]).toBe(s3);
-            expect(putArgs[1]).toBe('output/master.m3u8');
-            expect(typeof putArgs[2]).toBe('string');
-            expect(putArgs[3]).toBe('old');
-            expect(putArgs[4]).toBe('application/vnd.apple.mpegurl');
-
-            expect(result.etag).toBe('new');
-            expect(result.writtenKeys).toEqual(['output/master.m3u8']);
-        });
-
-        it('propagates ConflictException from putObjectIfMatch', async () => {
-            etag.getObjectWithEtag.mockResolvedValue({
-                body: Buffer.from(MASTER),
-                etag: 'old',
-            });
-            etag.putObjectIfMatch.mockRejectedValue(
-                new ConflictException({ code: 'ETAG_MISMATCH' })
+                'output/master.m3u8',
+                { en: 'chapters/en_0123abcd.vtt' }
             );
 
+            expect(result).toEqual({
+                masterKey: 'output/master_r1.m3u8',
+                etag: 'new',
+            });
+            expect(etag.putObjectIfAbsent).toHaveBeenCalledTimes(1);
+            const [config, key, body, contentType, opts] =
+                etag.putObjectIfAbsent.mock.calls[0];
+            expect(config).toBe(s3);
+            expect(key).toBe('output/master_r1.m3u8');
+            expect(contentType).toBe('application/vnd.apple.mpegurl');
+            expect(opts).toEqual({ cacheControl: IMMUTABLE_CACHE_CONTROL });
+            expect(listChapterEntries(body as string)).toEqual([
+                expect.objectContaining({
+                    language: 'en',
+                    uri: 'chapters/en_0123abcd.vtt',
+                }),
+            ]);
+            expect(body).toContain('#EXT-X-STREAM-INF');
+            // The revision read is never written again.
+            expect(etag.putObject).not.toHaveBeenCalled();
+        });
+
+        it('builds on the revision it is given', async () => {
+            etag.getObjectWithEtag.mockResolvedValue({
+                body: Buffer.from(MASTER),
+                etag: 'old',
+            });
+            etag.putObjectIfAbsent.mockResolvedValue('new');
+
+            const result = await service.publishChapters(
+                s3,
+                'output/master_r4.m3u8',
+                { en: 'chapters/en_0123abcd.vtt' }
+            );
+
+            expect(etag.getObjectWithEtag).toHaveBeenCalledWith(
+                s3,
+                'output/master_r4.m3u8'
+            );
+            expect(result.masterKey).toBe('output/master_r5.m3u8');
+        });
+
+        it('refuses with a conflict when another save already wrote the next revision', async () => {
+            etag.getObjectWithEtag.mockResolvedValue({
+                body: Buffer.from(MASTER),
+                etag: 'old',
+            });
+            etag.putObjectIfAbsent.mockResolvedValue(undefined);
+
             await expect(
-                service.mutate({
-                    s3,
-                    masterPlaylistKey: 'm.m3u8',
-                    ifMatch: 'stale',
-                    operations: [],
+                service.publishChapters(s3, 'output/master.m3u8', {
+                    en: 'chapters/en_0123abcd.vtt',
                 })
             ).rejects.toBeInstanceOf(ConflictException);
         });
 
-        it('rejects unknown operation types with BadRequestException', async () => {
+        it('refuses, writing nothing, when the next revision is already there before the write', async () => {
             etag.getObjectWithEtag.mockResolvedValue({
                 body: Buffer.from(MASTER),
                 etag: 'old',
             });
+            etag.objectExists.mockResolvedValue(true);
 
             await expect(
-                service.mutate({
-                    s3,
-                    masterPlaylistKey: 'm.m3u8',
-                    ifMatch: 'old',
-                    operations: [{ type: 'nonsense' } as any],
+                service.publishChapters(s3, 'output/master.m3u8', {
+                    en: 'chapters/en_0123abcd.vtt',
                 })
-            ).rejects.toBeInstanceOf(BadRequestException);
-            expect(etag.putObjectIfMatch).not.toHaveBeenCalled();
-        });
-
-        it('known-but-unimplemented operations yield NotImplementedException (501)', async () => {
-            etag.getObjectWithEtag.mockResolvedValue({
-                body: Buffer.from(MASTER),
-                etag: 'old',
+            ).rejects.toMatchObject({
+                response: { code: 'CHANGED_ELSEWHERE' },
             });
-
-            await expect(
-                service.mutate({
-                    s3,
-                    masterPlaylistKey: 'm.m3u8',
-                    ifMatch: 'old',
-                    operations: [{ type: 'upsertSubtitle' } as any],
-                })
-            ).rejects.toBeInstanceOf(NotImplementedException);
+            expect(etag.putObjectIfAbsent).not.toHaveBeenCalled();
         });
     });
 
@@ -313,63 +336,112 @@ describe('HlsEditService', () => {
         });
     });
 
-    describe('writeChapters', () => {
-        it('puts the VTT body with the right key, body, and content-type', async () => {
+    describe('writeChapterFile', () => {
+        it('puts the VTT body under a name of its own, with the right content-type, cached for good', async () => {
             etag.putObject.mockResolvedValue({ etag: 'y' });
 
-            await service.writeChapters(
+            const result = await service.writeChapterFile(
                 s3,
                 'output/',
                 'en',
                 'WEBVTT\n\n00:00:00.000 --> 00:00:10.000\nIntro'
             );
 
+            expect(result.lang).toBe('en');
+            expect(result.uri).toMatch(CHAPTER_FILE);
             expect(etag.putObject).toHaveBeenCalledWith(
                 s3,
-                'output/chapters/en.vtt',
+                `output/${result.uri}`,
                 expect.stringMatching(/^WEBVTT/),
                 'text/vtt',
-                {}
+                { cacheControl: IMMUTABLE_CACHE_CONTROL }
             );
         });
 
-        it('normalizes uppercase lang codes before writing the sidecar path', async () => {
+        it('writes each save under a new name', async () => {
             etag.putObject.mockResolvedValue({ etag: 'y' });
 
-            await service.writeChapters(
+            const first = await service.writeChapterFile(
+                s3,
+                'output',
+                'en',
+                'WEBVTT\n'
+            );
+            const second = await service.writeChapterFile(
+                s3,
+                'output',
+                'en',
+                'WEBVTT\n'
+            );
+
+            expect(first.uri).not.toBe(second.uri);
+            expect(etag.putObject.mock.calls[0][1]).toBe(`output/${first.uri}`);
+        });
+
+        it('normalizes uppercase lang codes before naming the file', async () => {
+            etag.putObject.mockResolvedValue({ etag: 'y' });
+
+            const result = await service.writeChapterFile(
                 s3,
                 'output/',
                 'EN',
                 'WEBVTT\n\n00:00:00.000 --> 00:00:10.000\nIntro'
             );
 
-            expect(etag.putObject).toHaveBeenCalledWith(
-                s3,
-                'output/chapters/en.vtt',
-                expect.stringMatching(/^WEBVTT/),
-                'text/vtt',
-                {}
+            expect(result.lang).toBe('en');
+            expect(result.uri).toMatch(CHAPTER_FILE);
+            expect(etag.putObject.mock.calls[0][1]).toMatch(
+                /^output\/chapters\/en_[0-9a-f]{8}\.vtt$/
             );
         });
 
         it('rejects bodies that do not start with WEBVTT', async () => {
             await expect(
-                service.writeChapters(s3, 'output/', 'en', 'not vtt')
+                service.writeChapterFile(s3, 'output/', 'en', 'not vtt')
             ).rejects.toBeInstanceOf(BadRequestException);
             expect(etag.putObject).not.toHaveBeenCalled();
         });
 
         it('rejects malformed lang codes', async () => {
             await expect(
-                service.writeChapters(s3, 'output/', 'en_US', 'WEBVTT')
+                service.writeChapterFile(s3, 'output/', 'en_US', 'WEBVTT')
             ).rejects.toBeInstanceOf(BadRequestException);
+            await expect(
+                service.writeChapterFile(s3, 'output/', '../etc', 'WEBVTT')
+            ).rejects.toBeInstanceOf(BadRequestException);
+            expect(etag.putObject).not.toHaveBeenCalled();
         });
 
         it('rejects bodies larger than 1 MiB', async () => {
             const big = 'WEBVTT\n' + 'x'.repeat(1024 * 1024 + 100);
             await expect(
-                service.writeChapters(s3, 'output/', 'en', big)
+                service.writeChapterFile(s3, 'output/', 'en', big)
             ).rejects.toBeInstanceOf(PayloadTooLargeException);
+            expect(etag.putObject).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('writeLegacyChapters', () => {
+        it('overwrites chapters/<lang>.vtt, asking caches to check back', async () => {
+            etag.putObject.mockResolvedValue({ etag: 'y' });
+
+            await service.writeLegacyChapters(s3, 'output', 'en', 'WEBVTT\n');
+
+            expect(etag.putObject).toHaveBeenCalledWith(
+                s3,
+                'output/chapters/en.vtt',
+                'WEBVTT\n',
+                'text/vtt',
+                { cacheControl: EDITED_CACHE_CONTROL }
+            );
+        });
+
+        it('does not fail the save it follows when the write fails', async () => {
+            etag.putObject.mockRejectedValue(new Error('offline'));
+
+            await expect(
+                service.writeLegacyChapters(s3, 'output/', 'en', 'WEBVTT\n')
+            ).resolves.toBeUndefined();
         });
     });
 });
@@ -408,7 +480,7 @@ describe('HlsEditService — encrypted sessions (LMCENC01)', () => {
 
     beforeEach(() => {
         etag = makeEtagMock();
-        service = new HlsEditService(etag as any);
+        service = makeService(etag);
     });
 
     describe('read', () => {
@@ -456,54 +528,69 @@ describe('HlsEditService — encrypted sessions (LMCENC01)', () => {
         });
     });
 
-    describe('mutate', () => {
-        it('writes the rebuilt master back encrypted, with a fresh IV', async () => {
+    describe('publishChapters', () => {
+        it('writes the new revision encrypted, with a fresh IV', async () => {
             const stored = encrypt(MASTER);
             etag.getObjectWithEtag.mockResolvedValue({
                 body: stored,
                 etag: 'old',
             });
-            etag.putObjectIfMatch.mockResolvedValue({ etag: 'new' });
+            etag.putObjectIfAbsent.mockResolvedValue('new');
 
-            const result = await service.mutate({
+            const result = await service.publishChapters(
                 s3,
-                masterPlaylistKey: 'output/master.m3u8',
-                ifMatch: 'old',
-                operations: [],
-                keyHex: KEY_HEX,
-            });
+                'output/master.m3u8',
+                { en: 'chapters/en_0123abcd.vtt' },
+                KEY_HEX
+            );
 
-            const [, , body, , contentType] =
-                etag.putObjectIfMatch.mock.calls[0];
+            const [, key, body, contentType] =
+                etag.putObjectIfAbsent.mock.calls[0];
+            expect(key).toBe('output/master_r1.m3u8');
             expect(Buffer.isBuffer(body)).toBe(true);
             expect(contentType).toBe('application/octet-stream');
-            // Plaintext never reaches S3 — not even for the instant between
-            // this write and a follow-up one.
-            expect(decrypt(body as Buffer)).toContain('#EXT-X-STREAM-INF');
+            // Plaintext never reaches S3.
+            const text = decrypt(body as Buffer);
+            expect(text).toContain('#EXT-X-STREAM-INF');
+            expect(text).toContain('chapters/en_0123abcd.vtt');
             expect(
                 (body as Buffer).subarray(8, 24).equals(stored.subarray(8, 24))
             ).toBe(false);
             expect(result.etag).toBe('new');
         });
 
-        it('keeps a plaintext session plaintext', async () => {
+        it('keeps a plaintext master plaintext even when a key is held', async () => {
             etag.getObjectWithEtag.mockResolvedValue({
                 body: Buffer.from(MASTER),
                 etag: 'old',
             });
-            etag.putObjectIfMatch.mockResolvedValue({ etag: 'new' });
+            etag.putObjectIfAbsent.mockResolvedValue('new');
 
-            await service.mutate({
+            await service.publishChapters(
                 s3,
-                masterPlaylistKey: 'output/master.m3u8',
-                ifMatch: 'old',
-                operations: [],
-            });
+                'output/master.m3u8',
+                { en: 'chapters/en_0123abcd.vtt' },
+                KEY_HEX
+            );
 
-            const [, , body, , contentType] =
-                etag.putObjectIfMatch.mock.calls[0];
+            const [, , body, contentType] =
+                etag.putObjectIfAbsent.mock.calls[0];
             expect(typeof body).toBe('string');
             expect(contentType).toBe('application/vnd.apple.mpegurl');
+        });
+
+        it('refuses an encrypted master with no key, writing nothing', async () => {
+            etag.getObjectWithEtag.mockResolvedValue({
+                body: encrypt(MASTER),
+                etag: 'old',
+            });
+
+            await expect(
+                service.publishChapters(s3, 'output/master.m3u8', {
+                    en: 'chapters/en_0123abcd.vtt',
+                })
+            ).rejects.toBeInstanceOf(BadRequestException);
+            expect(etag.putObjectIfAbsent).not.toHaveBeenCalled();
         });
     });
 
@@ -528,7 +615,7 @@ describe('HlsEditService — encrypted sessions (LMCENC01)', () => {
         it('encrypts a chapter sidecar on write', async () => {
             etag.putObject.mockResolvedValue({ etag: 'e' });
 
-            await service.writeChapters(
+            const { uri } = await service.writeChapterFile(
                 s3,
                 'output/',
                 'en',
@@ -537,7 +624,7 @@ describe('HlsEditService — encrypted sessions (LMCENC01)', () => {
             );
 
             const [, key, body, contentType] = etag.putObject.mock.calls[0];
-            expect(key).toBe('output/chapters/en.vtt');
+            expect(key).toBe(`output/${uri}`);
             expect(contentType).toBe('application/octet-stream');
             expect(decrypt(body as Buffer)).toContain('One');
         });
@@ -546,8 +633,8 @@ describe('HlsEditService — encrypted sessions (LMCENC01)', () => {
             etag.putObject.mockResolvedValue({ etag: 'e' });
             const vtt = 'WEBVTT\n';
 
-            await service.writeChapters(s3, 'output/', 'en', vtt, KEY_HEX);
-            await service.writeChapters(s3, 'output/', 'en', vtt, KEY_HEX);
+            await service.writeChapterFile(s3, 'output/', 'en', vtt, KEY_HEX);
+            await service.writeChapterFile(s3, 'output/', 'en', vtt, KEY_HEX);
 
             const first = etag.putObject.mock.calls[0][2] as Buffer;
             const second = etag.putObject.mock.calls[1][2] as Buffer;
@@ -557,7 +644,7 @@ describe('HlsEditService — encrypted sessions (LMCENC01)', () => {
         it('stores plaintext when the session has no key', async () => {
             etag.putObject.mockResolvedValue({ etag: 'e' });
 
-            await service.writeChapters(s3, 'output/', 'en', 'WEBVTT\n');
+            await service.writeChapterFile(s3, 'output/', 'en', 'WEBVTT\n');
 
             const [, , body, contentType] = etag.putObject.mock.calls[0];
             expect(body).toBe('WEBVTT\n');
@@ -566,7 +653,13 @@ describe('HlsEditService — encrypted sessions (LMCENC01)', () => {
 
         it('rejects a malformed key rather than writing something unreadable', async () => {
             await expect(
-                service.writeChapters(s3, 'output/', 'en', 'WEBVTT\n', 'nothex')
+                service.writeChapterFile(
+                    s3,
+                    'output/',
+                    'en',
+                    'WEBVTT\n',
+                    'nothex'
+                )
             ).rejects.toThrow(/32 hex/);
             expect(etag.putObject).not.toHaveBeenCalled();
         });

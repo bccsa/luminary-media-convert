@@ -15,7 +15,8 @@ import {
     type HlsParsedMediaPlaylist,
 } from '@luminary-media-converter/hls-core';
 import { S3EtagService } from '../../hls-edit/s3-etag.service.js';
-import { EDITED_CACHE_CONTROL } from '../../hls-edit/hls-edit.service.js';
+import { MasterRevisionService } from '../../hls-edit/master-revision.service.js';
+import { VideoRevisionService } from './video-revision.service.js';
 import {
     addAudioTrackLines,
     assertTrackLabel,
@@ -112,8 +113,8 @@ const CHUNK_CAP_BYTES = 50 * 1024 * 1024;
  * picked file's audio is encoded to match each of the video's audio groups —
  * bitrate, channels, sample rate, segment length, byte ranges, encryption —
  * uploaded beside it in folders of its own, and named in the master. The
- * video's own files are never written; the master only gains lines, over the
- * version the editor read, its original kept at `master.m3u8.orig`.
+ * video's own files are never written; a new master revision gains the lines,
+ * written from the version the editor read.
  */
 @Injectable()
 export class AddAudioTrackService {
@@ -124,7 +125,9 @@ export class AddAudioTrackService {
         private readonly sessionService: SessionService,
         private readonly s3EtagService: S3EtagService,
         private readonly segmentPipelineService: SegmentPipelineService,
-        private readonly encryptionService: EncryptionService
+        private readonly encryptionService: EncryptionService,
+        private readonly masterRevisions: MasterRevisionService,
+        private readonly videoRevisions: VideoRevisionService
     ) {}
 
     /** The job on this session, while it runs and after it ended. */
@@ -349,19 +352,22 @@ export class AddAudioTrackService {
             const contentType = encrypted
                 ? 'application/octet-stream'
                 : 'application/vnd.apple.mpegurl';
-            await this.s3EtagService.putObjectIfAbsent(
-                s3,
-                `${masterKey}.orig`,
-                master.body,
-                contentType
-            );
-            await this.s3EtagService.putObjectIfMatch(
-                s3,
-                masterKey,
-                encrypted ? encryptTextAsset(updated, key!) : updated,
-                master.etag,
-                contentType,
-                { cacheControl: EDITED_CACHE_CONTROL }
+            // Written as the revision after the one this job read, whatever the
+            // session holds by now: if anything else got there first, that
+            // revision exists and the job fails rather than overwrite it with
+            // a master built from an older version. Not gated on the CMS: the
+            // job was checked when it started, and if the CMS has gone since,
+            // the version waits for it.
+            await this.videoRevisions.save(
+                session.id,
+                () =>
+                    this.masterRevisions.writeNext(
+                        s3,
+                        masterKey,
+                        encrypted ? encryptTextAsset(updated, key!) : updated,
+                        contentType
+                    ),
+                { gate: false, awaitAck: false }
             );
             job.state = 'done';
             job.phase = 'done';

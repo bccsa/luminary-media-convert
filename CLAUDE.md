@@ -40,4 +40,4 @@ Split from this file on 2026-10-12 to cut per-request context. Nothing was dropp
 
 ## Follow-ups
 
-Known gaps and deferred work are tracked as [issues](https://github.com/bccsa/luminary-media-convert/issues). Notably: CMS edit mode for existing collections (#205 — `existingMedia` is accepted and ignored), auto-update and code signing (#206), Linux builds (#207), storage that is never reclaimed when a document is deleted or a collection superseded (#208), and Windows build verification (#209).
+Known gaps and deferred work are tracked as [issues](https://github.com/bccsa/luminary-media-convert/issues). Notably: auto-update and code signing (#206), Linux builds (#207) and Windows build verification (#209). Files an edit replaces (older master revisions, chapter files, subtitles, sprites) are kept on purpose and go only when the CMS deletes the video's whole folder.

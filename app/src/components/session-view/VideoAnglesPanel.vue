@@ -9,6 +9,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { getEncodedMedia, putVideoAngles } from '../../api';
 import type { AddVideoAngleJob, EncodedMedia, VideoAngle } from '../../types';
 import AddVideoAngleModal from './AddVideoAngleModal.vue';
+import { isChangedElsewhere, saveErrorMessage } from '../../utils/errors';
 
 const props = defineProps<{
     sessionId: string;
@@ -16,8 +17,12 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-    /** The master changed: whatever holds the old one should load it again. */
-    saved: [];
+    /**
+     * The master changed — saved here, or moved on to a version another
+     * machine wrote: whatever holds the old one should load it again. A save
+     * passes on its `published`, whether Luminary CMS has stored it yet.
+     */
+    saved: [published?: boolean];
 }>();
 
 /** One editable row per angle: the angle as read, and what it is being renamed to. */
@@ -161,21 +166,39 @@ async function save(): Promise<void> {
     saving.value = true;
     error.value = null;
     try {
-        setRows(
-            await putVideoAngles(
-                props.sessionId,
-                token,
-                media.value.etag,
-                edits.value,
-                removed.value
-            )
+        const next = await putVideoAngles(
+            props.sessionId,
+            token,
+            media.value.etag,
+            edits.value,
+            removed.value
         );
+        setRows(next);
         savedAt.value = new Date();
-        emit('saved');
+        emit('saved', next.published);
     } catch (err) {
-        error.value = (err as Error).message;
+        error.value = saveErrorMessage(err);
+        if (isChangedElsewhere(err)) void followNewerVersion();
     } finally {
         saving.value = false;
+    }
+}
+
+/**
+ * Another machine saved the video first, and the session has moved on to its
+ * version. The edits here stay, to be saved again over it, so only the version
+ * read is replaced — its ETag is what the next save has to name — and the page
+ * follows the new master.
+ */
+async function followNewerVersion(): Promise<void> {
+    emit('saved');
+    const token = props.sessionToken;
+    if (!token) return;
+    try {
+        media.value = await getEncodedMedia(props.sessionId, token);
+    } catch {
+        // The old ETag stays; the next save is refused as changed, and offers
+        // to read the video again.
     }
 }
 
@@ -377,6 +400,23 @@ watch(() => [props.sessionId, props.sessionToken] as const, load, {
             v-else-if="media"
             class="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-8 text-center"
         >
+            <div
+                class="flex h-11 w-11 items-center justify-center rounded-full border border-neutral-200 bg-neutral-50 text-slate-500 dark:border-slate-600/55 dark:bg-slate-900/45 dark:text-slate-400"
+                aria-hidden="true"
+            >
+                <svg
+                    class="h-5 w-5"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.75"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                >
+                    <path d="m16 10 5-3v10l-5-3" />
+                    <rect x="3" y="6" width="13" height="12" rx="2" />
+                </svg>
+            </div>
             <p
                 class="m-0 text-[0.8125rem] font-semibold text-zinc-900 dark:text-slate-200"
             >

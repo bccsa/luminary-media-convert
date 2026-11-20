@@ -125,6 +125,72 @@ export class VideoTrackInfoDto {
     })
     @Expose()
     level?: number;
+
+    @ApiPropertyOptional({
+        example: 90,
+        description:
+            'Clockwise quarter turns the picture is shown at, in degrees (90, ' +
+            '180 or 270), from the display matrix. A phone stores a portrait ' +
+            'video landscape and says to turn it. Absent when the picture is ' +
+            'shown as stored. `displayWidth`/`displayHeight` already count it.',
+    })
+    @Expose()
+    rotation?: number;
+
+    @ApiPropertyOptional({
+        example: 0,
+        description:
+            'The camera angle this track is one quality of, when the source ' +
+            'carries the same picture more than once: the lowest track index in ' +
+            'that angle. Absent on a track that is its own angle, and on every ' +
+            'track when `anglesDetected` is not set.',
+    })
+    @Expose()
+    pictureGroup?: number;
+
+    @ApiPropertyOptional({
+        example: 48,
+        description:
+            'The fewest sampled instants at which this track was seen to show ' +
+            'the same picture as another member of its `pictureGroup`. Absent ' +
+            'without a group.',
+    })
+    @Expose()
+    pictureMatches?: number;
+
+    @ApiPropertyOptional({
+        example: true,
+        description:
+            'The comparison behind `pictureGroup` ran to the end. False when ' +
+            'the time allowed cut it short, so the tracks agreed at fewer ' +
+            'instants than a grouping is normally trusted on. Absent without ' +
+            'a group.',
+    })
+    @Expose()
+    pictureVerified?: boolean;
+
+    @ApiPropertyOptional({
+        example: [1],
+        type: [Number],
+        description:
+            'Tracks this one may show the same picture as, but was kept apart ' +
+            'from: they agreed at enough instants, and a disagreement was ' +
+            'still waiting to be re-checked when the time allowed ran out. ' +
+            'Absent when there are none.',
+    })
+    @Expose()
+    pictureUndecided?: number[];
+
+    @ApiPropertyOptional({
+        example: 0,
+        description:
+            'The keyframe grid this track is cut on: the lowest index among the ' +
+            'video tracks that cut keyframes at the same instants and run as ' +
+            'long as it does. Tracks with the same id can be copied as rungs of ' +
+            'one ladder. Absent when the keyframes were not compared.',
+    })
+    @Expose()
+    keyframeGrid?: number;
 }
 
 export class AudioTrackInfoDto {
@@ -198,4 +264,14 @@ export class ProbeResultDto {
     @Type(() => AudioTrackInfoDto)
     @Expose()
     audioTracks: AudioTrackInfoDto[];
+
+    @ApiPropertyOptional({
+        example: true,
+        description:
+            'The video tracks were compared for which show the same picture. ' +
+            'Without it, a track with no `pictureGroup` was never compared, ' +
+            'rather than found to be an angle of its own.',
+    })
+    @Expose()
+    anglesDetected?: boolean;
 }

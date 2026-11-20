@@ -1208,6 +1208,44 @@ describe('PlayerController — chapters', () => {
         expect(calls.filter((url) => url === FR_CHAPTERS)).toHaveLength(1);
     });
 
+    it("keeps the host's chapter files for languages the master does not name", async () => {
+        // A video from before the index, with English and French chapters. An
+        // English save names only English in the master; French is still the
+        // host's file.
+        const EN_SAVED = `${BASE}/chapters/en_1a2b3c4d.vtt`;
+        const master = SIMPLE_MASTER.replace(
+            '#EXTM3U\n',
+            '#EXTM3U\n#EXT-X-SESSION-DATA:DATA-ID="com.luminary.chapters",LANGUAGE="en",URI="chapters/en_1a2b3c4d.vtt",FORMAT=RAW\n',
+        );
+        const { controller } = setup({
+            ...simpleRoutes,
+            [MASTER_URL]: master,
+            [EN_SAVED]: CHAPTERS_VTT,
+            [FR_CHAPTERS]: FR_VTT,
+        });
+        await controller.load({
+            masterUrl: MASTER_URL,
+            sidecars: {
+                chapters: [
+                    { lang: 'en', label: 'English', url: EN_CHAPTERS },
+                    { lang: 'fr', label: 'Français', url: FR_CHAPTERS },
+                ],
+            },
+        });
+        await flush();
+
+        const tracks = controller.getState().chapterTracks;
+        expect(tracks.map((t) => [t.lang, t.label])).toEqual([
+            ['en', 'English'],
+            ['fr', 'Français'],
+        ]);
+        controller.setChapterTrack('c:fr');
+        await flush();
+        expect(controller.getState().chapters.map((c) => c.title)).toEqual([
+            'Ouverture',
+        ]);
+    });
+
     it('reads encrypted chapter sidecars with the session key', async () => {
         const { controller } = setup({
             ...simpleRoutes,
@@ -1218,8 +1256,11 @@ describe('PlayerController — chapters', () => {
             keyHex: TEST_KEY_HEX,
             sidecars: { chapters: [{ lang: 'en', url: EN_CHAPTERS }] },
         });
-        await flush();
-        expect(controller.getState().chapters).toHaveLength(2);
+        // Decrypting runs on WebCrypto, which can take longer than a few event
+        // loop turns on a slow runner: wait for the chapters, not for ticks.
+        await vi.waitFor(() =>
+            expect(controller.getState().chapters).toHaveLength(2),
+        );
     });
 
     it('turns chapters off without touching playback', async () => {
@@ -1715,6 +1756,64 @@ describe('PlayerController — scrub thumbnails', () => {
 
         expect(controller.state.thumbnailsReady).toBe(false);
         expect(errors).toEqual([]);
+    });
+
+    describe('a strip per angle', () => {
+        const WIDE_STRIP = `${BASE}/thumbnails/wide.vtt`;
+        const CLOSE_STRIP = `${BASE}/thumbnails/close.vtt`;
+        const CLOSE_VTT = THUMBS_VTT.replace(/sprite_0/g, 'close_0');
+        const master = MULTI_ANGLE_MASTER.replace(
+            '#EXTM3U\n',
+            [
+                '#EXTM3U',
+                '#EXT-X-SESSION-DATA:DATA-ID="com.luminary.thumbnails.angle_0",VIDEO="angle_0",URI="thumbnails/wide.vtt",FORMAT=RAW',
+                '#EXT-X-SESSION-DATA:DATA-ID="com.luminary.thumbnails.angle_1",VIDEO="angle_1",URI="thumbnails/close.vtt",FORMAT=RAW',
+                '',
+            ].join('\n'),
+        );
+        const angleRoutes = {
+            ...multiAngleRoutes,
+            [MASTER_URL]: master,
+            [WIDE_STRIP]: THUMBS_VTT,
+            [CLOSE_STRIP]: CLOSE_VTT,
+        };
+
+        it("shows none of the old angle's frames while the new strip loads", async () => {
+            const { controller, adapter } = setup(angleRoutes);
+            await controller.load({ masterUrl: MASTER_URL });
+            adapter.emit('durationchange', { duration: 20 });
+            await flush();
+            expect(controller.thumbnailAt(3)?.spriteUrl).toContain('sprite_0');
+
+            await controller.setAngle('angle_1');
+            // Before the close strip is read: no frame beats the wide one.
+            expect(controller.thumbnailAt(3)).toBeNull();
+            await flush();
+            expect(controller.thumbnailAt(3)?.spriteUrl).toContain('close_0');
+        });
+
+        it('reads a shared strip that failed again on the next angle switch', async () => {
+            // One strip for every angle: the URL never changes on a switch, so
+            // without a retry one failed read hides the frames for good.
+            const SHARED = `${BASE}/thumbnails/all.vtt`;
+            const { controller, adapter, routes } = setup({
+                ...multiAngleRoutes,
+                [MASTER_URL]: MULTI_ANGLE_MASTER.replace(
+                    '#EXTM3U\n',
+                    '#EXTM3U\n#EXT-X-SESSION-DATA:DATA-ID="com.luminary.thumbnails",URI="thumbnails/all.vtt",FORMAT=RAW\n',
+                ),
+                [SHARED]: { status: 503 },
+            });
+            await controller.load({ masterUrl: MASTER_URL });
+            adapter.emit('durationchange', { duration: 20 });
+            await flush();
+            expect(controller.thumbnailAt(3)).toBeNull();
+
+            routes.set(SHARED, THUMBS_VTT);
+            await controller.setAngle('angle_1');
+            await flush();
+            expect(controller.thumbnailAt(3)?.spriteUrl).toContain('sprite_0');
+        });
     });
 
     it("does not carry one source's frames into the next", async () => {

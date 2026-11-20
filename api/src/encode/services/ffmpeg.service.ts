@@ -45,6 +45,7 @@ import dotenv from 'dotenv';
 import { ffmpegBin, ffprobeBin } from './ffbin.js';
 import { checkFfmpeg } from './ffmpeg-availability.js';
 import { ALIGNMENT_TOLERANCE_SECONDS } from './copy-mode-eligibility.js';
+import { angleOf, outputAngles, videoMediaLine } from './output-angles.js';
 import type { QuickTrimPlan } from './quick-trim-plan.js';
 import {
     runQuickTrim,
@@ -97,6 +98,12 @@ export interface EncodeOptions {
      * the same encode.
      */
     sessionCap?: number;
+    /**
+     * Decode on the CPU and still encode on the hardware. For a source shown
+     * turned: FFmpeg turns the picture in the decode, and a hardware decode
+     * that keeps its frames on the device skips the turn.
+     */
+    softwareDecode?: boolean;
 }
 
 /**
@@ -775,7 +782,16 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    private async probeFrameRate(inputPath: string): Promise<number> {
+    /**
+     * One video track's frame rate. Per track, because the GOP is counted in
+     * frames: a 25 fps proxy sitting in front of a 30 fps master once set every
+     * rendition's GOP from the proxy, and the master's keyframes stopped landing
+     * on segment boundaries.
+     */
+    private async probeFrameRate(
+        inputPath: string,
+        videoTrackIndex = 0
+    ): Promise<number> {
         try {
             const { stdout } = await execFileAsync(
                 ffprobeBin(),
@@ -783,7 +799,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                     '-v',
                     'error',
                     '-select_streams',
-                    'v:0',
+                    `v:${videoTrackIndex}`,
                     '-show_entries',
                     'stream=r_frame_rate',
                     '-of',
@@ -873,6 +889,19 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         const segmentDuration = encodeConfig.segmentDuration ?? 6;
         const sourceFrameRate = await this.probeFrameRate(inputPath);
         const gopFrames = Math.round(segmentDuration * sourceFrameRate);
+        // Each re-encoded rendition keeps its own source track's rate, so its
+        // GOP has to be counted at that rate. Track 0's is the one logged.
+        const frameRateByTrack = new Map<number, number>([
+            [0, sourceFrameRate],
+        ]);
+        for (const r of renditions) {
+            const track = r.sourceTrackIndex ?? 0;
+            if (!r.copyStream && !frameRateByTrack.has(track))
+                frameRateByTrack.set(
+                    track,
+                    await this.probeFrameRate(inputPath, track)
+                );
+        }
         const trimming = !!encodeConfig.trimSegments?.length;
         // Never alongside copy streams: `canResume` keeps them apart.
         const resume = opts.resume;
@@ -884,7 +913,13 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
 
         const hasReencode = renditions.some((r) => !r.copyStream);
 
-        args.push(...decodeArgs(this.accelMode, 'ladder', hasReencode));
+        args.push(
+            ...decodeArgs(
+                this.accelMode,
+                'ladder',
+                hasReencode && !opts.softwareDecode
+            )
+        );
 
         if (trimming) {
             const concatPath = await this.buildConcatFile(
@@ -1030,7 +1065,9 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                     // overwrite an earlier one.
                     filterParts.push(
                         `[reencode${e.globalIndex}]${scalerExpr(
-                            this.accelMode,
+                            // Frames decoded on the CPU need its scaler: the
+                            // hardware ones take only frames on the device.
+                            opts.softwareDecode ? 'cpu' : this.accelMode,
                             e.rendition.width,
                             e.rendition.height
                         )},setsar=1[vout${e.globalIndex}]`
@@ -1051,19 +1088,18 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             const r = reencodeRenditions[i];
             args.push('-map', `[vout${i}]`);
 
+            const fps =
+                frameRateByTrack.get(r.sourceTrackIndex ?? 0) ??
+                sourceFrameRate;
+            const trackGop = Math.round(segmentDuration * fps);
             args.push(
-                ...ladderVideoArgs(
-                    this.accelMode,
-                    r,
-                    videoOutputIndex,
-                    sourceFrameRate
-                )
+                ...ladderVideoArgs(this.accelMode, r, videoOutputIndex, fps)
             );
             args.push(
                 `-g:v:${videoOutputIndex}`,
-                `${gopFrames}`,
+                `${trackGop}`,
                 `-keyint_min:v:${videoOutputIndex}`,
-                `${gopFrames}`
+                `${trackGop}`
             );
             videoIndexMap.push({ rendition: r, outputIndex: videoOutputIndex });
             videoOutputIndex++;
@@ -1447,21 +1483,13 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             mkdirSync(outputDir, { recursive: true });
         }
 
-        // Create output subdirectories
-        if (type === 'video') {
-            const totalStreams =
-                (encodeConfig.videoRenditions?.length ?? 0) +
-                (encodeConfig.audioGroups?.length ?? 0);
-            for (let i = 0; i < totalStreams; i++) {
-                const dir = join(outputDir, `stream_${i}`);
-                if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-            }
-        } else {
-            const numGroups = encodeConfig.audioGroups?.length ?? 1;
-            for (let i = 0; i < numGroups; i++) {
-                const dir = join(outputDir, `stream_${i}`);
-                if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-            }
+        // The stream directories FFmpeg writes into, by the names it gives
+        // them. Any other directory here is one the segment pipeline finds
+        // with no chunk chain and nothing in it.
+        const streamDirs = Object.keys(this.buildStreamChainMap(encodeConfig));
+        for (const name of streamDirs) {
+            const dir = join(outputDir, name);
+            if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
         }
 
         // Settled before anything is built: a source whose streams do not start
@@ -2187,47 +2215,34 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
 
     /**
      * Add VIDEO attribute to each EXT-X-STREAM-INF identifying the angle.
-     * Uses positional matching (re-encode first, then copy) and derives the
-     * angle name from videoTrackNames + sourceTrackIndex.
+     *
+     * Each variant is matched to its rendition by the stream directory its URI
+     * names — the same key `mergeWaveMasterPlaylists` restores audio groups by —
+     * never by position. Position assumed the muxer's order (re-encoded, then
+     * copied), which a wave-merged master does not keep: it lists wave one's
+     * re-encodes, then the copies that ride with it, then wave two's re-encodes,
+     * and a multi-angle ladder split that way had variants filed under the
+     * wrong camera.
      */
     private fixMasterPlaylistVideoGroups(
         content: string,
         config: EncodeConfigDto
     ): string {
-        const renditions = config.videoRenditions ?? [];
-        if (renditions.length === 0) return content;
+        const angles = outputAngles(config);
+        if (angles.length === 0) return content;
 
-        const uniqueTracks = new Set(
-            renditions.map((r) => r.sourceTrackIndex ?? 0)
-        );
-        if (uniqueTracks.size <= 1) return content;
-
-        const nameByTrackIndex = new Map<number, string>();
-        for (const tn of config.videoTrackNames ?? []) {
-            nameByTrackIndex.set(tn.index, tn.name ?? `Angle ${tn.index}`);
+        const groupByAngle = new Map(angles.map((a) => [a.id, a.groupId]));
+        const groupByDir = new Map<string, string>();
+        for (const [rendition, name] of this.videoStreamNames(
+            config.videoRenditions ?? []
+        )) {
+            const groupId = groupByAngle.get(angleOf(rendition));
+            if (groupId) groupByDir.set(`stream_${name}`, groupId);
         }
-        for (const idx of uniqueTracks) {
-            if (!nameByTrackIndex.has(idx)) {
-                nameByTrackIndex.set(idx, `Angle ${idx}`);
-            }
-        }
-
-        const sanitize = (s: string): string =>
-            s
-                .replace(/[^a-zA-Z0-9_-]/g, '_')
-                .replace(/_+/g, '_')
-                .replace(/^_|_$/g, '') || 'angle';
-
-        const orderedRenditions = [
-            ...renditions.filter((r) => !r.copyStream),
-            ...renditions.filter((r) => r.copyStream),
-        ];
 
         const lines = content.split('\n');
         const result: string[] = [];
-        let videoEntryIndex = 0;
         let insertedVideoMedia = false;
-        const insertedGroupIds = new Set<string>();
 
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
@@ -2237,35 +2252,37 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 (line.startsWith('#EXT-X-MEDIA:') ||
                     line.startsWith('#EXT-X-STREAM-INF:'))
             ) {
-                for (const [, angleName] of nameByTrackIndex) {
-                    const groupId = sanitize(angleName);
-                    if (insertedGroupIds.has(groupId)) continue;
-                    insertedGroupIds.add(groupId);
-                    const isDefault = insertedGroupIds.size === 1;
-                    result.push(
-                        `#EXT-X-MEDIA:TYPE=VIDEO,GROUP-ID="${groupId}",NAME="${angleName}",DEFAULT=${isDefault ? 'YES' : 'NO'}`
-                    );
-                }
+                angles.forEach((angle, n) =>
+                    result.push(videoMediaLine(angle, n === 0))
+                );
                 insertedVideoMedia = true;
             }
 
-            if (
-                line.startsWith('#EXT-X-STREAM-INF:') &&
-                videoEntryIndex < orderedRenditions.length
-            ) {
-                const rendition = orderedRenditions[videoEntryIndex];
-                const angleName =
-                    nameByTrackIndex.get(rendition.sourceTrackIndex ?? 0) ??
-                    'Angle 0';
-                const groupId = sanitize(angleName);
-                const newLine = line.includes('AUDIO=')
-                    ? line.replace(
-                          /AUDIO="([^"]+)"/,
-                          `VIDEO="${groupId}",AUDIO="$1"`
-                      )
-                    : `${line},VIDEO="${groupId}"`;
-                result.push(newLine);
-                videoEntryIndex++;
+            if (line.startsWith('#EXT-X-STREAM-INF:')) {
+                // The URI is the next line that is neither blank nor a tag.
+                let uri = '';
+                for (let j = i + 1; j < lines.length; j++) {
+                    const next = lines[j].trim();
+                    if (!next || next.startsWith('#')) continue;
+                    uri = next;
+                    break;
+                }
+                const groupId = groupByDir.get(uri.split('/')[0]);
+                if (!groupId) {
+                    this.logger.warn(
+                        `Master playlist variant ${uri || '(no URI)'} matches no rendition; left without an angle`
+                    );
+                    result.push(line);
+                    continue;
+                }
+                result.push(
+                    line.includes('AUDIO=')
+                        ? line.replace(
+                              /AUDIO="([^"]+)"/,
+                              `VIDEO="${groupId}",AUDIO="$1"`
+                          )
+                        : `${line},VIDEO="${groupId}"`
+                );
                 continue;
             }
 
@@ -2304,8 +2321,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 encodeConfig.videoRenditions ?? []
             );
             for (const [rendition, name] of names) {
-                chains[`stream_${name}`] =
-                    `v${rendition.sourceTrackIndex ?? 0}`;
+                chains[`stream_${name}`] = `v${angleOf(rendition)}`;
             }
         }
 

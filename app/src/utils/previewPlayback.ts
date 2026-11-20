@@ -211,6 +211,9 @@ function videoProblem(
 ): string | null {
     const codec = track.codec;
     if (!allowed.has(codec)) return misplaced('video', codec, containerLabel);
+    // The browser shows a turned picture as stored, on its side; the
+    // conversion turns it.
+    if (track.rotation) return 'Rotated video';
     const pixFmt = track.pixFmt;
     const eightBit = !!pixFmt && EIGHT_BIT_420.has(pixFmt);
     const tenBit = !!pixFmt && TEN_BIT_420.has(pixFmt);

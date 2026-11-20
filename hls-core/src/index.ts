@@ -7,3 +7,4 @@ export * from './media-playlist.js';
 export * from './keys.js';
 export * from './sidecar.js';
 export * from './thumbnail-vtt.js';
+export * from './session-data.js';
