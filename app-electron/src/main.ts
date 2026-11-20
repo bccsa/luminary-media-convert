@@ -11,7 +11,6 @@ import {
 } from 'electron';
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import {
     ALLOWED_EXTENSIONS,
@@ -27,6 +26,13 @@ import {
 } from '@luminary-media-converter/api';
 import { showLicences } from './licences';
 import { candidateBinaries, resolveFfmpegBinary } from './ffmpeg-location';
+import { checkCandidate } from './ffmpeg-candidate';
+import {
+    type Settings,
+    defaultSettings,
+    loadSettings as readSettings,
+    saveSettings as writeSettings,
+} from './settings';
 import { resolveWindowTarget } from './window-target';
 import { type AvailableUpdate, checkForUpdate } from './update-check';
 import { teeConsoleToFile } from './log-file';
@@ -56,63 +62,19 @@ let quitting = false;
  * Remembered decisions
  * ------------------------------------------------------------------ */
 
-interface Settings {
-    /** Origins the user has allowed. Loaded into the API's allowlist at boot. */
-    allowedOrigins: string[];
-    /**
-     * Origins the user has refused. Kept so a site that keeps trying cannot
-     * turn "no" into a dialog every few seconds until someone clicks the wrong
-     * button.
-     */
-    deniedOrigins: string[];
-    /**
-     * A directory holding an ffmpeg the user would rather we used than the one
-     * we ship. Unset for everybody who has never opened the menu item.
-     *
-     * A directory rather than two file paths, so ffmpeg and ffprobe cannot be
-     * chosen from different builds — a pair that disagree fail in ways that
-     * look like a broken source file.
-     */
-    ffmpegDir?: string | null;
-    /**
-     * A release the user said to stop mentioning. Only that version: the next
-     * one is announced again, so "skip" never quietly becomes "never".
-     */
-    skippedVersion?: string | null;
-}
-
 const settingsPath = (): string =>
     join(app.getPath('userData'), 'settings.json');
 
-let settings: Settings = { allowedOrigins: [], deniedOrigins: [] };
+let settings: Settings = defaultSettings();
 
 async function loadSettings(): Promise<void> {
-    try {
-        const raw = await readFile(settingsPath(), 'utf8');
-        const parsed = JSON.parse(raw) as Partial<Settings>;
-        settings = {
-            allowedOrigins: parsed.allowedOrigins ?? [],
-            deniedOrigins: parsed.deniedOrigins ?? [],
-            ffmpegDir: parsed.ffmpegDir ?? null,
-            skippedVersion: parsed.skippedVersion ?? null,
-        };
-    } catch {
-        // No settings yet, or unreadable: start from "trust nothing", which is
-        // the same state a first run is in.
-    }
+    settings = await readSettings(settingsPath());
 }
 
 async function saveSettings(): Promise<void> {
-    try {
-        await mkdir(app.getPath('userData'), { recursive: true });
-        await writeFile(
-            settingsPath(),
-            JSON.stringify(settings, null, 4),
-            'utf8'
-        );
-    } catch (err) {
-        console.error('Could not persist settings:', err);
-    }
+    await writeSettings(settingsPath(), settings, (err) =>
+        console.error('Could not persist settings:', err)
+    );
 }
 
 /* ------------------------------------------------------------------ *
@@ -422,30 +384,11 @@ async function chooseFfmpegDirectory(): Promise<void> {
     if (canceled || !filePaths[0]) return;
 
     const dir = filePaths[0];
-    const candidate = candidateBinaries(dir, process.platform);
-    const before = {
-        ffmpeg: process.env.FFMPEG_PATH,
-        ffprobe: process.env.FFPROBE_PATH,
-    };
-
-    let reason: string | null | undefined;
-    let detail: string | null | undefined;
-    try {
-        process.env.FFMPEG_PATH = candidate.ffmpeg;
-        process.env.FFPROBE_PATH = candidate.ffprobe;
-        ({ reason, detail } = await checkFfmpeg());
-    } finally {
-        // Restore whatever was there, including nothing: leaving the candidate
-        // in the environment would point the running API at a binary the user
-        // may have just been told is unusable.
-        for (const [key, value] of [
-            ['FFMPEG_PATH', before.ffmpeg],
-            ['FFPROBE_PATH', before.ffprobe],
-        ] as const) {
-            if (value === undefined) delete process.env[key];
-            else process.env[key] = value;
-        }
-    }
+    const { reason, detail } = await checkCandidate(
+        process.env,
+        candidateBinaries(dir, process.platform),
+        checkFfmpeg
+    );
 
     if (reason) {
         if (detail) console.error(detail);
