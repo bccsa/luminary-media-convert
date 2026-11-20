@@ -257,8 +257,15 @@ export function rewriteAudioTracks(
 
 export const MEDIA_TAG = '#EXT-X-MEDIA:';
 
+/**
+ * `name`'s attribute in an attribute list. Group 1 is everything before it, a
+ * run of whole attributes each with its comma, so `NAME=` or `LANGUAGE=`
+ * written inside a quoted value (a track or angle named `Cam,LANGUAGE=x`) is
+ * never taken for the attribute; groups 2 and 3 are its quoted and unquoted
+ * value.
+ */
 export const attributePattern = (name: string): RegExp =>
-    new RegExp(`(^|,)${name}=(?:"([^"]*)"|([^,]*))`);
+    new RegExp(`^((?:[^",]*(?:"[^"]*")?,)*?)${name}=(?:"([^"]*)"|([^,]*))`);
 
 export function readAttribute(list: string, name: string): string | undefined {
     const match = attributePattern(name).exec(list);
@@ -290,6 +297,19 @@ export function writeBareAttribute(
     return pattern.test(list)
         ? list.replace(pattern, (_, lead: string) => `${lead}${name}=${value}`)
         : `${list},${name}=${value}`;
+}
+
+/**
+ * Takes `name`'s attribute out, with the comma that joined it to the rest, so
+ * no stray comma is left whether it was first, in the middle or last. The
+ * attributes before it are put back as they were.
+ */
+export function removeAttribute(list: string, name: string): string {
+    return list.replace(
+        new RegExp(`${attributePattern(name).source},?`),
+        (match: string, lead: string) =>
+            match.endsWith(',') ? lead : lead.replace(/,$/, '')
+    );
 }
 
 /** A new track's rendition in one audio group. */
