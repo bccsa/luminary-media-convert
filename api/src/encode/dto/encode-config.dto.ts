@@ -9,11 +9,57 @@ import {
     IsString,
     MaxLength,
     Min,
+    ValidateBy,
     ValidateNested,
     ValidateIf,
+    buildMessage,
+    type ValidationOptions,
 } from 'class-validator';
 import { Expose, Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+    ANGLE_ACCESSIBILITY,
+    type AngleAccessibility,
+} from '@luminary-media-converter/hls-core';
+import { assertAngleLanguage } from '../../hls-edit/video-angles.js';
+
+/** The hearing-impaired kinds of view an angle can be, as the API names them. */
+const ACCESSIBILITY_KINDS = Object.keys(
+    ANGLE_ACCESSIBILITY
+) as AngleAccessibility[];
+
+/**
+ * A camera angle's language by the rule the published-video editor writes
+ * `LANGUAGE` with ({@link assertAngleLanguage}): empty for none, else an ISO
+ * 639 code as an audio track takes it. Checked here, so a code the master
+ * could not carry is refused when the encode is started, not when its master
+ * is written at the end.
+ */
+function IsAngleLanguage(options?: ValidationOptions): PropertyDecorator {
+    return ValidateBy(
+        {
+            name: 'isAngleLanguage',
+            validator: {
+                validate: (value: unknown) => {
+                    if (typeof value !== 'string') return false;
+                    try {
+                        assertAngleLanguage(value);
+                        return true;
+                    } catch {
+                        return false;
+                    }
+                },
+                defaultMessage: buildMessage(
+                    (each) =>
+                        `${each}$property must be an ISO 639 language code ` +
+                        '(e.g. "en" or "fra"), or empty for none',
+                    options
+                ),
+            },
+        },
+        options
+    );
+}
 
 export class VideoRenditionDto {
     @ApiProperty({ description: 'Output width in pixels.', example: 1920 })
@@ -183,6 +229,34 @@ export class VideoTrackNameDto {
     @MaxLength(100)
     @Expose()
     name: string;
+
+    @ApiPropertyOptional({
+        description:
+            "The angle's LANGUAGE (ISO 639): the audio language its picture " +
+            'belongs to (burnt-in titles, lip sync), which a player follows ' +
+            'the audio to. Read from the entry an angle is filed under, and ' +
+            'written only when the encode has more than one angle. Empty or ' +
+            'left out for none.',
+        example: 'fra',
+    })
+    @IsOptional()
+    @IsString()
+    @MaxLength(16)
+    @IsAngleLanguage()
+    @Expose()
+    language?: string;
+
+    @ApiPropertyOptional({
+        enum: ACCESSIBILITY_KINDS,
+        description:
+            "The angle's hearing-impaired kind of view, written as its " +
+            'CHARACTERISTICS. A player keeps a viewer on this kind of view ' +
+            'when the audio language changes. Left out for none.',
+    })
+    @IsOptional()
+    @IsIn(ACCESSIBILITY_KINDS)
+    @Expose()
+    accessibility?: AngleAccessibility;
 }
 
 export class VideoTrackAngleDto {
@@ -264,10 +338,19 @@ export class EncodeConfigDto {
 
     @ApiPropertyOptional({
         description:
-            'Video track display names for angle playlist naming (used when type is video).',
+            'Video track display names for angle playlist naming (used when ' +
+            'type is video). The entry an angle is filed under (its id, as ' +
+            'renditions name it in angle) can also give the angle a language ' +
+            'and a hearing-impaired kind of view, which the master writes as ' +
+            'LANGUAGE and CHARACTERISTICS on its TYPE=VIDEO line.',
         example: [
-            { index: 0, name: 'Main angle' },
-            { index: 1, name: 'Side angle' },
+            { index: 0, name: 'Main angle', language: 'eng' },
+            { index: 1, name: 'French titles', language: 'fra' },
+            {
+                index: 2,
+                name: 'Sign language',
+                accessibility: 'sign-language',
+            },
         ],
     })
     @IsArray()
