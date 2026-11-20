@@ -39,6 +39,11 @@ import {
     type ThumbnailSpriteCue,
 } from '@luminary-media-converter/hls-core';
 import { StateStore, createInitialState } from './store.js';
+import { angleForAudio } from './angleForAudio.js';
+import {
+    findPreferredTrack,
+    matchesPreferredLanguage,
+} from './audioTrackLanguage.js';
 import { SleepTimer } from './sleepTimer.js';
 import { chapterIndexAt } from './chapters.js';
 import {
@@ -222,6 +227,43 @@ export class PlayerController implements PlayerControllerApi {
      * when a list carrying it arrives and it is handed back.
      */
     private audioChoicePending = false;
+    /**
+     * The audio language the picture last followed: the one the angle was
+     * chosen for, at load or by the last language change {@link setAudioTrack}
+     * acted on. The rule there fires on a CHANGE of language against this, not
+     * on every call, because hosts re-apply the viewer's preferred language
+     * through that same method after every load, on `loadeddata` and on every
+     * track-list change; were each of those a trigger, a hand-picked angle
+     * would be undone moments after it landed.
+     *
+     * Null when there is no language to follow. Kept across a reload of the
+     * same video (see {@link followedAudioLangSeeded}).
+     */
+    private followedAudioLang: string | null = null;
+    /**
+     * Whether {@link followedAudioLang} has been seeded for the video loaded,
+     * which `applyMaster` does once. Cleared by a `load()` of another video;
+     * left alone by a reload of the same one.
+     *
+     * A flag rather than "seed while null", because null is a legitimate value
+     * — the stream's audio names no language, the host named none it
+     * has — and the master is only read in `applyMaster`, which may run long
+     * after `load()` returns (the coming-soon poller). Seeding whenever it was
+     * null would treat a same-video reload that was following nothing as a
+     * fresh video, and seed it from the reload's `preferredAudioLanguages`
+     * instead: the next language the host applies would then compare against
+     * a language the picture never followed, and could move the angle the
+     * viewer had kept. With the flag, a reload of the same video starts from
+     * exactly what the picture followed before it.
+     */
+    private followedAudioLangSeeded = false;
+    /**
+     * The angle the picture would return to from Audio only when the load
+     * began, kept for `applyMaster` on a reload of the same video: one that
+     * starts as Audio only should come back to the angle the viewer was on,
+     * not to the default. Null for another video.
+     */
+    private reloadVideoAngleId: string | null = null;
     private qualityToVariant = new Map<string, string>();
     /**
      * A quality chosen through {@link setQuality} on an engine that cannot pin
@@ -272,6 +314,19 @@ export class PlayerController implements PlayerControllerApi {
         this.source = source;
         if (source.maxHeightInPlace && this.canCapInPlace && !sameVideo)
             this.liveCap = source.maxHeight ?? null;
+        // The same video loaded again — a cap lifted, a reload with the
+        // position kept — keeps following the language it followed, and the
+        // picture it would return to from Audio only; another video decides
+        // both afresh once its master is read. Read before the reset below;
+        // a reload made before the last one had read its master (the state
+        // names no angle yet) passes on what that one was carrying.
+        this.reloadVideoAngleId = sameVideo
+            ? this.state.videoAngleId ?? this.reloadVideoAngleId
+            : null;
+        if (!sameVideo) {
+            this.followedAudioLang = null;
+            this.followedAudioLangSeeded = false;
+        }
         this.policy = resolveRecoveryPolicy(source.recovery);
         this.startPosition = preserved;
         this.resumePlaying = resume;
@@ -381,17 +436,48 @@ export class PlayerController implements PlayerControllerApi {
     ): Promise<void> {
         this.master = info;
         this.subtitleCues.clear();
+        // Seeded from what the host is about to choose, never from the start
+        // angle: the angle follows the audio, not the other way round, and a
+        // host's `startAngleId` (the angle a reload is to keep, say) says
+        // nothing about which language it will select next.
+        if (!this.followedAudioLangSeeded) {
+            this.followedAudioLang = startAudioLanguage(
+                info,
+                this.source?.preferredAudioLanguages,
+            );
+            this.followedAudioLangSeeded = true;
+        }
         const requested = this.source?.startAngleId;
+        // A plain picture for the language the audio starts in, so a viewer
+        // who prefers French starts on the French titles instead of watching
+        // the picture switch once the host selects the audio. A master whose
+        // angles carry no language has no such angle, and starts on its
+        // default as it always has.
+        const forAudio = angleForAudio(
+            info.angles,
+            undefined,
+            this.followedAudioLang,
+        );
         const angleId =
             requested && info.angles.some((angle) => angle.id === requested)
                 ? requested
-                : defaultAngleId(info.angles);
+                : forAudio ?? defaultAngleId(info.angles);
+        const reloaded = this.reloadVideoAngleId;
+        const videoAngleId =
+            angleId !== AUDIO_ONLY_ANGLE_ID
+                ? angleId
+                : reloaded !== null &&
+                  reloaded !== AUDIO_ONLY_ANGLE_ID &&
+                  info.angles.some((angle) => angle.id === reloaded)
+                ? reloaded
+                : forAudio ?? defaultVideoAngleId(info.angles);
 
         this.store.setState({
             lifecycle: 'loading',
             bufferedEnd: 0,
             angles: info.angles,
             activeAngleId: angleId,
+            videoAngleId,
             audioTracks: info.audioTracks,
             activeAudioTrackId: info.audioTracks[0]?.id ?? null,
             subtitleTracks: info.subtitleTracks,
@@ -776,11 +862,17 @@ export class PlayerController implements PlayerControllerApi {
 
     async setAngle(id: string): Promise<void> {
         if (!this.master || this.state.lifecycle === 'destroyed') return;
+        if (!this.state.angles.some((angle) => angle.id === id)) return;
+        // At request time, not when the attach lands: a language change made
+        // while this switch is under way follows the audio from the angle the
+        // viewer asked for. Audio only leaves it alone — it is the angle that
+        // choosing Audio only comes back from.
+        if (id !== AUDIO_ONLY_ANGLE_ID)
+            this.store.setState({ videoAngleId: id });
         // Against the angle on its way in: the one last attached is stale while
         // another attaches. Asking for that one again is not a cancel; it is
         // attached again, over the one in flight.
         if (id === this.targetAngleId) return;
-        if (!this.state.angles.some((angle) => angle.id === id)) return;
 
         const generation = this.generation;
         let landed: boolean;
@@ -791,6 +883,19 @@ export class PlayerController implements PlayerControllerApi {
             });
         } catch (error) {
             if (generation !== this.generation) return;
+            // The switch never landed: the angle playing is still the one the
+            // state names, and it is the one a later language change, a reload
+            // or "Video" starts from — not an angle that never played. Asked
+            // for from Audio only, the angle stays: it is still the one
+            // "Video" goes back to.
+            const playing = this.state.activeAngleId;
+            if (
+                this.state.videoAngleId === id &&
+                playing !== null &&
+                playing !== AUDIO_ONLY_ANGLE_ID
+            ) {
+                this.store.setState({ videoAngleId: playing });
+            }
             this.fail(toPlayerError(error));
             return;
         }
@@ -962,18 +1067,96 @@ export class PlayerController implements PlayerControllerApi {
         return true;
     }
 
+    /**
+     * Selects an audio track, and moves the picture to the angle for its
+     * language when the language changed (see `PlayerControllerApi`).
+     *
+     * Why each condition of the rule holds:
+     *
+     * - It lives here, in the public method, and nowhere else. The hand-back
+     *   after a re-attach ({@link handBackAudioChoice}) calls the adapter
+     *   directly, so it cannot start a switch. Neither can an engine
+     *   re-selecting its own default while it rebuilds its list — unless a
+     *   host relays that here: a host that mirrors the engine's selections
+     *   into this method (a menu relay) would read the rebuilt list's default
+     *   as a pick, and a default in another language WOULD start a switch.
+     *   Such a host must not relay the first selection on a new list.
+     * - It fires on a CHANGE of language against {@link followedAudioLang},
+     *   never on a repeat. Hosts re-apply the preferred language through this
+     *   method after every load, on `loadeddata` and on every track-list
+     *   change; a repeat is that, not a viewer's decision, and is what lets an
+     *   angle picked by hand hold until the audio language next changes.
+     * - The language is read from `state.audioTracks`, which holds the
+     *   master-derived list until the engine's arrives and is not emptied
+     *   when the engine's is torn down for a re-attach, so it answers for
+     *   whichever kind of id the host is selecting by.
+     * - Whether to re-attach is decided against the angle on its way in
+     *   ({@link targetAngleId}) — the test `setAngle` itself applies — not
+     *   against {@link PlayerState.videoAngleId}, which moves when a switch
+     *   is asked for rather than when it lands, and is not what `setAngle`
+     *   tests. Were the two to disagree, a choice could be left pending for a
+     *   switch `setAngle` then declines as already under way, and no engine
+     *   would ever be told of it. When the target is on its way already, that
+     *   attach hands the choice back on arrival.
+     * - While Audio only plays, only `videoAngleId` moves: no video is
+     *   fetched, and "Video" returns to the angle for the language chosen.
+     * - A `nativeHls` adapter is handed the whole master, and picks the
+     *   picture itself; there is nothing here to switch.
+     *
+     * A switch is ONE interruption: the track is not selected on the outgoing
+     * engine — it is about to be replaced — and the choice is left pending, so
+     * {@link refreshAudioTracks} hands it to the new engine's list. (A
+     * track-list change on the outgoing engine while the new angle is fetched
+     * hands it the choice early, which is harmless: the new list is handed it
+     * all the same.)
+     */
     setAudioTrack(id: string): void {
+        const lang = this.state.audioTracks.find((t) => t.id === id)?.lang;
+        let target: string | undefined;
+        if (
+            lang &&
+            this.master &&
+            !this.adapter.capabilities.nativeHls &&
+            !matchesPreferredLanguage(lang, this.followedAudioLang)
+        ) {
+            this.followedAudioLang = lang;
+            target = angleForAudio(
+                this.state.angles,
+                this.angleOf(this.state.videoAngleId),
+                lang,
+            );
+        }
+        const reattach =
+            target !== undefined &&
+            this.targetAngleId !== AUDIO_ONLY_ANGLE_ID &&
+            target !== this.targetAngleId;
+
         this.chosenAudioTrackId = id;
         // A list that does not carry it yet — the engine's has not arrived, or
-        // is being rebuilt — gets it handed over once it does.
-        this.audioChoicePending = !this.adapter
+        // is being rebuilt — gets it handed over once it does; so does the
+        // list of the engine an angle switch is about to bring in.
+        const listed = this.adapter
             .getAudioTracks()
             .some((track) => track.id === id);
-        this.adapter.setAudioTrack(id);
-        this.store.setState({ activeAudioTrackId: id });
+        this.audioChoicePending = reattach || !listed;
+        if (!reattach) this.adapter.setAudioTrack(id);
+        this.store.setState({
+            activeAudioTrackId: id,
+            ...(target !== undefined ? { videoAngleId: target } : {}),
+        });
         if (!this.chapterTrackPinned) {
             this.selectDefaultChapterTrack(this.generation);
         }
+        // Last, once the choice is recorded: the attach reads it when the new
+        // engine lists its tracks.
+        if (reattach) void this.setAngle(target!);
+    }
+
+    /** The angle of the master with this id, if any. */
+    private angleOf(id: string | null): Angle | undefined {
+        return id === null
+            ? undefined
+            : this.state.angles.find((angle) => angle.id === id);
     }
 
     setSubtitleTrack(id: string | null): void {
@@ -1314,6 +1497,11 @@ export class PlayerController implements PlayerControllerApi {
                         ? { lifecycle: 'ready' as const, error: null }
                         : {}),
                 });
+                // A switch that failed left the audio choice it carried
+                // pending, for a list that never arrived: the engine that
+                // stayed is handed it now that it plays on.
+                if (recovered && this.audioChoicePending)
+                    this.refreshAudioTracks();
             }),
             this.adapter.on('pause', () => {
                 this.store.setState({ playing: false, stalled: false });
@@ -1420,6 +1608,35 @@ function defaultAngleId(angles: Angle[]): string | null {
         angles.find((angle) => angle.id !== AUDIO_ONLY_ANGLE_ID) ??
         angles[0];
     return preferred?.id ?? DEFAULT_ANGLE_ID;
+}
+
+/**
+ * The camera angle the master would start on if Audio only were not an
+ * option: the one Audio only returns to when nothing better is known. Null
+ * when the master has no video.
+ */
+function defaultVideoAngleId(angles: Angle[]): string | null {
+    const video = angles.filter((angle) => angle.id !== AUDIO_ONLY_ANGLE_ID);
+    return (video.find((angle) => angle.isDefault) ?? video[0])?.id ?? null;
+}
+
+/**
+ * The language a load's audio will start in, as far as the controller can
+ * tell before the host selects it: the first of the host's preferences the
+ * master has audio for — the host's own rule picks by the same list and the
+ * same matching — else the stream's default audio, which is what the engine
+ * plays when nobody chooses. Not simply the first track: a master may list
+ * French first and mark English the default, and the picture would then
+ * start in French under English audio.
+ */
+function startAudioLanguage(
+    info: MasterInfo,
+    preferred: readonly string[] | undefined,
+): string | null {
+    for (const lang of preferred ?? []) {
+        if (findPreferredTrack(info.audioTracks, lang) !== null) return lang;
+    }
+    return info.defaultAudioLang ?? info.audioTracks[0]?.lang ?? null;
 }
 
 function sameIds(a: { id: string }[], b: readonly { id: string }[]): boolean {

@@ -118,6 +118,14 @@ export interface MasterInfo {
     isMaster: boolean;
     angles: Angle[];
     audioTracks: AudioTrack[];
+    /**
+     * The language of the audio an engine starts on when nobody chooses: the
+     * first `TYPE=AUDIO` entry marked `DEFAULT=YES`, else the first one. Not
+     * always `audioTracks[0]`, which follows the master's order — a master may
+     * list French first and mark English the default. Absent when that entry
+     * names no language, and on a master described by hand.
+     */
+    defaultAudioLang?: string;
     subtitleTracks: SubtitleTrack[];
     /** The master carries no video at all. */
     nativelyAudioOnly: boolean;
@@ -255,10 +263,17 @@ export function describeMaster(
     }
 
     const nativelyAudioOnly = !masterHasVideo(master);
+    // Both tags are carried only when the master states them, so an untagged
+    // angle keeps its three-field shape and the synthesized ones below carry
+    // neither: they belong to no language and are no kind of view.
     const videoAngles = listAngles(master).map<Angle>((angle) => ({
         id: angle.id,
         name: angle.name,
         isDefault: angle.isDefault,
+        ...(angle.language ? { lang: angle.language } : {}),
+        ...(angle.characteristics
+            ? { characteristics: angle.characteristics }
+            : {}),
     }));
 
     const angles: Angle[] = [...videoAngles];
@@ -302,6 +317,13 @@ export function describeMaster(
         }
     }
 
+    // From the collapsed text, as the track list is: the entry an engine
+    // starts on is one of the tracks it is offered.
+    const audio = parsed.media.filter((entry) => entry.type === 'AUDIO');
+    const defaultAudioLang = (
+        audio.find((entry) => entry.isDefault) ?? audio[0]
+    )?.language;
+
     // Read off the text as served: the index lines are relative to the master's
     // own URL, which is the last place they can be resolved against — the
     // master the engine is handed is served from somewhere else.
@@ -323,6 +345,7 @@ export function describeMaster(
         isMaster: true,
         angles,
         audioTracks: dedupeByName(dedupeById(audioTracks)),
+        ...(defaultAudioLang ? { defaultAudioLang } : {}),
         subtitleTracks: dedupeById(subtitleTracks),
         nativelyAudioOnly,
         chapters,
