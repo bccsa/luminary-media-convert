@@ -1085,4 +1085,71 @@ describe('SessionView', () => {
             expect(playsDirectly(strip)).toBe(true);
         });
     });
+
+    describe('a converted preview that fails to play', () => {
+        /** The player strip, with the lifecycle and reload SessionView reads off its ref. */
+        const reload = vi.fn();
+        const failingStrip = {
+            ...PLAYER_STRIP_STUB,
+            data: () => ({ lifecycle: 'playing' }),
+            methods: { reload },
+        };
+
+        /** The encoder's answer to the preview's own playlist. */
+        function playlistAnswers(status: number, body: unknown = {}) {
+            const fetchMock = globalThis.fetch as unknown as ReturnType<
+                typeof vi.fn
+            >;
+            const fallback = fetchMock.getMockImplementation() as (
+                input: unknown
+            ) => unknown;
+            fetchMock.mockImplementation((input: unknown) =>
+                String(input).includes('/preview/playlist.m3u8')
+                    ? Promise.resolve({
+                          ok: status < 400,
+                          status,
+                          json: async () => body,
+                      })
+                    : fallback(input)
+            );
+        }
+
+        async function failPlayback() {
+            const wrapper = shallowMount(SessionView, {
+                global: {
+                    stubs: {
+                        Teleport: true,
+                        Transition: true,
+                        RouterLink: true,
+                        SessionPlayerStrip: failingStrip,
+                        SessionTopline: false,
+                    },
+                },
+            });
+            await flushPromises();
+            const strip = wrapper.findComponent({ name: 'SessionPlayerStrip' });
+            (strip.vm as unknown as { lifecycle: string }).lifecycle = 'error';
+            await flushPromises();
+            return strip;
+        }
+
+        it('says why, and stops loading it, when the encoder cannot make it', async () => {
+            playlistAnswers(422, {
+                message: 'FFmpeg could not convert this file for the preview.',
+            });
+            const strip = await failPlayback();
+
+            expect(reload).not.toHaveBeenCalled();
+            expect(strip.props('previewNote')).toBe(
+                'Preview not available · FFmpeg could not convert this file for the preview.'
+            );
+        });
+
+        it('loads it again when the encoder still makes it', async () => {
+            playlistAnswers(200);
+            await failPlayback();
+
+            expect(reload).toHaveBeenCalledTimes(1);
+        });
+    });
 });

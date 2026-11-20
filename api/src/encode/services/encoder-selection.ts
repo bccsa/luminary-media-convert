@@ -305,7 +305,12 @@ function previewBitrate(scaleFilter: string | undefined): string {
 export function previewVideoArgs(
     mode: AccelMode,
     useGpu: boolean,
-    scaleFilter?: string
+    scaleFilter?: string,
+    /**
+     * The frames come from a software decode. Only VideoToolbox cares: its
+     * encoder takes software frames, but `scale_vt` refuses them.
+     */
+    softwareFrames = false
 ): string[] {
     assertEncodable(mode);
     // `,setsar=1` on every scaled path, and inside this helper rather than at
@@ -366,9 +371,11 @@ export function previewVideoArgs(
                 // the input's *storage* ratio, so `scale_vt=w=854:h=-2` on a
                 // 720x576 source gives 683, not 480.
                 ...scale(
-                    `scale_vt=w=${(scaleFilter ?? '').split(':')[0]}:h=${
-                        (scaleFilter ?? '').split(':')[1]
-                    }`
+                    softwareFrames
+                        ? `scale=${scaleFilter}`
+                        : `scale_vt=w=${(scaleFilter ?? '').split(':')[0]}:h=${
+                              (scaleFilter ?? '').split(':')[1]
+                          }`
                 ),
             ];
         default:

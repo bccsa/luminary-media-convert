@@ -203,6 +203,13 @@ describe('previewVideoArgs', () => {
         expect(filterOf('apple')).toBe('scale_vt=w=640:h=360,setsar=1');
     });
 
+    it('scales software frames with plain scale on apple', () => {
+        // scale_vt takes only frames still on the device.
+        const args = previewVideoArgs('apple', true, '640:360', true);
+        expect(args[args.indexOf('-c:v') + 1]).toBe('h264_videotoolbox');
+        expect(args[args.indexOf('-vf') + 1]).toBe('scale=640:360,setsar=1');
+    });
+
     it('adds no filter at all when there is nothing to scale', () => {
         // The tag rides on the scaler, so a copy-through preview stays bare.
         for (const mode of ['cpu', 'nvidia', 'apple', 'intel'] as AccelMode[]) {
