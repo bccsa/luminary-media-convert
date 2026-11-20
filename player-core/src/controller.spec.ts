@@ -1256,8 +1256,11 @@ describe('PlayerController — chapters', () => {
             keyHex: TEST_KEY_HEX,
             sidecars: { chapters: [{ lang: 'en', url: EN_CHAPTERS }] },
         });
-        await flush();
-        expect(controller.getState().chapters).toHaveLength(2);
+        // Decrypting runs on WebCrypto, which can take longer than a few event
+        // loop turns on a slow runner: wait for the chapters, not for ticks.
+        await vi.waitFor(() =>
+            expect(controller.getState().chapters).toHaveLength(2),
+        );
     });
 
     it('turns chapters off without touching playback', async () => {
