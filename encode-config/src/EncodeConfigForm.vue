@@ -8,6 +8,7 @@ import type {
     AudioTrackInfo,
     VideoTrackInfo,
     TrimCopyMode,
+    AngleAccessibility,
 } from './types';
 import {
     computeLayoutKey,
@@ -23,16 +24,18 @@ import {
     getAudioTierForHeight,
     rankAudioTracks,
 } from './audioGroups';
-import { applySavedTrackLabels } from './trackLabels';
+import { applySavedTrackLabels, type AngleTags } from './trackLabels';
 import {
     angleDoubt,
     anglesOf,
     angleNames,
     initialAssignment,
     moveTrack,
+    nameSourceOf,
     normalize,
     rankTracks,
     undecidedPairs,
+    type Angle,
     type AngleAssignment,
 } from './angles';
 import LanguageSelect from './LanguageSelect.vue';
@@ -401,6 +404,147 @@ const allAngles = computed(() =>
 );
 
 const angleNameById = computed(() => angleNames(allAngles.value));
+
+/**
+ * Angles' languages and kinds of view, by track: each kept on the track whose
+ * name the angle shows (see {@link angleTagsOf}), so name and tags move
+ * together when tracks move between angles. Set only by the operator, saved
+ * labels or a restored config — never from the probe, whose video tracks carry
+ * whatever language the muxer stamped on all of them (`und`, `eng`), and which
+ * would make every angle one language's picture. Holds nothing empty.
+ */
+const angleTags = reactive(new Map<number, AngleTags>());
+
+const hasTags = (track: number): boolean => {
+    const tags = angleTags.get(track);
+    return !!(tags?.language || tags?.accessibility);
+};
+
+/**
+ * Angle `angle`'s language and kind of view: those of the member its name
+ * comes from, so the name and the tags always belong together — after tracks
+ * are merged into one angle, or when a restored config files the angle under a
+ * track that is not its lowest. When no member has a name, the key track's,
+ * else the first member's that has any.
+ */
+function angleTagsOf(angle: Angle): AngleTags {
+    const named = nameSourceOf(angle);
+    if (named) return angleTags.get(named.index) ?? {};
+    const key = angleIdTrack(angle).index;
+    const from = hasTags(key)
+        ? key
+        : angle.members.find((t) => hasTags(t.index))?.index;
+    return from === undefined ? {} : (angleTags.get(from) ?? {});
+}
+
+/** {@link angleTagsOf} the angle with id `id`; none for an angle that is not there. */
+function angleTagsById(id: number): AngleTags {
+    const angle = allAngles.value.find((a) => a.id === id);
+    return angle ? angleTagsOf(angle) : {};
+}
+
+/**
+ * The angles the encode will write, by id, in the order the master lists them:
+ * the order `videoTrackNames` names their tracks in, so the first is the one a
+ * player starts on. Only angles a kept row is filed under, as the API counts
+ * them. Empty for an audio encode or a single-track source, which write no
+ * angle at all.
+ */
+const writtenAngleIds = computed<number[]>(() => {
+    if (encodingType.value !== 'video' || !multiTrack.value) return [];
+    const used = new Set(
+        videoRenditions
+            .filter((r) => !excludedVideo.has(r.sourceTrackIndex ?? 0))
+            .map(rowAngle)
+    );
+    return editableVideoTracks.map((t) => t.index).filter((i) => used.has(i));
+});
+
+/**
+ * An angle's language and kind of view are offered only where the master will
+ * carry them: a video encode writing more than one angle. One angle gets no
+ * `TYPE=VIDEO` line to put them on.
+ */
+const angleTagsOffered = computed(() => writtenAngleIds.value.length > 1);
+
+/**
+ * Some angle the encode writes has a language and the one that plays first
+ * has none: a viewer the player has moved to another language's picture cannot
+ * get back to it by choosing its audio again, since nothing says which audio it
+ * goes with. The published-video editor warns of the same.
+ */
+const playsFirstNeedsLanguage = computed(() => {
+    const ids = writtenAngleIds.value;
+    return (
+        ids.length > 1 &&
+        !angleTagsById(ids[0]).language &&
+        ids.some((id) => !!angleTagsById(id).language)
+    );
+});
+
+/** The hearing-impaired kinds of view, as the published-video editor names them. */
+const ACCESSIBILITY_OPTIONS: readonly SelectMenuOption[] = [
+    { value: 'none', label: 'None' },
+    { value: 'captions', label: 'Captions' },
+    { value: 'sign-language', label: 'Sign language' },
+    { value: 'lip-reading', label: 'Lip reading' },
+];
+
+/**
+ * Makes `tags` `angle`'s language and kind of view, written where
+ * {@link angleTagsOf} reads them (the member that names the angle, else its
+ * key track). Taken off every member with no name of its own too: that read
+ * falls back on those when no member has a name, and would bring back a tag
+ * cleared here. A member that has a name keeps its pair, hidden like its name
+ * while it is merged, for when it is moved out again.
+ */
+function writeAngleTags(angle: Angle, tags: AngleTags) {
+    const to = nameSourceOf(angle)?.index ?? angleIdTrack(angle).index;
+    for (const t of angle.members) {
+        if (t.index === to || !t.name?.trim()) angleTags.delete(t.index);
+    }
+    if (tags.language || tags.accessibility) angleTags.set(to, tags);
+}
+
+/**
+ * Changes `angle`'s language and kind of view: the pair it shows, with
+ * `change` made (see {@link writeAngleTags}). So the first edit after a merge
+ * keeps the field it does not change.
+ */
+function setAngleTags(angle: Angle, change: AngleTags) {
+    const next = { ...angleTagsOf(angle), ...change };
+    writeAngleTags(angle, {
+        ...(next.language ? { language: next.language } : {}),
+        ...(next.accessibility ? { accessibility: next.accessibility } : {}),
+    });
+}
+
+/**
+ * Names `angle` on the track it is keyed by, keeping its language and kind of
+ * view. A name typed there can move the member the name comes from, and with
+ * it the pair {@link angleTagsOf} reads: from another member, or none, to the
+ * key track, whose pair is empty or stale; clearing it moves it on, to a
+ * member whose own pair was hidden, or to none. Either way the operator only
+ * renamed the angle, so when the name moves the pair it showed is written
+ * again, where it is now read: not a copy left behind on a key track that has
+ * lost its name, for the no-name fallback to show once the others move out.
+ */
+function nameAngle(angle: Angle, idTrack: VideoTrackInfo, name: string) {
+    const shown = angleTagsOf(angle);
+    const from = nameSourceOf(angle)?.index;
+    idTrack.name = name;
+    if (nameSourceOf(angle)?.index !== from) writeAngleTags(angle, shown);
+}
+
+/** Give `angle` a language, or none for empty. */
+function setAngleLanguage(angle: Angle, language: string) {
+    setAngleTags(angle, { language: language || undefined });
+}
+
+/** Mark `angle` as a kind of view, or as none. */
+function setAngleAccessibility(angle: Angle, kind: AngleAccessibility | 'none') {
+    setAngleTags(angle, { accessibility: kind !== 'none' ? kind : undefined });
+}
 
 /**
  * The angles of the encode whose grouping by detection should be checked by
@@ -1137,7 +1281,8 @@ reanalyze();
             savedConfig,
             editableVideoTracks,
             editableAudioTracks,
-            false
+            false,
+            angleTags
         );
         reanalyze();
     }
@@ -1260,7 +1405,17 @@ function restore(config: EncodeConfig): void {
         );
         excludeAudioTracksGroupsDoNotNeed(config.audioGroups);
     }
-    applySavedTrackLabels(config, editableVideoTracks, editableAudioTracks, true);
+    // A config that names the angles says all they had: a language or kind of
+    // view it leaves out is one that encode did not have, not one to keep from
+    // the labels saved for this layout.
+    if (config.videoTrackNames) angleTags.clear();
+    applySavedTrackLabels(
+        config,
+        editableVideoTracks,
+        editableAudioTracks,
+        true,
+        angleTags
+    );
 }
 
 const uniqueAudioGroupOptions = computed(() => {
@@ -1296,7 +1451,8 @@ function loadPreviousTrackLabels() {
         config,
         editableVideoTracks,
         editableAudioTracks,
-        true
+        true,
+        angleTags
     );
 }
 
@@ -1763,6 +1919,9 @@ function onTrackInputKeydown(e: KeyboardEvent) {
     const col = parseInt(target.getAttribute('data-col') ?? '-1', 10);
     if (row < 0 || col < 0) return;
 
+    // An open list keeps its arrow keys: moving on would leave it open behind.
+    if (target.getAttribute('aria-expanded') === 'true') return;
+
     const fieldset = target.closest('fieldset');
     if (!fieldset) return;
     const inputs = Array.from(
@@ -1799,8 +1958,6 @@ function onTrackInputKeydown(e: KeyboardEvent) {
         return;
     }
     if (nextRow === row && nextCol === col) return;
-
-    e.preventDefault();
     const rowOf = (el: HTMLElement) =>
         parseInt(el.getAttribute('data-row') ?? '-1', 10);
     const colOf = (el: HTMLElement) =>
@@ -1825,10 +1982,12 @@ function onTrackInputKeydown(e: KeyboardEvent) {
         : inputs.find(
               (el) => rowOf(el) === nextRow && colOf(el) === nextCol
           );
-    if (next) {
-        next.focus();
-        if (next instanceof HTMLInputElement) next.select();
-    }
+    // No cell that way (an audio name has nothing to its right): the key
+    // keeps its own meaning, such as moving the caret.
+    if (!next) return;
+    e.preventDefault();
+    next.focus();
+    if (next instanceof HTMLInputElement) next.select();
 }
 
 function channelLabel(ch: number): string {
@@ -1964,7 +2123,9 @@ function buildEncodeConfig(): EncodeConfig | null {
         // its own angle that is one entry per track, as it always was. A track
         // that is one more quality of an angle is listed only if it has a name
         // of its own to remember: a made-up `Angle <n>` for it would come back
-        // as a real name the next time these labels are loaded.
+        // as a real name the next time these labels are loaded. The angle's
+        // entry also carries its language and kind of view, when it has them:
+        // those of the member its name comes from, so the two stay together.
         if (multiTrack.value) {
             config.videoTrackAngles = editableVideoTracks
                 .filter((t) => !excludedVideo.has(t.index))
@@ -1981,6 +2142,7 @@ function buildEncodeConfig(): EncodeConfig | null {
                         name:
                             angleNameById.value.get(t.index) ??
                             `Angle ${t.index}`,
+                        ...angleTagsById(t.index),
                     },
                 ];
             const own = t.name?.trim();
@@ -2183,6 +2345,17 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                         {{ note }} If they are qualities of one camera, move one
                         into the other's angle.
                     </p>
+                    <p
+                        v-if="angleTagsOffered"
+                        class="ecf-hint"
+                        data-test="angle-tags-hint"
+                    >
+                        Give an angle a language when its picture belongs to one
+                        audio language, such as burnt-in titles: a viewer who
+                        picks that audio is shown it. Accessibility marks views
+                        for deaf or hard-of-hearing viewers, who stay on their
+                        kind of view when they change the audio language.
+                    </p>
                     <div class="ecf-table-wrap">
                         <table class="ecf-table">
                             <thead class="ecf-thead">
@@ -2200,98 +2373,164 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                                 </tr>
                             </thead>
                             <tbody class="ecf-tbody">
-                                <tr
+                                <template
                                     v-for="(row, rowIdx) in videoTrackRows"
                                     :key="row.track.index"
-                                    class="ecf-tr"
-                                    :class="{
-                                        'ecf-tr--excluded': choosableVideo && excludedVideo.has(row.track.index),
-                                        'ecf-tr--member': choosableVideo && !row.first,
-                                    }"
                                 >
-                                    <td v-if="choosableVideo" class="ecf-td ecf-td-include">
-                                        <input
-                                            type="checkbox"
-                                            class="ecf-checkbox"
-                                            data-test="track-include"
-                                            data-kind="video"
-                                            :data-track-index="row.track.index"
-                                            :checked="!excludedVideo.has(row.track.index)"
-                                            :disabled="!canExclude('video', row.track.index)"
-                                            :title="includeTitle('video', row.track.index)"
-                                            :aria-label="`Include angle ${row.track.index}`"
-                                            @change="setTrackIncluded('video', row.track.index, ($event.target as HTMLInputElement).checked)"
-                                        />
-                                    </td>
-                                    <td class="ecf-td">{{ row.track.index }}</td>
-                                    <td class="ecf-td">
-                                        {{ row.track.codec
-                                        }}{{
-                                            row.track.profile ? ` (${row.track.profile})` : ''
-                                        }}
-                                    </td>
-                                    <td class="ecf-td">
-                                        <template v-if="isRotated(row.track)">
-                                            {{ displayDimensionsOf(row.track).width }}&times;{{
-                                                displayDimensionsOf(row.track).height
+                                    <tr
+                                        class="ecf-tr"
+                                        :class="{
+                                            'ecf-tr--excluded': choosableVideo && excludedVideo.has(row.track.index),
+                                            'ecf-tr--member': choosableVideo && !row.first,
+                                            'ecf-tr--tagged': angleTagsOffered && row.first,
+                                        }"
+                                    >
+                                        <td v-if="choosableVideo" class="ecf-td ecf-td-include">
+                                            <input
+                                                type="checkbox"
+                                                class="ecf-checkbox"
+                                                data-test="track-include"
+                                                data-kind="video"
+                                                :data-track-index="row.track.index"
+                                                :checked="!excludedVideo.has(row.track.index)"
+                                                :disabled="!canExclude('video', row.track.index)"
+                                                :title="includeTitle('video', row.track.index)"
+                                                :aria-label="`Include angle ${row.track.index}`"
+                                                @change="setTrackIncluded('video', row.track.index, ($event.target as HTMLInputElement).checked)"
+                                            />
+                                        </td>
+                                        <td class="ecf-td">{{ row.track.index }}</td>
+                                        <td class="ecf-td">
+                                            {{ row.track.codec
+                                            }}{{
+                                                row.track.profile ? ` (${row.track.profile})` : ''
                                             }}
-                                            <span class="ecf-cell-dim"
-                                                >(stored {{ row.track.width }}&times;{{
-                                                    row.track.height
-                                                }})</span
-                                            >
-                                        </template>
-                                        <template v-else>
-                                            {{ row.track.width }}&times;{{ row.track.height }}
-                                        </template>
-                                    </td>
-                                    <td class="ecf-td">
-                                        {{
-                                            row.track.bitrateKbps
-                                                ? `${row.track.bitrateKbps} kbps`
-                                                : '—'
-                                        }}
-                                    </td>
-                                    <td class="ecf-td">{{ row.track.frameRate }}</td>
-                                    <td v-if="choosableVideo" class="ecf-td">
-                                        <SelectMenu
-                                            :model-value="row.angle.id"
-                                            :options="angleSelectOptions"
-                                            class="ecf-select-inline"
-                                            data-test="track-angle"
-                                            :data-track-index="row.track.index"
-                                            :aria-label="`Angle of track ${row.track.index}`"
-                                            @update:model-value="setTrackAngle(row.track.index, $event as number | 'new')"
-                                        />
-                                    </td>
-                                    <td class="ecf-td">
-                                        <!-- An angle is named once, on its first row; the
-                                             name is kept on the track the angle is keyed by. -->
-                                        <input
-                                            v-if="!choosableVideo || row.first"
-                                            :value="(choosableVideo ? row.idTrack : row.track).name ?? ''"
-                                            type="text"
-                                            class="ecf-input ecf-input-sm"
-                                            :placeholder="
-                                                choosableVideo
-                                                    ? angleNameById.get(row.angle.id)
-                                                    : 'e.g. Main angle'
-                                            "
-                                            data-track-field="video-name"
-                                            :data-track-index="(choosableVideo ? row.idTrack : row.track).index"
-                                            :data-row="rowIdx"
-                                            data-col="0"
-                                            @input="(choosableVideo ? row.idTrack : row.track).name = ($event.target as HTMLInputElement).value"
-                                            @keydown="onTrackInputKeydown"
-                                        />
-                                        <span v-else class="ecf-cell-dim">
-                                            same picture as #{{ row.angle.members[0].index }}
-                                        </span>
-                                    </td>
-                                </tr>
+                                        </td>
+                                        <td class="ecf-td">
+                                            <template v-if="isRotated(row.track)">
+                                                {{ displayDimensionsOf(row.track).width }}&times;{{
+                                                    displayDimensionsOf(row.track).height
+                                                }}
+                                                <span class="ecf-cell-dim"
+                                                    >(stored {{ row.track.width }}&times;{{
+                                                        row.track.height
+                                                    }})</span
+                                                >
+                                            </template>
+                                            <template v-else>
+                                                {{ row.track.width }}&times;{{ row.track.height }}
+                                            </template>
+                                        </td>
+                                        <td class="ecf-td">
+                                            {{
+                                                row.track.bitrateKbps
+                                                    ? `${row.track.bitrateKbps} kbps`
+                                                    : '—'
+                                            }}
+                                        </td>
+                                        <td class="ecf-td">{{ row.track.frameRate }}</td>
+                                        <td v-if="choosableVideo" class="ecf-td">
+                                            <SelectMenu
+                                                :model-value="row.angle.id"
+                                                :options="angleSelectOptions"
+                                                class="ecf-select-inline ecf-select-angle"
+                                                data-test="track-angle"
+                                                :data-track-index="row.track.index"
+                                                :aria-label="`Angle of track ${row.track.index}`"
+                                                @update:model-value="setTrackAngle(row.track.index, $event as number | 'new')"
+                                            />
+                                        </td>
+                                        <td class="ecf-td">
+                                            <!-- An angle is named once, on its first row; the
+                                                 name is kept on the track the angle is keyed by. -->
+                                            <input
+                                                v-if="!choosableVideo || row.first"
+                                                :value="(choosableVideo ? row.idTrack : row.track).name ?? ''"
+                                                type="text"
+                                                class="ecf-input ecf-input-sm"
+                                                :placeholder="
+                                                    choosableVideo
+                                                        ? angleNameById.get(row.angle.id)
+                                                        : 'e.g. Main angle'
+                                                "
+                                                data-track-field="video-name"
+                                                :data-track-index="(choosableVideo ? row.idTrack : row.track).index"
+                                                :data-row="rowIdx"
+                                                data-col="0"
+                                                @input="
+                                                    choosableVideo
+                                                        ? nameAngle(row.angle, row.idTrack, ($event.target as HTMLInputElement).value)
+                                                        : (row.track.name = ($event.target as HTMLInputElement).value)
+                                                "
+                                                @keydown="onTrackInputKeydown"
+                                            />
+                                            <span v-else class="ecf-cell-dim">
+                                                same picture as #{{ row.angle.members[0].index }}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                    <!-- The angle's language and kind of view, on a line of
+                                         their own under the row that names it: as two more
+                                         columns they pushed the table past the panel. On the
+                                         name's grid row, so the arrow keys reach them from
+                                         the name as before. None until set: not the probe's
+                                         language, which every video track has. -->
+                                    <tr
+                                        v-if="angleTagsOffered && row.first"
+                                        class="ecf-tr ecf-tr--tags"
+                                        :class="{ 'ecf-tr--excluded': !writtenAngleIds.includes(row.angle.id) }"
+                                        data-test="angle-tags-row"
+                                    >
+                                        <td :colspan="choosableVideo ? 2 : 1" class="ecf-td"></td>
+                                        <td :colspan="choosableVideo ? 6 : 5" class="ecf-td">
+                                            <div class="ecf-angle-tags">
+                                                <span class="ecf-angle-tag">
+                                                    <span class="ecf-angle-tag-label">Language</span>
+                                                    <LanguageSelect
+                                                        :model-value="angleTagsOf(row.angle).language ?? ''"
+                                                        placeholder="none"
+                                                        :aria-label="`Language of ${angleNameById.get(row.angle.id)}`"
+                                                        data-test="angle-language"
+                                                        data-track-field="video-language"
+                                                        :data-track-index="row.idTrack.index"
+                                                        :data-row="rowIdx"
+                                                        data-col="1"
+                                                        @update:model-value="setAngleLanguage(row.angle, $event)"
+                                                        @keydown="onTrackInputKeydown"
+                                                    />
+                                                </span>
+                                                <span class="ecf-angle-tag">
+                                                    <span class="ecf-angle-tag-label">Accessibility</span>
+                                                    <SelectMenu
+                                                        :model-value="angleTagsOf(row.angle).accessibility ?? 'none'"
+                                                        :options="ACCESSIBILITY_OPTIONS"
+                                                        class="ecf-select-inline"
+                                                        :aria-label="`Accessibility of ${angleNameById.get(row.angle.id)}`"
+                                                        data-test="angle-accessibility"
+                                                        data-track-field="video-accessibility"
+                                                        :data-track-index="row.idTrack.index"
+                                                        :data-row="rowIdx"
+                                                        data-col="2"
+                                                        @update:model-value="setAngleAccessibility(row.angle, $event as AngleAccessibility | 'none')"
+                                                        @keydown="onTrackInputKeydown"
+                                                    />
+                                                </span>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </template>
                             </tbody>
                         </table>
                     </div>
+                    <!-- Under the table, so appearing does not push the row being edited down. -->
+                    <p
+                        v-if="playsFirstNeedsLanguage"
+                        class="ecf-hint ecf-hint--warn"
+                        data-test="angle-language-hint"
+                    >
+                        Give the angle that plays first a language too. Otherwise
+                        choosing its audio again will not bring its picture back.
+                    </p>
                 </div>
                 <div v-if="editableAudioTracks.length > 0">
                     <p class="ecf-detect-sub">Audio tracks</p>

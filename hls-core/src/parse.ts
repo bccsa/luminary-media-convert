@@ -40,6 +40,14 @@ export interface HlsMedia {
     groupId: string;
     name: string;
     language?: string;
+    /**
+     * Raw `CHARACTERISTICS` text, exactly as written: a comma-separated list of
+     * UTIs kept as one string, as `codecs` is on a variant. Not trimmed, split
+     * or case-folded, so an unedited entry writes back byte for byte, and `''`
+     * (for `CHARACTERISTICS=""`) is kept distinct from absent for the same
+     * reason. `listAngles` splits it for a video angle.
+     */
+    characteristics?: string;
     uri?: string;
     /** `true` for `DEFAULT=YES`, `false` for an explicit `DEFAULT=NO`, absent otherwise. */
     default?: boolean;
@@ -101,6 +109,7 @@ const MEDIA_ATTRS = [
     'GROUP-ID',
     'NAME',
     'LANGUAGE',
+    'CHARACTERISTICS',
     'DEFAULT',
     'AUTOSELECT',
     'FORCED',
@@ -131,7 +140,10 @@ const MEDIA_TYPES = new Set(['AUDIO', 'VIDEO', 'SUBTITLES', 'CLOSED-CAPTIONS']);
  * The model is lossless: every line either becomes a modeled entry or is kept
  * verbatim in the playlist's layout (see {@link getMasterLayout}), so
  * `buildMasterPlaylist(parseMasterPlaylist(text))` reproduces `text` — modulo
- * blank lines, leading/trailing whitespace, and a `LANGUAGE` case fold.
+ * blank lines, leading/trailing whitespace, a `LANGUAGE` case fold, and two
+ * spellings of `CHARACTERISTICS` the spec does not allow: an unquoted value is
+ * written back quoted (without any quote characters it held), and a bare
+ * `CHARACTERISTICS` token, with no value at all, is dropped.
  */
 export function parseMasterPlaylist(content: string): HlsParsedMaster {
     const lines = content.split('\n').map((l) => l.trim());
@@ -268,6 +280,22 @@ function buildMediaEntry(attrs: HlsAttribute[]): HlsMedia | undefined {
     if (!type || !MEDIA_TYPES.has(type)) return undefined;
 
     const language = quoted(attrs, 'LANGUAGE');
+    // Quoted or not, as `flag` reads: once an attribute is modeled, a value
+    // the model does not hold is dropped on rebuild, so refusing the unquoted
+    // spelling would delete it. The builder writes it back quoted, the spec's
+    // spelling, in place. `''` is a value here, not an absence, or
+    // `CHARACTERISTICS=""` would vanish on rebuild.
+    //
+    // Quote characters are stripped because only an unquoted value can hold
+    // them — a quoted one ends at its first `"` — and an unquoted value with
+    // quotes in it is a malformed quoted one: `CHARACTERISTICS = "a"`, where
+    // the space after `=` hides the opening quote from the tokenizer. Written
+    // back quoted as read, it would come out `""a""`, and the next read of
+    // that `""`: the value would wear away a little on every rebuild.
+    const characteristics = value(attrs, 'CHARACTERISTICS')?.replace(
+        /"/g,
+        '',
+    );
     const uri = quoted(attrs, 'URI');
 
     const entry: HlsMedia = {
@@ -275,6 +303,7 @@ function buildMediaEntry(attrs: HlsAttribute[]): HlsMedia | undefined {
         groupId: quoted(attrs, 'GROUP-ID') ?? '',
         name: quoted(attrs, 'NAME') ?? '',
         ...(language ? { language } : {}),
+        ...(characteristics !== undefined ? { characteristics } : {}),
         ...(uri ? { uri } : {}),
         ...flag(attrs, 'DEFAULT', 'default'),
         ...flag(attrs, 'AUTOSELECT', 'autoselect'),
@@ -370,6 +399,12 @@ function plain(attrs: HlsAttribute[], name: string): string | undefined {
     return a && !a.quoted && !a.bare ? a.value : undefined;
 }
 
+/** The value quoted or not; `undefined` only when absent or bare. */
+function value(attrs: HlsAttribute[], name: string): string | undefined {
+    const a = find(attrs, name);
+    return a && !a.bare ? a.value : undefined;
+}
+
 function numeric(attrs: HlsAttribute[], name: string): number | undefined {
     const raw = plain(attrs, name);
     if (raw === undefined || raw === '') return undefined;
@@ -386,8 +421,7 @@ function flag<K extends string>(
     // packagers write `DEFAULT="YES"` too; refusing it dropped the attribute
     // on rebuild, and a master whose only default was written that way came
     // out with no default at all. The builder writes it back unquoted.
-    const a = find(attrs, name);
-    const raw = a && !a.bare ? a.value : undefined;
+    const raw = value(attrs, name);
     if (raw === 'YES') return { [key]: true } as Record<K, boolean>;
     if (raw === 'NO') return { [key]: false } as Record<K, boolean>;
     return {};

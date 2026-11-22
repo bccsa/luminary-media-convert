@@ -122,8 +122,20 @@ describe('HlsEditService — an existing video', () => {
             service = makeService(etag);
             const media = await service.readEncodedMedia(s3, MASTER_KEY);
             expect(media.angles).toEqual([
-                { id: 'main', name: 'Main', default: true, renditions: 1 },
-                { id: 'side', name: 'Side', default: false, renditions: 1 },
+                {
+                    id: 'main',
+                    name: 'Main',
+                    default: true,
+                    renditions: 1,
+                    language: '',
+                },
+                {
+                    id: 'side',
+                    name: 'Side',
+                    default: false,
+                    renditions: 1,
+                    language: '',
+                },
             ]);
         });
 

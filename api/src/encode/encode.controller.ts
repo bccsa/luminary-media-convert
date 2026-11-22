@@ -1438,11 +1438,16 @@ export class EncodeController {
     @AuthTypes('instance', 'session')
     @ApiSecurity('apikey')
     @ApiOperation({
-        summary: "Rename the existing video's camera angles, or remove some",
+        summary:
+            "Rename the existing video's camera angles, set their language and accessibility, or remove some",
         description:
-            'Only for an edit session. Rewrites NAME of the angles renamed and takes ' +
-            'the removed ones (group, variants, I-frame playlists, thumbnail strip) out, ' +
-            'as a new master revision; their files stay in storage. Refused with 409 once ' +
+            'Only for an edit session. Rewrites the NAME, LANGUAGE and CHARACTERISTICS ' +
+            '(`accessibility`) each edit sends and leaves those it leaves out; an empty ' +
+            '`language` takes LANGUAGE off, and `accessibility: none` takes ' +
+            'CHARACTERISTICS off when it marks one of the kinds (a value that marks ' +
+            'none of them is left as it is). Takes the ' +
+            'removed angles (group, variants, I-frame playlists, thumbnail strip) out. ' +
+            'All as a new master revision; their files stay in storage. Refused with 409 once ' +
             'the master has changed since `ifMatch` was read, or with ' +
             'CMS_NOT_ACKNOWLEDGED / CHANGED_ELSEWHERE.',
     })
@@ -1508,15 +1513,16 @@ export class EncodeController {
             "Only for an edit session. Encodes the file's picture to the sizes, bitrates, " +
             "frame rate and segments of the video's main angle, uploads it beside the " +
             'video in folders of its own, then adds it to the master over the version ' +
-            "`ifMatch` names, sharing the video's audio. A video with a single picture " +
-            'gains angles: its picture becomes the main one, named `mainName`. Runs in the ' +
-            'background: GET /api/sessions/:id/media reports it as `addingAngle`.',
+            "`ifMatch` names, sharing the video's audio, with its `language` and " +
+            '`accessibility` when given. A video with a single picture gains angles: its ' +
+            'picture becomes the main one, named `mainName` and given `mainLanguage`. Runs ' +
+            'in the background: GET /api/sessions/:id/media reports it as `addingAngle`.',
     })
     @ApiParam({ name: 'sessionId', description: 'Session ID' })
     @ApiResponse({ status: 202, type: AddVideoAngleJobDto })
     @ApiResponse({
         status: 400,
-        description: 'The file, stream, name or offset is invalid.',
+        description: 'The file, stream, name, language or offset is invalid.',
     })
     @ApiResponse({
         status: 409,

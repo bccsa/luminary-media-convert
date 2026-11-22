@@ -32,6 +32,21 @@ const NAME_FORBIDDEN = /["\r\n]/;
 const NAME_MAX = 100;
 
 /**
+ * A language code, trimmed, or a 400 saying it is not one. Shared with the
+ * camera angles, whose `LANGUAGE` names the audio they go with: one rule, so a
+ * code an audio track takes is one an angle takes too.
+ */
+export function assertLanguage(language: string): string {
+    const lang = language.trim();
+    if (!LANGUAGE.test(lang)) {
+        throw new BadRequestException(
+            `"${language}" is not a language code (ISO 639, e.g. "en" or "fra")`
+        );
+    }
+    return lang;
+}
+
+/**
  * A track's language and name, trimmed, or a 400 saying what is wrong with
  * them: an ISO 639 code, and a name an attribute list can carry.
  */
@@ -39,13 +54,8 @@ export function assertTrackLabel(
     language: string,
     name: string
 ): { language: string; name: string } {
-    const lang = language.trim();
+    const lang = assertLanguage(language);
     const label = name.trim();
-    if (!LANGUAGE.test(lang)) {
-        throw new BadRequestException(
-            `"${language}" is not a language code (ISO 639, e.g. "en" or "fra")`
-        );
-    }
     if (!label || label.length > NAME_MAX || NAME_FORBIDDEN.test(label)) {
         throw new BadRequestException(
             `A track name needs 1 to ${NAME_MAX} characters, without quotes or line breaks`
@@ -257,8 +267,15 @@ export function rewriteAudioTracks(
 
 export const MEDIA_TAG = '#EXT-X-MEDIA:';
 
+/**
+ * `name`'s attribute in an attribute list. Group 1 is everything before it, a
+ * run of whole attributes each with its comma, so `NAME=` or `LANGUAGE=`
+ * written inside a quoted value (a track or angle named `Cam,LANGUAGE=x`) is
+ * never taken for the attribute; groups 2 and 3 are its quoted and unquoted
+ * value.
+ */
 export const attributePattern = (name: string): RegExp =>
-    new RegExp(`(^|,)${name}=(?:"([^"]*)"|([^,]*))`);
+    new RegExp(`^((?:[^",]*(?:"[^"]*")?,)*?)${name}=(?:"([^"]*)"|([^,]*))`);
 
 export function readAttribute(list: string, name: string): string | undefined {
     const match = attributePattern(name).exec(list);
@@ -290,6 +307,19 @@ export function writeBareAttribute(
     return pattern.test(list)
         ? list.replace(pattern, (_, lead: string) => `${lead}${name}=${value}`)
         : `${list},${name}=${value}`;
+}
+
+/**
+ * Takes `name`'s attribute out, with the comma that joined it to the rest, so
+ * no stray comma is left whether it was first, in the middle or last. The
+ * attributes before it are put back as they were.
+ */
+export function removeAttribute(list: string, name: string): string {
+    return list.replace(
+        new RegExp(`${attributePattern(name).source},?`),
+        (match: string, lead: string) =>
+            match.endsWith(',') ? lead : lead.replace(/,$/, '')
+    );
 }
 
 /** A new track's rendition in one audio group. */

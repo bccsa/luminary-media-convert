@@ -33,6 +33,17 @@ export function parseAttributeList(input: string): HlsAttribute[] {
 
         if (i < input.length && input[i] === '=') {
             i++;
+            // `NAME= "value"` breaks RFC 8216, but read as written the value
+            // would be an unquoted token holding the quotes, cut at the first
+            // comma inside them. Skipped only when the quoted string closes
+            // where a value must end (a comma or the end of the list), so an
+            // unterminated or misplaced quote is read as it always was; and
+            // only when there was whitespace to skip, so a well-formed list
+            // pays a couple of character comparisons per attribute.
+            let quote = i;
+            while (input[quote] === ' ' || input[quote] === '\t') quote++;
+            if (quote > i && input[quote] === '"' && closesCleanly(input, quote))
+                i = quote;
             if (input[i] === '"') {
                 i++;
                 let value = '';
@@ -53,6 +64,15 @@ export function parseAttributeList(input: string): HlsAttribute[] {
     }
 
     return attrs;
+}
+
+/** The quoted string opening at `open` ends at a separator or the end of the list. */
+function closesCleanly(input: string, open: number): boolean {
+    const close = input.indexOf('"', open + 1);
+    if (close < 0) return false;
+    let k = close + 1;
+    while (input[k] === ' ' || input[k] === '\t') k++;
+    return k >= input.length || input[k] === ',';
 }
 
 export function formatAttribute(attr: HlsAttribute): string {

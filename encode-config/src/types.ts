@@ -179,12 +179,40 @@ export interface TrimSegment {
     outSec: number;
 }
 
+/**
+ * The hearing-impaired kinds of view a camera angle can be. The keys of
+ * `ANGLE_ACCESSIBILITY` in `@luminary-media-converter/hls-core`, which is the
+ * one source of what each is written as in the master; spelled out here only
+ * because this package does not depend on hls-core. The API checks a submitted
+ * value against that map.
+ */
+export type AngleAccessibility = 'captions' | 'sign-language' | 'lip-reading';
+
+/**
+ * A video track's name. The entry filed under an angle's id names the angle,
+ * and can say which audio it belongs with and what kind of view it is, for a
+ * player that switches the picture with the audio language.
+ */
+export interface VideoTrackName {
+    index: number;
+    name: string;
+    /**
+     * The audio language the angle's picture belongs to (burnt-in titles, lip
+     * sync), as an audio track's language is written. Absent for none — never
+     * taken from the probe, whose video tracks carry whatever the muxer
+     * stamped (`und`, `eng`) on every one of them.
+     */
+    language?: string;
+    /** The hearing-impaired kind of view the angle is. Absent for none. */
+    accessibility?: AngleAccessibility;
+}
+
 export interface EncodeConfig {
     type: 'video' | 'audio';
     segmentDuration?: number;
     videoRenditions?: VideoRendition[];
     audioGroups?: AudioGroup[];
-    videoTrackNames?: { index: number; name: string }[];
+    videoTrackNames?: VideoTrackName[];
     /**
      * The angle each kept track of a multi-track source belongs to, by angle
      * id. The encode does not use it: rows name their own angle. It is what a

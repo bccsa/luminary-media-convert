@@ -59,7 +59,9 @@
 
     /* Layout */
     .ecf-root { @apply space-y-6; }
-    .ecf-fieldset { @apply space-y-3 border-none m-0 p-0; }
+    /* min-w-0: a fieldset is min-content wide by default, so a wide table
+       stretched it past the panel, clipped there, instead of scrolling. */
+    .ecf-fieldset { @apply space-y-3 border-none m-0 p-0 min-w-0; }
     .ecf-fieldset-padded { @apply mt-2; }
     .ecf-section-header { @apply flex items-center justify-between; }
     .ecf-legend { @apply text-sm font-semibold uppercase tracking-wider text-slate-400 p-0; }
@@ -245,6 +247,12 @@
     .ecf-input-id { @apply !w-16 !p-[0.1875rem_0.375rem] !text-[0.8125rem]; }
     .ecf-input-num { @apply !w-20 text-center; }
     .ecf-select-inline { @apply !min-w-[7rem] !p-[0.1875rem_2rem_0.1875rem_0.375rem] !text-[0.8125rem]; }
+    /* The angle picker keeps its width whatever the angles are called: grown to
+       a long name, it pushed the table and the angle's name, language and kind
+       past the panel. A long name is cut short here, and in the open list once
+       it is wider than the room beside the picker; hovering the picker shows
+       the full name of the angle it is set to. */
+    .ecf-select-angle { @apply max-w-[7rem]; }
     .ecf-select-ch { @apply !w-[5.5rem] !p-[0.1875rem_2rem_0.1875rem_0.375rem] !text-[0.8125rem]; }
     .ecf-select-src { @apply !min-w-[10rem] !p-[0.1875rem_2rem_0.1875rem_0.375rem] !text-xs; }
 
@@ -298,6 +306,8 @@
     .ecf-sr-only { @apply sr-only; }
     .ecf-stack { @apply flex flex-col gap-3; }
     .ecf-hint { @apply -mt-0.5 mb-2 text-xs leading-snug text-slate-500; }
+    /* A note on what a table holds, set under it rather than above. */
+    .ecf-table-wrap + .ecf-hint { @apply mt-2 mb-0; }
     .ecf-hint--warn { @apply text-amber-700 dark:text-amber-400; }
     .ecf-em { @apply font-semibold text-slate-800 dark:text-slate-100; }
 
@@ -317,6 +327,12 @@
     .ecf-tr--excluded > .ecf-td:not(.ecf-td-include) { @apply opacity-45; }
     /* A further quality of the angle above: indented under the track naming it. */
     .ecf-tr--member > .ecf-td:nth-child(2) { @apply pl-5; }
+    /* An angle's language and kind of view: a line under the row naming it. */
+    .ecf-tr--tagged { @apply border-b-0; }
+    .ecf-tr--tags > .ecf-td { @apply pt-0 pb-1.5; }
+    .ecf-angle-tags { @apply flex flex-wrap items-center gap-x-4 gap-y-1; }
+    .ecf-angle-tag { @apply inline-flex items-center gap-1.5; }
+    .ecf-angle-tag-label { @apply text-xs text-slate-500 dark:text-slate-400; }
     .ecf-th-include,
     .ecf-td-include { @apply w-px text-center; }
 

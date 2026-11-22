@@ -18,6 +18,8 @@ export type {
     ProbeResult,
     TrimSegment,
 } from '@luminary-media-converter/encode-config';
+import type { AngleAccessibility } from '@luminary-media-converter/hls-core';
+export type { AngleAccessibility } from '@luminary-media-converter/hls-core';
 
 // --- Session Request/Response Types ---
 
@@ -117,9 +119,24 @@ export interface AddAudioTrackJob {
 export interface VideoAngle {
     id: string;
     name: string;
+    /** The audio language its picture belongs to; empty when it has none. */
+    language: string;
+    /** The hearing-impaired kind of view it is, when it is one. */
+    accessibility?: AngleAccessibility;
     default: boolean;
     /** How many sizes it has. */
     renditions: number;
+}
+
+/**
+ * A change to one angle: only the fields sent change. An empty `language`
+ * takes the angle's language off, and `accessibility: 'none'` its kind.
+ */
+export interface VideoAngleEdit {
+    id: string;
+    name?: string;
+    language?: string;
+    accessibility?: AngleAccessibility | 'none';
 }
 
 /** A camera angle being added to the existing video, and how far it has got. */

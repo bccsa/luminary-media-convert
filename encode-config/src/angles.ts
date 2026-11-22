@@ -209,6 +209,19 @@ export function undecidedPairs(angles: readonly Angle[]): string[] {
 }
 
 /**
+ * The member an angle's name comes from: its own track (its id) if that has a
+ * name, else the first member that does; undefined when none has one. What
+ * else belongs with the name (a language, a kind of view) is read from the
+ * same member, so the two move together when tracks move between angles.
+ */
+export function nameSourceOf(angle: Angle): VideoTrackInfo | undefined {
+    return (
+        angle.members.find((t) => t.index === angle.id && t.name?.trim()) ??
+        angle.members.find((t) => t.name?.trim())
+    );
+}
+
+/**
  * Each angle's display name, unique among the angles.
  *
  * The angle's own track (its id) names it if it has a name, else the first
@@ -232,11 +245,8 @@ export function angleNames(angles: readonly Angle[]): Map<number, string> {
         taken.add(name.toLowerCase());
         names.set(id, name);
     };
-    const given = (angle: Angle) =>
-        angle.members.find((t) => t.index === angle.id)?.name?.trim() ||
-        angle.members.map((t) => t.name?.trim()).find(Boolean);
     for (const angle of angles) {
-        const name = given(angle);
+        const name = nameSourceOf(angle)?.name?.trim();
         if (name) claim(angle.id, name);
     }
     angles.forEach((angle, n) => {

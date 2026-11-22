@@ -62,14 +62,26 @@ const variant = (
 describe('listVideoAngles', () => {
     it('lists a single picture as one unnamed angle', () => {
         expect(listVideoAngles(parseMasterPlaylist(SINGLE))).toEqual([
-            { id: '', name: '', default: true, renditions: 2 },
+            { id: '', name: '', default: true, renditions: 2, language: '' },
         ]);
     });
 
     it('lists each video group with its variant count', () => {
         expect(listVideoAngles(parseMasterPlaylist(MULTI))).toEqual([
-            { id: 'main', name: 'Main Camera', default: true, renditions: 1 },
-            { id: 'pulpit', name: 'Pulpit', default: false, renditions: 1 },
+            {
+                id: 'main',
+                name: 'Main Camera',
+                default: true,
+                renditions: 1,
+                language: '',
+            },
+            {
+                id: 'pulpit',
+                name: 'Pulpit',
+                default: false,
+                renditions: 1,
+                language: '',
+            },
         ]);
     });
 

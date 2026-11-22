@@ -2,15 +2,22 @@
 /**
  * The dialog that adds a camera angle to the existing video, from a file on
  * this machine or a link (a video file, or an HLS playlist): one of its video
- * streams is picked, and the new angle named and placed on the video's
- * timeline. For a video with a single picture it also names that picture,
- * which becomes the main angle. It closes once the add has started; the encode
- * runs in the encoder, and the panel behind shows its progress.
+ * streams is picked, and the new angle named, given its language and
+ * hearing-impaired kind if it has them, and placed on the video's timeline.
+ * For a video with a single picture it also names that picture, and gives it
+ * a language, as it becomes the main angle. It closes once the add has
+ * started; the encode runs in the encoder, and the panel behind shows its
+ * progress.
  */
 import { computed, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue';
+import { LanguageSelect } from '@luminary-media-converter/encode-config';
 import { addVideoAngle, probeVideoSource } from '../../api';
 import FormSelect, { type SelectOption } from '../FormSelect.vue';
-import type { AddVideoAngleJob, VideoSource } from '../../types';
+import type {
+    AddVideoAngleJob,
+    AngleAccessibility,
+    VideoSource,
+} from '../../types';
 import { saveErrorMessage } from '../../utils/errors';
 
 const props = defineProps<{
@@ -42,6 +49,11 @@ const source = ref<VideoSource | null>(null);
 const sourceTrackIndex = ref(0);
 const name = ref('');
 const mainName = ref('Main');
+/** The new angle's language; empty for none. */
+const language = ref('');
+const accessibility = ref<AngleAccessibility | 'none'>('none');
+/** The language of the video's own picture, as it becomes the main angle. */
+const mainLanguage = ref('');
 const offsetSec = ref(0);
 const reading = ref(false);
 const starting = ref(false);
@@ -81,6 +93,22 @@ function streamLabel(
     return parts.join(' · ');
 }
 
+/** The hearing-impaired kinds of view, as the panel names them. */
+const accessibilityOptions: SelectOption[] = [
+    { value: 'none', label: 'None' },
+    { value: 'captions', label: 'Captions' },
+    { value: 'sign-language', label: 'Sign language' },
+    { value: 'lip-reading', label: 'Lip reading' },
+];
+
+/**
+ * The new angle has a language and the picture that will play first has none:
+ * choosing that picture's audio again could not bring it back.
+ */
+const mainNeedsLanguage = computed(
+    () => props.namesMain && !!language.value && !mainLanguage.value
+);
+
 /** The source's video streams, as the custom dropdown lists them. */
 const sourceOptions = computed<SelectOption[]>(() =>
     (source.value?.videoTracks ?? []).map((track, i) => ({
@@ -110,6 +138,13 @@ async function add(): Promise<void> {
             sourceTrackIndex: sourceTrackIndex.value,
             name: name.value.trim(),
             ...(props.namesMain ? { mainName: mainName.value.trim() } : {}),
+            ...(language.value ? { language: language.value } : {}),
+            ...(accessibility.value !== 'none'
+                ? { accessibility: accessibility.value }
+                : {}),
+            ...(props.namesMain && mainLanguage.value
+                ? { mainLanguage: mainLanguage.value }
+                : {}),
             offsetSec: offsetSec.value,
             ifMatch: props.etag,
         });
@@ -140,6 +175,9 @@ watch(
         sourceTrackIndex.value = 0;
         name.value = '';
         mainName.value = 'Main';
+        language.value = '';
+        accessibility.value = 'none';
+        mainLanguage.value = '';
         offsetSec.value = 0;
         error.value = null;
     }
@@ -262,12 +300,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
                             data-test="angleSourceTrack"
                         />
                     </label>
+                    <!-- Each picture's name with its language beside it, as the audio tracks pair them. -->
                     <div
-                        class="grid gap-3"
-                        :class="namesMain ? 'grid-cols-2' : 'grid-cols-1'"
+                        v-if="namesMain"
+                        class="grid grid-cols-[minmax(0,1fr)_8rem] gap-3"
                     >
                         <label
-                            v-if="namesMain"
                             class="flex flex-col gap-1 text-xs font-medium text-slate-500 dark:text-slate-400"
                         >
                             This video's picture
@@ -282,6 +320,26 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
                         <label
                             class="flex flex-col gap-1 text-xs font-medium text-slate-500 dark:text-slate-400"
                         >
+                            Language
+                            <LanguageSelect
+                                v-model="mainLanguage"
+                                placeholder="none"
+                                aria-label="Language of this video's picture"
+                                data-test="mainAngleLanguage"
+                            />
+                        </label>
+                    </div>
+                    <p
+                        v-if="namesMain"
+                        class="-mt-2 text-xs text-slate-500 dark:text-slate-400"
+                    >
+                        This video has one picture so far. It stays the one that
+                        plays first, under the name you give it.
+                    </p>
+                    <div class="grid grid-cols-[minmax(0,1fr)_8rem] gap-3">
+                        <label
+                            class="flex flex-col gap-1 text-xs font-medium text-slate-500 dark:text-slate-400"
+                        >
                             New angle
                             <input
                                 v-model="name"
@@ -292,13 +350,53 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
                                 data-test="newAngleName"
                             />
                         </label>
+                        <label
+                            class="flex flex-col gap-1 text-xs font-medium text-slate-500 dark:text-slate-400"
+                        >
+                            Language
+                            <LanguageSelect
+                                v-model="language"
+                                placeholder="none"
+                                aria-label="Language of the new angle"
+                                data-test="newAngleLanguage"
+                            />
+                        </label>
+                    </div>
+                    <!-- The help sits outside the label, so clicking it does not open the list. -->
+                    <div class="flex flex-col gap-1">
+                        <label
+                            class="flex flex-col gap-1 text-xs font-medium text-slate-500 dark:text-slate-400"
+                        >
+                            Accessibility
+                            <FormSelect
+                                v-model="accessibility"
+                                :options="accessibilityOptions"
+                                variant="field"
+                                size="sm"
+                                presentation="custom"
+                                wrapper-class="max-w-44"
+                                aria-label="Accessibility of the new angle"
+                                data-test="newAngleAccessibility"
+                            />
+                        </label>
+                        <p
+                            class="m-0 text-xs text-slate-500 dark:text-slate-400"
+                        >
+                            Give the angle a language when its picture goes with
+                            one audio language, such as burnt-in titles: a
+                            viewer who picks that audio is shown it. Mark a view
+                            made for deaf or hard-of-hearing viewers; they stay
+                            on that kind of view when they change the audio.
+                        </p>
                     </div>
                     <p
-                        v-if="namesMain"
-                        class="-mt-2 text-xs text-slate-500 dark:text-slate-400"
+                        v-if="mainNeedsLanguage"
+                        class="-mt-2 text-xs text-amber-700 dark:text-amber-400"
+                        data-test="mainAngleLanguageHint"
                     >
-                        This video has one picture so far. It stays the one that
-                        plays first, under the name you give it.
+                        Give this video's picture a language too. Otherwise
+                        choosing its audio again will not bring its picture
+                        back.
                     </p>
                     <label
                         class="flex flex-col gap-1 text-xs font-medium text-slate-500 dark:text-slate-400"
