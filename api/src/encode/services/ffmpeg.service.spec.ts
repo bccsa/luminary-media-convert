@@ -2699,6 +2699,96 @@ describe('FfmpegService', () => {
         });
     });
 
+    /**
+     * MPEG-2 on Apple Silicon: VideoToolbox does not decode it, FFmpeg hands
+     * `scale_vt` frames in system memory, and every rung fails. One frame tried
+     * on the hardware path says so before the encode starts.
+     */
+    describe('decodesOnDevice', () => {
+        const config = (
+            renditions: Partial<EncodeConfigDto['videoRenditions'][number]>[]
+        ) =>
+            ({
+                type: 'video',
+                videoRenditions: renditions.map((r) => ({
+                    width: 1280,
+                    height: 720,
+                    videoBitrateKbps: 2500,
+                    copyStream: false,
+                    ...r,
+                })),
+            }) as EncodeConfigDto;
+        const ffmpegCalls = () =>
+            mockExecFile.mock.calls.map((c) => c[1] as string[]);
+
+        it('asks nothing on a path that decodes on the CPU', async () => {
+            (service as any).accelMode = 'cpu';
+            expect(await service.decodesOnDevice('/in.mpg', config([{}]))).toBe(
+                true
+            );
+            expect(mockExecFile).not.toHaveBeenCalled();
+        });
+
+        it('asks nothing of a ladder that only copies', async () => {
+            (service as any).accelMode = 'apple';
+            expect(
+                await service.decodesOnDevice(
+                    '/in.mp4',
+                    config([{ copyStream: true }])
+                )
+            ).toBe(true);
+            expect(mockExecFile).not.toHaveBeenCalled();
+        });
+
+        it('tries one frame of each re-encoded track as the ladder would', async () => {
+            (service as any).accelMode = 'apple';
+            expect(
+                await service.decodesOnDevice(
+                    '/in.mp4',
+                    config([
+                        { sourceTrackIndex: 0 },
+                        { sourceTrackIndex: 1 },
+                        { sourceTrackIndex: 1 },
+                    ])
+                )
+            ).toBe(true);
+            const calls = ffmpegCalls();
+            expect(calls).toHaveLength(2);
+            for (const args of calls) {
+                expect(args).toContain('videotoolbox_vld');
+                expect(args.join(' ')).toContain('scale_vt=');
+                expect(args).toContain('h264_videotoolbox');
+                expect(args).toEqual(
+                    expect.arrayContaining(['-frames:v', '1'])
+                );
+            }
+            expect(calls.map((a) => a[a.indexOf('-map') + 1])).toEqual([
+                '0:v:0',
+                '0:v:1',
+            ]);
+        });
+
+        it('is false when FFmpeg refuses the frame', async () => {
+            (service as any).accelMode = 'apple';
+            mockExecFile.mockImplementation((...args: any[]) => {
+                const cb = args[args.length - 1];
+                if (typeof cb === 'function')
+                    cb(
+                        Object.assign(new Error('Function not implemented'), {
+                            code: 178,
+                        }),
+                        {
+                            stdout: '',
+                            stderr: '',
+                        }
+                    );
+            });
+            expect(await service.decodesOnDevice('/in.mpg', config([{}]))).toBe(
+                false
+            );
+        });
+    });
+
     describe('encode', () => {
         let tmpDir: string;
         let alignmentOffsetSpy: MockInstance;
@@ -2771,6 +2861,39 @@ describe('FfmpegService', () => {
             fixMasterPlaylistSpy.mockRestore();
             fixAudioOnlyMasterPlaylistSpy.mockRestore();
             probeFrameRateSpy.mockRestore();
+        });
+
+        it('decodes in software when the hardware cannot decode the source', async () => {
+            (service as any).accelMode = 'apple';
+            vi.spyOn(service, 'decodesOnDevice').mockResolvedValue(false);
+            const mockProc = createMockProcess();
+            mockSpawn.mockReturnValue(mockProc);
+
+            const promise = service.encode(makeEncodeOpts());
+            await flushPromises();
+            mockProc.emitClose(0);
+            await promise;
+
+            const args = mockSpawn.mock.calls[0][1] as string[];
+            expect(args).not.toContain('-hwaccel');
+            expect(args.join(' ')).toContain('scale=1280:720');
+            expect(args).toContain('h264_videotoolbox');
+        });
+
+        it('keeps the hardware decode when the hardware decodes the source', async () => {
+            (service as any).accelMode = 'apple';
+            vi.spyOn(service, 'decodesOnDevice').mockResolvedValue(true);
+            const mockProc = createMockProcess();
+            mockSpawn.mockReturnValue(mockProc);
+
+            const promise = service.encode(makeEncodeOpts());
+            await flushPromises();
+            mockProc.emitClose(0);
+            await promise;
+
+            const args = mockSpawn.mock.calls[0][1] as string[];
+            expect(args).toContain('-hwaccel');
+            expect(args.join(' ')).toContain('scale_vt=w=1280:h=720');
         });
 
         it('should resolve with outputDir and masterPlaylist on success', async () => {
