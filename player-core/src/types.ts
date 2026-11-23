@@ -111,6 +111,12 @@ export interface ThumbnailSidecar {
     url: string;
 }
 
+/** The loudness curve (`waveform.json`) beside the master, for a host that draws a waveform to scrub by. */
+export interface WaveformSidecar {
+    /** Absolute URL of the plaintext `waveform.json`. */
+    url: string;
+}
+
 export interface PlayerSource {
     /** URL of the (possibly multi-angle, possibly LMCENC-encrypted) master playlist. */
     masterUrl: string;
@@ -212,6 +218,11 @@ export interface PlayerSource {
          * player does not.
          */
         thumbnails?: ThumbnailSidecar;
+        /**
+         * Carried for the host's own UI and for engines that draw their own controls: the player never
+         * fetches it. A file that is not there means no waveform.
+         */
+        waveform?: WaveformSidecar;
     };
     poll?: PollPolicy;
     recovery?: Partial<RecoveryPolicy>;
