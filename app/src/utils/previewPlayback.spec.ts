@@ -110,6 +110,19 @@ describe('previewPlayability', () => {
         });
     });
 
+    it('converts a rotated video, which the browser shows on its side', () => {
+        // An iPhone portrait video: stored landscape, shown turned.
+        const turned = {
+            ...video('h264'),
+            displayWidth: 1080,
+            displayHeight: 1920,
+            rotation: 90,
+        } as VideoTrackInfo;
+        expect(
+            previewPlayability(probe(MP4, [turned], [audio('aac')]), chromium)
+        ).toEqual({ direct: false, reason: 'Rotated video' });
+    });
+
     describe('HEVC, which needs a platform decoder', () => {
         it('converts it where the browser has none', () => {
             expect(

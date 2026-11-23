@@ -321,3 +321,22 @@ describe('alignment and cadence edges', () => {
         expect(copyModeBlockedReason(unknown, 0.98, 6)).toBeNull();
     });
 });
+
+describe('a turned picture', () => {
+    // A phone's portrait video, stored landscape and shown turned.
+    const portrait = goodCadenceTrack({
+        width: 1920,
+        height: 1080,
+        displayWidth: 1080,
+        displayHeight: 1920,
+        rotation: 90,
+        startTime: 0,
+    });
+
+    it('blocks copy and the quick cut', () => {
+        expect(copyModeBlockedReason(portrait, 0, 6)).toMatch(
+            /stored turned \(shown at 90°\)/
+        );
+        expect(quickTrimBlockedReason(portrait, 6)).toMatch(/stored turned/);
+    });
+});

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { SessionService } from './session.service.js';
 import { ProbeService } from './probe.service.js';
+import { defaultAngleTracks } from './picture-groups.js';
 import { WaveformService } from './waveform.service.js';
 import {
     selectStoryboardTrack,
@@ -63,7 +64,7 @@ export class IngestService {
         // The track is chosen rather than taken first: on a multi-angle file the
         // first track is as likely to be a 144p proxy as the camera the user
         // means to look at.
-        const video = selectStoryboardTrack(probeResult.videoTracks);
+        const video = selectStoryboardTrack(defaultAngleTracks(probeResult));
         const duration = probeResult.format?.duration ?? 0;
         if (video && duration > 0) {
             void this.thumbnailService

@@ -209,7 +209,7 @@ describe('SubtitlesPanel', () => {
         await flushPromises();
         expect(confirm).toHaveBeenCalled();
         expect(api.deleteSubtitles).toHaveBeenCalledWith('sess-1', 'tok', 'en', 'v1');
-        expect(wrapper.find('[data-test="subtitlesEmpty"]').text()).toContain('This video has no subtitles yet');
+        expect(wrapper.find('[data-test="subtitlesEmpty"]').text()).toContain('No subtitles yet');
         expect(wrapper.emitted('saved')).toHaveLength(1);
     });
 

@@ -14,6 +14,11 @@ export type SidecarKind = 'subtitles' | 'chapters' | 'waveform';
  * with the filename ignored, which no longer described any live behaviour.
  *
  * Mirrors the existing thumbnails layout (`<masterFolder>/thumbnails/thumbnails.vtt`).
+ *
+ * These fixed names are now only the fallback for videos whose master names
+ * no sidecars. A chapter file or thumbnail strip that changes is written
+ * under a new name, and the master's `#EXT-X-SESSION-DATA` lines say which is
+ * current — see `session-data.ts`.
  */
 export function sidecarPath(masterKey: string, kind: SidecarKind, filename: string): string {
     const lastSlash = masterKey.lastIndexOf('/');

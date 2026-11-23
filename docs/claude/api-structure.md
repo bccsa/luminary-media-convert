@@ -22,21 +22,23 @@ api/
 │   │   └── cms-session-hook.ts          # CMS_SESSION_HOOK — fire-and-forget "bring your window forward"
 │   ├── encode/
 │   │   ├── encode.module.ts
-│   │   ├── encode.controller.ts         # /api/sessions — create, list, local-file, encode, status, SSE, delete, chapters, waveform, source, preview, storyboard
+│   │   ├── encode.controller.ts         # /api/sessions — create, list, local-file, encode, status, SSE, ack, delete, chapters, edit (media/*), waveform, source, preview, storyboard
 │   │   ├── cms.controller.ts            # /api/cms — health, sessions (origin-gated)
 │   │   ├── session-status.ts            # SessionStatus union
 │   │   ├── dto/
 │   │   │   ├── create-session.dto.ts        # S3 + encryption + segment + byte-range + thumbnail options
-│   │   │   ├── cms-create-session.dto.ts    # documentId, title, s3, publicBaseUrl, encryption.required, existingMedia (accepted, unused)
-│   │   │   ├── cms-session-response.dto.ts  # sessionId, readToken, eventsUrl, apiVersion, reused (+ health DTO)
+│   │   │   ├── cms-create-session.dto.ts    # documentId, title, s3, publicBaseUrl, encryption.required, mode, existingMedia (the video an edit session opens)
+│   │   │   ├── cms-session-response.dto.ts  # sessionId, readToken, eventsUrl, apiVersion, reused, hlsUrl (edit: revision opened) (+ health DTO)
 │   │   │   ├── local-file.dto.ts            # absolute path of a file already on this machine
 │   │   │   ├── encode-config.dto.ts         # type, video renditions, audio groups, VBR, labels, trimSegments
 │   │   │   ├── encryption-config.dto.ts     # enabled + optional keyUrl
 │   │   │   ├── chapters.dto.ts              # session-scoped chapter write body
-│   │   │   └── s3-config.dto.ts, probe-result.dto.ts, session-response.dto.ts, rendition.dto.ts, review-range.dto.ts
+│   │   │   └── s3-config.dto.ts, probe-result.dto.ts, session-response.dto.ts, rendition.dto.ts
 │   │   └── services/
 │   │       ├── session.service.ts           # Session store + tokens + persistence (session.json, credentials.enc) + restore/sweep
 │   │       ├── session-events.service.ts    # SSE event subject (SessionEvent shape)
+│   │       ├── cms-ack.service.ts           # CMS gate: read-token streams open + acknowledged hlsUrl per session (cmsPending)
+│   │       ├── video-revision.service.ts    # Every master change: gate → save under the video lock → announce → await the ack
 │   │       ├── session-cleanup.service.ts   # Hourly sweep of abandoned sessions
 │   │       ├── credential-cipher.ts         # CredentialCipher interface + CREDENTIAL_CIPHER token
 │   │       ├── ingest.service.ts            # Shared post-ingest pipeline: probe → uploaded → prime waveform/storyboard
@@ -58,9 +60,9 @@ api/
 │   │       └── media-extensions.ts          # ALLOWED_EXTENSIONS allow-list (re-exported from bootstrap for the host's file picker)
 │   └── hls-edit/
 │       ├── hls-edit.module.ts
-│       ├── hls-edit.controller.ts       # /api/hls — read, mutate, discover, chapters/read, chapters/write, waveform/read
-│       ├── hls-edit.service.ts          # parse → mutate → If-Match write of master.m3u8 in S3
-│       ├── s3-etag.service.ts           # ETag-aware GET/PUT with optimistic concurrency
-│       ├── dto/                         # read, mutate, discover, chapters-read, chapters-write, waveform-read
-│       └── operations/index.ts          # upsertSubtitle, removeSubtitle, upsertChapters, removeChapters
+│       ├── hls-edit.controller.ts       # /api/hls — read, discover, chapters/read, waveform/read (stateless, read-only)
+│       ├── hls-edit.service.ts          # Edit-session reads and saves (chapters, subtitles, audio tracks, angles) → a new master revision
+│       ├── master-revision.service.ts   # master_rN.m3u8 naming, per-video lock, If-None-Match write, latestRevision
+│       ├── s3-etag.service.ts           # ETag-aware GET/PUT with optimistic concurrency, putObjectIfAbsent
+│       └── dto/                         # read, discover, chapters-read, waveform-read
 ```

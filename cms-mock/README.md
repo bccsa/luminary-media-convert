@@ -33,13 +33,25 @@ behaviour the real CMS has when the desktop app is not running.
 2. **Create session** — `POST /api/cms/sessions` with the form's `documentId`,
    `title`, S3 config, `publicBaseUrl` and encoding options. The raw response is
    shown, with a `reused` badge when the API hands back an existing session for
-   the same `documentId`.
+   the same `documentId`. **Edit mode** sends `mode: 'edit'` with
+   `existingMedia` ("Use stored media" fills it from what the document holds);
+   the response's `hlsUrl` — newer than the one sent when the folder has a later
+   revision — is stored straight away.
 3. **SSE console** — subscribes to the returned `eventsUrl` with `EventSource`
-   and logs every event as pretty JSON. The first event carrying `hlsUrl` is
-   highlighted and pinned into a "What Luminary would save" card in `MediaDto`
-   shape (`{ hlsUrl, hlsKey }`) — that is the moment the real CMS writes to its
-   document.
-4. **Playback check** — fetches the reported `hlsUrl`. While it 404s it shows
+   and logs every event as pretty JSON. `hlsUrl` changes on every edit (a new
+   `master_rN.m3u8`), so every event whose `hlsUrl` differs from the stored one
+   is stored, highlighted, and shown in a "What Luminary has stored" card in
+   `MediaDto` shape (`{ hlsUrl, hlsKey }`). The badge says what the real CMS
+   would do: auto-save a revision in the same folder, or leave a new folder to
+   the editor's Save (the mock has no Save, so it stores both). After storing,
+   or on seeing a URL it already holds, it acknowledges it
+   (`POST /api/sessions/:id/ack`, a 404 ignored). The **Acknowledge** switch
+   turns that off, to see the encoder's pending state and refusals; turning it
+   back on acks the stored URL. **Disconnect** stands in for closing the CMS tab.
+   The followed session is remembered across reloads, and followed after it
+   completes; it is forgotten only when the encoder no longer holds it
+   (401/404) or it names another document.
+4. **Playback check** — fetches the stored `hlsUrl`. While it 404s it shows
    "not available yet" (what the real player does mid-encode). Once it resolves,
    it lists the video angles and renders the extracted single-angle and
    audio-only playlists via `@luminary-media-converter/hls-core`
@@ -50,8 +62,9 @@ behaviour the real CMS has when the desktop app is not running.
 Actual video playback stays in the main app — this mock proves URL availability,
 angle extraction and the key swap, not decoding.
 
-Form values (including the API base URL) persist to `localStorage`, so a page
-reload does not mean retyping S3 credentials.
+Form values (including the API base URL), each document's stored media and the
+followed session persist to `localStorage`, so a page reload does not mean
+retyping S3 credentials or losing the session.
 
 ## MinIO assumption
 

@@ -162,10 +162,35 @@ export interface EncodedMedia {
     chapterLanguages: string[];
     etag: string;
     encrypted: boolean;
+    /**
+     * Public URL of the master revision read or just written. Every save
+     * writes a new revision under a new name, so this moves with each one.
+     */
+    hlsUrl: string;
+    /** Its object key. */
+    masterPlaylist: string;
+    /**
+     * On a save's answer only, for a session opened from Luminary CMS: whether
+     * the CMS confirmed it stored the new version. `false` means the save
+     * landed but the CMS has not caught up yet.
+     */
+    published?: boolean;
     /** The audio track being added, or the last one. */
     adding?: AddAudioTrackJob;
     /** The angle being added, or the last one. */
     addingAngle?: AddVideoAngleJob;
+}
+
+/**
+ * What `PUT /api/sessions/:id/chapters` answers. Empty while the video has no
+ * published master (chapters saved during the encode); afterwards, the new
+ * master revision that names the chapters, as {@link EncodedMedia} has it.
+ */
+export interface ChaptersSaveResult {
+    hlsUrl?: string;
+    masterPlaylist?: string;
+    etag?: string;
+    published?: boolean;
 }
 
 /** A file picked to take a new audio track from: its audio streams. */
@@ -225,4 +250,9 @@ export interface SessionStatusResponse {
     storyboardComplete?: boolean;
     /** Trim ranges submitted with the encode config, in source-timeline seconds. */
     trimSegments?: TrimSegment[];
+    /**
+     * Luminary CMS has not yet stored the version `hlsUrl` names. Saves to the
+     * video are refused while it is, after a short wait for the CMS.
+     */
+    cmsPending?: boolean;
 }

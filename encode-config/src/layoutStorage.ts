@@ -30,13 +30,20 @@ function videoTrackSegment(track: {
     codec: string;
     displayWidth?: number;
     displayHeight?: number;
+    pictureGroup?: number;
 }): string {
     const display = displayDimensionsOf(track);
     const shown =
         display.width !== track.width || display.height !== track.height
             ? `@${display.width}x${display.height}`
             : '';
-    return `${track.width}x${track.height}${shown}:${track.codec}`;
+    // The angle a track shares, on the same terms: only when there is one, so
+    // a key for a source whose tracks are all separate angles — every key
+    // written before angles were detected — stays byte-identical. Without it,
+    // two cameras at 1080p and 360p and one picture at 1080p and 360p would
+    // share a slot and restore each other's angles.
+    const grouped = track.pictureGroup != null ? `~g${track.pictureGroup}` : '';
+    return `${track.width}x${track.height}${shown}:${track.codec}${grouped}`;
 }
 
 function audioTrackSegment(track: { codec: string; channels: number; sampleRate: number }): string {

@@ -12,6 +12,7 @@ import { createSegmentId } from './types';
 import { formatDuration, formatTime, parseTime } from './time';
 import { exportChaptersVtt, exportSubtitlesVtt, parseVtt } from './vtt';
 import { stepBetweenFields } from '../../utils/fieldWalk';
+import { waveformGain } from './waveform';
 import {
     findThumbnailCue,
     parseThumbnailVtt,
@@ -1884,9 +1885,10 @@ function drawWaveform(): void {
 
     const peaks = props.waveformPeaks;
     // Every bar stands on the bottom edge of the track and grows upward, so the
-    // waveform reads as one shape sitting under the thumbnails. Amplitude scaling
-    // and colour are unchanged from how the waveform has always drawn.
-    const maxBarHeight = height * WAVEFORM_MAX_HEIGHT_RATIO;
+    // waveform reads as one shape sitting under the thumbnails. Scaled so the
+    // loudest peak reaches the top: a quiet recording keeps its shape readable.
+    const maxBarHeight =
+        height * WAVEFORM_MAX_HEIGHT_RATIO * waveformGain(peaks);
 
     ctx.fillStyle = resolveWaveformColor();
 
@@ -1901,6 +1903,7 @@ function drawWaveform(): void {
 
     // One path for the whole waveform rather than a fill per column: same
     // pixels, a fraction of the canvas calls at 1000+ columns.
+    const tops = new Array<number>(width);
     ctx.beginPath();
     for (let x = 0; x < width; x++) {
         const peakIdx = startIdx + (x / width) * rangeLen;
@@ -1911,10 +1914,28 @@ function drawWaveform(): void {
         const peak2 = peaks[Math.min(idx1 + 1, lastPeak)] || 0;
         const peak = peak1 * (1 - t) + peak2 * t;
 
-        const barHeight = Math.max(1, peak * maxBarHeight);
+        const barHeight = Math.max(1, Math.min(height, peak * maxBarHeight));
         ctx.rect(x, height - barHeight, 1, barHeight);
+        tops[x] = height - barHeight;
     }
     ctx.fill();
+
+    // Over thumbnails the translucent fill takes on the colours of the frames
+    // behind it and the shape is lost, so its outline is drawn as well: a solid
+    // light line with a dark shadow, which reads over bright and dark frames.
+    if (thumbnailStripTiles.value.length > 0 && width > 0) {
+        ctx.beginPath();
+        ctx.moveTo(0, tops[0]);
+        for (let x = 1; x < width; x++) ctx.lineTo(x, tops[x]);
+        ctx.lineWidth = 1.5;
+        ctx.lineJoin = 'round';
+        ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+        ctx.shadowColor = 'rgba(0,0,0,0.85)';
+        ctx.shadowBlur = 3;
+        ctx.stroke();
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+    }
 }
 
 watch(

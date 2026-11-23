@@ -24,6 +24,7 @@ export interface AspectTrack {
     height: number;
     displayWidth?: number;
     displayHeight?: number;
+    rotation?: number;
 }
 
 /**
@@ -50,10 +51,25 @@ export function displayDimensionsOf(track: AspectTrack | undefined): {
  * Whether this track stores non-square pixels.
  *
  * The whole of the question, with no ratio arithmetic: the display dimensions
- * are equal to the coded ones exactly when the samples are square.
+ * are equal to the coded ones, turned, exactly when the samples are square.
  */
 export function isAnamorphic(track: AspectTrack | undefined): boolean {
     if (!track || track.width <= 0 || track.height <= 0) return false;
     const display = displayDimensionsOf(track);
-    return display.width !== track.width || display.height !== track.height;
+    // A quarter turn swaps the axes without changing the samples' shape.
+    const quarter = track.rotation === 90 || track.rotation === 270;
+    const width = quarter ? track.height : track.width;
+    const height = quarter ? track.width : track.height;
+    return display.width !== width || display.height !== height;
+}
+
+/**
+ * Whether this track is shown turned from how it is stored.
+ *
+ * Its picture has to be turned by a decode that honours the display matrix:
+ * a copy keeps it stored on its side, and a hardware decode that keeps frames
+ * on the device skips the turn.
+ */
+export function isRotated(track: AspectTrack | undefined): boolean {
+    return !!track?.rotation;
 }

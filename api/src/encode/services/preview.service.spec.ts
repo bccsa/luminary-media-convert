@@ -1655,6 +1655,70 @@ describe('PreviewService', () => {
         });
 
         /**
+         * A copied preview is cut on one track's keyframes and lasts as long
+         * as that track, so its rungs have to share both with the first.
+         */
+        describe('one angle whose tracks do not line up', () => {
+            function ladderService(keyframeGrid: number[]) {
+                const probe = {
+                    ...makeProbe({
+                        duration: 30,
+                        videoTracks: [
+                            {
+                                index: 0,
+                                codec: 'h264',
+                                width: 1280,
+                                height: 720,
+                                bitrateKbps: 6500,
+                                frameRate: 25,
+                                pictureGroup: 0,
+                                keyframeGrid: keyframeGrid[0],
+                            },
+                            {
+                                index: 1,
+                                codec: 'h264',
+                                width: 640,
+                                height: 360,
+                                bitrateKbps: 1800,
+                                frameRate: 25,
+                                pictureGroup: 0,
+                                keyframeGrid: keyframeGrid[1],
+                            },
+                        ],
+                    }),
+                    anglesDetected: true,
+                } as ProbeResult;
+                sessionService = makeSessionService({
+                    filePath: '/tmp/video.mp4',
+                    probeResult: probe,
+                });
+                return new PreviewService(sessionService, makeFfmpegService());
+            }
+
+            it('copies the small rung when it lines up with the first track', async () => {
+                service = ladderService([0, 0]);
+                await service.init('s1');
+                const master = service.getPlaylist('s1', 'tok')!;
+                expect(master.match(/RESOLUTION=(\d+x\d+)/g)).toEqual([
+                    'RESOLUTION=640x360',
+                ]);
+            });
+
+            it('previews the first track rather than one that does not', async () => {
+                // The 640x360 rung is shorter: previewed, the preview would end
+                // with it, and the rest of the video could not be cut.
+                service = ladderService([0, 1]);
+                await service.init('s1');
+                const renditions = (service as any).states.get('s1')
+                    .renditions as { videoIndex: number }[];
+                expect(renditions.length).toBeGreaterThan(0);
+                for (const r of renditions) {
+                    expect(r).toMatchObject({ videoIndex: 0 });
+                }
+            });
+        });
+
+        /**
          * The trim player is where the user first sees the shape of their
          * source, so an anamorphic one is transcoded rather than copied: a
          * copied preview carries the source's own sample aspect ratio and comes
@@ -1989,6 +2053,52 @@ describe('PreviewService', () => {
             mockWriteFile.mockResolvedValue(undefined);
             return svc;
         }
+
+        it('decodes a rotated source in software and never copies it', async () => {
+            // An iPhone portrait H.264 video: copyable but for the turn.
+            const probe = makeProbe({
+                duration: 12,
+                videoTracks: [
+                    {
+                        index: 0,
+                        codec: 'h264',
+                        pixFmt: 'yuv420p',
+                        width: 1280,
+                        height: 720,
+                        displayWidth: 720,
+                        displayHeight: 1280,
+                        rotation: 90,
+                        bitrateKbps: 5000,
+                        frameRate: 30,
+                    },
+                ],
+            });
+            const svc = new PreviewService(
+                makeSessionService({
+                    filePath: '/tmp/phone.mov',
+                    probeResult: probe,
+                }),
+                makeFfmpegService('nvidia')
+            );
+            await svc.init('s1');
+            const state = (svc as any).states.get('s1');
+            expect(state.renditions[0].canCopy).toBe(false);
+            expect(state.softwareDecode).toBe(true);
+
+            mockExecFile.mockReset();
+            mockExistsSync.mockReset();
+            mockExistsSync.mockReturnValueOnce(false).mockReturnValue(true);
+            mockStat.mockResolvedValue({ size: 2048 });
+            setupExecFile(() => ({ stdout: '', stderr: '' }));
+            mockCreateReadStream.mockReturnValue({ pipe: vi.fn() });
+            await svc.getSegmentStream('s1', 0, 0);
+
+            const args = mockExecFile.mock.calls[0][1] as string[];
+            // The decode turns the picture; one kept on the device would not.
+            expect(args).not.toContain('-hwaccel');
+            expect(args).toContain('h264_nvenc');
+            expect(args[args.indexOf('-vf') + 1]).toMatch(/^scale=/);
+        });
 
         it('should use h264_nvenc and scale_cuda for nvidia mode', async () => {
             const svc = await initHevcService('nvidia');

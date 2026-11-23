@@ -122,6 +122,23 @@
     .ecf-seg-ctrl { @apply ml-auto inline-flex items-center gap-1.5; }
     .ecf-seg-lbl { @apply text-xs text-slate-400 dark:text-slate-500; }
 
+    /* EncodeConfigForm — ladder mode switch (copy / re-encode) */
+    .ecf-seg {
+        @apply inline-flex overflow-hidden rounded-lg border border-slate-300 dark:border-slate-700/70;
+    }
+    .ecf-seg-btn {
+        @apply cursor-pointer border-0 bg-white px-3 py-[0.3125rem] text-xs font-medium text-slate-600 transition-colors
+            enabled:hover:bg-slate-100 enabled:hover:text-slate-900
+            disabled:cursor-not-allowed disabled:opacity-40
+            dark:bg-slate-900/55 dark:text-slate-400
+            dark:enabled:hover:bg-slate-800/80 dark:enabled:hover:text-slate-200;
+    }
+    .ecf-seg-btn + .ecf-seg-btn { @apply border-l border-slate-300 dark:border-slate-700/70; }
+    .ecf-seg-btn--on,
+    .ecf-seg-btn--on:enabled:hover {
+        @apply bg-slate-900 text-white dark:bg-slate-200 dark:text-slate-900;
+    }
+
     /* EncodeConfigForm — collapsible panels (detect + ladder) */
     .ecf-detect,
     .ecf-panel {
@@ -173,6 +190,7 @@
     /* EncodeConfigForm — ladder stack (gap matches ecf-root space-y-6) */
     .ecf-ladder-stack { @apply flex flex-col gap-6; }
     .ecf-box-hint { @apply text-[0.6875rem] m-0 text-slate-400 dark:text-slate-600; }
+    .ecf-box-hint--warn { @apply text-amber-700 dark:text-amber-400; }
 
     /* EncodeConfigForm — ladder table */
     .ecf-lt { @apply w-full text-[0.8125rem]; }
@@ -280,6 +298,7 @@
     .ecf-sr-only { @apply sr-only; }
     .ecf-stack { @apply flex flex-col gap-3; }
     .ecf-hint { @apply -mt-0.5 mb-2 text-xs leading-snug text-slate-500; }
+    .ecf-hint--warn { @apply text-amber-700 dark:text-amber-400; }
     .ecf-em { @apply font-semibold text-slate-800 dark:text-slate-100; }
 
     /* Info panel */
@@ -296,6 +315,8 @@
     .ecf-tr { @apply border-b border-slate-200/90 dark:border-slate-700/50; }
     .ecf-td { @apply px-2 py-1; }
     .ecf-tr--excluded > .ecf-td:not(.ecf-td-include) { @apply opacity-45; }
+    /* A further quality of the angle above: indented under the track naming it. */
+    .ecf-tr--member > .ecf-td:nth-child(2) { @apply pl-5; }
     .ecf-th-include,
     .ecf-td-include { @apply w-px text-center; }
 

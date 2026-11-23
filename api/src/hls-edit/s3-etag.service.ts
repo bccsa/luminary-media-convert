@@ -201,28 +201,47 @@ export class S3EtagService {
 
     /**
      * PUT only when nothing is stored at `key` yet (`If-None-Match: *`).
-     * Resolves false, writing nothing, when an object is already there.
+     * Resolves to the new object's ETag, or undefined, writing nothing, when
+     * an object is already there.
      */
     async putObjectIfAbsent(
         config: S3ConfigDto,
         key: string,
         body: Buffer | string,
-        contentType: string
-    ): Promise<boolean> {
+        contentType: string,
+        options: PutOptions = {}
+    ): Promise<string | undefined> {
         const client = this.createClient(config);
         try {
-            await client.send(
+            const resp = await client.send(
                 new PutObjectCommand({
                     Bucket: config.bucket,
                     Key: key,
                     Body: body,
                     ContentType: contentType,
                     IfNoneMatch: '*',
+                    ...(options.cacheControl
+                        ? { CacheControl: options.cacheControl }
+                        : {}),
                 })
+            );
+            return stripQuotes(resp.ETag ?? '');
+        } catch (err) {
+            if (isPreconditionFailed(err)) return undefined;
+            throw err;
+        }
+    }
+
+    /** Whether anything is stored at `key`. */
+    async objectExists(config: S3ConfigDto, key: string): Promise<boolean> {
+        const client = this.createClient(config);
+        try {
+            await client.send(
+                new HeadObjectCommand({ Bucket: config.bucket, Key: key })
             );
             return true;
         } catch (err) {
-            if (isPreconditionFailed(err)) return false;
+            if (isNotFound(err)) return false;
             throw err;
         }
     }
@@ -253,7 +272,21 @@ function isPreconditionFailed(err: unknown): boolean {
     return (
         e.name === 'PreconditionFailed' ||
         e.Code === 'PreconditionFailed' ||
-        e.$metadata?.httpStatusCode === 412
+        e.$metadata?.httpStatusCode === 412 ||
+        // AWS answers two conditional writes racing for the same key with 409
+        // rather than 412: the loser of the race lost the condition all the same.
+        e.name === 'ConditionalRequestConflict' ||
+        e.Code === 'ConditionalRequestConflict'
+    );
+}
+
+function isNotFound(err: unknown): boolean {
+    if (!err || typeof err !== 'object') return false;
+    const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };
+    return (
+        e.name === 'NotFound' ||
+        e.name === 'NoSuchKey' ||
+        e.$metadata?.httpStatusCode === 404
     );
 }
 

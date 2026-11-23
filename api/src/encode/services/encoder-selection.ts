@@ -307,8 +307,9 @@ export function previewVideoArgs(
     useGpu: boolean,
     scaleFilter?: string,
     /**
-     * The frames come from a software decode. Only VideoToolbox cares: its
-     * encoder takes software frames, but `scale_vt` refuses them.
+     * The frames come from a software decode. The hardware encoders take
+     * software frames, but the hardware scalers take only frames on the
+     * device, so these are scaled with plain `scale`.
      */
     softwareFrames = false
 ): string[] {
@@ -322,7 +323,12 @@ export function previewVideoArgs(
     // costs nothing on a hardware surface — and it goes after the scaler, since
     // a scale filter derives its output link's ratio from its input.
     const scale = (expr: string) =>
-        scaleFilter ? ['-vf', `${expr},setsar=1`] : [];
+        scaleFilter
+            ? [
+                  '-vf',
+                  `${softwareFrames ? `scale=${scaleFilter}` : expr},setsar=1`,
+              ]
+            : [];
     if (!useGpu) mode = 'cpu';
 
     switch (mode) {
@@ -371,11 +377,9 @@ export function previewVideoArgs(
                 // the input's *storage* ratio, so `scale_vt=w=854:h=-2` on a
                 // 720x576 source gives 683, not 480.
                 ...scale(
-                    softwareFrames
-                        ? `scale=${scaleFilter}`
-                        : `scale_vt=w=${(scaleFilter ?? '').split(':')[0]}:h=${
-                              (scaleFilter ?? '').split(':')[1]
-                          }`
+                    `scale_vt=w=${(scaleFilter ?? '').split(':')[0]}:h=${
+                        (scaleFilter ?? '').split(':')[1]
+                    }`
                 ),
             ];
         default:
