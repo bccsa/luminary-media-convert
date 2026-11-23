@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import type { CreateSessionDto } from '../dto/create-session.dto.js';
 import {
+    ADD_ANGLE_CHUNK_CAP_BYTES,
+    addAnglePipelineConfig,
     angleCodecs,
     angleRenditionDir,
     buildAddAngleArgs,
@@ -115,5 +118,49 @@ describe('angleCodecs', () => {
             'avc1.64001f,mp4a.40.2'
         );
         expect(angleCodecs('avc1.64001f')).toBe('avc1.64001f');
+    });
+});
+
+describe('addAnglePipelineConfig', () => {
+    // Only the block length is read; the rest of the session body is irrelevant here.
+    const sessionWith = (
+        config: Pick<CreateSessionDto, 'byteRangeBlockSeconds'>
+    ) => ({ config: config as CreateSessionDto });
+
+    const run = {
+        outputDir: '/work/s/add-angle-ab',
+        s3Config: { bucket: 'media' } as never,
+        s3PathPrefix: 'post-1',
+        byteRange: true,
+        durationSec: 3600,
+        segmentDurationSec: 6,
+        token: 'ab',
+        renditions: plan().renditions,
+    };
+
+    it("packs the angle with the session's block length", () => {
+        const config = addAnglePipelineConfig(
+            sessionWith({ byteRangeBlockSeconds: 120 }),
+            run
+        );
+        expect(config.byteRangeBlockSeconds).toBe(120);
+    });
+
+    it('packs in arrival order when the session has no block length', () => {
+        const config = addAnglePipelineConfig(sessionWith({}), run);
+        expect(config.byteRangeBlockSeconds).toBeUndefined();
+    });
+
+    it('puts every rendition in one video chain of its own', () => {
+        const config = addAnglePipelineConfig(sessionWith({}), run);
+        expect(config.streamChains).toEqual({
+            stream_addab_0_Pulpit_1080p: 'vab',
+            stream_addab_1_Pulpit_720p: 'vab',
+        });
+        expect(config.byteRangeMaxFileSizeBytes).toBe(
+            ADD_ANGLE_CHUNK_CAP_BYTES
+        );
+        expect(config.audioByteRangeMaxFileSizeBytes).toBeUndefined();
+        expect(config.estimatedTotalSegments).toBe(600 * 2);
     });
 });

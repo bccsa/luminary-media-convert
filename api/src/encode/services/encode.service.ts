@@ -407,6 +407,7 @@ export class EncodeService implements OnModuleInit {
                         (session.config.audioByteRangeMaxFileSizeMB ?? 50) *
                         1024 *
                         1024,
+                    byteRangeBlockSeconds: session.config.byteRangeBlockSeconds,
                     segmentDurationSeconds: segDur,
                     estimatedTotalSegments,
                     attempt: thisRun.attempt,
@@ -468,7 +469,6 @@ export class EncodeService implements OnModuleInit {
                         });
                     },
                 });
-
 
             /**
              * Name the post-drain step the session is on.
@@ -629,6 +629,13 @@ export class EncodeService implements OnModuleInit {
             pipeline.start();
 
             if (!encodeResult) {
+                // From the config that runs, not the session's: a quick cut's
+                // fallback re-encodes its copy streams and can split into
+                // waves where the session's config would not.
+                const waves =
+                    encodeConfig.type === 'video'
+                        ? this.ffmpegService.waveLayout(encodeConfig)
+                        : [];
                 // Run FFmpeg — pipeline polls for segments in the background
                 encodeResult = await this.ffmpegService.encode({
                     sessionId,
@@ -647,10 +654,20 @@ export class EncodeService implements OnModuleInit {
                     ...(thisRun.waveResume
                         ? { waveResume: thisRun.waveResume }
                         : {}),
-                    ...(thisRun.layout && thisRun.layout.length > 1
+                    ...(waves.length > 1
                         ? {
-                              onWaveDone: (index: number) =>
-                                  this.keepWave(thisRun, outputDir, index),
+                              onWaveDone: async (index: number) => {
+                                  const wave = waves[index]!;
+                                  await pipeline?.finishStreams([
+                                      ...wave.videoStreams,
+                                      ...wave.audioStreams,
+                                  ]);
+                                  await this.keepWave(
+                                      thisRun,
+                                      outputDir,
+                                      index
+                                  );
+                              },
                           }
                         : {}),
                 });
@@ -1085,6 +1102,10 @@ export class EncodeService implements OnModuleInit {
                             session.config.byteRangeMaxFileSizeMB,
                         audioByteRangeMaxFileSizeMB:
                             session.config.audioByteRangeMaxFileSizeMB,
+                        // Left out for arrival order, 0 included, so those
+                        // runs still match the records of earlier ones.
+                        byteRangeBlockSeconds:
+                            session.config.byteRangeBlockSeconds || undefined,
                         encryption: session.config.encryption ?? null,
                     }),
                     keyFingerprint: encryptionKey
@@ -1353,27 +1374,33 @@ export class EncodeService implements OnModuleInit {
             );
         let locked: Promise<void>;
         try {
-            locked = this.masterRevisions.withVideoLock(session.edit.masterKey, async () => {
-                const now = this.sessionService.get(sessionId);
-                if (!now?.edit) return;
-                const late = Object.fromEntries(
-                    Object.entries(now.chapterFiles ?? {}).filter(
-                        ([lang, uri]) => injected[lang] !== uri
-                    )
-                );
-                if (Object.keys(late).length === 0) return;
-                const written = await this.hlsEditService.publishChapters(
-                    now.config.s3,
-                    now.edit.masterKey,
-                    late,
-                    now.encryptionKeyHex
-                );
-                this.sessionService.setMasterRevision(sessionId, written.masterKey);
-                this.sessionService.setChapterFilesInjected(sessionId, {
-                    ...injected,
-                    ...late,
-                });
-            });
+            locked = this.masterRevisions.withVideoLock(
+                session.edit.masterKey,
+                async () => {
+                    const now = this.sessionService.get(sessionId);
+                    if (!now?.edit) return;
+                    const late = Object.fromEntries(
+                        Object.entries(now.chapterFiles ?? {}).filter(
+                            ([lang, uri]) => injected[lang] !== uri
+                        )
+                    );
+                    if (Object.keys(late).length === 0) return;
+                    const written = await this.hlsEditService.publishChapters(
+                        now.config.s3,
+                        now.edit.masterKey,
+                        late,
+                        now.encryptionKeyHex
+                    );
+                    this.sessionService.setMasterRevision(
+                        sessionId,
+                        written.masterKey
+                    );
+                    this.sessionService.setChapterFilesInjected(sessionId, {
+                        ...injected,
+                        ...late,
+                    });
+                }
+            );
         } catch (err) {
             warn(err as Error);
             return;

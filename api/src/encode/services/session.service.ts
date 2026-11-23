@@ -953,6 +953,18 @@ export class SessionService implements OnModuleInit {
         this.emitEvent(session);
     }
 
+    /**
+     * The block length a track or angle added from now on is packed with: the
+     * CMS's setting may have changed since the session was opened.
+     */
+    setByteRangeBlockSeconds(id: string, seconds: number | undefined): void {
+        const session = this.sessions.get(id);
+        if (session && session.config.byteRangeBlockSeconds !== seconds) {
+            session.config.byteRangeBlockSeconds = seconds;
+            this.persist(session);
+        }
+    }
+
     /** The CMS confirmed it has stored `hlsUrl`. */
     setAckedHlsUrl(id: string, hlsUrl: string): void {
         const session = this.sessions.get(id);

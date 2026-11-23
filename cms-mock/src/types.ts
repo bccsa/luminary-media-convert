@@ -24,6 +24,8 @@ export interface SessionForm {
     byteRange: boolean;
     byteRangeMaxFileSizeMB: number | null;
     audioByteRangeMaxFileSizeMB: number | null;
+    /** Empty (null) leaves it out, which the encoder reads as arrival order. */
+    byteRangeBlockSeconds: number | null;
     segmentDuration: number | null;
     /** 'encode' a new file for the post, or 'edit' the video it already has. */
     mode: 'encode' | 'edit';

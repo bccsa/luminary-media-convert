@@ -366,6 +366,7 @@ describe('CmsController — the session it builds', () => {
                 byteRange: false,
                 byteRangeMaxFileSizeMB: 250,
                 audioByteRangeMaxFileSizeMB: 80,
+                byteRangeBlockSeconds: 60,
                 thumbnails: false,
             } as never)
         );
@@ -377,6 +378,7 @@ describe('CmsController — the session it builds', () => {
         // every audio rendition and is fetched by every viewer, audio-only ones
         // included, so its chunks are meant to stay small.
         expect(session.config.audioByteRangeMaxFileSizeMB).toBe(80);
+        expect(session.config.byteRangeBlockSeconds).toBe(60);
         expect(session.config.thumbnails).toBe(false);
     });
 });
@@ -534,6 +536,49 @@ describe("CmsController — an edit session on the post's existing video", () =>
         expect(session.thumbnailsVtt).toBeUndefined();
     });
 
+    it('keeps the block length for the tracks and angles it adds', async () => {
+        const { sessionId } = await buildEditing().createSession(
+            editDto({ byteRangeBlockSeconds: 30 }),
+            req()
+        );
+        expect(sessions.get(sessionId)!.config.byteRangeBlockSeconds).toBe(30);
+    });
+
+    it('packs in arrival order when the CMS sends no block length', async () => {
+        const { sessionId } = await buildEditing().createSession(
+            editDto(),
+            req()
+        );
+        expect(
+            sessions.get(sessionId)!.config.byteRangeBlockSeconds
+        ).toBeUndefined();
+    });
+
+    it('takes the block length a second click sends, for what is added after it', async () => {
+        const controller = buildEditing();
+        const first = await controller.createSession(
+            editDto({ byteRangeBlockSeconds: 30 }),
+            req()
+        );
+        const again = await controller.createSession(
+            editDto({ byteRangeBlockSeconds: 120 }),
+            req()
+        );
+        expect(again).toMatchObject({
+            sessionId: first.sessionId,
+            reused: true,
+        });
+        expect(
+            sessions.get(first.sessionId)!.config.byteRangeBlockSeconds
+        ).toBe(120);
+
+        // A CMS that stopped sending one has gone back to arrival order.
+        await controller.createSession(editDto(), req());
+        expect(
+            sessions.get(first.sessionId)!.config.byteRangeBlockSeconds
+        ).toBeUndefined();
+    });
+
     it("points at the video's scrub thumbnails when it has them", async () => {
         readEncodedMedia.mockResolvedValue({
             encrypted: false,
@@ -575,12 +620,18 @@ describe("CmsController — an edit session on the post's existing video", () =>
             { latestRevision: vi.fn(async () => latest) } as never
         );
         const first = await controller.createSession(editDto(), req());
-        sessions.setMasterRevision(first.sessionId, 'posts/p1/s1/master_r2.m3u8');
+        sessions.setMasterRevision(
+            first.sessionId,
+            'posts/p1/s1/master_r2.m3u8'
+        );
 
         latest = 'posts/p1/s1/master_r3.m3u8';
         const again = await controller.createSession(editDto(), req());
 
-        expect(again).toMatchObject({ sessionId: first.sessionId, reused: true });
+        expect(again).toMatchObject({
+            sessionId: first.sessionId,
+            reused: true,
+        });
         expect(sessions.get(first.sessionId)!.edit!.masterKey).toBe(
             'posts/p1/s1/master_r3.m3u8'
         );
@@ -640,7 +691,9 @@ describe("CmsController — an edit session on the post's existing video", () =>
 
 describe('CmsController — one session per post in the list', () => {
     const req = () => makeRequest({ origin: 'https://cms.test' });
-    const editing = (readEncodedMedia = vi.fn().mockResolvedValue({ encrypted: false })) =>
+    const editing = (
+        readEncodedMedia = vi.fn().mockResolvedValue({ encrypted: false })
+    ) =>
         new CmsController(
             sessions,
             new OriginRegistry({ allowedOrigins: ['https://cms.test'] }),
@@ -650,7 +703,9 @@ describe('CmsController — one session per post in the list', () => {
     const editDto = () =>
         makeDto({
             mode: 'edit',
-            existingMedia: { hlsUrl: 'https://cdn.example.com/media/posts/p1/s1/master.m3u8' },
+            existingMedia: {
+                hlsUrl: 'https://cdn.example.com/media/posts/p1/s1/master.m3u8',
+            },
         });
 
     it('drops a finished session of the post when it is opened again', async () => {
@@ -676,8 +731,14 @@ describe('CmsController — one session per post in the list', () => {
 
     it("keeps another post's sessions, and another site's", async () => {
         const controller = build(['https://cms.test', 'https://other.test']);
-        const other = await controller.createSession(makeDto({ documentId: 'post_other' }), req());
-        const elsewhere = await controller.createSession(makeDto(), makeRequest({ origin: 'https://other.test' }));
+        const other = await controller.createSession(
+            makeDto({ documentId: 'post_other' }),
+            req()
+        );
+        const elsewhere = await controller.createSession(
+            makeDto(),
+            makeRequest({ origin: 'https://other.test' })
+        );
         sessions.updateStatus(other.sessionId, 'completed');
         sessions.updateStatus(elsewhere.sessionId, 'completed');
 
@@ -704,7 +765,9 @@ describe('CmsController — one session per post in the list', () => {
         sessions.updateStatus(encode.sessionId, 'encoding');
         onSessionCreated.mockClear();
 
-        await expect(controller.createSession(editDto(), req())).rejects.toThrow(/being encoded/);
+        await expect(
+            controller.createSession(editDto(), req())
+        ).rejects.toThrow(/being encoded/);
 
         expect(onSessionCreated).toHaveBeenCalledWith(encode.sessionId);
         expect(sessions.list().map((s) => s.id)).toEqual([encode.sessionId]);
@@ -716,6 +779,11 @@ describe('CmsController — one session per post in the list', () => {
 
         const edit = await controller.createSession(editDto(), req());
 
-        expect(sessions.list().map((s) => s.id).sort()).toEqual([pending.sessionId, edit.sessionId].sort());
+        expect(
+            sessions
+                .list()
+                .map((s) => s.id)
+                .sort()
+        ).toEqual([pending.sessionId, edit.sessionId].sort());
     });
 });

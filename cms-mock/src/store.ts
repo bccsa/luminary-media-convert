@@ -56,6 +56,7 @@ function defaults(): Persisted {
             byteRange: true,
             byteRangeMaxFileSizeMB: 500,
             audioByteRangeMaxFileSizeMB: 50,
+            byteRangeBlockSeconds: null,
             segmentDuration: 6,
             mode: 'encode',
             existingMedia: { hlsUrl: '', hlsKey: '' },
@@ -254,6 +255,10 @@ function createSessionBody(): Record<string, unknown> {
     }
     if (form.audioByteRangeMaxFileSizeMB !== null) {
         body.audioByteRangeMaxFileSizeMB = form.audioByteRangeMaxFileSizeMB;
+    }
+    // An emptied number input holds '' rather than null.
+    if (typeof form.byteRangeBlockSeconds === 'number') {
+        body.byteRangeBlockSeconds = form.byteRangeBlockSeconds;
     }
     if (form.segmentDuration !== null) {
         body.segmentDuration = form.segmentDuration;

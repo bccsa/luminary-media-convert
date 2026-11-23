@@ -41,6 +41,7 @@ import { S3Service } from './s3.service.js';
 import { SegmentPipelineService } from './segment-pipeline.service.js';
 import { SessionService, type Session } from './session.service.js';
 import {
+    addAnglePipelineConfig,
     angleCodecs,
     angleRenditionDir,
     buildAddAngleArgs,
@@ -123,8 +124,6 @@ interface ExistingVideo {
     audioBps: Map<string, number>;
 }
 
-/** Cap for the new angle's byte-range chunks, as the encode's default. */
-const CHUNK_CAP_BYTES = 500 * 1024 * 1024;
 /** FFmpeg's master for the new renditions: read, then removed before anything is uploaded. */
 const FFMPEG_MASTER = 'angle-master.m3u8';
 
@@ -317,28 +316,24 @@ export class AddVideoAngleService {
             const iv = existing.segmentsEncrypted
                 ? this.encryptionService.generateIV()
                 : undefined;
-            const segmentCount = Math.ceil(
-                existing.durationSec / existing.segmentDurationSec
+            const pipeline = this.segmentPipelineService.createPipeline(
+                addAnglePipelineConfig(session, {
+                    outputDir: workDir,
+                    s3Config: s3,
+                    s3PathPrefix: S3Service.canonicalPrefix(folder),
+                    encryptionKey: existing.segmentsEncrypted ? key : undefined,
+                    encryptionIV: iv,
+                    byteRange: existing.byteRange,
+                    durationSec: existing.durationSec,
+                    segmentDurationSec: existing.segmentDurationSec,
+                    token,
+                    renditions: targets,
+                    onProgress: (p) => {
+                        if (job.phase === 'uploading' && p.uploading != null)
+                            job.progress = p.uploading;
+                    },
+                })
             );
-            const pipeline = this.segmentPipelineService.createPipeline({
-                outputDir: workDir,
-                s3Config: s3,
-                s3PathPrefix: S3Service.canonicalPrefix(folder),
-                encryptionKey: existing.segmentsEncrypted ? key : undefined,
-                encryptionIV: iv,
-                byteRange: existing.byteRange,
-                byteRangeMaxFileSizeBytes: CHUNK_CAP_BYTES,
-                // One chain for the angle, as the encoder packs each of its own.
-                streamChains: Object.fromEntries(
-                    targets.map((t) => [t.dir, `v${token}`])
-                ),
-                segmentDurationSeconds: existing.segmentDurationSec,
-                estimatedTotalSegments: segmentCount * targets.length,
-                onProgress: (p) => {
-                    if (job.phase === 'uploading' && p.uploading != null)
-                        job.progress = p.uploading;
-                },
-            });
 
             job.phase = 'encoding';
             pipeline.start();

@@ -65,8 +65,9 @@ export interface PipelineProgress {
  * somebody who watches ten seconds and leaves has not dragged a full-size
  * backhaul across for it. Every chunk after it is grown to the cap instead,
  * because each extra object is a billed storage operation and a permanent cache
- * entry — and intermediate ramp steps buy nothing once ranges pass straight
- * through to the client, which is the property this whole layout assumes.
+ * entry — and intermediate ramp steps buy nothing on an edge that serves each
+ * range as its pull of the object reaches it, which is the property this whole
+ * layout assumes.
  */
 const FIRST_CHUNK_SECONDS = 20;
 
@@ -95,6 +96,14 @@ export interface SegmentPipelineConfig {
     streamChains?: Record<string, string>;
     /** Cap for the audio chain. Defaults to 50 MiB. */
     audioByteRangeMaxFileSizeBytes?: number;
+    /**
+     * Seconds of content per block when packing byte-range chunks. Each block
+     * holds one stream's segments together, then the next stream's, and blocks
+     * follow each other in time order, so a download fetches a stream in a few
+     * long ranges instead of one per segment. 0 or absent packs segments in
+     * arrival order. See `docs/claude/api-architecture.md`.
+     */
+    byteRangeBlockSeconds?: number;
     /** Segment duration the encode was configured with. Defaults to 6. */
     segmentDurationSeconds?: number;
     /** Estimated total segments across all streams (for progress calculation) */
@@ -182,13 +191,26 @@ interface ByteRangeEntry {
 
 const SEGMENT_INDEX_RE = /^segment_(\d+)\./;
 
+/** A segment held back, encrypted and on disk, until its whole block can be written. */
+interface HeldSegment {
+    state: StreamState;
+    stream: string;
+    file: string;
+    path: string;
+    size: number;
+    /** Where it falls in its stream, counted from the stream's first segment. */
+    position: number;
+    durable: DurableSegment;
+}
+
 /**
  * One chunk chain: a run of `<id>_<n>.m4s` files under `media/`, shared by every
  * stream mapped to it.
  *
- * Byte order inside a chunk does not matter — an edge asked for a range pulls
- * the whole object anyway — so segments land in whatever order they arrive and
- * nothing waits for a peer stream to catch up.
+ * In arrival order, segments land as they come and nothing waits for a peer
+ * stream to catch up. In block order a block is written only once every stream
+ * that has started in the chain has passed it or finished, so a slow stream
+ * holds its block back while later ones collect behind it.
  */
 interface ChainState {
     id: string;
@@ -202,10 +224,21 @@ interface ChainState {
     currentChunkSegmentCount: number;
     /** What the open chunk holds, reported durable once it has uploaded. */
     currentChunkSegments: DurableSegment[];
+    /** Block order only: segments waiting for their block, by block number. */
+    heldBlocks: Map<number, HeldSegment[]>;
+    /** Block order only: per started stream, the furthest position it has reached. */
+    reached: Map<string, number>;
 }
 
 interface StreamState {
     processedSegments: Set<string>;
+    /**
+     * Block order only: how many segments this run has held, which is the next
+     * one's position. Not its file index: a quick trim numbers each spliced
+     * part from a stride of its own, and a continue numbers every stream from
+     * its restart index, including audio that is encoded again from time 0.
+     */
+    heldCount: number;
     /**
      * This stream's own view of the chain, keyed by original segment
      * filename — matching into the playlist is exact, never positional.
@@ -254,6 +287,8 @@ export class SegmentPipeline {
     private readonly streamStates = new Map<string, StreamState>();
     private readonly chains = new Map<string, ChainState>();
     private readonly uploadedKeys: string[] = [];
+    /** Block order only: streams whose run of ffmpeg has ended, so no block waits on them. */
+    private readonly finishedStreams = new Set<string>();
 
     private pollTimer: ReturnType<typeof setInterval> | null = null;
     private running = false;
@@ -349,6 +384,11 @@ export class SegmentPipeline {
         // once per stream would enqueue the same object several times over.
         if (this.config.byteRange) {
             for (const chain of this.chains.values()) {
+                // Every stream has finished, so whatever is still held, a
+                // partial last block included, is written now.
+                if (this.blockSegments > 0) {
+                    await this.writeHeldBlocks(chain, true);
+                }
                 await this.finalizeCurrentChunk(chain);
             }
         }
@@ -377,6 +417,31 @@ export class SegmentPipeline {
 
         this.running = false;
         return [...this.uploadedKeys];
+    }
+
+    /**
+     * Told that these streams will write no more segments: a wave of a ladder
+     * in waves has ended. In block order their last, partial block is written
+     * into the open chunk at once, as arrival order would already have done,
+     * so a failure in a later wave salvages it and a continue can skip the
+     * finished wave. Failures land in `error`, as a poll's do.
+     */
+    async finishStreams(streams: string[]): Promise<void> {
+        if (this.blockSegments === 0) return;
+        while (this.polling) {
+            await new Promise((r) => setTimeout(r, 50));
+        }
+        this.polling = true;
+        try {
+            for (const stream of streams) this.finishedStreams.add(stream);
+            // The sweep picks up the wave's last segments, then writes blocks.
+            await this.poll();
+        } catch (err) {
+            this.pipelineError = err as Error;
+            this.logger.error(`Pipeline poll error: ${(err as Error).message}`);
+        } finally {
+            this.polling = false;
+        }
     }
 
     abort(): void {
@@ -447,6 +512,9 @@ export class SegmentPipeline {
      * the chunks closed and waiting, and those still open, now closed, each
      * with the segments in it and the size it must have. A continue can upload
      * them instead of making their segments again.
+     *
+     * Segments still held for their block are in no chunk and are not handed
+     * on; a continue makes them again.
      */
     async salvage(): Promise<SalvagedUpload[]> {
         await Promise.all(this.closing.splice(0));
@@ -514,6 +582,15 @@ export class SegmentPipeline {
             if (this.aborted || this.pipelineError) return;
             await this.processStream(dir);
         }
+
+        // After every stream has been read, not per segment: a quick trim
+        // hands over every segment at once, and writing as each stream was read
+        // would sort the whole chunk by stream.
+        if (this.blockSegments > 0) {
+            for (const chain of this.chains.values()) {
+                await this.writeHeldBlocks(chain, false);
+            }
+        }
     }
 
     private async processStream(streamDirName: string): Promise<void> {
@@ -523,6 +600,7 @@ export class SegmentPipeline {
         if (!state) {
             state = {
                 processedSegments: new Set(),
+                heldCount: 0,
                 byteRangeEntries: [],
                 chain: this.chainFor(streamDirName),
             };
@@ -637,7 +715,9 @@ export class SegmentPipeline {
                 }
             }
 
-            if (this.config.byteRange) {
+            if (this.config.byteRange && this.blockSegments > 0) {
+                await this.holdForBlock(state, filename, segPath, durable);
+            } else if (this.config.byteRange) {
                 await this.appendToByteRangeChunk(
                     state,
                     filename,
@@ -854,6 +934,8 @@ export class SegmentPipeline {
             currentChunkFile: '',
             currentChunkSegmentCount: 0,
             currentChunkSegments: [],
+            heldBlocks: new Map(),
+            reached: new Map(),
         };
         this.chains.set(id, chain);
         return chain;
@@ -891,6 +973,28 @@ export class SegmentPipeline {
         const segSize = segStat.size;
         if (segSize === 0) return;
 
+        await this.rollForSegment(chain, segmentFile, segSize);
+        await this.writeSegment(state, segmentFile, segPath, segSize, durable);
+
+        // And roll chunk 0 on its segment count, which is the only chunk that
+        // closes on anything but the byte cap. Checked after the append so the
+        // segment that reaches the target is inside the chunk rather than
+        // starting the next one.
+        if (
+            chain.currentChunkIndex === 0 &&
+            chain.currentChunkSegmentCount >=
+                this.firstChunkSegmentTarget(chain)
+        ) {
+            await this.finalizeCurrentChunk(chain);
+        }
+    }
+
+    /** Close the open chunk when one more segment of `segSize` would pass the cap. */
+    private async rollForSegment(
+        chain: ChainState,
+        segmentFile: string,
+        segSize: number
+    ): Promise<void> {
         if (segSize > chain.capBytes) {
             // Said out loud because the consequence is silent: the chunk this
             // lands in is larger than the cap, and an object over the edge's
@@ -909,6 +1013,17 @@ export class SegmentPipeline {
         ) {
             await this.finalizeCurrentChunk(chain);
         }
+    }
+
+    /** Append one segment to its chain's open chunk, opening one if none is. */
+    private async writeSegment(
+        state: StreamState,
+        segmentFile: string,
+        segPath: string,
+        segSize: number,
+        durable: DurableSegment
+    ): Promise<void> {
+        const chain = state.chain;
 
         // Ensure we have an open write stream
         if (!chain.currentChunkStream) {
@@ -946,18 +1061,169 @@ export class SegmentPipeline {
 
         // Delete the original segment file (data now in chunk)
         await unlink(segPath).catch(() => {});
+    }
 
-        // And roll chunk 0 on its segment count, which is the only chunk that
-        // closes on anything but the byte cap. Checked after the append so the
-        // segment that reaches the target is inside the chunk rather than
-        // starting the next one.
+    /**
+     * Segments per block, or 0 for arrival order. Block order needs byte
+     * ranges: without them every segment is an object of its own.
+     */
+    private get blockSegments(): number {
+        const seconds = this.config.byteRangeBlockSeconds ?? 0;
+        if (!this.config.byteRange || !(seconds > 0)) return 0;
+        const segmentDuration = this.config.segmentDurationSeconds ?? 6;
+        return Math.max(1, Math.ceil(seconds / segmentDuration));
+    }
+
+    /**
+     * Segments per stream in block 0. Chunk 0 closes after the first block it
+     * takes, which is block 0, so the first chunk holds `FIRST_CHUNK_SECONDS`
+     * of every stream that has started.
+     */
+    private get leadBlockSegments(): number {
+        const segmentDuration = this.config.segmentDurationSeconds ?? 6;
+        return Math.ceil(FIRST_CHUNK_SECONDS / segmentDuration);
+    }
+
+    private blockOf(position: number): number {
+        const lead = this.leadBlockSegments;
+        return position < lead
+            ? 0
+            : 1 + Math.floor((position - lead) / this.blockSegments);
+    }
+
+    private lastPositionIn(block: number): number {
+        const lead = this.leadBlockSegments;
+        return block === 0 ? lead - 1 : lead + block * this.blockSegments - 1;
+    }
+
+    /** Keep an encrypted segment where it is until its block is written. */
+    private async holdForBlock(
+        state: StreamState,
+        segmentFile: string,
+        segPath: string,
+        durable: DurableSegment
+    ): Promise<void> {
+        const size = (await stat(segPath)).size;
+        if (size === 0) return;
+
+        const position = state.heldCount++;
+        const chain = state.chain;
+        const block = this.blockOf(position);
+        let held = chain.heldBlocks.get(block);
+        if (!held) {
+            held = [];
+            chain.heldBlocks.set(block, held);
+        }
+        held.push({
+            state,
+            stream: durable.stream,
+            file: segmentFile,
+            path: segPath,
+            size,
+            position,
+            durable,
+        });
+        chain.reached.set(durable.stream, position);
+    }
+
+    /**
+     * Write a chain's held blocks in time order: each one every started stream
+     * has passed or finished, or with `all`, everything held.
+     *
+     * Only streams that have produced a segment count. A ladder split into
+     * waves starts its later renditions after the first wave has finished, and
+     * a continue restores the streams of a wave it skips without any segments,
+     * so waiting on every mapped stream would hold the whole chain until the
+     * drain. A stream that starts late has its blocks written after the ones
+     * already out.
+     */
+    private async writeHeldBlocks(
+        chain: ChainState,
+        all: boolean
+    ): Promise<void> {
+        const blocks = [...chain.heldBlocks.keys()].sort((a, b) => a - b);
+        for (const block of blocks) {
+            if (this.aborted || this.pipelineError) return;
+            if (!all) {
+                const last = this.lastPositionIn(block);
+                const passed = [...chain.reached].every(
+                    ([stream, reached]) =>
+                        reached >= last || this.finishedStreams.has(stream)
+                );
+                // Reach only grows, so no later block is ready either.
+                if (!passed) return;
+            }
+            const held = chain.heldBlocks.get(block)!;
+            chain.heldBlocks.delete(block);
+            await this.writeBlock(chain, block, held);
+        }
+    }
+
+    /**
+     * One block into the chain: stream by stream in the chain's stream order,
+     * each stream's segments in order.
+     *
+     * A block goes whole into one chunk, so the chunk closes first when the
+     * block would take it past the cap. A block bigger than the cap on its own
+     * is split at segment boundaries over as many chunks as it needs: a chunk
+     * over the cap is never cached at the edge, which costs more than a stream
+     * reaching one block in two ranges.
+     */
+    private async writeBlock(
+        chain: ChainState,
+        block: number,
+        held: HeldSegment[]
+    ): Promise<void> {
+        const order = this.streamOrder(chain);
+        const rank = (stream: string) => order.get(stream) ?? order.size;
+        held.sort(
+            (a, b) =>
+                rank(a.stream) - rank(b.stream) ||
+                a.stream.localeCompare(b.stream) ||
+                a.position - b.position
+        );
+
+        const bytes = held.reduce((sum, s) => sum + s.size, 0);
         if (
-            chain.currentChunkIndex === 0 &&
-            chain.currentChunkSegmentCount >=
-                this.firstChunkSegmentTarget(chain)
+            chain.currentChunkOffset > 0 &&
+            chain.currentChunkOffset + bytes > chain.capBytes
         ) {
             await this.finalizeCurrentChunk(chain);
         }
+        if (bytes > chain.capBytes) {
+            this.logger.warn(
+                `[pipeline] chain ${chain.id}: block ${block} is ${bytes} bytes, ` +
+                    `over the ${chain.capBytes}-byte chunk cap — splitting it across chunks`
+            );
+        }
+
+        for (const segment of held) {
+            if (this.aborted || this.pipelineError) return;
+            // Only ever closes a chunk inside a block bigger than the cap.
+            await this.rollForSegment(chain, segment.file, segment.size);
+            await this.writeSegment(
+                segment.state,
+                segment.file,
+                segment.path,
+                segment.size,
+                segment.durable
+            );
+        }
+
+        // The first block a chain writes is block 0, of only the streams that
+        // have started; a segment count of every mapped stream would let a
+        // ladder in waves run on through the next block.
+        if (chain.currentChunkIndex === 0) {
+            await this.finalizeCurrentChunk(chain);
+        }
+    }
+
+    /** Stream directory → its place in the chain, in the order the encode config lists them. */
+    private streamOrder(chain: ChainState): Map<string, number> {
+        const streams = Object.entries(this.config.streamChains ?? {})
+            .filter(([, id]) => id === chain.id)
+            .map(([stream]) => stream);
+        return new Map(streams.map((stream, i) => [stream, i]));
     }
 
     /**

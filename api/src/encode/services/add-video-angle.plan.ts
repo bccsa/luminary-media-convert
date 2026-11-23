@@ -4,6 +4,14 @@
  * that encodes them.
  */
 import { ladderVideoArgs, type AccelMode } from './encoder-selection.js';
+import type {
+    PipelineProgress,
+    SegmentPipelineConfig,
+} from './segment-pipeline.service.js';
+import type { Session } from './session.service.js';
+
+/** Cap for the new angle's byte-range chunks, as the encode's default. */
+export const ADD_ANGLE_CHUNK_CAP_BYTES = 500 * 1024 * 1024;
 
 /** One size of the existing angle, which the new angle gets a rendition of. */
 export interface AngleRenditionTarget {
@@ -172,4 +180,50 @@ export function angleCodecs(
         .map((c) => c.trim())
         .filter((c) => c && !isVideo(c));
     return [...video, ...others].join(',');
+}
+
+/** What one run of adding an angle knows when it opens its segment pipeline. */
+export interface AnglePipelineRun {
+    outputDir: string;
+    s3Config: SegmentPipelineConfig['s3Config'];
+    s3PathPrefix: string;
+    encryptionKey?: Buffer;
+    encryptionIV?: Buffer;
+    /** Whether the video's own segments are byte ranges into shared chunks. */
+    byteRange: boolean;
+    durationSec: number;
+    segmentDurationSec: number;
+    /** The run's token: its chunks form a chain no other run writes. */
+    token: string;
+    renditions: AngleRenditionTarget[];
+    onProgress?: (progress: PipelineProgress) => void;
+}
+
+/**
+ * The new angle's segment pipeline. Its block length is the session's, which
+ * follows the CMS's current setting, so the new chain is packed as a fresh encode
+ * would pack it.
+ */
+export function addAnglePipelineConfig(
+    session: Pick<Session, 'config'>,
+    run: AnglePipelineRun
+): SegmentPipelineConfig {
+    const segmentCount = Math.ceil(run.durationSec / run.segmentDurationSec);
+    return {
+        outputDir: run.outputDir,
+        s3Config: run.s3Config,
+        s3PathPrefix: run.s3PathPrefix,
+        encryptionKey: run.encryptionKey,
+        encryptionIV: run.encryptionIV,
+        byteRange: run.byteRange,
+        byteRangeMaxFileSizeBytes: ADD_ANGLE_CHUNK_CAP_BYTES,
+        // One chain for the angle, as the encoder packs each of its own.
+        streamChains: Object.fromEntries(
+            run.renditions.map((t) => [t.dir, `v${run.token}`])
+        ),
+        byteRangeBlockSeconds: session.config.byteRangeBlockSeconds,
+        segmentDurationSeconds: run.segmentDurationSec,
+        estimatedTotalSegments: segmentCount * run.renditions.length,
+        onProgress: run.onProgress,
+    };
 }

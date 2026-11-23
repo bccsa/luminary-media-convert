@@ -11,7 +11,7 @@ export class CmsHealthResponseDto {
 
     @ApiProperty({
         description: 'Version of the local encoder.',
-        example: '0.0.1',
+        example: '0.0.2',
     })
     @Expose()
     apiVersion: string;
@@ -51,7 +51,7 @@ export class CmsSessionResponseDto {
 
     @ApiProperty({
         description: 'Version of the local encoder.',
-        example: '0.0.1',
+        example: '0.0.2',
     })
     @Expose()
     apiVersion: string;

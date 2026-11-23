@@ -18,6 +18,33 @@ The bytes fetched are discarded ciphertext. Nothing is decrypted, parsed,
 cached, or handed to the engine — the request exists to make the edge fetch the
 object, not to produce data anybody uses.
 
+## Byte order inside a chunk
+
+Because the edge serves a range once its pull from the origin reaches it, the
+order of bytes inside a chunk decides how long a request into a **cold** chunk
+waits. The encoder packs in one of two orders (`byteRangeBlockSeconds`, see
+`docs/claude/api-architecture.md`):
+
+- **Arrival order** (the default, `0`): segments in the order the encoder
+  found them. During a running encode that is roughly time order across every
+  stream the chunk carries, so the bytes for the playing position arrive early
+  in the pull and a cold chunk plays progressively. When the encoder finds many
+  segments at once, as after a quick trim, they land one stream after another
+  and a cold request can wait for most of the chunk.
+- **Blocks** (`> 0`, up to 600 s): time order between short blocks, each
+  stream's segments together inside a block, a quick trim's included. A cold
+  request can wait for the rest of its own block, in exchange for offline
+  downloads fetching a stream in one range per block. A block's size is its
+  length times the chain's summed bitrate, bounded only by the chunk cap. 30 to
+  60 s is the intended block length; at that length the wait is expected to be
+  tens of megabytes at most, and warming the next chunk early is expected to
+  hide most of it. Both expectations, and the length itself, are pending a
+  cold-start measurement on the CDN.
+
+Warming is the same in both: it works on whole objects, and the schedules below
+come from the playlists' `#EXT-X-BYTERANGE` URLs, not from where in an object a
+segment sits.
+
 ## Where the responsibility splits
 
 | Piece | Owner | Why there |
