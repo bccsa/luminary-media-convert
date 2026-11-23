@@ -44,6 +44,7 @@ function makeMockPipeline(
         drain: vi.fn().mockResolvedValue(keys),
         settle: vi.fn().mockResolvedValue(undefined),
         abort: vi.fn(),
+        finishStreams: vi.fn().mockResolvedValue(undefined),
         uploadRemainingFiles: vi.fn().mockResolvedValue([]),
         get error() {
             return null;
@@ -122,6 +123,7 @@ describe('EncodeService', () => {
             resumeBlocker: vi
                 .fn()
                 .mockReturnValue('not resumable in this test'),
+            waveLayout: vi.fn().mockReturnValue([]),
             videoStreamDirs: vi.fn().mockReturnValue([]),
             computeAlignmentOffset: vi.fn().mockResolvedValue(0),
             buildStreamChainMap: vi.fn().mockReturnValue({
@@ -385,6 +387,20 @@ describe('EncodeService', () => {
             expect(
                 configPassedToPipeline().audioByteRangeMaxFileSizeBytes
             ).toBe(120 * 1024 * 1024);
+        });
+
+        it('packs in arrival order unless a block length is set', async () => {
+            await run();
+
+            expect(
+                configPassedToPipeline().byteRangeBlockSeconds
+            ).toBeUndefined();
+        });
+
+        it('carries a caller-set block length through', async () => {
+            await run({ byteRangeBlockSeconds: 60 });
+
+            expect(configPassedToPipeline().byteRangeBlockSeconds).toBe(60);
         });
     });
 
@@ -1435,6 +1451,7 @@ describe('EncodeService — encrypting the text assets last', () => {
             resumeBlocker: vi
                 .fn()
                 .mockReturnValue('not resumable in this test'),
+            waveLayout: vi.fn().mockReturnValue([]),
             videoStreamDirs: vi.fn().mockReturnValue([]),
             computeAlignmentOffset: vi.fn().mockResolvedValue(0),
             buildStreamChainMap: vi.fn().mockReturnValue({}),
@@ -1615,6 +1632,7 @@ describe('EncodeService — naming the finalize phases', () => {
             resumeBlocker: vi
                 .fn()
                 .mockReturnValue('not resumable in this test'),
+            waveLayout: vi.fn().mockReturnValue([]),
             videoStreamDirs: vi.fn().mockReturnValue([]),
             computeAlignmentOffset: vi.fn().mockResolvedValue(0),
             buildStreamChainMap: vi.fn().mockReturnValue({}),
@@ -1819,7 +1837,9 @@ describe('EncodeService — naming the finalize phases', () => {
         it('stays off an unencrypted session', async () => {
             await run(makeConfig());
 
-            expect(emissions.every((p) => p.encrypting === undefined)).toBe(true);
+            expect(emissions.every((p) => p.encrypting === undefined)).toBe(
+                true
+            );
         });
     });
 });
@@ -1892,6 +1912,7 @@ describe('EncodeService — the delivered waveform sidecar', () => {
             resumeBlocker: vi
                 .fn()
                 .mockReturnValue('not resumable in this test'),
+            waveLayout: vi.fn().mockReturnValue([]),
             videoStreamDirs: vi.fn().mockReturnValue([]),
             computeAlignmentOffset: vi.fn().mockResolvedValue(0),
             buildStreamChainMap: vi.fn().mockReturnValue({}),
@@ -2057,6 +2078,8 @@ describe('EncodeService — continuing a ladder in waves', () => {
     let sessionService: SessionService;
     let service: EncodeService;
     let pipelineConfig: any;
+    let pipelines: SegmentPipeline[];
+    let ffmpegService: any;
     const encodes: any[] = [];
 
     const waves = [
@@ -2127,9 +2150,10 @@ describe('EncodeService — continuing a ladder in waves', () => {
         testWorkDir = mkdtempSync(join(tmpdir(), 'luminary-waves-'));
         process.env.WORK_DIR = testWorkDir;
         encodes.length = 0;
+        pipelines = [];
         sessionService = new SessionService({ emit: () => {} } as any);
 
-        const ffmpegService = {
+        ffmpegService = {
             encode: vi.fn(async (opts: any) => {
                 encodes.push({
                     ...opts,
@@ -2200,7 +2224,9 @@ describe('EncodeService — continuing a ladder in waves', () => {
             {
                 createPipeline: vi.fn((config: any) => {
                     pipelineConfig = config;
-                    return makeMockPipeline();
+                    const pipeline = makeMockPipeline();
+                    pipelines.push(pipeline);
+                    return pipeline;
                 }),
             } as any
         );
@@ -2209,6 +2235,126 @@ describe('EncodeService — continuing a ladder in waves', () => {
     afterEach(() => {
         rmSync(testWorkDir, { recursive: true, force: true });
         delete process.env.WORK_DIR;
+    });
+
+    it("tells the pipeline when a wave's streams have finished, so it packs their last block", async () => {
+        const session = sessionService.create(makeConfig());
+        const source = join(testWorkDir, 'source.mp4');
+        writeFileSync(source, 'video');
+        sessionService.setFilePath(session.id, source);
+        sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+
+        await service.processSession(session.id);
+
+        expect(pipelines[0].finishStreams).toHaveBeenCalledWith([
+            'stream_720p',
+            'stream_a',
+        ]);
+    });
+
+    it('tells the pipeline of each wave of an encode that cannot be continued', async () => {
+        ffmpegService.resumeBlocker.mockReturnValue(
+            'an encode with copied streams starts over'
+        );
+        ffmpegService.encode.mockImplementationOnce(async (opts: any) => {
+            await opts.onWaveDone(0);
+            await opts.onWaveDone(1);
+            return {
+                outputDir: opts.outputDir,
+                masterPlaylist: 'master.m3u8',
+                segmentFormat: 'fmp4',
+                alignmentOffset: 0,
+            };
+        });
+        const session = sessionService.create(makeConfig());
+        const source = join(testWorkDir, 'source.mp4');
+        writeFileSync(source, 'video');
+        sessionService.setFilePath(session.id, source);
+        sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+
+        await service.processSession(session.id);
+
+        expect(vi.mocked(pipelines[0].finishStreams).mock.calls).toEqual([
+            [['stream_720p', 'stream_a']],
+            [['stream_240p']],
+        ]);
+    });
+
+    it("takes the waves from a quick cut's re-encode, not from the session's config", async () => {
+        const quickCut: EncodeConfigDto = {
+            ...makeEncodeConfig(),
+            trimSegments: [{ inSec: 0, outSec: 10 }],
+            videoRenditions: makeEncodeConfig().videoRenditions!.map((r) => ({
+                ...r,
+                copyStream: true,
+            })),
+            audioGroups: makeEncodeConfig().audioGroups!.map((g) => ({
+                ...g,
+                copyStream: true,
+            })),
+        };
+        // Copy renditions open no encoder session; re-encoded, they need waves.
+        ffmpegService.waveLayout.mockImplementation(
+            (config: EncodeConfigDto) =>
+                config.videoRenditions!.some((r) => r.copyStream)
+                    ? [waves[0]]
+                    : waves
+        );
+        ffmpegService.encode.mockImplementationOnce(async (opts: any) => {
+            await opts.onWaveDone(0);
+            return {
+                outputDir: opts.outputDir,
+                masterPlaylist: 'master.m3u8',
+                segmentFormat: 'fmp4',
+                alignmentOffset: 0,
+            };
+        });
+        vi.spyOn(service as any, 'buildQuickTrimPlan').mockResolvedValue({
+            reason: 'no keyframe index',
+        });
+        const session = sessionService.create(makeConfig());
+        const source = join(testWorkDir, 'source.mp4');
+        writeFileSync(source, 'video');
+        sessionService.setFilePath(session.id, source);
+        sessionService.setEncodeConfig(session.id, quickCut);
+
+        await service.processSession(session.id);
+
+        const run = ffmpegService.encode.mock.calls[0][0];
+        expect(
+            run.encodeConfig.videoRenditions.every(
+                (r: { copyStream: boolean }) => !r.copyStream
+            )
+        ).toBe(true);
+        expect(pipelines[0].finishStreams).toHaveBeenCalledWith([
+            'stream_720p',
+            'stream_a',
+        ]);
+    });
+
+    it('puts a block length in the resume config hash, but not 0', async () => {
+        const hashFor = async (byteRangeBlockSeconds?: number) => {
+            const session = sessionService.create({
+                ...makeConfig(),
+                ...(byteRangeBlockSeconds !== undefined
+                    ? { byteRangeBlockSeconds }
+                    : {}),
+            });
+            const source = join(testWorkDir, 'source.mp4');
+            writeFileSync(source, 'video');
+            sessionService.setFilePath(session.id, source);
+            sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+            const run = await (service as any).prepareRun(
+                sessionService.get(session.id),
+                undefined
+            );
+            return (await run.store.readState()).configHash as string;
+        };
+
+        const unset = await hashFor(undefined);
+        expect(unset).toMatch(/^[0-9a-f]{64}$/);
+        expect(await hashFor(0)).toBe(unset);
+        expect(await hashFor(60)).not.toBe(unset);
     });
 
     it('has the continue offer ready when the session is reported failed', async () => {

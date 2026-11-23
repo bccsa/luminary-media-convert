@@ -144,6 +144,16 @@ const openedNewer = computed(
                 />
             </label>
             <label class="field">
+                <span>byteRangeBlockSeconds</span>
+                <input
+                    v-model.number="form.byteRangeBlockSeconds"
+                    type="number"
+                    min="0"
+                    max="600"
+                    placeholder="off (arrival order)"
+                />
+            </label>
+            <label class="field">
                 <span>segmentDuration (s)</span>
                 <input v-model.number="form.segmentDuration" type="number" />
             </label>

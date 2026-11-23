@@ -1,4 +1,5 @@
 import {
+    existsSync,
     mkdtempSync,
     writeFileSync,
     mkdirSync,
@@ -8,10 +9,13 @@ import {
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { Logger } from '@nestjs/common';
+import { readBaseMediaDecodeTime } from './fmp4-timeline.js';
 import {
     SegmentPipeline,
+    type DurableSegment,
     type SegmentPipelineConfig,
 } from './segment-pipeline.service.js';
+import { resumePlan, resumePoint, type ResumeRecord } from './encode-resume.js';
 
 function makePipeline(
     outputDir: string,
@@ -51,11 +55,12 @@ function makePipeline(
  * under `media/`, rather than each stream packing a chain inside its own
  * directory.
  *
- * The reason is the edge, not the encoder: the CDN class this targets forwards
- * a requested range to the client immediately and backhauls the whole object
- * behind it, so one chunk pull warms every rendition of an angle and an ABR
- * step-up never lands on a cold object. That also makes byte order inside a
- * chunk irrelevant, which is why segments may interleave freely below.
+ * The reason is the edge, not the encoder: the CDN class this targets serves a
+ * requested range once its pull of the whole object reaches it, so one chunk
+ * pull warms every rendition of an angle and an ABR step-up never lands on a
+ * cold object. Byte order inside a chunk only decides how long a request into
+ * a cold chunk waits, which is why arrival order may interleave streams freely
+ * and block order groups them inside short blocks.
  */
 describe('SegmentPipeline — shared chunk chains', () => {
     let tmpDir: string;
@@ -841,6 +846,1312 @@ describe('SegmentPipeline — shared chunk chains', () => {
             '#EXT-X-ENDLIST',
             '',
         ]);
+    });
+
+    /**
+     * Block order: time order between blocks, each stream's segments together
+     * inside a block, so a download reaches a stream in one range per block.
+     *
+     * Ten-second segments throughout unless a test says otherwise, so block 0
+     * (the first chunk's ~20 s) is two segments per stream, and a 20 s block is
+     * two more.
+     */
+    describe('grouped by stream in blocks', () => {
+        /** Every seeded segment's bytes, keyed `<stream>/<file>`, to find it again in a chunk. */
+        let originals: Map<string, Buffer>;
+        /** Each stream's segment files in playlist order. */
+        let seeded: Map<string, string[]>;
+
+        beforeEach(() => {
+            originals = new Map();
+            seeded = new Map();
+        });
+
+        const name = (i: number) => `segment_${String(i).padStart(5, '0')}.m4s`;
+
+        /** One segment, filled with a tag naming it, so a misplaced range shows. */
+        function writeTagged(stream: string, file: string, size: number): void {
+            const bytes = Buffer.alloc(size, `${stream}/${file}|`);
+            mkdirSync(join(tmpDir, stream), { recursive: true });
+            writeFileSync(join(tmpDir, stream, file), bytes);
+            originals.set(`${stream}/${file}`, bytes);
+        }
+
+        function writePlaylist(stream: string, files: string[]): void {
+            mkdirSync(join(tmpDir, stream), { recursive: true });
+            const lines = [
+                '#EXTM3U',
+                '#EXT-X-TARGETDURATION:10',
+                '#EXT-X-MAP:URI="init.mp4"',
+                ...files.flatMap((f) => ['#EXTINF:10.000000,', f]),
+                '#EXT-X-ENDLIST',
+                '',
+            ];
+            writeFileSync(
+                join(tmpDir, stream, 'playlist.m3u8'),
+                lines.join('\n')
+            );
+            seeded.set(stream, files);
+        }
+
+        /**
+         * A stream whose playlist lists `sizes.length` segments, of which the
+         * first `present` are on disk; the rest are written later with `more`.
+         */
+        function seedTagged(
+            stream: string,
+            sizes: number[],
+            opts?: { present?: number; files?: string[] }
+        ): { more: (upTo: number) => void } {
+            const files = opts?.files ?? sizes.map((_, i) => name(i));
+            writePlaylist(stream, files);
+            let written = 0;
+            const more = (upTo: number) => {
+                for (; written < upTo; written++) {
+                    writeTagged(stream, files[written], sizes[written]);
+                }
+            };
+            more(opts?.present ?? sizes.length);
+            return { more };
+        }
+
+        const sizesOf = (count: number, base = 40) =>
+            Array.from({ length: count }, (_, i) => base + i);
+
+        interface Placed {
+            stream: string;
+            file: string;
+            /** Its place in the stream's playlist. */
+            position: number;
+            chunk: string;
+            offset: number;
+            length: number;
+        }
+
+        /** Where each stream's playlist says its segments are. */
+        function placements(): Placed[] {
+            const out: Placed[] = [];
+            for (const [stream, files] of seeded) {
+                const lines = readPlaylist(stream);
+                const ranges: Omit<Placed, 'stream' | 'file' | 'position'>[] =
+                    [];
+                lines.forEach((line, i) => {
+                    const m = /^#EXT-X-BYTERANGE:(\d+)@(\d+)$/.exec(line);
+                    if (!m) return;
+                    const uri = lines[i + 1];
+                    expect(uri).toMatch(/^\.\.\/media\//);
+                    ranges.push({
+                        chunk: uri.slice('../media/'.length),
+                        length: Number(m[1]),
+                        offset: Number(m[2]),
+                    });
+                });
+                // Every segment the playlist lists is packed, and only once.
+                expect(ranges).toHaveLength(files.length);
+                ranges.forEach((r, position) =>
+                    out.push({ stream, file: files[position], position, ...r })
+                );
+            }
+            return out;
+        }
+
+        const chunkNumber = (chunk: string) =>
+            Number(/_(\d+)\.m4s$/.exec(chunk)![1]);
+
+        const chainOf = (chunk: string) => /^(.+)_\d+\.m4s$/.exec(chunk)![1];
+
+        /**
+         * What every block layout must hold: each range is the segment it
+         * names, the ranges of a chunk tile it with no gap or overlap, each
+         * chain's blocks follow in time order, and inside a block each stream
+         * is one run of its own segments in order. Returns the segments in
+         * byte order, chain by chain.
+         */
+        function verifyBlockLayout(
+            uploads: Map<string, Buffer>,
+            opts: { lead: number; perBlock: number; splitBlocks?: boolean }
+        ): Placed[] {
+            const blockOf = (p: number) =>
+                p < opts.lead
+                    ? 0
+                    : 1 + Math.floor((p - opts.lead) / opts.perBlock);
+            const placed = placements();
+            expect(placed).toHaveLength(originals.size);
+
+            for (const p of placed) {
+                const chunk = uploads.get(`prefix/media/${p.chunk}`);
+                expect(chunk, p.chunk).toBeDefined();
+                expect(chunk!.subarray(p.offset, p.offset + p.length)).toEqual(
+                    originals.get(`${p.stream}/${p.file}`)
+                );
+            }
+
+            const byChunk = new Map<string, Placed[]>();
+            for (const p of placed) {
+                byChunk.set(p.chunk, [...(byChunk.get(p.chunk) ?? []), p]);
+            }
+            for (const [chunk, inChunk] of byChunk) {
+                inChunk.sort((a, b) => a.offset - b.offset);
+                let end = 0;
+                for (const p of inChunk) {
+                    expect(p.offset, `${chunk} at ${p.offset}`).toBe(end);
+                    end += p.length;
+                }
+                expect(uploads.get(`prefix/media/${chunk}`)!.length).toBe(end);
+            }
+
+            // Each chain is its own run of blocks, written independently.
+            const chains = [...new Set([...byChunk.keys()].map(chainOf))];
+            const ordered: Placed[] = [];
+            for (const chain of chains) {
+                const inChain = [...byChunk.keys()]
+                    .filter((chunk) => chainOf(chunk) === chain)
+                    .sort((a, b) => chunkNumber(a) - chunkNumber(b))
+                    .flatMap((chunk) => byChunk.get(chunk)!);
+                let block = -1;
+                let stream = '';
+                let position = -1;
+                let finished = new Set<string>();
+                for (const p of inChain) {
+                    const b = blockOf(p.position);
+                    expect(
+                        b,
+                        `${chain} ${p.stream} ${p.position}`
+                    ).toBeGreaterThanOrEqual(block);
+                    if (b !== block) {
+                        block = b;
+                        finished = new Set();
+                        stream = '';
+                    }
+                    if (p.stream !== stream) {
+                        expect(
+                            finished.has(p.stream),
+                            `${p.stream} split in block ${b}`
+                        ).toBe(false);
+                        if (stream) finished.add(stream);
+                        stream = p.stream;
+                        position = -1;
+                    }
+                    expect(p.position).toBeGreaterThan(position);
+                    position = p.position;
+                }
+                ordered.push(...inChain);
+            }
+
+            if (!opts.splitBlocks) {
+                const chunksOfBlock = new Map<string, Set<string>>();
+                for (const p of placed) {
+                    const key = `${chainOf(p.chunk)} block ${blockOf(p.position)}`;
+                    chunksOfBlock.set(
+                        key,
+                        (chunksOfBlock.get(key) ?? new Set()).add(p.chunk)
+                    );
+                }
+                for (const [key, chunks] of chunksOfBlock) {
+                    expect([...chunks], key).toHaveLength(1);
+                }
+            }
+            return ordered;
+        }
+
+        const label = (p: Placed) => `${p.chunk} ${p.stream} ${p.position}`;
+
+        it('packs in arrival order with the option off, byte for byte as without it', async () => {
+            const run = async (blockSeconds: number | undefined) => {
+                rmSync(tmpDir, { recursive: true, force: true });
+                mkdirSync(tmpDir, { recursive: true });
+                seedTagged('stream_1080p', sizesOf(4));
+                seedTagged('stream_720p', sizesOf(4, 60));
+                const pipeline = makePipeline(tmpDir, {
+                    byteRange: true,
+                    streamChains: { stream_1080p: 'v0', stream_720p: 'v0' },
+                    segmentDurationSeconds: 10,
+                    ...(blockSeconds !== undefined
+                        ? { byteRangeBlockSeconds: blockSeconds }
+                        : {}),
+                });
+                const uploads = captureUploads(pipeline);
+                await (pipeline as any).poll();
+                await pipeline.drain();
+                return {
+                    uploads,
+                    playlists: ['stream_1080p', 'stream_720p'].map((s) =>
+                        readPlaylist(s).join('\n')
+                    ),
+                    placed: placements(),
+                };
+            };
+
+            const without = await run(undefined);
+            const off = await run(0);
+
+            expect(off.uploads).toEqual(without.uploads);
+            expect(off.playlists).toEqual(without.playlists);
+            // Arrival order: a poll reads one directory after the other, so the
+            // first chunk fills with the first stream it reads.
+            expect(
+                off.placed
+                    .sort(
+                        (a, b) =>
+                            chunkNumber(a.chunk) - chunkNumber(b.chunk) ||
+                            a.offset - b.offset
+                    )
+                    .map(label)
+            ).toEqual([
+                'v0_0.m4s stream_1080p 0',
+                'v0_0.m4s stream_1080p 1',
+                'v0_0.m4s stream_1080p 2',
+                'v0_0.m4s stream_1080p 3',
+                'v0_1.m4s stream_720p 0',
+                'v0_1.m4s stream_720p 1',
+                'v0_1.m4s stream_720p 2',
+                'v0_1.m4s stream_720p 3',
+            ]);
+        });
+
+        it('groups each stream inside a block, in the chain order, with blocks in time order', async () => {
+            seedTagged('stream_1080p', sizesOf(7));
+            seedTagged('stream_720p', sizesOf(7, 60));
+            const pipeline = makePipeline(tmpDir, {
+                byteRange: true,
+                // The encode config's order, not the directories'.
+                streamChains: { stream_720p: 'v0', stream_1080p: 'v0' },
+                segmentDurationSeconds: 10,
+                byteRangeBlockSeconds: 20,
+            });
+            const uploads = captureUploads(pipeline);
+
+            await (pipeline as any).poll();
+            await pipeline.drain();
+
+            const ordered = verifyBlockLayout(uploads, {
+                lead: 2,
+                perBlock: 2,
+            });
+            expect(ordered.map(label)).toEqual([
+                'v0_0.m4s stream_720p 0',
+                'v0_0.m4s stream_720p 1',
+                'v0_0.m4s stream_1080p 0',
+                'v0_0.m4s stream_1080p 1',
+                'v0_1.m4s stream_720p 2',
+                'v0_1.m4s stream_720p 3',
+                'v0_1.m4s stream_1080p 2',
+                'v0_1.m4s stream_1080p 3',
+                'v0_1.m4s stream_720p 4',
+                'v0_1.m4s stream_720p 5',
+                'v0_1.m4s stream_1080p 4',
+                'v0_1.m4s stream_1080p 5',
+                'v0_1.m4s stream_720p 6',
+                'v0_1.m4s stream_1080p 6',
+            ]);
+        });
+
+        it('applies to the audio chain too', async () => {
+            seedTagged('stream_en', sizesOf(4));
+            seedTagged('stream_fr', sizesOf(4, 60));
+            const pipeline = makePipeline(tmpDir, {
+                byteRange: true,
+                streamChains: { stream_en: 'a', stream_fr: 'a' },
+                segmentDurationSeconds: 10,
+                byteRangeBlockSeconds: 20,
+            });
+            const uploads = captureUploads(pipeline);
+
+            await (pipeline as any).poll();
+            await pipeline.drain();
+
+            const ordered = verifyBlockLayout(uploads, {
+                lead: 2,
+                perBlock: 2,
+            });
+            expect(ordered.map(label)).toEqual([
+                'a_0.m4s stream_en 0',
+                'a_0.m4s stream_en 1',
+                'a_0.m4s stream_fr 0',
+                'a_0.m4s stream_fr 1',
+                'a_1.m4s stream_en 2',
+                'a_1.m4s stream_en 3',
+                'a_1.m4s stream_fr 2',
+                'a_1.m4s stream_fr 3',
+            ]);
+        });
+
+        it('holds a block open for a stream that lags, while later blocks collect', async () => {
+            seedTagged('stream_1080p', sizesOf(7));
+            const slow = seedTagged('stream_720p', sizesOf(7, 60), {
+                present: 1,
+            });
+            const pipeline = makePipeline(tmpDir, {
+                byteRange: true,
+                streamChains: { stream_1080p: 'v0', stream_720p: 'v0' },
+                segmentDurationSeconds: 10,
+                byteRangeBlockSeconds: 20,
+            });
+            const uploads = captureUploads(pipeline);
+
+            // 720p has not finished block 0, so nothing is written at all.
+            await (pipeline as any).poll();
+            expect(existsSync(join(tmpDir, 'media'))).toBe(false);
+            expect(existsSync(join(tmpDir, 'stream_1080p', name(6)))).toBe(
+                true
+            );
+
+            // Through block 1: blocks 0 and 1 go out, block 2 waits on 720p.
+            slow.more(4);
+            await (pipeline as any).poll();
+            await vi.waitFor(() =>
+                expect(uploads.has('prefix/media/v0_0.m4s')).toBe(true)
+            );
+            expect(existsSync(join(tmpDir, 'stream_1080p', name(3)))).toBe(
+                false
+            );
+            expect(existsSync(join(tmpDir, 'stream_1080p', name(4)))).toBe(
+                true
+            );
+
+            // One segment short of the end of block 2: still held.
+            slow.more(5);
+            await (pipeline as any).poll();
+            expect(existsSync(join(tmpDir, 'stream_1080p', name(4)))).toBe(
+                true
+            );
+
+            // Through block 2: it goes out, block 3 waits.
+            slow.more(6);
+            await (pipeline as any).poll();
+            expect(existsSync(join(tmpDir, 'stream_1080p', name(4)))).toBe(
+                false
+            );
+            expect(existsSync(join(tmpDir, 'stream_1080p', name(6)))).toBe(
+                true
+            );
+
+            slow.more(7);
+            await pipeline.drain();
+
+            verifyBlockLayout(uploads, { lead: 2, perBlock: 2 });
+        });
+
+        it('keeps the first chunk to its ~20 s, grouped, and grows the next one to the cap', async () => {
+            // Six-second segments: block 0 is ceil(20 / 6) = 4 per stream, and
+            // a 60 s block is 10.
+            seedTagged('stream_1080p', sizesOf(15));
+            seedTagged('stream_720p', sizesOf(15, 60));
+            const pipeline = makePipeline(tmpDir, {
+                byteRange: true,
+                streamChains: { stream_1080p: 'v0', stream_720p: 'v0' },
+                segmentDurationSeconds: 6,
+                byteRangeBlockSeconds: 60,
+            });
+            const uploads = captureUploads(pipeline);
+
+            await (pipeline as any).poll();
+            await pipeline.drain();
+
+            const ordered = verifyBlockLayout(uploads, {
+                lead: 4,
+                perBlock: 10,
+            });
+            expect(
+                ordered.filter((p) => p.chunk === 'v0_0.m4s').map(label)
+            ).toEqual([
+                'v0_0.m4s stream_1080p 0',
+                'v0_0.m4s stream_1080p 1',
+                'v0_0.m4s stream_1080p 2',
+                'v0_0.m4s stream_1080p 3',
+                'v0_0.m4s stream_720p 0',
+                'v0_0.m4s stream_720p 1',
+                'v0_0.m4s stream_720p 2',
+                'v0_0.m4s stream_720p 3',
+            ]);
+            expect([...uploads.keys()].sort()).toEqual([
+                'prefix/media/v0_0.m4s',
+                'prefix/media/v0_1.m4s',
+            ]);
+        });
+
+        it('closes a chunk before a block that would pass the cap, never inside it', async () => {
+            // 40-byte segments, so a block of two streams is 160 bytes. Under a
+            // 380-byte cap chunk 1 takes blocks 1 and 2 (320 bytes). Block 3
+            // (80) would pass the cap, though its first segment alone would
+            // not, so it starts chunk 2 whole.
+            seedTagged('stream_1080p', Array(7).fill(40));
+            seedTagged('stream_720p', Array(7).fill(40));
+            const pipeline = makePipeline(tmpDir, {
+                byteRange: true,
+                streamChains: { stream_1080p: 'v0', stream_720p: 'v0' },
+                byteRangeMaxFileSizeBytes: 380,
+                segmentDurationSeconds: 10,
+                byteRangeBlockSeconds: 20,
+            });
+            const uploads = captureUploads(pipeline);
+
+            await (pipeline as any).poll();
+            await pipeline.drain();
+
+            verifyBlockLayout(uploads, { lead: 2, perBlock: 2 });
+            expect([...uploads].map(([k, v]) => [k, v.length]).sort()).toEqual([
+                ['prefix/media/v0_0.m4s', 160],
+                ['prefix/media/v0_1.m4s', 320],
+                ['prefix/media/v0_2.m4s', 80],
+            ]);
+        });
+
+        it('splits a block bigger than the cap on its own at segment boundaries, and says so', async () => {
+            const warn = vi
+                .spyOn(Logger.prototype, 'warn')
+                .mockImplementation(() => {});
+            seedTagged('stream_1080p', Array(4).fill(40));
+            seedTagged('stream_720p', Array(4).fill(40));
+            const pipeline = makePipeline(tmpDir, {
+                byteRange: true,
+                streamChains: { stream_1080p: 'v0', stream_720p: 'v0' },
+                byteRangeMaxFileSizeBytes: 100,
+                segmentDurationSeconds: 10,
+                byteRangeBlockSeconds: 20,
+            });
+            const uploads = captureUploads(pipeline);
+
+            await (pipeline as any).poll();
+            await pipeline.drain();
+
+            verifyBlockLayout(uploads, {
+                lead: 2,
+                perBlock: 2,
+                splitBlocks: true,
+            });
+            for (const chunk of uploads.values()) {
+                expect(chunk.length).toBeLessThanOrEqual(100);
+            }
+            expect(
+                warn.mock.calls.some((c) =>
+                    String(c[0]).includes(
+                        'over the 100-byte chunk cap — splitting it across chunks'
+                    )
+                )
+            ).toBe(true);
+        });
+
+        it('writes a partial last block at the drain, streams of uneven length included', async () => {
+            seedTagged('stream_1080p', sizesOf(5));
+            seedTagged('stream_720p', sizesOf(4, 60));
+            const pipeline = makePipeline(tmpDir, {
+                byteRange: true,
+                streamChains: { stream_1080p: 'v0', stream_720p: 'v0' },
+                segmentDurationSeconds: 10,
+                byteRangeBlockSeconds: 20,
+            });
+            const uploads = captureUploads(pipeline);
+
+            // Block 2 holds only 1080p's last segment, and nothing passes it.
+            await (pipeline as any).poll();
+            expect(existsSync(join(tmpDir, 'stream_1080p', name(4)))).toBe(
+                true
+            );
+
+            await pipeline.drain();
+
+            const ordered = verifyBlockLayout(uploads, {
+                lead: 2,
+                perBlock: 2,
+            });
+            expect(ordered.at(-1)).toEqual(
+                expect.objectContaining({ stream: 'stream_1080p', position: 4 })
+            );
+        });
+
+        it('blocks a quick trim by position, whatever its parts are numbered', async () => {
+            const files = [
+                'segment_0000000.m4s',
+                'segment_0100000.m4s',
+                'segment_0100001.m4s',
+                'segment_0200000.m4s',
+            ];
+            seedTagged('stream_1080p', sizesOf(4), { files });
+            seedTagged('stream_720p', sizesOf(4, 60), { files });
+            const pipeline = makePipeline(tmpDir, {
+                byteRange: true,
+                streamChains: { stream_1080p: 'v0', stream_720p: 'v0' },
+                segmentDurationSeconds: 10,
+                byteRangeBlockSeconds: 20,
+            });
+            const uploads = captureUploads(pipeline);
+
+            // Every segment is there before the pipeline starts, as after a quick trim.
+            await pipeline.drain();
+
+            const ordered = verifyBlockLayout(uploads, {
+                lead: 2,
+                perBlock: 2,
+            });
+            expect(ordered.map(label)).toEqual([
+                'v0_0.m4s stream_1080p 0',
+                'v0_0.m4s stream_1080p 1',
+                'v0_0.m4s stream_720p 0',
+                'v0_0.m4s stream_720p 1',
+                'v0_1.m4s stream_1080p 2',
+                'v0_1.m4s stream_1080p 3',
+                'v0_1.m4s stream_720p 2',
+                'v0_1.m4s stream_720p 3',
+            ]);
+        });
+
+        it('rounds a block length that does not divide by the segment duration up to whole segments', async () => {
+            // 25 s over 10 s segments: three per block after block 0's two.
+            seedTagged('stream_1080p', sizesOf(8));
+            seedTagged('stream_720p', sizesOf(8, 60));
+            const pipeline = makePipeline(tmpDir, {
+                byteRange: true,
+                streamChains: { stream_1080p: 'v0', stream_720p: 'v0' },
+                segmentDurationSeconds: 10,
+                byteRangeBlockSeconds: 25,
+            });
+            const uploads = captureUploads(pipeline);
+
+            await (pipeline as any).poll();
+            await pipeline.drain();
+
+            const ordered = verifyBlockLayout(uploads, {
+                lead: 2,
+                perBlock: 3,
+            });
+            expect(ordered.slice(4, 10).map(label)).toEqual([
+                'v0_1.m4s stream_1080p 2',
+                'v0_1.m4s stream_1080p 3',
+                'v0_1.m4s stream_1080p 4',
+                'v0_1.m4s stream_720p 2',
+                'v0_1.m4s stream_720p 3',
+                'v0_1.m4s stream_720p 4',
+            ]);
+        });
+
+        it('packs encrypted segments as encrypted, and leaves the inits outside the chunks', async () => {
+            seedTagged('stream_1080p', sizesOf(5));
+            seedTagged('stream_720p', sizesOf(5, 60));
+            for (const stream of ['stream_1080p', 'stream_720p']) {
+                writeFileSync(
+                    join(tmpDir, stream, 'init.mp4'),
+                    `INIT ${stream}`
+                );
+            }
+            const pipeline = makePipeline(tmpDir, {
+                byteRange: true,
+                streamChains: { stream_1080p: 'v0', stream_720p: 'v0' },
+                segmentDurationSeconds: 10,
+                byteRangeBlockSeconds: 20,
+                encryptionKey: Buffer.alloc(16, 1),
+                encryptionIV: Buffer.alloc(16, 2),
+            });
+            // Ciphertext is longer than the plaintext, as AES-CBC padding makes it.
+            (pipeline as any).encryptionService = {
+                encryptSegment: vi.fn(async (path: string) => {
+                    const encrypted = Buffer.concat([
+                        Buffer.from('ENC|'),
+                        readFileSync(path),
+                        Buffer.alloc(7, '!'),
+                    ]);
+                    writeFileSync(path, encrypted);
+                    const [stream, file] = path.split(/[\\/]/).slice(-2);
+                    originals.set(`${stream}/${file}`, encrypted);
+                }),
+            };
+            const uploads = captureUploads(pipeline);
+
+            await (pipeline as any).poll();
+            await pipeline.drain();
+
+            verifyBlockLayout(uploads, { lead: 2, perBlock: 2 });
+            expect(
+                (pipeline as any).encryptionService.encryptSegment
+            ).toHaveBeenCalledTimes(10);
+            for (const [key, chunk] of uploads) {
+                expect(key).toMatch(/^prefix\/media\/v0_\d+\.m4s$/);
+                expect(chunk.includes('INIT')).toBe(false);
+            }
+            for (const stream of ['stream_1080p', 'stream_720p']) {
+                expect(
+                    readFileSync(join(tmpDir, stream, 'init.mp4'), 'utf-8')
+                ).toBe(`INIT ${stream}`);
+            }
+        });
+
+        it('closes the first chunk on block 0 of the streams that have started, not of every mapped one', async () => {
+            // A ladder in waves: five renditions map to v0, three produce now.
+            const streamChains = Object.fromEntries(
+                ['1080p', '720p', '480p', '360p', '240p'].map((r) => [
+                    `stream_${r}`,
+                    'v0',
+                ])
+            );
+            seedTagged('stream_1080p', sizesOf(15));
+            seedTagged('stream_720p', sizesOf(15, 60));
+            seedTagged('stream_480p', sizesOf(15, 80));
+            const pipeline = makePipeline(tmpDir, {
+                byteRange: true,
+                streamChains,
+                segmentDurationSeconds: 6,
+                byteRangeBlockSeconds: 60,
+            });
+            const uploads = captureUploads(pipeline);
+
+            // Out mid-encode, without waiting on the two that have not started.
+            await (pipeline as any).poll();
+            await vi.waitFor(() =>
+                expect(uploads.has('prefix/media/v0_0.m4s')).toBe(true)
+            );
+            await pipeline.drain();
+
+            const ordered = verifyBlockLayout(uploads, {
+                lead: 4,
+                perBlock: 10,
+            });
+            const first = ordered.filter((p) => p.chunk === 'v0_0.m4s');
+            expect(first).toHaveLength(12);
+            expect(first.every((p) => p.position < 4)).toBe(true);
+        });
+
+        it('writes block 0 of a stream that starts while the others are part-way, once it has passed it', async () => {
+            seedTagged('stream_1080p', sizesOf(7));
+            seedTagged('stream_720p', sizesOf(7, 60));
+            const pipeline = makePipeline(tmpDir, {
+                byteRange: true,
+                streamChains: {
+                    stream_1080p: 'v0',
+                    stream_720p: 'v0',
+                    stream_480p: 'v0',
+                },
+                segmentDurationSeconds: 10,
+                byteRangeBlockSeconds: 20,
+            });
+            const uploads = captureUploads(pipeline);
+
+            // Blocks 0 to 2 go out; block 3 waits on more of either stream.
+            await (pipeline as any).poll();
+            expect(existsSync(join(tmpDir, 'stream_1080p', name(6)))).toBe(
+                true
+            );
+
+            // 480p's block 0 is behind block 3 in time but ready first.
+            seedTagged('stream_480p', sizesOf(2, 80));
+            await (pipeline as any).poll();
+            expect(existsSync(join(tmpDir, 'stream_480p', name(1)))).toBe(
+                false
+            );
+            expect(existsSync(join(tmpDir, 'stream_1080p', name(6)))).toBe(
+                true
+            );
+
+            await pipeline.drain();
+            expect(
+                placements()
+                    .sort(
+                        (a, b) =>
+                            chunkNumber(a.chunk) - chunkNumber(b.chunk) ||
+                            a.offset - b.offset
+                    )
+                    .map(label)
+            ).toEqual([
+                'v0_0.m4s stream_1080p 0',
+                'v0_0.m4s stream_1080p 1',
+                'v0_0.m4s stream_720p 0',
+                'v0_0.m4s stream_720p 1',
+                'v0_1.m4s stream_1080p 2',
+                'v0_1.m4s stream_1080p 3',
+                'v0_1.m4s stream_720p 2',
+                'v0_1.m4s stream_720p 3',
+                'v0_1.m4s stream_1080p 4',
+                'v0_1.m4s stream_1080p 5',
+                'v0_1.m4s stream_720p 4',
+                'v0_1.m4s stream_720p 5',
+                'v0_1.m4s stream_480p 0',
+                'v0_1.m4s stream_480p 1',
+                'v0_1.m4s stream_1080p 6',
+                'v0_1.m4s stream_720p 6',
+            ]);
+        });
+
+        it('holds every later block of a chain behind a stream that ended early, until the drain', async () => {
+            // A short audio track: nothing tells the pipeline it has ended.
+            seedTagged('stream_en', sizesOf(10));
+            seedTagged('stream_fr', sizesOf(2, 60));
+            const pipeline = makePipeline(tmpDir, {
+                byteRange: true,
+                streamChains: { stream_en: 'a', stream_fr: 'a' },
+                segmentDurationSeconds: 10,
+                byteRangeBlockSeconds: 20,
+            });
+            const uploads = captureUploads(pipeline);
+
+            await (pipeline as any).poll();
+            await vi.waitFor(() =>
+                expect(uploads.has('prefix/media/a_0.m4s')).toBe(true)
+            );
+            for (let i = 2; i < 10; i++) {
+                expect(existsSync(join(tmpDir, 'stream_en', name(i)))).toBe(
+                    true
+                );
+            }
+
+            await pipeline.drain();
+            verifyBlockLayout(uploads, { lead: 2, perBlock: 2 });
+        });
+
+        it("keeps each chain's blocks to its own streams, so a lagging chain holds back no other", async () => {
+            // Two angles and the audio chain in one encode, as every multi-angle video is.
+            const streamChains: Record<string, string> = {
+                stream_a0_hi: 'v0',
+                stream_a0_lo: 'v0',
+                stream_a1_hi: 'v1',
+                stream_a1_lo: 'v1',
+                stream_en: 'a',
+                stream_fr: 'a',
+            };
+            seedTagged('stream_a0_hi', sizesOf(7));
+            seedTagged('stream_a0_lo', sizesOf(7, 60));
+            const a1hi = seedTagged('stream_a1_hi', sizesOf(7, 80), {
+                present: 3,
+            });
+            const a1lo = seedTagged('stream_a1_lo', sizesOf(7, 100), {
+                present: 3,
+            });
+            const en = seedTagged('stream_en', sizesOf(6, 120), { present: 3 });
+            // A short track: it ends after three segments.
+            const fr = seedTagged('stream_fr', sizesOf(3, 140), { present: 1 });
+            const pipeline = makePipeline(tmpDir, {
+                byteRange: true,
+                streamChains,
+                segmentDurationSeconds: 10,
+                byteRangeBlockSeconds: 20,
+            });
+            const uploads = captureUploads(pipeline);
+            const onDisk = (stream: string, i: number) =>
+                existsSync(join(tmpDir, stream, name(i)));
+
+            // Angle 0 has passed block 2 and angle 1 block 0, mid-encode, while
+            // audio waits on fr's block 0.
+            await (pipeline as any).poll();
+            await vi.waitFor(() => {
+                expect(uploads.has('prefix/media/v0_0.m4s')).toBe(true);
+                expect(uploads.has('prefix/media/v1_0.m4s')).toBe(true);
+            });
+            for (const stream of ['stream_a0_hi', 'stream_a0_lo']) {
+                expect(onDisk(stream, 5)).toBe(false);
+                expect(onDisk(stream, 6)).toBe(true);
+            }
+            for (const stream of ['stream_a1_hi', 'stream_a1_lo']) {
+                expect(onDisk(stream, 1)).toBe(false);
+                expect(onDisk(stream, 2)).toBe(true);
+            }
+            expect(onDisk('stream_en', 0)).toBe(true);
+            expect(onDisk('stream_fr', 0)).toBe(true);
+            expect(uploads.has('prefix/media/a_0.m4s')).toBe(false);
+
+            // Angle 1 catches up through block 2 and audio's block 0 goes out,
+            // while fr still holds audio's block 1 and angle 0 waits for block 3.
+            a1hi.more(6);
+            a1lo.more(6);
+            en.more(6);
+            fr.more(3);
+            await (pipeline as any).poll();
+            await vi.waitFor(() =>
+                expect(uploads.has('prefix/media/a_0.m4s')).toBe(true)
+            );
+            for (const stream of ['stream_a1_hi', 'stream_a1_lo']) {
+                expect(onDisk(stream, 5)).toBe(false);
+            }
+            expect(onDisk('stream_en', 1)).toBe(false);
+            expect(onDisk('stream_en', 2)).toBe(true);
+            expect(onDisk('stream_fr', 2)).toBe(true);
+            expect(onDisk('stream_a0_hi', 6)).toBe(true);
+
+            a1hi.more(7);
+            a1lo.more(7);
+            await pipeline.drain();
+
+            const ordered = verifyBlockLayout(uploads, {
+                lead: 2,
+                perBlock: 2,
+            });
+            for (const p of ordered) {
+                expect(chainOf(p.chunk), label(p)).toBe(streamChains[p.stream]);
+            }
+        });
+
+        it('stops writing mid-block on an abort, and salvages only what reached the chunk', async () => {
+            seedTagged('stream_1080p', sizesOf(4));
+            seedTagged('stream_720p', sizesOf(4, 60));
+            const pipeline = makePipeline(tmpDir, {
+                byteRange: true,
+                streamChains: { stream_1080p: 'v0', stream_720p: 'v0' },
+                segmentDurationSeconds: 10,
+                byteRangeBlockSeconds: 20,
+            });
+            captureUploads(pipeline);
+            // Abort once 1080p's half of block 1 is in chunk 1.
+            const writeSegment = (pipeline as any).writeSegment.bind(pipeline);
+            let written = 0;
+            vi.spyOn(pipeline as any, 'writeSegment').mockImplementation(
+                async (...args: unknown[]) => {
+                    await writeSegment(...args);
+                    if (++written === 6) pipeline.abort();
+                }
+            );
+
+            await (pipeline as any).poll();
+            const kept = await pipeline.salvage();
+
+            expect(written).toBe(6);
+            expect(kept).toHaveLength(1);
+            expect(kept[0].objectKey).toBe('prefix/media/v0_1.m4s');
+            expect(
+                kept[0].segments.map((s) => `${s.stream} ${s.index}`)
+            ).toEqual(['stream_1080p 2', 'stream_1080p 3']);
+            expect(readFileSync(kept[0].filePath)).toEqual(
+                Buffer.concat([
+                    originals.get(`stream_1080p/${name(2)}`)!,
+                    originals.get(`stream_1080p/${name(3)}`)!,
+                ])
+            );
+            // 720p's half was never written, so it is still where ffmpeg put it.
+            expect(existsSync(join(tmpDir, 'stream_720p', name(2)))).toBe(true);
+            expect(existsSync(join(tmpDir, 'stream_720p', name(3)))).toBe(true);
+        });
+
+        it("sweeps up a finished wave's last segment, written after the last poll", async () => {
+            const { more } = seedTagged('stream_1080p', sizesOf(7), {
+                present: 6,
+            });
+            const pipeline = makePipeline(tmpDir, {
+                byteRange: true,
+                streamChains: { stream_1080p: 'v0', stream_720p: 'v0' },
+                segmentDurationSeconds: 10,
+                byteRangeBlockSeconds: 20,
+            });
+            const uploads = captureUploads(pipeline);
+
+            await (pipeline as any).poll();
+            more(7);
+            await pipeline.finishStreams(['stream_1080p']);
+
+            // In the open chunk at once, not held for the drain.
+            expect(existsSync(join(tmpDir, 'stream_1080p', name(6)))).toBe(
+                false
+            );
+            await pipeline.drain();
+            verifyBlockLayout(uploads, { lead: 2, perBlock: 2 });
+        });
+
+        it('waits for a poll in flight, so two writers never share a chunk', async () => {
+            seedTagged('stream_1080p', sizesOf(7));
+            const pipeline = makePipeline(tmpDir, {
+                byteRange: true,
+                streamChains: { stream_1080p: 'v0', stream_720p: 'v0' },
+                segmentDurationSeconds: 10,
+                byteRangeBlockSeconds: 20,
+                pollIntervalMs: 5,
+            });
+            const uploads = captureUploads(pipeline);
+            const writeSegment = (pipeline as any).writeSegment.bind(pipeline);
+            let finishing: Promise<void> | undefined;
+            let calledMidPoll = false;
+            let writing = 0;
+            let overlapped = false;
+            vi.spyOn(pipeline as any, 'writeSegment').mockImplementation(
+                async (...args: unknown[]) => {
+                    // The wave ends while the timer's poll is writing block 0.
+                    if (!finishing) {
+                        calledMidPoll = (pipeline as any).polling;
+                        finishing = pipeline.finishStreams(['stream_1080p']);
+                    }
+                    if (writing++ > 0) overlapped = true;
+                    try {
+                        await new Promise((r) => setTimeout(r, 20));
+                        await writeSegment(...args);
+                    } finally {
+                        writing--;
+                    }
+                }
+            );
+
+            pipeline.start();
+            await vi.waitFor(() => expect(finishing).toBeDefined());
+            await finishing;
+            await pipeline.drain();
+
+            expect(calledMidPoll).toBe(true);
+            expect(overlapped).toBe(false);
+            expect(pipeline.error).toBeNull();
+            verifyBlockLayout(uploads, { lead: 2, perBlock: 2 });
+        });
+
+        it("keeps the timer's poll out while its own sweep is writing", async () => {
+            seedTagged('stream_1080p', sizesOf(7));
+            const { more } = seedTagged('stream_720p', sizesOf(7, 60), {
+                present: 2,
+            });
+            const pipeline = makePipeline(tmpDir, {
+                byteRange: true,
+                streamChains: { stream_1080p: 'v0', stream_720p: 'v0' },
+                segmentDurationSeconds: 10,
+                byteRangeBlockSeconds: 20,
+                pollIntervalMs: 5,
+            });
+            const uploads = captureUploads(pipeline);
+            const writeSegment = (pipeline as any).writeSegment.bind(pipeline);
+            let writing = 0;
+            let overlapped = false;
+            vi.spyOn(pipeline as any, 'writeSegment').mockImplementation(
+                async (...args: unknown[]) => {
+                    // The rest of 720p lands while the sweep writes block 0,
+                    // with the timer due several times before it is done.
+                    more(7);
+                    if (writing++ > 0) overlapped = true;
+                    try {
+                        await new Promise((r) => setTimeout(r, 20));
+                        await writeSegment(...args);
+                    } finally {
+                        writing--;
+                    }
+                }
+            );
+
+            pipeline.start();
+            await pipeline.finishStreams(['stream_1080p']);
+            await pipeline.drain();
+
+            expect(overlapped).toBe(false);
+            expect(pipeline.error).toBeNull();
+            verifyBlockLayout(uploads, { lead: 2, perBlock: 2 });
+        });
+
+        describe('an interrupted encode, continued', () => {
+            const box = (type: string, ...content: Buffer[]) => {
+                const body = Buffer.concat(content);
+                const head = Buffer.alloc(8);
+                head.writeUInt32BE(body.length + 8, 0);
+                head.write(type, 4, 4, 'latin1');
+                return Buffer.concat([head, body]);
+            };
+            /** A segment starting at `tfdt`, padded so each stream's are a size of their own. */
+            const fmp4Segment = (tfdt: number, pad: number) => {
+                const tfdtBox = Buffer.alloc(12);
+                tfdtBox.writeUInt8(1, 0);
+                tfdtBox.writeBigUInt64BE(BigInt(tfdt), 4);
+                return Buffer.concat([
+                    box('styp', Buffer.from('msdh', 'latin1')),
+                    box('moof', box('traf', box('tfdt', tfdtBox))),
+                    box('mdat', Buffer.alloc(pad)),
+                ]);
+            };
+            const init = () => {
+                const mdhd = Buffer.alloc(24);
+                mdhd.writeUInt32BE(90000, 12);
+                return box(
+                    'moov',
+                    box(
+                        'trak',
+                        box(
+                            'mdia',
+                            box('mdhd', mdhd),
+                            box(
+                                'minf',
+                                box('stbl', box('stsd', Buffer.from('avc1')))
+                            )
+                        )
+                    )
+                );
+            };
+            const TEN_SECONDS = 900000;
+            const pads: Record<string, number> = {
+                stream_1080p: 32,
+                stream_720p: 16,
+            };
+            const streamChains = { stream_1080p: 'v0', stream_720p: 'v0' };
+
+            /** Segments `from`..`to`-1 of a stream, timed from `tfdtBase` as a fresh ffmpeg times them. */
+            function seedRun(
+                stream: string,
+                from: number,
+                to: number,
+                tfdtBase: number
+            ): void {
+                const dir = join(tmpDir, stream);
+                mkdirSync(dir, { recursive: true });
+                writeFileSync(join(dir, 'init.mp4'), init());
+                const lines = [
+                    '#EXTM3U',
+                    '#EXT-X-VERSION:7',
+                    '#EXT-X-TARGETDURATION:10',
+                    `#EXT-X-MEDIA-SEQUENCE:${from}`,
+                    '#EXT-X-PLAYLIST-TYPE:VOD',
+                    '#EXT-X-INDEPENDENT-SEGMENTS',
+                    '#EXT-X-MAP:URI="init.mp4"',
+                ];
+                for (let i = from; i < to; i++) {
+                    writeFileSync(
+                        join(dir, name(i)),
+                        fmp4Segment(
+                            tfdtBase + (i - from) * TEN_SECONDS,
+                            pads[stream]
+                        )
+                    );
+                    lines.push('#EXTINF:10.000000,', name(i));
+                }
+                lines.push('#EXT-X-ENDLIST', '');
+                writeFileSync(join(dir, 'playlist.m3u8'), lines.join('\n'));
+            }
+
+            /** What a continue reads back: every start time seen, and what is stored. */
+            const recordsOf = (
+                seen: DurableSegment[],
+                stored: DurableSegment[]
+            ): ResumeRecord[] => [
+                ...seen.map((s) => ({
+                    kind: 'seen' as const,
+                    stream: s.stream,
+                    index: s.index,
+                    tfdt: s.tfdt!,
+                })),
+                ...stored.map((s) => ({ kind: 'durable' as const, ...s })),
+            ];
+
+            it("stores whole blocks, keeps none of what was still held, and counts the continued run's blocks from its restart", async () => {
+                // The first run: 1080p is through segment 4, 720p through 3. Blocks
+                // 0 and 1 are complete; block 2 is held for 720p.
+                seedRun('stream_1080p', 0, 5, 0);
+                seedRun('stream_720p', 0, 4, 0);
+                const durable: DurableSegment[] = [];
+                const seen: DurableSegment[] = [];
+                const first = makePipeline(tmpDir, {
+                    byteRange: true,
+                    streamChains,
+                    segmentDurationSeconds: 10,
+                    byteRangeBlockSeconds: 20,
+                    onDurable: (segments) => durable.push(...segments),
+                    onSegment: (segment) => seen.push(segment),
+                });
+                captureUploads(first);
+
+                await (first as any).poll();
+                await vi.waitFor(() => expect(durable).toHaveLength(4));
+                first.abort();
+                const kept = await first.salvage();
+
+                // Chunk 0, block 0, reached storage.
+                expect(durable.map((d) => `${d.stream} ${d.index}`)).toEqual([
+                    'stream_1080p 0',
+                    'stream_1080p 1',
+                    'stream_720p 0',
+                    'stream_720p 1',
+                ]);
+                // The open chunk holds block 1, whole and grouped; segment 4,
+                // still held, is in neither.
+                expect(kept).toHaveLength(1);
+                expect(kept[0].objectKey).toBe('prefix/media/v0_1.m4s');
+                expect(
+                    kept[0].segments.map(
+                        (s) => `${s.stream} ${s.index} @${s.offset}`
+                    )
+                ).toEqual([
+                    'stream_1080p 2 @0',
+                    'stream_1080p 3 @88',
+                    'stream_720p 2 @176',
+                    'stream_720p 3 @248',
+                ]);
+                expect(readFileSync(kept[0].filePath).length).toBe(
+                    kept[0].size
+                );
+
+                // Segment 4's start is unknown in 720p, so the continue
+                // restarts at 3, inside what was block 1.
+                const point = resumePoint(
+                    Object.keys(streamChains),
+                    recordsOf(seen, [...durable, ...kept[0].segments])
+                )!;
+                expect(point.startIndex).toBe(3);
+
+                rmSync(tmpDir, { recursive: true, force: true });
+                seedRun('stream_1080p', 3, 7, 0);
+                seedRun('stream_720p', 3, 7, 0);
+                const continued: DurableSegment[] = [];
+                const second = makePipeline(tmpDir, {
+                    byteRange: true,
+                    streamChains,
+                    segmentDurationSeconds: 10,
+                    byteRangeBlockSeconds: 20,
+                    attempt: 1,
+                    resume: {
+                        ...point,
+                        previousInits: {
+                            stream_1080p: init(),
+                            stream_720p: init(),
+                        },
+                    },
+                    onDurable: (segments) => continued.push(...segments),
+                });
+                const uploads = captureUploads(second);
+
+                await second.drain();
+
+                // The continued run's first chunk is its own block 0: ~20 s.
+                expect(
+                    continued.map(
+                        (d) => `${d.mediaFile} ${d.stream} ${d.index} ${d.tfdt}`
+                    )
+                ).toEqual([
+                    `media/v0_r1_0.m4s stream_1080p 3 ${3 * TEN_SECONDS}`,
+                    `media/v0_r1_0.m4s stream_1080p 4 ${4 * TEN_SECONDS}`,
+                    `media/v0_r1_0.m4s stream_720p 3 ${3 * TEN_SECONDS}`,
+                    `media/v0_r1_0.m4s stream_720p 4 ${4 * TEN_SECONDS}`,
+                    `media/v0_r1_1.m4s stream_1080p 5 ${5 * TEN_SECONDS}`,
+                    `media/v0_r1_1.m4s stream_1080p 6 ${6 * TEN_SECONDS}`,
+                    `media/v0_r1_1.m4s stream_720p 5 ${5 * TEN_SECONDS}`,
+                    `media/v0_r1_1.m4s stream_720p 6 ${6 * TEN_SECONDS}`,
+                ]);
+                for (const stream of Object.keys(streamChains)) {
+                    const lines = readPlaylist(stream);
+                    const uris = lines.filter((l) => l && !l.startsWith('#'));
+                    expect(uris).toEqual([
+                        '../media/v0_0.m4s',
+                        '../media/v0_0.m4s',
+                        '../media/v0_1.m4s',
+                        '../media/v0_r1_0.m4s',
+                        '../media/v0_r1_0.m4s',
+                        '../media/v0_r1_1.m4s',
+                        '../media/v0_r1_1.m4s',
+                    ]);
+                    // This run's ranges hold this stream's segments, in order.
+                    const ranges = lines.filter((l) =>
+                        l.startsWith('#EXT-X-BYTERANGE:')
+                    );
+                    uris.forEach((uri, index) => {
+                        if (!uri.includes('_r1_')) return;
+                        const [length, offset] = ranges[index]
+                            .slice('#EXT-X-BYTERANGE:'.length)
+                            .split('@')
+                            .map(Number);
+                        const bytes = uploads
+                            .get(`prefix/${uri.slice('../'.length)}`)!
+                            .subarray(offset, offset + length);
+                        expect(bytes.length).toBe(56 + pads[stream]);
+                        expect(readBaseMediaDecodeTime(bytes)).toBe(
+                            index * TEN_SECONDS
+                        );
+                    });
+                }
+            });
+
+            /**
+             * A ladder in waves: 1080p is wave 0 and finishes, then 720p
+             * starts in the same chain and the run fails part-way through it.
+             */
+            it.each([
+                ['arrival order', 0],
+                ['blocks', 20],
+            ])(
+                'keeps a finished wave whole for a continue to skip, in %s',
+                async (_order, blockSeconds) => {
+                    const waves = [
+                        { videoStreams: ['stream_1080p'], audioStreams: [] },
+                        { videoStreams: ['stream_720p'], audioStreams: [] },
+                    ];
+                    const durable: DurableSegment[] = [];
+                    const seen: DurableSegment[] = [];
+                    const pipeline = makePipeline(tmpDir, {
+                        byteRange: true,
+                        streamChains,
+                        segmentDurationSeconds: 10,
+                        byteRangeBlockSeconds: blockSeconds,
+                        onDurable: (segments) => durable.push(...segments),
+                        onSegment: (segment) => seen.push(segment),
+                    });
+                    captureUploads(pipeline);
+
+                    seedRun('stream_1080p', 0, 7, 0);
+                    await (pipeline as any).poll();
+                    // Its last segment is written only when the wave ends.
+                    await pipeline.finishStreams(['stream_1080p']);
+                    seedRun('stream_720p', 0, 3, 0);
+                    await (pipeline as any).poll();
+                    await vi.waitFor(() =>
+                        expect(durable.length).toBeGreaterThan(0)
+                    );
+                    pipeline.abort();
+                    await pipeline.settle();
+                    const kept = await pipeline.salvage();
+
+                    const stored = [
+                        ...durable,
+                        ...kept.flatMap((k) => k.segments),
+                    ];
+                    const indices = (stream: string) =>
+                        stored
+                            .filter((s) => s.stream === stream)
+                            .map((s) => s.index)
+                            .sort((a, b) => a - b);
+                    expect(indices('stream_1080p')).toEqual([
+                        0, 1, 2, 3, 4, 5, 6,
+                    ]);
+                    expect(indices('stream_720p').slice(0, 2)).toEqual([0, 1]);
+
+                    const plan = resumePlan(waves, [
+                        ...recordsOf(seen, stored),
+                        {
+                            kind: 'waveDone',
+                            wave: 0,
+                            counts: { stream_1080p: 7 },
+                        },
+                    ])!;
+                    expect(plan.skip).toBe(1);
+                    expect(Object.keys(plan.point!.startTfdt)).toEqual([
+                        'stream_720p',
+                    ]);
+                    expect(plan.point!.startIndex).toBeGreaterThanOrEqual(2);
+                }
+            );
+
+            it("writes a finished wave's last partial block into the open chunk, and the next wave's blocks after it", async () => {
+                const pipeline = makePipeline(tmpDir, {
+                    byteRange: true,
+                    streamChains,
+                    segmentDurationSeconds: 10,
+                    byteRangeBlockSeconds: 20,
+                });
+                captureUploads(pipeline);
+
+                seedRun('stream_1080p', 0, 7, 0);
+                await (pipeline as any).poll();
+                expect(existsSync(join(tmpDir, 'stream_1080p', name(6)))).toBe(
+                    true
+                );
+                await pipeline.finishStreams(['stream_1080p']);
+                expect(existsSync(join(tmpDir, 'stream_1080p', name(6)))).toBe(
+                    false
+                );
+
+                seedRun('stream_720p', 0, 3, 0);
+                await (pipeline as any).poll();
+                pipeline.abort();
+                const kept = await pipeline.salvage();
+
+                expect(kept).toHaveLength(1);
+                expect(
+                    kept[0].segments.map((s) => `${s.stream} ${s.index}`)
+                ).toEqual([
+                    'stream_1080p 2',
+                    'stream_1080p 3',
+                    'stream_1080p 4',
+                    'stream_1080p 5',
+                    'stream_1080p 6',
+                    'stream_720p 0',
+                    'stream_720p 1',
+                ]);
+                // 720p's segment 2 is still held for its block.
+                expect(existsSync(join(tmpDir, 'stream_720p', name(2)))).toBe(
+                    true
+                );
+            });
+        });
     });
 });
 

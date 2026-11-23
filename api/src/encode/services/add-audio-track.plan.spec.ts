@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
+import type { CreateSessionDto } from '../dto/create-session.dto.js';
 import {
+    ADD_AUDIO_CHUNK_CAP_BYTES,
+    addAudioPipelineConfig,
     buildAddAudioArgs,
     estimateBitrateKbps,
     renditionDir,
@@ -98,5 +101,52 @@ describe('renditionDir', () => {
             'stream_addab12_0_Fran_ais_dub'
         );
         expect(renditionDir('ab12', 1, '"')).toBe('stream_addab12_1');
+    });
+});
+
+describe('addAudioPipelineConfig', () => {
+    // Only the block length is read; the rest of the session body is irrelevant here.
+    const sessionWith = (
+        config: Pick<CreateSessionDto, 'byteRangeBlockSeconds'>
+    ) => ({ config: config as CreateSessionDto });
+
+    const run = {
+        outputDir: '/work/add',
+        s3Config: { bucket: 'media' } as never,
+        s3PathPrefix: 'post-1',
+        byteRange: true,
+        durationSec: 3600.5,
+        segmentDurationSec: 6,
+        token: 'ab12',
+        renditions: plan.renditions,
+    };
+
+    it("packs the track with the session's block length", () => {
+        const config = addAudioPipelineConfig(
+            sessionWith({ byteRangeBlockSeconds: 120 }),
+            run
+        );
+        expect(config.byteRangeBlockSeconds).toBe(120);
+    });
+
+    it('packs in arrival order when the session has no block length', () => {
+        const config = addAudioPipelineConfig(sessionWith({}), run);
+        expect(config.byteRangeBlockSeconds).toBeUndefined();
+    });
+
+    it('puts every rendition in one chain of its own, under the audio cap', () => {
+        const config = addAudioPipelineConfig(sessionWith({}), run);
+        expect(config.streamChains).toEqual({
+            stream_addab12_0_Fr: 'aab12',
+            stream_addab12_1_Fr: 'aab12',
+        });
+        expect(config.byteRangeMaxFileSizeBytes).toBe(
+            ADD_AUDIO_CHUNK_CAP_BYTES
+        );
+        expect(config.audioByteRangeMaxFileSizeBytes).toBe(
+            ADD_AUDIO_CHUNK_CAP_BYTES
+        );
+        expect(config.segmentDurationSeconds).toBe(6);
+        expect(config.estimatedTotalSegments).toBe(601 * 2);
     });
 });

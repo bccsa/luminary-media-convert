@@ -41,6 +41,7 @@ import { S3Service } from './s3.service.js';
 import { SegmentPipelineService } from './segment-pipeline.service.js';
 import { SessionService, type Session } from './session.service.js';
 import {
+    addAudioPipelineConfig,
     buildAddAudioArgs,
     estimateBitrateKbps,
     renditionDir,
@@ -104,9 +105,6 @@ interface ExistingAudio {
         sampleRate: number;
     }[];
 }
-
-/** Cap for the new track's byte-range chunks, as for the encode's audio chain. */
-const CHUNK_CAP_BYTES = 50 * 1024 * 1024;
 
 /**
  * Adds an audio track to a post's existing video, in an edit session: the
@@ -276,29 +274,24 @@ export class AddAudioTrackService {
             const iv = existing.segmentsEncrypted
                 ? this.encryptionService.generateIV()
                 : undefined;
-            const segmentCount = Math.ceil(
-                existing.durationSec / existing.segmentDurationSec
+            const pipeline = this.segmentPipelineService.createPipeline(
+                addAudioPipelineConfig(session, {
+                    outputDir: workDir,
+                    s3Config: s3,
+                    s3PathPrefix: S3Service.canonicalPrefix(folder),
+                    encryptionKey: existing.segmentsEncrypted ? key : undefined,
+                    encryptionIV: iv,
+                    byteRange: existing.byteRange,
+                    durationSec: existing.durationSec,
+                    segmentDurationSec: existing.segmentDurationSec,
+                    token,
+                    renditions: targets,
+                    onProgress: (p) => {
+                        if (job.phase === 'uploading' && p.uploading != null)
+                            job.progress = p.uploading;
+                    },
+                })
             );
-            const pipeline = this.segmentPipelineService.createPipeline({
-                outputDir: workDir,
-                s3Config: s3,
-                s3PathPrefix: S3Service.canonicalPrefix(folder),
-                encryptionKey: existing.segmentsEncrypted ? key : undefined,
-                encryptionIV: iv,
-                byteRange: existing.byteRange,
-                byteRangeMaxFileSizeBytes: CHUNK_CAP_BYTES,
-                // One chain of its own: sharing the encode's would write over its chunks.
-                streamChains: Object.fromEntries(
-                    targets.map((t) => [t.dir, `a${token}`])
-                ),
-                audioByteRangeMaxFileSizeBytes: CHUNK_CAP_BYTES,
-                segmentDurationSeconds: existing.segmentDurationSec,
-                estimatedTotalSegments: segmentCount * targets.length,
-                onProgress: (p) => {
-                    if (job.phase === 'uploading' && p.uploading != null)
-                        job.progress = p.uploading;
-                },
-            });
 
             job.phase = 'encoding';
             pipeline.start();

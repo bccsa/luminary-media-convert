@@ -2289,8 +2289,8 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
      * wrong chain, and would say nothing about it.
      *
      * One chain per video angle, holding every rendition of that angle: the
-     * target CDN class forwards a requested range to the client immediately
-     * while backhauling the whole object, so one chunk pull warms every
+     * target CDN class pulls the whole object on a ranged request and serves
+     * the range once that pull reaches it, so one chunk pull warms every
      * rendition of the angle at the edge and an ABR step-up never lands on a
      * cold object. Audio gets a single chain of its own instead of riding along
      * — it is needed *concurrently* with video rather than swapped for it, so

@@ -356,6 +356,17 @@ describe('SessionService — restoring after a restart', () => {
         expect(second.hasUsableCredentials(restored!)).toBe(true);
     });
 
+    it('keeps a block length changed after the session opened', () => {
+        const first = build();
+        const session = first.create(makeConfig({ byteRangeBlockSeconds: 30 }));
+        first.setByteRangeBlockSeconds(session.id, 120);
+
+        const second = build();
+        second.onModuleInit();
+
+        expect(second.get(session.id)?.config.byteRangeBlockSeconds).toBe(120);
+    });
+
     it('re-indexes both tokens so the client can carry on', () => {
         const first = build();
         const session = first.create(makeConfig(), { origin: 'cms' });

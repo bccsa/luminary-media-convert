@@ -229,6 +229,11 @@ export class CmsController {
             if (existing.hlsUrl === media.hlsUrl) {
                 this.sessionService.setAckedHlsUrl(existing.id, media.hlsUrl);
             }
+            // What is added from here on follows the CMS's current setting.
+            this.sessionService.setByteRangeBlockSeconds(
+                existing.id,
+                dto.byteRangeBlockSeconds
+            );
             this.notifyHost(existing.id);
             return this.describe(existing, req, true);
         }
@@ -279,6 +284,9 @@ export class CmsController {
                     ...dto.s3,
                     pathPrefix: folder === '.' ? '' : folder,
                 };
+                // An audio track or angle added here is packed as a fresh
+                // encode would pack it.
+                config.byteRangeBlockSeconds = dto.byteRangeBlockSeconds;
                 return config;
             },
             {
@@ -370,6 +378,7 @@ export class CmsController {
         config.byteRange = dto.byteRange;
         config.byteRangeMaxFileSizeMB = dto.byteRangeMaxFileSizeMB;
         config.audioByteRangeMaxFileSizeMB = dto.audioByteRangeMaxFileSizeMB;
+        config.byteRangeBlockSeconds = dto.byteRangeBlockSeconds;
         config.thumbnails = dto.thumbnails;
         // A CMS states a requirement; key delivery is not its business. Leaving
         // this undefined is what the encoder reads as "no encryption".
@@ -403,7 +412,9 @@ export class CmsController {
             reused,
             // A published video's current revision, for the CMS to store at
             // once rather than wait for an event.
-            ...(session.edit && session.hlsUrl ? { hlsUrl: session.hlsUrl } : {}),
+            ...(session.edit && session.hlsUrl
+                ? { hlsUrl: session.hlsUrl }
+                : {}),
         };
     }
 

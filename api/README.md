@@ -171,11 +171,12 @@ Content-Type: application/json
     "byteRange": true,
     "byteRangeMaxFileSizeMB": 500,
     "audioByteRangeMaxFileSizeMB": 50,
+    "byteRangeBlockSeconds": 0,
     "thumbnails": true
 }
 ```
 
-Everything but `s3` is optional. `segmentDuration` defaults to 6 s, `byteRange` to true, `byteRangeMaxFileSizeMB` to 500, `thumbnails` to true for video encodes. `audioByteRangeMaxFileSizeMB` (default 50) caps the shared audio chunk chain, which carries **every** audio group — minutes of content per chunk ≈ cap ÷ (audio stream count × bitrate), so a wide multi-language ladder should raise it. `encryption` omitted means no encryption; `encryption.keyUrl` overrides the `luminary://key` placeholder written into `#EXT-X-KEY`.
+Everything but `s3` is optional. `segmentDuration` defaults to 6 s, `byteRange` to true, `byteRangeMaxFileSizeMB` to 500, `thumbnails` to true for video encodes. `audioByteRangeMaxFileSizeMB` (default 50) caps the shared audio chunk chain, which carries **every** audio group — minutes of content per chunk ≈ cap ÷ (audio stream count × bitrate), so a wide multi-language ladder should raise it. `byteRangeBlockSeconds` (default 0, at most 600) sets the byte order inside a chunk: 0 packs segments in arrival order; a positive value groups each stream's segments together inside blocks of that many seconds, blocks in time order, so an offline download fetches a stream in one range per block instead of one per segment. 30 to 60 is the intended production value, pending a cold-start measurement on the CDN. `encryption` omitted means no encryption; `encryption.keyUrl` overrides the `luminary://key` placeholder written into `#EXT-X-KEY`.
 
 **Response (201):**
 
@@ -318,7 +319,7 @@ DELETE /api/sessions/:sessionId
 
 ### CMS handshake
 
-`GET /api/cms/health` → `{ "status": "ok", "apiVersion": "0.0.1" }`, unauthenticated. A probe that says only "something is listening on this port, and it is us" gives away nothing, and the CMS needs it before it can decide whether to show the affordance at all.
+`GET /api/cms/health` → `{ "status": "ok", "apiVersion": "0.0.2" }`, unauthenticated. A probe that says only "something is listening on this port, and it is us" gives away nothing, and the CMS needs it before it can decide whether to show the affordance at all.
 
 `POST /api/cms/sessions`, gated by Origin:
 
@@ -343,7 +344,7 @@ DELETE /api/sessions/:sessionId
     "sessionId": "…",
     "readToken": "read_…",
     "eventsUrl": "http://127.0.0.1:31711/api/sessions/<id>/events?token=read_…",
-    "apiVersion": "0.0.1",
+    "apiVersion": "0.0.2",
     "reused": false
 }
 ```
@@ -453,7 +454,7 @@ Output is **always fMP4** (`.m4s` + a per-stream init, CMAF-compatible). A sourc
 
 Copy-mode video is gated by the source: the track must not be early-starting on a misaligned source (an input seek cuts copied streams at keyframe granularity, leaving permanent desync) and its keyframe cadence must be regular and divide the segment duration exactly (compared in frames, so NTSC rates pass). An unqualified track is refused at encode submit with a message naming it; the form disables its Copy toggle with the same reason.
 
-With byte-range mode on (the default), segments are packed into **shared chunk chains** under `media/`: one chain per video angle carrying every rendition of that angle (segments interleaved by arrival), and one audio chain carrying every audio group. On a delivery edge that forwards a requested range while backhauling the whole object, one backhaul warms every quality of the playing angle, so an ABR step-up never lands on a cold object. The first chunk of each chain closes at ~20 s of content (fast edge warm-up at play-start); every later chunk is cap-sized — `byteRangeMaxFileSizeMB` for video chains, `audioByteRangeMaxFileSizeMB` for the audio chain. Media playlists stay in their stream directories and reference the chunks as `../media/…` with `#EXT-X-BYTERANGE`.
+With byte-range mode on (the default), segments are packed into **shared chunk chains** under `media/`: one chain per video angle carrying every rendition of that angle, and one audio chain carrying every audio group. Inside a chunk, segments are in the order the encoder finds them by default (roughly time order across the chain's streams while an encode runs, one stream after another when many are found at once, as after a quick trim), or, with `byteRangeBlockSeconds`, grouped by stream inside short blocks that follow each other in time order. On a delivery edge that pulls the whole object on a ranged request and serves the range once that pull reaches it, one pull warms every quality of the playing angle, so an ABR step-up never lands on a cold object. The first chunk of each chain closes at ~20 s of content (fast edge warm-up at play-start); every later chunk is cap-sized — `byteRangeMaxFileSizeMB` for video chains, `audioByteRangeMaxFileSizeMB` for the audio chain. Media playlists stay in their stream directories and reference the chunks as `../media/…` with `#EXT-X-BYTERANGE`.
 
 ```
 {pathPrefix}/{sessionId}/          # CMS sessions get a per-session subfolder

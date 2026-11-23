@@ -3,6 +3,14 @@
  * rather than done: what each new rendition must match, and the FFmpeg command
  * that encodes them.
  */
+import type {
+    PipelineProgress,
+    SegmentPipelineConfig,
+} from './segment-pipeline.service.js';
+import type { Session } from './session.service.js';
+
+/** Cap for the new track's byte-range chunks, as for the encode's audio chain. */
+export const ADD_AUDIO_CHUNK_CAP_BYTES = 50 * 1024 * 1024;
 
 /** What an existing audio group's renditions are, so the new track's matches them. */
 export interface RenditionTarget {
@@ -118,4 +126,51 @@ export function buildAddAudioArgs(plan: AudioEncodePlan): string[] {
         `${plan.outputDir}/%v/playlist.m3u8`
     );
     return args;
+}
+
+/** What one run of adding a track knows when it opens its segment pipeline. */
+export interface AudioPipelineRun {
+    outputDir: string;
+    s3Config: SegmentPipelineConfig['s3Config'];
+    s3PathPrefix: string;
+    encryptionKey?: Buffer;
+    encryptionIV?: Buffer;
+    /** Whether the video's own segments are byte ranges into shared chunks. */
+    byteRange: boolean;
+    durationSec: number;
+    segmentDurationSec: number;
+    /** The run's token: its chunks form a chain no other run writes. */
+    token: string;
+    renditions: RenditionTarget[];
+    onProgress?: (progress: PipelineProgress) => void;
+}
+
+/**
+ * The new track's segment pipeline. Its block length is the session's, which
+ * follows the CMS's current setting, so the new chain is packed as a fresh encode
+ * would pack it.
+ */
+export function addAudioPipelineConfig(
+    session: Pick<Session, 'config'>,
+    run: AudioPipelineRun
+): SegmentPipelineConfig {
+    const segmentCount = Math.ceil(run.durationSec / run.segmentDurationSec);
+    return {
+        outputDir: run.outputDir,
+        s3Config: run.s3Config,
+        s3PathPrefix: run.s3PathPrefix,
+        encryptionKey: run.encryptionKey,
+        encryptionIV: run.encryptionIV,
+        byteRange: run.byteRange,
+        byteRangeMaxFileSizeBytes: ADD_AUDIO_CHUNK_CAP_BYTES,
+        // One chain of its own: sharing the encode's would write over its chunks.
+        streamChains: Object.fromEntries(
+            run.renditions.map((t) => [t.dir, `a${run.token}`])
+        ),
+        audioByteRangeMaxFileSizeBytes: ADD_AUDIO_CHUNK_CAP_BYTES,
+        byteRangeBlockSeconds: session.config.byteRangeBlockSeconds,
+        segmentDurationSeconds: run.segmentDurationSec,
+        estimatedTotalSegments: segmentCount * run.renditions.length,
+        onProgress: run.onProgress,
+    };
 }

@@ -187,6 +187,24 @@ export class CmsCreateSessionDto {
 
     @ApiPropertyOptional({
         description:
+            'Seconds of content per block in byte-range chunks. Within a block each ' +
+            "stream's segments sit together, so an offline download fetches a stream " +
+            'in one range per block instead of one per segment; blocks stay in time ' +
+            'order so a cold chunk still streams progressively. 0 packs segments in ' +
+            'arrival order. 30 to 60 is the intended production value, pending a ' +
+            'cold-start measurement on the CDN. Defaults to 0.',
+        default: 0,
+        example: 60,
+    })
+    @IsNumber()
+    @IsOptional()
+    @Min(0)
+    @Max(600)
+    @Expose()
+    byteRangeBlockSeconds?: number;
+
+    @ApiPropertyOptional({
+        description:
             'Generate WebVTT thumbnail sprites for scrubbing preview. Only applies to video encodes. Defaults to true.',
         default: true,
     })
