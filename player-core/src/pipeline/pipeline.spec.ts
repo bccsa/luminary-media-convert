@@ -92,6 +92,15 @@ describe('describeMaster', () => {
         expect(info.audioTracks.map((t) => t.label)).toEqual(['English', 'Français']);
     });
 
+    it('says how many bitrates the Audio-only angle offers, one per audio group', () => {
+        const tiers = (master: string) =>
+            describeMaster(MASTER_URL, master).angles.find(
+                (angle) => angle.id === AUDIO_ONLY_ANGLE_ID,
+            )?.soundTiers;
+        expect(tiers(SIMPLE_MASTER)).toBe(2);
+        expect(tiers(MULTI_ANGLE_MASTER)).toBe(1);
+    });
+
     it('synthesizes a Default angle for a single-angle master', () => {
         const info = describeMaster(MASTER_URL, SIMPLE_MASTER);
         expect(info.angles.map((a) => a.id)).toEqual([
