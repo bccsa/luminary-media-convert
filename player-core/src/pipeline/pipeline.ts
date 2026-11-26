@@ -282,10 +282,16 @@ export function describeMaster(
         angles.push({ id: DEFAULT_ANGLE_ID, name: 'Default', isDefault: true });
     }
     if (!nativelyAudioOnly && angles.length > 0 && canRenderAudioOnly(master)) {
+        const groups = new Set(
+            master.audioGroups.flatMap((entry) =>
+                entry.groupId && entry.uri ? [entry.groupId] : [],
+            ),
+        );
         angles.push({
             id: AUDIO_ONLY_ANGLE_ID,
             name: 'Audio only',
             isDefault: false,
+            soundTiers: groups.size,
         });
     }
 

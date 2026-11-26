@@ -267,6 +267,11 @@ export interface Angle {
      * master states none, never `[]`; never set on the synthesized angles.
      */
     characteristics?: string[];
+    /**
+     * On the Audio-only angle: how many audio rendition groups (bitrates) its
+     * rendering offers. Only that rendering lets an engine choose among them.
+     */
+    soundTiers?: number;
 }
 
 /**
