@@ -9,8 +9,10 @@
  */
 
 import {
+    buildMasterPlaylist,
     extractAudioOnlyPlaylist,
     parseMasterPlaylist,
+    parseMediaPlaylist,
     type HlsParsedMaster,
 } from '@luminary-media-converter/hls-core';
 import { hasVideoVariants } from './playlist-text.js';
@@ -21,6 +23,40 @@ import { hasVideoVariants } from './playlist-text.js';
  */
 export function buildAudioOnlyMaster(masterText: string): string | null {
     return extractAudioOnlyPlaylist(masterText);
+}
+
+/**
+ * The audio-only master with each tier's `BANDWIDTH` measured from its media
+ * playlist's segment sizes, where the playlist gives them (byte ranges). A
+ * master cannot state an audio rendition's bitrate, so without this every tier
+ * carries the same assumed one and the engine sees a single tier to play.
+ */
+export function measureAudioOnlyBandwidth(
+    masterText: string,
+    playlistText: (uri: string) => string | undefined,
+): string {
+    const master = parseMasterPlaylist(masterText);
+    let changed = false;
+    for (const variant of master.variants) {
+        const text = playlistText(variant.uri);
+        const measured = text === undefined ? undefined : measuredBitrate(text);
+        if (!measured || measured === variant.bandwidth) continue;
+        variant.bandwidth = measured;
+        changed = true;
+    }
+    return changed ? buildMasterPlaylist(master) : masterText;
+}
+
+/** Bits per second over the whole playlist; undefined unless every segment states its size. */
+function measuredBitrate(text: string): number | undefined {
+    let bytes = 0;
+    let seconds = 0;
+    for (const segment of parseMediaPlaylist(text).segments) {
+        if (!segment.byteRange) return undefined;
+        bytes += segment.byteRange.length;
+        seconds += segment.duration;
+    }
+    return bytes > 0 && seconds > 0 ? Math.round((bytes * 8) / seconds) : undefined;
 }
 
 /** True when an audio-only rendering can be derived from this master. */

@@ -3,6 +3,7 @@ import { parseMasterPlaylist } from '@luminary-media-converter/hls-core';
 import {
     buildAudioOnlyMaster,
     canRenderAudioOnly,
+    measureAudioOnlyBandwidth,
     hasAudioOnlyRendering,
     isAudioOnlyMaster,
     referencedPlaylistUris,
@@ -95,5 +96,43 @@ describe('audio-only pseudo-angle', () => {
         // Audio muxed into the video has no rendition of its own to promote.
         expect(hasAudioOnlyRendering(muxedAudio)).toBe(false);
         expect(hasAudioOnlyRendering(noGroup)).toBe(false);
+    });
+});
+
+describe('measureAudioOnlyBandwidth', () => {
+    const master = [
+        '#EXTM3U',
+        '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_hd",NAME="eng",LANGUAGE="eng",URI="hd.m3u8"',
+        '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_low",NAME="eng",LANGUAGE="eng",URI="low.m3u8"',
+        '#EXT-X-STREAM-INF:BANDWIDTH=128000,CODECS="mp4a.40.2",AUDIO="group_hd"',
+        'hd.m3u8',
+        '#EXT-X-STREAM-INF:BANDWIDTH=128000,CODECS="mp4a.40.2",AUDIO="group_low"',
+        'low.m3u8',
+        '',
+    ].join('\n');
+    /** Two 4 s segments of `bytes` each, as byte ranges of one chunk. */
+    const ranged = (bytes: number) =>
+        [
+            '#EXTM3U',
+            '#EXT-X-TARGETDURATION:4',
+            '#EXTINF:4,',
+            `#EXT-X-BYTERANGE:${bytes}@0`,
+            'chunk.m4s',
+            '#EXTINF:4,',
+            `#EXT-X-BYTERANGE:${bytes}@${bytes}`,
+            'chunk.m4s',
+            '#EXT-X-ENDLIST',
+        ].join('\n');
+
+    it('gives each tier the bitrate its segment sizes measure', () => {
+        const playlists: Record<string, string> = { 'hd.m3u8': ranged(128_000), 'low.m3u8': ranged(16_000) };
+        const measured = parseMasterPlaylist(measureAudioOnlyBandwidth(master, (uri) => playlists[uri]));
+        expect(measured.variants.map((v) => v.bandwidth)).toEqual([256_000, 32_000]);
+    });
+
+    it('leaves a tier whose playlist states no sizes as it was', () => {
+        const plain = ['#EXTM3U', '#EXTINF:4,', 'a.m4s', '#EXT-X-ENDLIST'].join('\n');
+        const playlists: Record<string, string> = { 'hd.m3u8': plain };
+        expect(measureAudioOnlyBandwidth(master, (uri) => playlists[uri])).toBe(master);
     });
 });

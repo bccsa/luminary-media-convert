@@ -34,6 +34,7 @@ import {
     buildAudioOnlyMaster,
     canRenderAudioOnly,
     isAudioOnlyMaster,
+    measureAudioOnlyBandwidth,
 } from './audio-only.js';
 import {
     KEY_CONTENT_TYPE,
@@ -468,6 +469,7 @@ export async function mungeSource(
         ctx.served?.playlists.set(info.url, { url, scan });
     } else {
         const replacements = new Map<string, string>();
+        const texts = new Map<string, string>();
         const refs = collectMasterRefs(capped).map((ref) => ({
             ref,
             absolute: absolutize(ref.uri, info.url),
@@ -485,6 +487,7 @@ export async function mungeSource(
         );
         for (const { ref, absolute } of refs) {
             const text = await reads.get(absolute)!;
+            texts.set(ref.uri, text);
             const memo = ctx.served?.playlists.get(absolute);
             // One read of the playlist answers every question asked of it
             // below, and travels on to the chunk schedules with it.
@@ -530,8 +533,13 @@ export async function mungeSource(
         // The `com.luminary.*` index lines are the controller's (read off the
         // master in `describeMaster`), not the engine's, and their relative
         // URIs would resolve against the URL this text is served at.
+        // Only now are the tiers' playlists in hand to measure.
+        const measured =
+            options.angleId === AUDIO_ONLY_ANGLE_ID
+                ? measureAudioOnlyBandwidth(capped, (uri) => texts.get(uri))
+                : capped;
         servedMasterText = stripLuminarySessionData(
-            substituteMasterRefs(capped, replacements),
+            substituteMasterRefs(measured, replacements),
         );
         url = ctx.serveStrategy.serve(servedMasterText, PLAYLIST_CONTENT_TYPE);
     }
